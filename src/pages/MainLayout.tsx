@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ServerBar } from '../components/layout/ServerBar'
 import { ChannelSidebar } from '../components/layout/ChannelSidebar'
 import { ChatArea } from '../components/layout/ChatArea'
@@ -28,13 +29,17 @@ const VoiceChannelView = lazy(() =>
 function ActiveServerBody({
   server,
   activeChannel,
+  pendingChannelId,
   onSelectChannel,
   onViewProfile,
+  onToggleMembers,
 }: {
   server: Server
   activeChannel: Channel | null
+  pendingChannelId?: string | null
   onSelectChannel: (channel: Channel) => void
   onViewProfile: (profile: Profile) => void
+  onToggleMembers: () => void
 }) {
   const { channels, loading: loadingChannels } = useChannels()
 
@@ -43,8 +48,9 @@ function ActiveServerBody({
     const stillValid = activeChannel && channels.some((c) => c.id === activeChannel.id)
     if (stillValid) return
 
+    const pending = pendingChannelId ? channels.find((c) => c.id === pendingChannelId) : undefined
     const firstText = [...channels].sort((a, b) => a.position - b.position).find((c) => c.type === 'text')
-    const fallback = firstText ?? channels[0]
+    const fallback = pending ?? firstText ?? channels[0]
     if (fallback) onSelectChannel(fallback)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channels, loadingChannels, activeChannel?.id])
@@ -68,7 +74,13 @@ function ActiveServerBody({
       <VoiceChannelView channel={activeChannel} serverId={server.id} />
     </Suspense>
   ) : (
-    <ChatArea channel={activeChannel} server={server} onViewProfile={onViewProfile} onJumpToChannel={onSelectChannel} />
+    <ChatArea
+      channel={activeChannel}
+      server={server}
+      onViewProfile={onViewProfile}
+      onJumpToChannel={onSelectChannel}
+      onToggleMembers={onToggleMembers}
+    />
   )
 }
 
@@ -79,6 +91,7 @@ function ActiveServerBody({
 function ActiveServerContent({
   server,
   activeChannel,
+  pendingChannelId,
   unreadChannelIds,
   drawerOpen,
   onSelectChannel,
@@ -87,12 +100,15 @@ function ActiveServerContent({
 }: {
   server: Server
   activeChannel: Channel | null
+  pendingChannelId?: string | null
   unreadChannelIds: Set<string>
   drawerOpen: boolean
   onSelectChannel: (channel: Channel) => void
   onServerGone: () => void
   onViewProfile: (profile: Profile) => void
 }) {
+  const [mobileMembersOpen, setMobileMembersOpen] = useState(false)
+
   return (
     <ChannelsProvider serverId={server.id} key={server.id}>
       <div
@@ -113,21 +129,47 @@ function ActiveServerContent({
       <ActiveServerBody
         server={server}
         activeChannel={activeChannel}
+        pendingChannelId={pendingChannelId}
         onSelectChannel={onSelectChannel}
         onViewProfile={onViewProfile}
+        onToggleMembers={() => setMobileMembersOpen((v) => !v)}
       />
 
-      <MemberList serverId={server.id} onViewProfile={onViewProfile} />
+      <MemberList
+        serverId={server.id}
+        onViewProfile={onViewProfile}
+        mobileOpen={mobileMembersOpen}
+        onCloseMobile={() => setMobileMembersOpen(false)}
+      />
     </ChannelsProvider>
   )
 }
 
 function MainLayoutInner() {
-  const { loading: loadingServers } = useServers()
+  const { servers, loading: loadingServers } = useServers()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [activeServer, setActiveServer] = useState<Server | null>(null)
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null)
+  const [pendingChannelId, setPendingChannelId] = useState<string | null>(null)
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+
+  // Quem vem de um link de convite (/convite/CODIGO) chega aqui com o
+  // servidor (e opcionalmente o canal) que acabou de entrar guardado no
+  // state da navegação — a gente seleciona automaticamente assim que a
+  // lista de servidores carregar esse novo servidor.
+  useEffect(() => {
+    const state = location.state as { joinedServerId?: string; joinedChannelId?: string | null } | null
+    if (!state?.joinedServerId || loadingServers) return
+    const server = servers.find((s) => s.id === state.joinedServerId)
+    if (!server) return
+
+    setActiveServer(server)
+    setPendingChannelId(state.joinedChannelId ?? null)
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, servers, loadingServers])
 
   // estado da "home" (quando nenhum servidor está selecionado)
   const [homeView, setHomeView] = useState<'friends' | 'bot' | 'conversation'>('friends')
@@ -233,6 +275,7 @@ function MainLayoutInner() {
         <ActiveServerContent
           server={activeServer}
           activeChannel={activeChannel}
+          pendingChannelId={pendingChannelId}
           unreadChannelIds={unread.unreadChannelIds}
           drawerOpen={mobileSidebarOpen}
           onSelectChannel={handleSelectChannel}

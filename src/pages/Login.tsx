@@ -32,7 +32,17 @@ export function Login() {
       setError(error)
       return
     }
-    navigate('/')
+    let redirectTo = '/'
+    try {
+      const saved = sessionStorage.getItem('mamacos-post-login-redirect')
+      if (saved) {
+        redirectTo = saved
+        sessionStorage.removeItem('mamacos-post-login-redirect')
+      }
+    } catch {
+      // best-effort
+    }
+    navigate(redirectTo)
   }
 
   return (

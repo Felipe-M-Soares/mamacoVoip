@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
+import { useVoice } from '../../hooks/useVoice'
 import { Avatar } from '../ui/Avatar'
 import { EditProfileModal } from '../modals/EditProfileModal'
 import { SettingsModal } from '../modals/SettingsModal'
@@ -14,14 +15,16 @@ const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
 
 export function UserPanel() {
   const { profile, signOut, updateStatus } = useAuth()
+  const voice = useVoice()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [volumeOpen, setVolumeOpen] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
   if (!profile) return null
 
   return (
-    <div className="relative h-[52px] bg-discord-darker/60 px-2 flex items-center gap-2 shrink-0">
+    <div className="relative h-[52px] bg-discord-darker/60 px-2 flex items-center gap-1 shrink-0">
       <button
         onClick={() => setMenuOpen((v) => !v)}
         className="flex items-center gap-2 flex-1 min-w-0 px-1 py-1 rounded hover:bg-white/5 transition-colors"
@@ -34,6 +37,43 @@ export function UserPanel() {
           </p>
         </div>
       </button>
+
+      <div className="relative shrink-0">
+        <button
+          title="Volume geral"
+          onClick={() => setVolumeOpen((v) => !v)}
+          className="w-8 h-8 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors"
+        >
+          {voice.masterVolume === 0 ? (
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+              <path d="M3 10v4h4l5 5V5L7 10H3zm12.3-1.7a1 1 0 0 1 1.4 0L18 9.6l1.3-1.3a1 1 0 1 1 1.4 1.4L19.4 11l1.3 1.3a1 1 0 0 1-1.4 1.4L18 12.4l-1.3 1.3a1 1 0 0 1-1.4-1.4l1.3-1.3-1.3-1.3a1 1 0 0 1 0-1.4z" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+              <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8zM15 3.2v2.1c2.9.9 5 3.6 5 6.7s-2.1 5.8-5 6.7v2.1c4-.9 7-4.5 7-8.8s-3-7.9-7-8.8z" />
+            </svg>
+          )}
+        </button>
+        {volumeOpen && (
+          <div className="absolute bottom-full right-0 mb-2 w-40 bg-[#111214] rounded-md shadow-xl border border-black/40 p-3 z-20">
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-bold uppercase text-discord-text-muted">Volume geral</p>
+              <span className="text-xs text-discord-text-muted">{voice.masterVolume}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={voice.masterVolume}
+              onChange={(e) => voice.setMasterVolume(Number(e.target.value))}
+              className="w-full accent-discord-blurple"
+            />
+            <p className="text-[10px] text-discord-text-muted mt-1.5">
+              Afeta o volume de todos que você ouve em canais de voz.
+            </p>
+          </div>
+        )}
+      </div>
 
       <button
         title="Configurações"

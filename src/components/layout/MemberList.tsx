@@ -7,7 +7,17 @@ import { useRoles } from '../../hooks/useRoles'
 import { ManageMemberModal } from '../modals/ManageMemberModal'
 import type { Profile } from '../../types/database'
 
-export function MemberList({ serverId, onViewProfile }: { serverId: string; onViewProfile: (profile: Profile) => void }) {
+export function MemberList({
+  serverId,
+  onViewProfile,
+  mobileOpen = false,
+  onCloseMobile,
+}: {
+  serverId: string
+  onViewProfile: (profile: Profile) => void
+  mobileOpen?: boolean
+  onCloseMobile?: () => void
+}) {
   const { profile } = useAuth()
   const { members, loading, refresh } = useServerMembers(serverId)
   const { permissions } = useModeration(serverId)
@@ -48,7 +58,22 @@ export function MemberList({ serverId, onViewProfile }: { serverId: string; onVi
   }
 
   return (
-    <aside className="w-60 bg-discord-sidebar shrink-0 overflow-y-auto py-4 px-2 hidden lg:block">
+    <>
+      {mobileOpen && (
+        <div className="lg:hidden fixed inset-0 bg-black/60 z-40" onClick={onCloseMobile} />
+      )}
+      <aside
+        className={`w-60 bg-discord-sidebar shrink-0 overflow-y-auto py-4 px-2 lg:block lg:static ${
+          mobileOpen ? 'fixed inset-y-0 right-0 z-40 block' : 'hidden'
+        }`}
+      >
+        <div className="lg:hidden flex justify-end mb-2">
+          <button onClick={onCloseMobile} className="text-discord-text-muted hover:text-white p-1">
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+              <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+            </svg>
+          </button>
+        </div>
       {loading ? (
         <div className="flex justify-center pt-8">
           <div className="w-5 h-5 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
@@ -88,14 +113,15 @@ export function MemberList({ serverId, onViewProfile }: { serverId: string; onVi
         </>
       )}
 
-      {managingProfile && (
-        <ManageMemberModal
-          serverId={serverId}
-          targetProfile={managingProfile}
-          onClose={() => setManagingProfile(null)}
-          onKicked={refresh}
-        />
-      )}
-    </aside>
+        {managingProfile && (
+          <ManageMemberModal
+            serverId={serverId}
+            targetProfile={managingProfile}
+            onClose={() => setManagingProfile(null)}
+            onKicked={refresh}
+          />
+        )}
+      </aside>
+    </>
   )
 }

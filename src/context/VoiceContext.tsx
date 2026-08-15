@@ -64,6 +64,10 @@ interface VoiceContextValue {
   changeMicrophone: (deviceId: string) => Promise<void>
   audioSettings: ReturnType<typeof useAudioSettings>
   maxParticipants: number
+  masterVolume: number
+  setMasterVolume: (volume: number) => void
+  getParticipantVolume: (userId: string) => number
+  setParticipantVolume: (userId: string, volume: number) => void
 }
 
 export const VoiceContext = createContext<VoiceContextValue | undefined>(undefined)
@@ -87,6 +91,50 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [screenSharing, setScreenSharing] = useState(false)
   const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null)
   const [speaking, setSpeaking] = useState(false)
+
+  const [masterVolume, setMasterVolumeState] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('mamacos-master-volume')
+      return raw ? Number(raw) : 100
+    } catch {
+      return 100
+    }
+  })
+  const [participantVolumes, setParticipantVolumes] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem('mamacos-participant-volumes')
+      return raw ? JSON.parse(raw) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  function setMasterVolume(volume: number) {
+    const clamped = Math.max(0, Math.min(100, volume))
+    setMasterVolumeState(clamped)
+    try {
+      localStorage.setItem('mamacos-master-volume', String(clamped))
+    } catch {
+      // best-effort
+    }
+  }
+
+  function getParticipantVolume(userId: string): number {
+    return participantVolumes[userId] ?? 100
+  }
+
+  function setParticipantVolume(userId: string, volume: number) {
+    const clamped = Math.max(0, Math.min(100, volume))
+    setParticipantVolumes((prev) => {
+      const next = { ...prev, [userId]: clamped }
+      try {
+        localStorage.setItem('mamacos-participant-volumes', JSON.stringify(next))
+      } catch {
+        // best-effort
+      }
+      return next
+    })
+  }
 
   const userIdRef = useRef<string | null>(null)
   userIdRef.current = user?.id ?? null
@@ -466,6 +514,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         changeMicrophone,
         audioSettings,
         maxParticipants: MAX_PARTICIPANTS,
+        masterVolume,
+        setMasterVolume,
+        getParticipantVolume,
+        setParticipantVolume,
       }}
     >
       {children}

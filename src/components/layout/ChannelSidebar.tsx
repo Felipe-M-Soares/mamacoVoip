@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { UserPanel } from './UserPanel'
 import { InviteModal } from '../modals/InviteModal'
+import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { ServerSettingsModal } from '../modals/ServerSettingsModal'
 import { LeaveServerModal } from '../modals/LeaveServerModal'
 import { CreateChannelModal } from '../modals/CreateChannelModal'
@@ -169,6 +170,7 @@ export function ChannelSidebar({
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
+  const [showInviteFriends, setShowInviteFriends] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showLeave, setShowLeave] = useState(false)
   const [showCreateChannel, setShowCreateChannel] = useState<{ categoryId: string | null } | null>(null)
@@ -207,6 +209,15 @@ export function ChannelSidebar({
               className="w-full text-left px-3 py-2 text-sm text-discord-blurple hover:bg-white/5 transition-colors"
             >
               Convidar pessoas
+            </button>
+            <button
+              onClick={() => {
+                setShowInviteFriends(true)
+                setMenuOpen(false)
+              }}
+              className="w-full text-left px-3 py-2 text-sm text-discord-blurple hover:bg-white/5 transition-colors"
+            >
+              Chamar amigos
             </button>
             {canManageChannels && (
               <>
@@ -363,6 +374,9 @@ export function ChannelSidebar({
       <UserPanel />
 
       {showInvite && <InviteModal serverId={server.id} onClose={() => setShowInvite(false)} />}
+      {showInviteFriends && (
+        <InviteFriendsModal serverId={server.id} onClose={() => setShowInviteFriends(false)} />
+      )}
       {showSettings && (
         <ServerSettingsModal
           server={server}

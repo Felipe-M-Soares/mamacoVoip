@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 export function Modal({
   title,
@@ -11,13 +12,13 @@ export function Modal({
   children: ReactNode
   maxWidth?: string
 }) {
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4"
       onClick={onClose}
     >
       <div
-        className={`bg-discord-dark rounded-lg shadow-xl w-full ${maxWidth} overflow-hidden`}
+        className={`bg-discord-dark rounded-lg shadow-xl w-full ${maxWidth} max-h-[90vh] overflow-y-auto`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5">
@@ -34,6 +35,7 @@ export function Modal({
         </div>
         <div className="p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

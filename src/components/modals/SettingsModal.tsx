@@ -6,6 +6,7 @@ import { useAudioSettings } from '../../hooks/useAudioSettings'
 import { useTheme } from '../../hooks/useTheme'
 import { THEMES } from '../../context/ThemeContext'
 import { getNotificationPermission, requestNotificationPermission } from '../../lib/notifications'
+import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sounds'
 
 type Tab = 'account' | 'appearance' | 'audio' | 'notifications' | 'privacy'
 
@@ -380,6 +381,26 @@ function AudioTab() {
             />
           </div>
         )}
+      </div>
+
+      <div className="bg-discord-darker rounded-lg p-3 space-y-2">
+        <label className="flex items-center justify-between cursor-pointer">
+          <div>
+            <p className="text-sm font-medium text-white">Sons de interface</p>
+            <p className="text-xs text-discord-text-muted">
+              Toques originais ao conectar/desconectar da voz, mutar e quando alguém entra ou sai da chamada.
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            defaultChecked={isSoundEnabled()}
+            onChange={(e) => {
+              setSoundEnabled(e.target.checked)
+              if (e.target.checked) playConnectSound()
+            }}
+            className="w-4 h-4 accent-discord-blurple shrink-0 ml-3"
+          />
+        </label>
       </div>
 
       <div className="bg-discord-darker rounded-lg p-3 space-y-2">

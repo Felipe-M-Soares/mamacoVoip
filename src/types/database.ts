@@ -15,6 +15,7 @@ export type Server = {
   id: string
   name: string
   icon_url: string | null
+  description: string | null
   owner_id: string
   created_at: string
   updated_at: string
@@ -217,8 +218,8 @@ export type Database = {
       }
       servers: {
         Row: Server
-        Insert: Pick<Server, 'name' | 'owner_id'> & Partial<Pick<Server, 'icon_url'>>
-        Update: Partial<Pick<Server, 'name' | 'icon_url'>>
+        Insert: Pick<Server, 'name' | 'owner_id'> & Partial<Pick<Server, 'icon_url' | 'description'>>
+        Update: Partial<Pick<Server, 'name' | 'icon_url' | 'description'>>
         Relationships: []
       }
       server_members: {

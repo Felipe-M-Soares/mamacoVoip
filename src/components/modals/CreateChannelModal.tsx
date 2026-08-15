@@ -4,17 +4,15 @@ import { useChannels } from '../../hooks/useChannels'
 import type { Category, ChannelType } from '../../types/database'
 
 export function CreateChannelModal({
-  serverId,
   categories,
   defaultCategoryId,
   onClose,
 }: {
-  serverId: string
   categories: Category[]
   defaultCategoryId?: string | null
   onClose: () => void
 }) {
-  const { createChannel } = useChannels(serverId)
+  const { createChannel } = useChannels()
   const [name, setName] = useState('')
   const [type, setType] = useState<ChannelType>('text')
   const [categoryId, setCategoryId] = useState<string>(defaultCategoryId ?? '')

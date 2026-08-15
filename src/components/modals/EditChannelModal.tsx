@@ -4,15 +4,13 @@ import { useChannels } from '../../hooks/useChannels'
 import type { Channel } from '../../types/database'
 
 export function EditChannelModal({
-  serverId,
   channel,
   onClose,
 }: {
-  serverId: string
   channel: Channel
   onClose: () => void
 }) {
-  const { updateChannel, deleteChannel } = useChannels(serverId)
+  const { updateChannel, deleteChannel } = useChannels()
   const [name, setName] = useState(channel.name)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [loading, setLoading] = useState(false)

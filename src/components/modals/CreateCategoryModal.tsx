@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { Modal } from './Modal'
 import { useChannels } from '../../hooks/useChannels'
 
-export function CreateCategoryModal({ serverId, onClose }: { serverId: string; onClose: () => void }) {
-  const { createCategory } = useChannels(serverId)
+export function CreateCategoryModal({ onClose }: { onClose: () => void }) {
+  const { createCategory } = useChannels()
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)

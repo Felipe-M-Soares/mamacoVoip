@@ -3,6 +3,10 @@ import { Modal } from './Modal'
 import { useServers } from '../../hooks/useServers'
 import type { Server } from '../../types/database'
 
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+}
+
 export function ServerSettingsModal({
   server,
   isOwner,
@@ -16,6 +20,7 @@ export function ServerSettingsModal({
 }) {
   const { updateServer, deleteServer } = useServers()
   const [name, setName] = useState(server.name)
+  const [description, setDescription] = useState(server.description ?? '')
   const [iconFile, setIconFile] = useState<File | null>(null)
   const [iconPreview, setIconPreview] = useState<string | null>(server.icon_url)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -32,8 +37,12 @@ export function ServerSettingsModal({
 
   async function handleSave() {
     setError(null)
+    if (description.length > 300) {
+      setError('A descrição pode ter no máximo 300 caracteres.')
+      return
+    }
     setLoading(true)
-    const { error } = await updateServer(server.id, { name, iconFile })
+    const { error } = await updateServer(server.id, { name, description: description.trim() || null, iconFile })
     setLoading(false)
     if (error) {
       setError(error)
@@ -119,9 +128,31 @@ export function ServerSettingsModal({
           />
         </div>
 
+        <div>
+          <div className="flex items-baseline justify-between mb-2">
+            <label className="block text-xs font-bold uppercase text-discord-text-muted">
+              Descrição
+            </label>
+            <span className="text-xs text-discord-text-muted">{description.length}/300</span>
+          </div>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={!isOwner}
+            maxLength={300}
+            rows={3}
+            placeholder="Do que se trata este servidor?"
+            className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple disabled:opacity-60 resize-none"
+          />
+        </div>
+
+        <div className="bg-discord-darker rounded-lg p-3 text-xs text-discord-text-muted">
+          Servidor criado em {formatDate(server.created_at)}
+        </div>
+
         {!isOwner && (
           <p className="text-xs text-discord-text-muted">
-            Só o dono do servidor pode alterar nome e ícone. Cargos e permissões chegam na Fase 7.
+            Só o dono do servidor pode alterar nome, descrição e ícone.
           </p>
         )}
 

@@ -9,9 +9,54 @@ import { EditChannelModal } from '../modals/EditChannelModal'
 import { useAuth } from '../../hooks/useAuth'
 import { useChannels } from '../../hooks/useChannels'
 import { useModeration } from '../../hooks/useModeration'
+import { useVoice } from '../../hooks/useVoice'
 import { RolesManagerModal } from '../modals/RolesManagerModal'
 import { ModerationLogModal } from '../modals/ModerationLogModal'
 import type { Channel, Server } from '../../types/database'
+
+function VoiceStatusBar({ serverId }: { serverId: string }) {
+  const voice = useVoice()
+  const { channels } = useChannels()
+
+  if (voice.connectedServerId !== serverId || !voice.connectedChannelId) return null
+  const channel = channels.find((c) => c.id === voice.connectedChannelId)
+
+  return (
+    <div className="px-2 py-2 bg-discord-darker/70 border-t border-black/20 flex items-center gap-2 shrink-0">
+      <span className="w-2 h-2 rounded-full bg-discord-green shrink-0 animate-pulse" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-discord-green truncate">Voz conectada</p>
+        <p className="text-xs text-discord-text-muted truncate">{channel?.name ?? '...'}</p>
+      </div>
+      <button
+        onClick={voice.toggleMute}
+        title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
+        className={`w-7 h-7 flex items-center justify-center rounded shrink-0 transition-colors ${
+          voice.muted ? 'text-red-400 hover:text-red-300' : 'text-discord-text-muted hover:text-white'
+        }`}
+      >
+        {voice.muted ? (
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+            <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-8.6 3.5L18 5A1 1 0 1 0 16.6 3.6L3.6 16.6A1 1 0 1 0 5 18l2-2A7 7 0 0 0 19 11zM12 15a3 3 0 0 0 3-3l-5.7 5.7A3 3 0 0 0 12 15zM9 6a3 3 0 0 1 6 0v3.5l2-2V6a5 5 0 0 0-9.9-1L9 6.6V6z" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+            <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
+          </svg>
+        )}
+      </button>
+      <button
+        onClick={voice.leave}
+        title="Desconectar"
+        className="w-7 h-7 flex items-center justify-center rounded text-discord-text-muted hover:text-red-400 transition-colors shrink-0"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+          <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+        </svg>
+      </button>
+    </div>
+  )
+}
 
 function ChannelIcon({ type }: { type: 'text' | 'voice' }) {
   if (type === 'voice') {
@@ -119,7 +164,7 @@ export function ChannelSidebar({
 }) {
   const { user } = useAuth()
   const isOwner = server.owner_id === user?.id
-  const { categories, channels, moveChannel, moveCategory } = useChannels(server.id)
+  const { categories, channels, moveChannel, moveCategory } = useChannels()
   const { permissions } = useModeration(server.id)
 
   const [menuOpen, setMenuOpen] = useState(false)
@@ -314,6 +359,7 @@ export function ChannelSidebar({
         })}
       </div>
 
+      <VoiceStatusBar serverId={server.id} />
       <UserPanel />
 
       {showInvite && <InviteModal serverId={server.id} onClose={() => setShowInvite(false)} />}
@@ -341,18 +387,16 @@ export function ChannelSidebar({
       )}
       {showCreateChannel && (
         <CreateChannelModal
-          serverId={server.id}
           categories={sortedCategories}
           defaultCategoryId={showCreateChannel.categoryId}
           onClose={() => setShowCreateChannel(null)}
         />
       )}
       {showCreateCategory && (
-        <CreateCategoryModal serverId={server.id} onClose={() => setShowCreateCategory(false)} />
+        <CreateCategoryModal onClose={() => setShowCreateCategory(false)} />
       )}
       {editingChannel && (
         <EditChannelModal
-          serverId={server.id}
           channel={editingChannel}
           onClose={() => setEditingChannel(null)}
         />

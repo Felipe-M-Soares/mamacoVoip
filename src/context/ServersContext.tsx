@@ -8,7 +8,10 @@ interface ServersContextValue {
   loading: boolean
   refresh: () => Promise<void>
   createServer: (name: string, iconFile?: File | null) => Promise<{ error: string | null; server?: Server }>
-  updateServer: (serverId: string, updates: { name?: string; iconFile?: File | null }) => Promise<{ error: string | null }>
+  updateServer: (
+    serverId: string,
+    updates: { name?: string; description?: string | null; iconFile?: File | null }
+  ) => Promise<{ error: string | null }>
   deleteServer: (serverId: string) => Promise<{ error: string | null }>
   leaveServer: (serverId: string) => Promise<{ error: string | null }>
   joinServerByInvite: (code: string) => Promise<{ error: string | null; server?: Server }>
@@ -94,9 +97,13 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     return { error: null, server }
   }
 
-  async function updateServer(serverId: string, updates: { name?: string; iconFile?: File | null }) {
-    const patch: { name?: string; icon_url?: string } = {}
+  async function updateServer(
+    serverId: string,
+    updates: { name?: string; description?: string | null; iconFile?: File | null }
+  ) {
+    const patch: { name?: string; description?: string | null; icon_url?: string } = {}
     if (updates.name) patch.name = updates.name
+    if (updates.description !== undefined) patch.description = updates.description
 
     if (updates.iconFile) {
       const { error: uploadError, iconUrl } = await uploadServerIcon(serverId, updates.iconFile)

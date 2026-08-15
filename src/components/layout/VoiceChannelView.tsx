@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
-import { useVoiceChannel, type VoiceParticipant } from '../../hooks/useVoiceChannel'
+import { useVoice } from '../../hooks/useVoice'
+import type { VoiceParticipant } from '../../context/VoiceContext'
 import type { Channel } from '../../types/database'
 
 function VideoTile({ stream, muted = false, sinkId }: { stream: MediaStream; muted?: boolean; sinkId?: string | null }) {
@@ -77,9 +78,16 @@ function ParticipantTile({
 export function VoiceChannelView({ channel, serverId }: { channel: Channel; serverId: string }) {
   const { profile } = useAuth()
   const { members } = useServerMembers(serverId)
-  const voice = useVoiceChannel(channel.id, serverId)
+  const voice = useVoice()
 
   const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
+  const isConnectedHere = voice.connectedChannelId === channel.id
+  const isConnectedElsewhere = voice.connectedChannelId !== null && !isConnectedHere
+
+  async function handleSwitchHere() {
+    voice.leave()
+    await voice.join(channel.id, serverId)
+  }
 
   return (
     <section className="flex-1 flex flex-col min-w-0 bg-discord-channels">
@@ -87,30 +95,49 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-text-muted">
           <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 0 1-14 0z" />
         </svg>
-        <h2 className="font-semibold text-white">{channel.name}</h2>
-        {voice.connected && (
+        <h2 className="font-display font-semibold tracking-wide text-white">{channel.name}</h2>
+        {isConnectedHere && (
           <span className="text-xs text-discord-text-muted">
             {Object.keys(voice.participants).length + 1}/{voice.maxParticipants} conectados
           </span>
         )}
       </header>
 
-      {!voice.connected ? (
+      {isConnectedElsewhere ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
           <div className="w-16 h-16 rounded-full bg-discord-lighter flex items-center justify-center mb-4">
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-discord-text-muted">
               <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 0 1-14 0z" />
             </svg>
           </div>
-          <h3 className="text-xl font-bold text-white">{channel.name}</h3>
+          <h3 className="font-display text-xl font-bold text-white tracking-wide">{channel.name}</h3>
+          <p className="text-discord-text-muted mt-1 max-w-sm">
+            Você já está conectado em outro canal de voz. Quer trocar pra este?
+          </p>
+          <button
+            onClick={handleSwitchHere}
+            disabled={voice.connecting}
+            className="mt-4 px-5 py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
+          >
+            {voice.connecting ? 'Trocando...' : 'Trocar de canal'}
+          </button>
+        </div>
+      ) : !isConnectedHere ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+          <div className="w-16 h-16 rounded-full bg-discord-lighter flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-discord-text-muted">
+              <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 0 1-14 0z" />
+            </svg>
+          </div>
+          <h3 className="font-display text-xl font-bold text-white tracking-wide">{channel.name}</h3>
           <p className="text-discord-text-muted mt-1 max-w-sm">
             Ninguém está no canal de voz ainda. Entre pra começar uma chamada.
           </p>
           {voice.error && <p className="text-sm text-red-400 mt-3">{voice.error}</p>}
           <button
-            onClick={voice.join}
+            onClick={() => voice.join(channel.id, serverId)}
             disabled={voice.connecting}
-            className="mt-4 px-5 py-2.5 rounded bg-discord-green text-white font-medium hover:bg-green-600 transition-colors disabled:opacity-60"
+            className="mt-4 px-5 py-2.5 rounded bg-discord-green text-white font-medium hover:brightness-110 transition-colors disabled:opacity-60"
           >
             {voice.connecting ? 'Conectando...' : 'Entrar no canal de voz'}
           </button>

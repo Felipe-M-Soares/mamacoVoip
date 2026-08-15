@@ -9,6 +9,8 @@ import { DMChatArea } from '../components/layout/DMChatArea'
 import { TestBotChatArea } from '../components/layout/TestBotChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
 import { ServersProvider } from '../context/ServersContext'
+import { ChannelsProvider } from '../context/ChannelsContext'
+import { VoiceProvider } from '../context/VoiceContext'
 import { useServers } from '../hooks/useServers'
 import { useChannels } from '../hooks/useChannels'
 import { useConversations } from '../hooks/useConversations'
@@ -18,6 +20,107 @@ import type { Channel, Profile, Server } from '../types/database'
 const VoiceChannelView = lazy(() =>
   import('../components/layout/VoiceChannelView').then((m) => ({ default: m.VoiceChannelView }))
 )
+
+// Fica DENTRO do ChannelsProvider, então tem acesso à lista de canais
+// já carregada — é aqui que a seleção automática do primeiro canal de
+// texto acontece quando você entra num servidor ou o canal atual deixa
+// de existir (foi excluído por outra pessoa, por exemplo).
+function ActiveServerBody({
+  server,
+  activeChannel,
+  onSelectChannel,
+  onViewProfile,
+}: {
+  server: Server
+  activeChannel: Channel | null
+  onSelectChannel: (channel: Channel) => void
+  onViewProfile: (profile: Profile) => void
+}) {
+  const { channels, loading: loadingChannels } = useChannels()
+
+  useEffect(() => {
+    if (loadingChannels) return
+    const stillValid = activeChannel && channels.some((c) => c.id === activeChannel.id)
+    if (stillValid) return
+
+    const firstText = [...channels].sort((a, b) => a.position - b.position).find((c) => c.type === 'text')
+    const fallback = firstText ?? channels[0]
+    if (fallback) onSelectChannel(fallback)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channels, loadingChannels, activeChannel?.id])
+
+  if (!activeChannel) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-discord-text-muted">
+        {loadingChannels ? '' : 'Este servidor ainda não tem canais.'}
+      </div>
+    )
+  }
+
+  return activeChannel.type === 'voice' ? (
+    <Suspense
+      fallback={
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <VoiceChannelView channel={activeChannel} serverId={server.id} />
+    </Suspense>
+  ) : (
+    <ChatArea channel={activeChannel} server={server} onViewProfile={onViewProfile} onJumpToChannel={onSelectChannel} />
+  )
+}
+
+// Tudo que depende da lista de canais de UM servidor específico fica
+// dentro do ChannelsProvider. key={server.id} garante que trocar de
+// servidor reinicia o estado do zero, sem vazar canal de um servidor
+// pro outro.
+function ActiveServerContent({
+  server,
+  activeChannel,
+  unreadChannelIds,
+  drawerOpen,
+  onSelectChannel,
+  onServerGone,
+  onViewProfile,
+}: {
+  server: Server
+  activeChannel: Channel | null
+  unreadChannelIds: Set<string>
+  drawerOpen: boolean
+  onSelectChannel: (channel: Channel) => void
+  onServerGone: () => void
+  onViewProfile: (profile: Profile) => void
+}) {
+  return (
+    <ChannelsProvider serverId={server.id} key={server.id}>
+      <div
+        className={`fixed inset-y-0 left-[72px] z-40 flex transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto lg:left-0 ${
+          drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
+        <ChannelSidebar
+          server={server}
+          activeChannelId={activeChannel?.id ?? null}
+          unreadChannelIds={unreadChannelIds}
+          onSelectChannel={onSelectChannel}
+          onServerDeleted={onServerGone}
+          onServerLeft={onServerGone}
+        />
+      </div>
+
+      <ActiveServerBody
+        server={server}
+        activeChannel={activeChannel}
+        onSelectChannel={onSelectChannel}
+        onViewProfile={onViewProfile}
+      />
+
+      <MemberList serverId={server.id} onViewProfile={onViewProfile} />
+    </ChannelsProvider>
+  )
+}
 
 function MainLayoutInner() {
   const { loading: loadingServers } = useServers()
@@ -32,22 +135,6 @@ function MainLayoutInner() {
   const { conversations } = useConversations()
   const unread = useUnreadOverview()
 
-  const { channels, loading: loadingChannels } = useChannels(activeServer?.id ?? null)
-
-  useEffect(() => {
-    if (!activeServer) {
-      setActiveChannel(null)
-      return
-    }
-    if (loadingChannels) return
-    const stillValid = activeChannel && channels.some((c) => c.id === activeChannel.id)
-    if (stillValid) return
-
-    const firstText = [...channels].sort((a, b) => a.position - b.position).find((c) => c.type === 'text')
-    setActiveChannel(firstText ?? channels[0] ?? null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeServer?.id, channels, loadingChannels])
-
   useEffect(() => {
     if (activeChannel && activeChannel.type === 'text') unread.markChannelRead(activeChannel.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -60,10 +147,12 @@ function MainLayoutInner() {
 
   function handleServerGone() {
     setActiveServer(null)
+    setActiveChannel(null)
   }
 
   function handleSelectServer(server: Server) {
     setActiveServer(server)
+    setActiveChannel(null)
     setMobileSidebarOpen(false)
   }
 
@@ -74,6 +163,7 @@ function MainLayoutInner() {
 
   function handleSelectHome() {
     setActiveServer(null)
+    setActiveChannel(null)
     setHomeView('friends')
     setMobileSidebarOpen(false)
   }
@@ -102,10 +192,7 @@ function MainLayoutInner() {
 
       {/* Overlay escuro atrás do drawer, só em mobile */}
       {mobileSidebarOpen && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/60 z-30"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
+        <div className="lg:hidden fixed inset-0 bg-black/60 z-30" onClick={() => setMobileSidebarOpen(false)} />
       )}
 
       <div
@@ -120,67 +207,38 @@ function MainLayoutInner() {
           onSelectHome={handleSelectHome}
         />
 
-        {activeServer ? (
-          <ChannelSidebar
-            server={activeServer}
-            activeChannelId={activeChannel?.id ?? null}
-            unreadChannelIds={unread.unreadChannelIds}
-            onSelectChannel={handleSelectChannel}
-            onServerDeleted={handleServerGone}
-            onServerLeft={handleServerGone}
+        {!activeServer && !loadingServers && (
+          <HomeSidebar
+            view={homeView}
+            activeConversationId={activeConversationId}
+            unreadConversationIds={unread.unreadConversationIds}
+            onSelectFriends={() => {
+              setHomeView('friends')
+              setMobileSidebarOpen(false)
+            }}
+            onSelectBot={() => {
+              setHomeView('bot')
+              setMobileSidebarOpen(false)
+            }}
+            onSelectConversation={(id) => {
+              setHomeView('conversation')
+              setActiveConversationId(id)
+              setMobileSidebarOpen(false)
+            }}
           />
-        ) : (
-          !loadingServers && (
-            <HomeSidebar
-              view={homeView}
-              activeConversationId={activeConversationId}
-              unreadConversationIds={unread.unreadConversationIds}
-              onSelectFriends={() => {
-                setHomeView('friends')
-                setMobileSidebarOpen(false)
-              }}
-              onSelectBot={() => {
-                setHomeView('bot')
-                setMobileSidebarOpen(false)
-              }}
-              onSelectConversation={(id) => {
-                setHomeView('conversation')
-                setActiveConversationId(id)
-                setMobileSidebarOpen(false)
-              }}
-            />
-          )
         )}
       </div>
 
       {activeServer ? (
-        <>
-          {activeChannel ? (
-            activeChannel.type === 'voice' ? (
-              <Suspense
-                fallback={
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="w-8 h-8 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
-                  </div>
-                }
-              >
-                <VoiceChannelView channel={activeChannel} serverId={activeServer.id} />
-              </Suspense>
-            ) : (
-              <ChatArea
-                channel={activeChannel}
-                server={activeServer}
-                onViewProfile={setViewingProfile}
-                onJumpToChannel={handleSelectChannel}
-              />
-            )
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-discord-text-muted">
-              {loadingChannels ? '' : 'Este servidor ainda não tem canais.'}
-            </div>
-          )}
-          <MemberList serverId={activeServer.id} onViewProfile={setViewingProfile} />
-        </>
+        <ActiveServerContent
+          server={activeServer}
+          activeChannel={activeChannel}
+          unreadChannelIds={unread.unreadChannelIds}
+          drawerOpen={mobileSidebarOpen}
+          onSelectChannel={handleSelectChannel}
+          onServerGone={handleServerGone}
+          onViewProfile={setViewingProfile}
+        />
       ) : loadingServers ? (
         <div className="flex-1 flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
@@ -206,8 +264,10 @@ function MainLayoutInner() {
 
 export function MainLayout() {
   return (
-    <ServersProvider>
-      <MainLayoutInner />
-    </ServersProvider>
+    <VoiceProvider>
+      <ServersProvider>
+        <MainLayoutInner />
+      </ServersProvider>
+    </VoiceProvider>
   )
 }

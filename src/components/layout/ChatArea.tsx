@@ -23,7 +23,7 @@ export function ChatArea({
   const { messages, attachments, reactions, sendMessage, editMessage, deleteMessage, toggleReaction } =
     useMessages(channel.id, server.id)
   const { members } = useServerMembers(server.id)
-  const { channels } = useChannels(server.id)
+  const { channels } = useChannels()
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [showSearch, setShowSearch] = useState(false)
 

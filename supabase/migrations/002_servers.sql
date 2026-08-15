@@ -82,9 +82,17 @@ alter table public.server_members enable row level security;
 alter table public.server_invites enable row level security;
 
 -- servers -------------------------------------------------
+-- IMPORTANTE: inclui "owner_id = auth.uid()" além da checagem de
+-- membership. Sem isso, criar um servidor com `.insert().select()`
+-- falha com "new row violates row-level security policy" — o
+-- RETURNING do INSERT precisa satisfazer a policy de SELECT, mas o
+-- trigger que insere o dono em server_members roda DEPOIS dessa
+-- checagem (AFTER INSERT triggers disparam ao final da query, não
+-- antes do RETURNING ser calculado). Deixando o dono passar direto
+-- por owner_id, a corrida deixa de ser um problema.
 create policy "Membros veem os servidores dos quais participam"
   on public.servers for select to authenticated
-  using (public.is_server_member(id, auth.uid()));
+  using (owner_id = auth.uid() or public.is_server_member(id, auth.uid()));
 
 create policy "Usuário autenticado pode criar servidor"
   on public.servers for insert to authenticated

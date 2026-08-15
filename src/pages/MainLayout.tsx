@@ -8,6 +8,7 @@ import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
 import { TestBotChatArea } from '../components/layout/TestBotChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
+import { ServersProvider } from '../context/ServersContext'
 import { useServers } from '../hooks/useServers'
 import { useChannels } from '../hooks/useChannels'
 import { useConversations } from '../hooks/useConversations'
@@ -18,7 +19,7 @@ const VoiceChannelView = lazy(() =>
   import('../components/layout/VoiceChannelView').then((m) => ({ default: m.VoiceChannelView }))
 )
 
-export function MainLayout() {
+function MainLayoutInner() {
   const { loading: loadingServers } = useServers()
   const [activeServer, setActiveServer] = useState<Server | null>(null)
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null)
@@ -200,5 +201,13 @@ export function MainLayout() {
         />
       )}
     </div>
+  )
+}
+
+export function MainLayout() {
+  return (
+    <ServersProvider>
+      <MainLayoutInner />
+    </ServersProvider>
   )
 }

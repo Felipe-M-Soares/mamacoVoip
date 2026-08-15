@@ -21,7 +21,7 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5">
-          <h2 className="text-lg font-bold text-white">{title}</h2>
+          <h2 className="font-display text-lg font-bold text-white tracking-wide">{title}</h2>
           <button
             onClick={onClose}
             className="text-discord-text-muted hover:text-white transition-colors"

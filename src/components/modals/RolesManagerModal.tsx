@@ -48,7 +48,7 @@ export function RolesManagerModal({ serverId, onClose }: { serverId: string; onC
     <Modal title="Cargos do servidor" onClose={onClose} maxWidth="max-w-lg">
       <button
         onClick={() => setEditing('new')}
-        className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors mb-4"
+        className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors mb-4"
       >
         + Criar cargo
       </button>
@@ -184,7 +184,7 @@ function RoleEditor({
         <button
           onClick={handleSave}
           disabled={loading}
-          className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors disabled:opacity-60"
+          className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
         >
           {loading ? 'Salvando...' : 'Salvar'}
         </button>

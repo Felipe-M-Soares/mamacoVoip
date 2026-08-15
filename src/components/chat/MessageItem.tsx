@@ -26,7 +26,7 @@ function renderContent(content: string, members: Profile[]) {
   return parts.map((part, i) => {
     if (part.startsWith('@') && usernames.has(part.slice(1).toLowerCase())) {
       return (
-        <span key={i} className="bg-discord-blurple/30 text-indigo-300 rounded px-1 font-medium">
+        <span key={i} className="bg-discord-blurple/30 text-discord-blurple rounded px-1 font-medium">
           {part}
         </span>
       )
@@ -276,7 +276,7 @@ export function MessageItem({
                     onClick={() => onToggleReaction(emoji)}
                     className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
                       reactedByMe
-                        ? 'bg-discord-blurple/20 border-discord-blurple text-indigo-300'
+                        ? 'bg-discord-blurple/20 border-discord-blurple text-discord-blurple'
                         : 'bg-discord-darker border-transparent text-discord-text-muted hover:border-discord-text-muted'
                     }`}
                   >

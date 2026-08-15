@@ -80,7 +80,7 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
           />
           <button
             onClick={handleSendRequest}
-            className="px-4 py-2 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors text-sm shrink-0"
+            className="px-4 py-2 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors text-sm shrink-0"
           >
             Enviar pedido
           </button>

@@ -73,7 +73,7 @@ export function UserProfileModal({
               <button
                 onClick={handleMessage}
                 disabled={loading}
-                className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors disabled:opacity-60"
+                className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
               >
                 Enviar mensagem
               </button>

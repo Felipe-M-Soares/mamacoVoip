@@ -43,7 +43,7 @@ export function ChatArea({
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-text-muted">
           <path d="M5.5 4.5c.5-.5 1.2-.8 2-.8h1.4l-.3 15h-1c-.8 0-1.5-.3-2-.8-.6-.5-.9-1.2-.9-2v-9.4c0-.8.3-1.5.8-2zm10 0c.5.5.8 1.2.8 2v9.4c0 .8-.3 1.5-.8 2-.5.5-1.2.8-2 .8h-1l-.3-15h1.4c.8 0 1.5.3 2 .8z" />
         </svg>
-        <h2 className="font-semibold text-white flex-1">{channel.name}</h2>
+        <h2 className="font-display font-semibold tracking-wide text-white flex-1">{channel.name}</h2>
         <button
           onClick={() => setShowSearch(true)}
           title="Pesquisar mensagens"

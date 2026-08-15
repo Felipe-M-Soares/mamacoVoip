@@ -6,6 +6,7 @@ import { MemberList } from '../components/layout/MemberList'
 import { HomeSidebar } from '../components/layout/HomeSidebar'
 import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
+import { TestBotChatArea } from '../components/layout/TestBotChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
 import { useServers } from '../hooks/useServers'
 import { useChannels } from '../hooks/useChannels'
@@ -25,7 +26,7 @@ export function MainLayout() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
 
   // estado da "home" (quando nenhum servidor está selecionado)
-  const [homeView, setHomeView] = useState<'friends' | 'conversation'>('friends')
+  const [homeView, setHomeView] = useState<'friends' | 'bot' | 'conversation'>('friends')
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const { conversations } = useConversations()
   const unread = useUnreadOverview()
@@ -137,6 +138,10 @@ export function MainLayout() {
                 setHomeView('friends')
                 setMobileSidebarOpen(false)
               }}
+              onSelectBot={() => {
+                setHomeView('bot')
+                setMobileSidebarOpen(false)
+              }}
               onSelectConversation={(id) => {
                 setHomeView('conversation')
                 setActiveConversationId(id)
@@ -181,6 +186,8 @@ export function MainLayout() {
         </div>
       ) : homeView === 'conversation' && activeConversation ? (
         <DMChatArea conversationId={activeConversation.id} otherProfile={activeConversation.otherProfile} />
+      ) : homeView === 'bot' ? (
+        <TestBotChatArea />
       ) : (
         <FriendsPanel onOpenConversation={handleOpenConversation} />
       )}

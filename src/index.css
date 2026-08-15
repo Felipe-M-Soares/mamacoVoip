@@ -1,6 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
+/* ============================================================
+   Tema padrão — "Vermelho" (identidade da marca Mamacos Voip).
+   Tailwind v4 gera as classes utilitárias (bg-discord-blurple, etc.)
+   referenciando estas variáveis via var(...), então trocar o valor
+   delas em runtime (veja os blocos [data-theme] mais abaixo) já basta
+   pra retemar o app inteiro — nenhum componente precisa saber que
+   temas existem.
+   ============================================================ */
 @theme {
+  --color-discord-dark: #0f0e10;
+  --color-discord-darker: #09090a;
+  --color-discord-sidebar: #171516;
+  --color-discord-channels: #1c1a1c;
+  --color-discord-lighter: #29262a;
+  --color-discord-blurple: #e0201b;
+  --color-discord-green: #3ba55c;
+  --color-discord-text: #f3efee;
+  --color-discord-text-muted: #a39a9c;
+
+  --font-display: 'Rajdhani', 'Inter', sans-serif;
+}
+
+/* Tema "Azul" — o clássico, pra quem preferir a cara mais neutra */
+[data-theme='azul'] {
   --color-discord-dark: #202225;
   --color-discord-darker: #18191c;
   --color-discord-sidebar: #2f3136;
@@ -12,7 +36,53 @@
   --color-discord-text-muted: #96989d;
 }
 
+/* Tema "Roxo Meia-noite" */
+[data-theme='roxo'] {
+  --color-discord-dark: #14121f;
+  --color-discord-darker: #0c0a15;
+  --color-discord-sidebar: #1e1a2e;
+  --color-discord-channels: #241f38;
+  --color-discord-lighter: #322b4a;
+  --color-discord-blurple: #8b5cf6;
+  --color-discord-green: #3ba55c;
+  --color-discord-text: #e8e4f2;
+  --color-discord-text-muted: #9891ab;
+}
+
 body {
   margin: 0;
-  font-family: 'gg sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  background-color: var(--color-discord-dark);
+}
+
+/* Utilitários de marca — brilho ao redor de elementos importantes
+   (logo, botão principal, ícone de servidor ativo). Usa color-mix
+   pra herdar a cor de acento do tema atual automaticamente. */
+.brand-glow {
+  box-shadow: 0 0 28px 0 color-mix(in srgb, var(--color-discord-blurple) 55%, transparent);
+}
+
+.brand-glow-sm {
+  box-shadow: 0 0 14px 0 color-mix(in srgb, var(--color-discord-blurple) 45%, transparent);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+/* Scrollbar discreta, combina com o visual escuro em qualquer tema */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-discord-lighter);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--color-discord-lighter) 70%, white);
 }

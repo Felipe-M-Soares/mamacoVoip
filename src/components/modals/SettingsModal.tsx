@@ -3,9 +3,11 @@ import { Modal } from './Modal'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { useAudioSettings } from '../../hooks/useAudioSettings'
+import { useTheme } from '../../hooks/useTheme'
+import { THEMES } from '../../context/ThemeContext'
 import { getNotificationPermission, requestNotificationPermission } from '../../lib/notifications'
 
-type Tab = 'account' | 'audio' | 'notifications' | 'privacy'
+type Tab = 'account' | 'appearance' | 'audio' | 'notifications' | 'privacy'
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { user, signOut } = useAuth()
@@ -13,10 +15,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="Configurações" onClose={onClose} maxWidth="max-w-lg">
-      <div className="flex gap-2 mb-4 bg-discord-darker rounded-lg p-1">
+      <div className="flex gap-1 mb-4 bg-discord-darker rounded-lg p-1 overflow-x-auto">
         {(
           [
             { id: 'account', label: 'Minha conta' },
+            { id: 'appearance', label: 'Aparência' },
             { id: 'audio', label: 'Voz e Vídeo' },
             { id: 'notifications', label: 'Notificações' },
             { id: 'privacy', label: 'Privacidade' },
@@ -25,7 +28,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex-1 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+            className={`shrink-0 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors ${
               tab === t.id ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:text-white'
             }`}
           >
@@ -35,6 +38,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       </div>
 
       {tab === 'account' && <AccountTab email={user?.email} onSignOut={signOut} />}
+      {tab === 'appearance' && <AppearanceTab />}
       {tab === 'audio' && <AudioTab />}
       {tab === 'notifications' && <NotificationsTab />}
       {tab === 'privacy' && <PrivacyTab />}
@@ -90,7 +94,7 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
       <button
         onClick={handleChangePassword}
         disabled={loading}
-        className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors disabled:opacity-60"
+        className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
       >
         {loading ? 'Salvando...' : 'Alterar senha'}
       </button>
@@ -137,7 +141,7 @@ function NotificationsTab() {
       ) : (
         <button
           onClick={handleEnable}
-          className="px-4 py-2.5 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors text-sm"
+          className="px-4 py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors text-sm"
         >
           Ativar notificações
         </button>
@@ -146,13 +150,52 @@ function NotificationsTab() {
   )
 }
 
+function AppearanceTab() {
+  const { theme, setTheme } = useTheme()
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-discord-text-muted">Escolha a paleta de cores do app.</p>
+      <div className="grid grid-cols-1 gap-3">
+        {THEMES.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTheme(t.id)}
+            className={`flex items-center gap-3 p-3 rounded-lg border-2 text-left transition-colors ${
+              theme === t.id ? 'border-discord-blurple bg-discord-darker' : 'border-transparent bg-discord-darker/60 hover:bg-discord-darker'
+            }`}
+          >
+            <span
+              className="w-10 h-10 rounded-full shrink-0 border border-white/10"
+              style={{
+                background: `radial-gradient(circle at 30% 30%, ${t.swatch}, #000000 120%)`,
+              }}
+            />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white">{t.label}</p>
+              <p className="text-xs text-discord-text-muted">{t.description}</p>
+            </div>
+            {theme === t.id && (
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-blurple shrink-0">
+                <path d="M9 16.2l-3.5-3.5-1.4 1.4L9 19 20 8l-1.4-1.4z" />
+              </svg>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AudioTab() {
   const audio = useAudioSettings()
   const [testing, setTesting] = useState(false)
+  const [echoing, setEchoing] = useState(false)
   const [level, setLevel] = useState(0)
   const streamRef = useRef<MediaStream | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const rafRef = useRef<number | null>(null)
+  const echoAudioRef = useRef<HTMLAudioElement>(null)
 
   async function handleRequestPermission() {
     await audio.requestPermission()
@@ -193,10 +236,56 @@ function AudioTab() {
     setLevel(0)
   }
 
-  useEffect(() => () => stopTest(), [])
+  // Eco de áudio: pega o microfone, atrasa um pouco (150ms) e toca de
+  // volta pelo alto-falante escolhido. É o jeito mais direto de
+  // confirmar que o fone/headset inteiro funciona (mic + saída), sem
+  // precisar de outra pessoa online — o pequeno atraso evita a
+  // microfonia (efeito Larsen) que aconteceria com um loopback instantâneo.
+  async function startEcho() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audio.getAudioConstraints() })
+      streamRef.current = stream
+      const ctx = new AudioContext()
+      audioCtxRef.current = ctx
+      const source = ctx.createMediaStreamSource(stream)
+      const delay = ctx.createDelay(1)
+      delay.delayTime.value = 0.15
+      const dest = ctx.createMediaStreamDestination()
+      source.connect(delay)
+      delay.connect(dest)
+
+      if (echoAudioRef.current) {
+        echoAudioRef.current.srcObject = dest.stream
+        const el = echoAudioRef.current as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+        if (audio.speakerId && el.setSinkId) await el.setSinkId(audio.speakerId).catch(() => {})
+        await echoAudioRef.current.play()
+      }
+      setEchoing(true)
+    } catch {
+      // sem permissão/dispositivo — o botão simplesmente não faz nada
+    }
+  }
+
+  function stopEcho() {
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    audioCtxRef.current?.close()
+    streamRef.current = null
+    audioCtxRef.current = null
+    if (echoAudioRef.current) echoAudioRef.current.srcObject = null
+    setEchoing(false)
+  }
+
+  useEffect(
+    () => () => {
+      stopTest()
+      stopEcho()
+    },
+    []
+  )
 
   return (
     <div className="space-y-5">
+      <audio ref={echoAudioRef} className="hidden" />
       {!audio.permissionGranted && (
         <div className="bg-discord-darker rounded-lg p-3">
           <p className="text-sm text-discord-text-muted mb-2">
@@ -204,7 +293,7 @@ function AudioTab() {
           </p>
           <button
             onClick={handleRequestPermission}
-            className="text-sm px-3 py-1.5 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors"
+            className="text-sm px-3 py-1.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors"
           >
             Permitir acesso ao microfone
           </button>
@@ -279,7 +368,7 @@ function AudioTab() {
       <div>
         <button
           onClick={testing ? stopTest : startTest}
-          className="text-sm px-4 py-2 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors"
+          className="text-sm px-4 py-2 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors"
         >
           {testing ? 'Parar teste' : 'Testar microfone'}
         </button>
@@ -291,6 +380,22 @@ function AudioTab() {
             />
           </div>
         )}
+      </div>
+
+      <div className="bg-discord-darker rounded-lg p-3 space-y-2">
+        <p className="text-sm font-medium text-white">Testar mic + fone juntos (eco)</p>
+        <p className="text-xs text-discord-text-muted">
+          Fala alguma coisa e escuta sua própria voz voltando com um pequeno atraso — se você se ouvir, o microfone
+          e o alto-falante/fone escolhidos estão funcionando juntos. Use fone de ouvido pra evitar microfonia.
+        </p>
+        <button
+          onClick={echoing ? stopEcho : startEcho}
+          className={`text-sm px-4 py-2 rounded font-medium transition-colors ${
+            echoing ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-discord-lighter text-white hover:opacity-90'
+          }`}
+        >
+          {echoing ? 'Parar eco' : 'Ouvir a si mesmo (eco)'}
+        </button>
       </div>
 
       <p className="text-xs text-discord-text-muted">

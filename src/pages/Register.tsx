@@ -2,6 +2,27 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
+function GlowBackdrop() {
+  return (
+    <>
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(ellipse 900px 600px at 50% 0%, color-mix(in srgb, var(--color-discord-blurple) 22%, transparent), transparent 70%)',
+        }}
+      />
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.04]"
+        style={{
+          backgroundImage:
+            'repeating-linear-gradient(45deg, var(--color-discord-text) 0, var(--color-discord-text) 1px, transparent 1px, transparent 14px)',
+        }}
+      />
+    </>
+  )
+}
+
 export function Register() {
   const { signUp } = useAuth()
   const [username, setUsername] = useState('')
@@ -42,9 +63,11 @@ export function Register() {
 
   if (confirmationSent) {
     return (
-      <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4">
-        <div className="bg-discord-dark rounded-lg shadow-xl w-full max-w-md p-8 text-center">
-          <h1 className="text-2xl font-bold text-white">Confirme seu e-mail</h1>
+      <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
+        <GlowBackdrop />
+        <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 text-center border border-white/5">
+          <img src="/logo.png" alt="Mamacos Voip" className="w-16 h-16 rounded-full object-cover mx-auto mb-4 brand-glow-sm" />
+          <h1 className="font-display text-2xl font-bold text-white tracking-wide">Confirme seu e-mail</h1>
           <p className="text-discord-text-muted mt-3">
             Enviamos um link de confirmação para <span className="text-discord-text">{email}</span>.
             Clique no link para ativar sua conta e poder entrar.
@@ -58,12 +81,13 @@ export function Register() {
   }
 
   return (
-    <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4">
-      <div className="bg-discord-dark rounded-lg shadow-xl w-full max-w-md p-8">
-        <div className="flex justify-center mb-4">
-          <img src="/logo.png" alt="Mamacos Voip" className="w-20 h-20 rounded-full object-cover" />
+    <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
+      <GlowBackdrop />
+      <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 border border-white/5">
+        <div className="flex justify-center mb-5">
+          <img src="/logo.png" alt="Mamacos Voip" className="w-24 h-24 rounded-full object-cover brand-glow" />
         </div>
-        <h1 className="text-2xl font-bold text-white text-center">Criar uma conta</h1>
+        <h1 className="font-display text-3xl font-bold text-white text-center tracking-wide">Criar uma conta</h1>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>
@@ -75,7 +99,7 @@ export function Register() {
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
               autoComplete="username"
             />
           </div>
@@ -89,7 +113,7 @@ export function Register() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
               autoComplete="email"
             />
           </div>
@@ -103,7 +127,7 @@ export function Register() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
               autoComplete="new-password"
             />
           </div>
@@ -117,7 +141,7 @@ export function Register() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:bg-indigo-600 transition-colors disabled:opacity-60"
+            className="w-full py-2.5 rounded bg-discord-blurple text-white font-display font-semibold tracking-wide text-base hover:brightness-110 hover:brand-glow-sm transition-all disabled:opacity-60"
           >
             {loading ? 'Criando conta...' : 'Continuar'}
           </button>

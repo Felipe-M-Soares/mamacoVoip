@@ -39,7 +39,7 @@ function ServerIcon({
         onClick={onClick}
         title={name}
         className={`w-12 h-12 flex items-center justify-center font-medium text-white transition-all duration-150 overflow-hidden
-          ${active ? 'rounded-2xl bg-discord-blurple' : 'rounded-3xl hover:rounded-2xl bg-discord-channels hover:bg-discord-blurple'}
+          ${active ? 'rounded-2xl bg-discord-blurple brand-glow-sm' : 'rounded-3xl hover:rounded-2xl bg-discord-channels hover:bg-discord-blurple'}
           ${variant === 'add' ? 'text-discord-green hover:text-white' : ''}
         `}
       >

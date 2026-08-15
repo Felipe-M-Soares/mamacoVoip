@@ -146,7 +146,7 @@ export function ChannelSidebar({
           onClick={() => setMenuOpen((v) => !v)}
           className="w-full h-12 px-4 flex items-center justify-between border-b border-black/20 shadow-sm text-white font-semibold text-left hover:bg-white/5 transition-colors"
         >
-          <span className="truncate">{server.name}</span>
+          <span className="truncate font-display tracking-wide">{server.name}</span>
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 shrink-0">
             <path d="M12 16a1 1 0 0 1-.7-.3l-6-6a1 1 0 1 1 1.4-1.4L12 13.6l5.3-5.3a1 1 0 0 1 1.4 1.4l-6 6a1 1 0 0 1-.7.3z" />
           </svg>

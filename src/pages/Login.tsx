@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
@@ -9,6 +9,18 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [confirmedBanner, setConfirmedBanner] = useState(false)
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('mamacos-email-confirmed') === '1') {
+        setConfirmedBanner(true)
+        sessionStorage.removeItem('mamacos-email-confirmed')
+      }
+    } catch {
+      // sem acesso a sessionStorage — sem problema, só não mostra o aviso
+    }
+  }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -46,6 +58,12 @@ export function Login() {
         </div>
         <h1 className="font-display text-3xl font-bold text-white text-center tracking-wide">Bem-vindo de volta!</h1>
         <p className="text-discord-text-muted text-center mt-1">Que bom te ver de novo!</p>
+
+        {confirmedBanner && (
+          <p className="mt-4 text-sm text-discord-green bg-green-950/40 border border-green-900 rounded px-3 py-2 text-center">
+            ✓ E-mail confirmado! Você já pode entrar com sua senha.
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>

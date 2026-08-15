@@ -1,4 +1,4 @@
-import { createContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { Profile, ProfileStatus } from '../types/database'
@@ -26,19 +26,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Capturado de forma síncrona (fora de qualquer efeito) porque o próprio
+  // cliente do Supabase pode "limpar" o hash da URL assim que processa a
+  // sessão — se a gente checar isso só dentro de um useEffect, pode já ser
+  // tarde demais.
+  const isEmailConfirmationRef = useRef(
+    typeof window !== 'undefined' &&
+      (window.location.hash.includes('type=signup') || window.location.hash.includes('type=email_change'))
+  )
+
   async function fetchProfile(userId: string) {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
     setProfile(data ?? null)
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      // O link de confirmação de e-mail já vem com uma sessão válida
+      // embutida (pra funcionar o "detectSessionInUrl"). Só que não
+      // queremos logar a pessoa automaticamente nesse caso — a gente
+      // desloga na hora e manda pra tela de login com um aviso de sucesso.
+      if (isEmailConfirmationRef.current && session) {
+        await supabase.auth.signOut()
+        try {
+          sessionStorage.setItem('mamacos-email-confirmed', '1')
+        } catch {
+          // best-effort — se não der pra guardar a flag, só não mostra o aviso
+        }
+        window.history.replaceState(null, '', '/login')
+        isEmailConfirmationRef.current = false
+        setSession(null)
+        setProfile(null)
+        setLoading(false)
+        return
+      }
+
+      isEmailConfirmationRef.current = false
       setSession(session)
       if (session?.user) fetchProfile(session.user.id)
       setLoading(false)
     })
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Ignora eventos disparados enquanto ainda estamos processando o
+      // caso de confirmação de e-mail acima, pra não piscar "logado" na tela
+      if (isEmailConfirmationRef.current) return
+
       setSession(session)
       if (session?.user) {
         fetchProfile(session.user.id)

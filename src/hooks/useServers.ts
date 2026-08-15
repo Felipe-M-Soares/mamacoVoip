@@ -37,7 +37,15 @@ export function useServers() {
       .select()
       .single()
 
-    if (error || !server) return { error: error?.message ?? 'Erro ao criar servidor' }
+    if (error || !server) {
+      let debugInfo = ''
+      if (error?.code === '42501') {
+        const { data: whoami } = await supabase.rpc('debug_whoami')
+        const row = whoami?.[0]
+        debugInfo = ` [DEBUG — seu app: ${user.id} | banco enxerga: ${row?.jwt_uid ?? 'null'} (role: ${row?.jwt_role ?? 'null'})]`
+      }
+      return { error: (error?.message ?? 'Erro ao criar servidor') + debugInfo }
+    }
 
     if (iconFile) {
       const { error: uploadError, iconUrl } = await uploadServerIcon(server.id, iconFile)

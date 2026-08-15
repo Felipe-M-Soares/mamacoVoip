@@ -413,6 +413,10 @@ export type Database = {
         Args: { p_server_id: string; p_user_id: string; p_permission: string }
         Returns: boolean
       }
+      debug_whoami: {
+        Args: Record<string, never>
+        Returns: { jwt_uid: string | null; jwt_role: string | null }[]
+      }
     }
   }
 }

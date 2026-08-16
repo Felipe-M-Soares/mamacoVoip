@@ -1,5 +1,6 @@
-const { app, BrowserWindow, session, Menu, shell, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, session, Menu, shell, ipcMain, dialog, protocol, net } = require('electron')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 const { exec } = require('node:child_process')
 const { autoUpdater } = require('electron-updater')
 
@@ -10,12 +11,25 @@ const isDev = !app.isPackaged
 // jeito) é bloqueada e reaberta no navegador do sistema em vez de
 // substituir o conteúdo da janela do app.
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
-const PROD_INDEX_FILE = path.join(__dirname, '..', 'dist', 'index.html')
+const DIST_DIR = path.join(__dirname, '..', 'dist')
+
+// Em produção, o app é servido por um protocolo próprio ("app://")
+// em vez de abrir o index.html direto do disco (file://). O Chromium
+// BLOQUEIA em silêncio a execução de módulos JavaScript modernos
+// quando carregados via file:// — a página "carrega" sem erro nenhum
+// visível, só o script nunca roda. Servindo pelo protocolo próprio, o
+// app passa a ter uma origem de verdade e os módulos funcionam normal.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+  },
+])
 
 function isAllowedNavigation(url) {
   if (isDev) return url.startsWith(DEV_SERVER_URL)
   try {
-    return new URL(url).protocol === 'file:' && url.includes('index.html')
+    return new URL(url).protocol === 'app:'
   } catch {
     return false
   }
@@ -139,7 +153,7 @@ function createWindow() {
     win.loadURL(DEV_SERVER_URL)
     win.webContents.openDevTools({ mode: 'detach' })
   } else {
-    win.loadFile(PROD_INDEX_FILE)
+    win.loadURL('app://bundle/index.html')
   }
 
   // Se o arquivo/página falhar ao carregar (ex: caminho errado, arquivo
@@ -183,6 +197,24 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Serve os arquivos de dist/ através do protocolo "app://" — é isso
+  // que substitui o antigo win.loadFile(file://...) e resolve o
+  // bloqueio silencioso de módulos JS do Chromium.
+  if (!isDev) {
+    protocol.handle('app', (request) => {
+      const parsedUrl = new URL(request.url)
+      let pathname = decodeURIComponent(parsedUrl.pathname)
+      if (pathname === '' || pathname === '/') pathname = '/index.html'
+      const filePath = path.join(DIST_DIR, pathname)
+
+      // Nunca serve nada fora da pasta dist/ (evita path traversal tipo "../../../etc/passwd")
+      if (!filePath.startsWith(DIST_DIR)) {
+        return new Response('Forbidden', { status: 403 })
+      }
+      return net.fetch(pathToFileURL(filePath).toString())
+    })
+  }
+
   // O app web pede permissão de microfone/câmera/compartilhamento de tela
   // via getUserMedia/getDisplayMedia — sem isso o Electron bloqueia por
   // padrão e a Fase 8 (voz) não funcionaria dentro do app desktop.

@@ -16,4 +16,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update-status', handler)
   },
   restartToUpdate: () => ipcRenderer.invoke('app:restartToUpdate'),
+  onScreenShareSources: (callback) => {
+    const handler = (_event, sources) => callback(sources)
+    ipcRenderer.on('screen-share-sources', handler)
+    return () => ipcRenderer.removeListener('screen-share-sources', handler)
+  },
+  selectScreenShareSource: (sourceId) => ipcRenderer.invoke('screen-share:select', sourceId),
 })

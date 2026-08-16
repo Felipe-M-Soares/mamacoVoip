@@ -4,6 +4,7 @@ import { ThemeProvider } from './context/ThemeContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { ConnectionBanner } from './components/ui/ConnectionBanner'
 import { UpdateStatusBadge } from './components/ui/UpdateStatusBadge'
+import { ScreenSharePicker } from './components/ui/ScreenSharePicker'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { MainLayout } from './pages/MainLayout'
@@ -26,6 +27,7 @@ function App() {
         <AuthProvider>
           <ConnectionBanner />
           <UpdateStatusBadge />
+          <ScreenSharePicker />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Register />} />

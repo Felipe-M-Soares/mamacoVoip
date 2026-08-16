@@ -39,11 +39,25 @@ function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; sinkId?:
 
 // "Palco" de compartilhamentos de tela: divide o espaço certinho
 // dependendo de quantas pessoas estão compartilhando ao mesmo tempo.
+function ScreenShareAudio({ stream, volume }: { stream: MediaStream; volume: number }) {
+  const ref = useRef<HTMLAudioElement>(null)
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = stream
+  }, [stream])
+  useEffect(() => {
+    if (ref.current) ref.current.volume = Math.max(0, Math.min(1, volume))
+  }, [volume])
+  if (stream.getAudioTracks().length === 0) return null
+  return <audio ref={ref} autoPlay />
+}
+
 function ScreenShareStage({
   shares,
 }: {
   shares: { key: string; name: string; stream: MediaStream; isLocal: boolean }[]
 }) {
+  const voice = useVoice()
+  const [openVolumeFor, setOpenVolumeFor] = useState<string | null>(null)
   const cols = shares.length <= 1 ? 1 : shares.length <= 2 ? 2 : shares.length <= 4 ? 2 : 3
 
   return (
@@ -51,18 +65,56 @@ function ScreenShareStage({
       className="grid gap-3 mb-4"
       style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
     >
-      {shares.map((share) => (
-        <div key={share.key} className="relative aspect-video rounded-lg overflow-hidden border border-black/30 bg-black">
-          <VideoTile stream={share.stream} />
-          <span className="absolute bottom-1.5 left-2 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded flex items-center gap-1">
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
-              <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
-            </svg>
-            {share.name}
-            {share.isLocal && ' (você)'}
-          </span>
-        </div>
-      ))}
+      {shares.map((share) => {
+        const hasAudio = share.stream.getAudioTracks().length > 0
+        const shareVolume = voice.getScreenShareVolume(share.key)
+        const effectiveVolume = (voice.masterVolume / 100) * (shareVolume / 100)
+
+        return (
+          <div
+            key={share.key}
+            className="relative aspect-video rounded-lg overflow-hidden border border-black/30 bg-black group/share"
+            onMouseLeave={() => setOpenVolumeFor((v) => (v === share.key ? null : v))}
+          >
+            <VideoTile stream={share.stream} />
+            {!share.isLocal && <ScreenShareAudio stream={share.stream} volume={effectiveVolume} />}
+            <span className="absolute bottom-1.5 left-2 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded flex items-center gap-1">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+                <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
+              </svg>
+              {share.name}
+              {share.isLocal && ' (você)'}
+            </span>
+
+            {!share.isLocal && hasAudio && (
+              <div className="absolute top-1.5 right-2 opacity-0 group-hover/share:opacity-100 transition-opacity">
+                <button
+                  onClick={() => setOpenVolumeFor((v) => (v === share.key ? null : share.key))}
+                  title="Ajustar volume do áudio desta transmissão"
+                  className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                    <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8z" />
+                  </svg>
+                </button>
+                {openVolumeFor === share.key && (
+                  <div className="absolute top-7 right-0 bg-[#111214] rounded-lg shadow-xl border border-black/40 p-2.5 w-36 z-10">
+                    <p className="text-[10px] text-discord-text-muted mb-1.5">Áudio da transmissão: {shareVolume}%</p>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={shareVolume}
+                      onChange={(e) => voice.setScreenShareVolume(share.key, Number(e.target.value))}
+                      className="w-full accent-discord-blurple"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

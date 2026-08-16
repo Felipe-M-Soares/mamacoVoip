@@ -5,11 +5,17 @@ import { supabase } from '../lib/supabase'
 // sinalização (voice:{channelId}), mas só pra observar a presença —
 // nunca chama .track() nem pega microfone. Assim dá pra mostrar quem
 // está numa sala de voz sem precisar entrar nela.
-export function useVoicePresence(channelId: string | null) {
+//
+// "skip" existe pra evitar uma inscrição duplicada no MESMO canal que
+// você já está conectado de verdade (via VoiceContext) — o Supabase
+// reaproveita a conexão existente por tópico, e tentar adicionar mais
+// escutas de presença numa conexão que já chamou subscribe() quebra
+// com "cannot add callbacks after subscribe()".
+export function useVoicePresence(channelId: string | null, skip = false) {
   const [userIds, setUserIds] = useState<string[]>([])
 
   useEffect(() => {
-    if (!channelId) {
+    if (!channelId || skip) {
       setUserIds([])
       return
     }
@@ -33,7 +39,7 @@ export function useVoicePresence(channelId: string | null) {
     return () => {
       supabase.removeChannel(rt)
     }
-  }, [channelId])
+  }, [channelId, skip])
 
   return userIds
 }

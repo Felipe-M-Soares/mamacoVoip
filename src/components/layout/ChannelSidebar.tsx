@@ -21,18 +21,29 @@ import { ModerationLogModal } from '../modals/ModerationLogModal'
 import type { Channel, Profile, Server } from '../../types/database'
 
 function VoiceChannelPresence({ channelId, profileById }: { channelId: string; profileById: Record<string, Profile> }) {
-  const userIds = useVoicePresence(channelId)
+  const { user } = useAuth()
+  const voice = useVoice()
+  const isConnectedHere = voice.connectedChannelId === channelId
+
+  // Pro canal que você já está conectado de verdade, usa a lista de
+  // participantes que já vem da própria conexão — evita se inscrever
+  // de novo no mesmo canal Realtime (o que quebrava ao voltar pra uma
+  // sala em que você já estava).
+  const observedIds = useVoicePresence(channelId, isConnectedHere)
+  const userIds = isConnectedHere
+    ? [user?.id, ...Object.keys(voice.participants)].filter((id): id is string => Boolean(id))
+    : observedIds
+
   if (userIds.length === 0) return null
   return (
     <div className="flex items-center gap-1 pl-7 pb-1 flex-wrap">
       {userIds.map((id) => {
-        const p = profileById[id]
+        const p = id === user?.id ? undefined : profileById[id]
+        const name = id === user?.id ? 'Você' : p?.display_name || p?.username || '...'
         return (
           <div key={id} className="flex items-center gap-1 bg-discord-darker/60 rounded-full pl-0.5 pr-2 py-0.5">
-            <Avatar name={p?.username ?? '?'} avatarUrl={p?.avatar_url} size={16} />
-            <span className="text-[10px] text-discord-text-muted truncate max-w-[70px]">
-              {p?.display_name || p?.username || '...'}
-            </span>
+            <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={16} />
+            <span className="text-[10px] text-discord-text-muted truncate max-w-[70px]">{name}</span>
           </div>
         )
       })}

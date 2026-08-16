@@ -87,6 +87,8 @@ interface VoiceContextValue {
   setMasterVolume: (volume: number) => void
   getParticipantVolume: (userId: string) => number
   setParticipantVolume: (userId: string, volume: number) => void
+  getScreenShareVolume: (userId: string) => number
+  setScreenShareVolume: (userId: string, volume: number) => void
 }
 
 export const VoiceContext = createContext<VoiceContextValue | undefined>(undefined)
@@ -148,6 +150,35 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const next = { ...prev, [userId]: clamped }
       try {
         localStorage.setItem('mamacos-participant-volumes', JSON.stringify(next))
+      } catch {
+        // best-effort
+      }
+      return next
+    })
+  }
+
+  // Volume separado pro ÁUDIO da transmissão de tela de cada pessoa
+  // (som do jogo dela), independente do volume da voz/microfone dela —
+  // dá pra abaixar o jogo de alguém sem mutar a voz da pessoa, e vice-versa.
+  const [screenShareVolumes, setScreenShareVolumesState] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem('mamacos-screenshare-volumes')
+      return raw ? JSON.parse(raw) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  function getScreenShareVolume(userId: string): number {
+    return screenShareVolumes[userId] ?? 100
+  }
+
+  function setScreenShareVolume(userId: string, volume: number) {
+    const clamped = Math.max(0, Math.min(100, volume))
+    setScreenShareVolumesState((prev) => {
+      const next = { ...prev, [userId]: clamped }
+      try {
+        localStorage.setItem('mamacos-screenshare-volumes', JSON.stringify(next))
       } catch {
         // best-effort
       }
@@ -586,6 +617,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           height: { ideal: 1080, max: 1080 },
           frameRate: { ideal: 30, max: 30 },
         },
+        // Inclui o áudio do sistema/jogo na transmissão, não só a
+        // imagem — quem estiver assistindo ouve o som do jogo junto.
+        audio: true,
       })
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
@@ -593,19 +627,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // instantâneo, enquanto a renegociação WebRTC (oferta/resposta/ICE)
       // leva alguns round-trips, então o aviso quase sempre chega primeiro.
       broadcastScreenMeta(stream.id)
-      const track = stream.getVideoTracks()[0]
+      const videoTrack = stream.getVideoTracks()[0]
+      const audioTrack = stream.getAudioTracks()[0]
       // "motion" prioriza fluidez de movimento em vez de nitidez de
       // texto estático — melhor pra compartilhar jogo/vídeo do que a
       // opção padrão, que otimiza pra tela parada (documento, planilha)
-      track.contentHint = 'motion'
-      track.onended = () => {
+      videoTrack.contentHint = 'motion'
+      videoTrack.onended = () => {
         screenStreamRef.current = null
         setLocalScreenStream(null)
         setScreenSharing(false)
         broadcastScreenMeta(null)
       }
       peersRef.current.forEach(({ pc }) => {
-        const sender = pc.addTrack(track, stream)
+        const sender = pc.addTrack(videoTrack, stream)
         // Limita o bitrate e prioriza manter os quadros por segundo
         // (em vez de resolução) quando a conexão/CPU não aguentar tudo
         // — pra quem tá jogando, uma imagem um pouco mais simples mas
@@ -617,6 +652,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         sender.setParameters(params).catch(() => {
           // alguns navegadores/drivers não suportam todos os campos — sem problema, segue com o padrão
         })
+        if (audioTrack) pc.addTrack(audioTrack, stream)
       })
       setScreenSharing(true)
     } catch {
@@ -672,6 +708,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         setMasterVolume,
         getParticipantVolume,
         setParticipantVolume,
+        getScreenShareVolume,
+        setScreenShareVolume,
       }}
     >
       {children}

@@ -1,9 +1,24 @@
+import { useEffect, useState } from 'react'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
 
 export function UpdateStatusBadge() {
   const { status, restart } = useAppUpdater()
+  const [dismissedError, setDismissedError] = useState(false)
+
+  useEffect(() => {
+    if (status?.status !== 'error') {
+      setDismissedError(false)
+      return
+    }
+    // Não checar com sucesso (ex: sem internet) não é um problema
+    // grave o bastante pra ficar um alerta permanente na tela — some
+    // sozinho depois de alguns segundos.
+    const timer = setTimeout(() => setDismissedError(true), 6000)
+    return () => clearTimeout(timer)
+  }, [status?.status])
 
   if (!status || status.status === 'up-to-date') return null
+  if (status.status === 'error' && dismissedError) return null
 
   if (status.status === 'checking') {
     return (

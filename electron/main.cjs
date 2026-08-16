@@ -67,6 +67,7 @@ const KNOWN_GAMES = {
 const GAME_CHECK_INTERVAL_MS = 15_000
 
 let mainWindow = null
+let pendingDisplayMediaCallback = null
 let gameCheckTimer = null
 let currentGame = null
 
@@ -229,22 +230,39 @@ app.whenReady().then(() => {
 
   // Diferente de um navegador comum, o Electron não tem um seletor de
   // tela/janela embutido — sem isso, o botão de compartilhar tela fica
-  // "morto" (o pedido de getDisplayMedia() nunca resolve). No Windows
-  // 10 2004+/Windows 11, isso abre o seletor NATIVO do próprio sistema
-  // (o mesmo que aparece no Teams/Zoom). Em sistemas sem suporte a
-  // esse seletor nativo, cai automaticamente pra compartilhar a tela
-  // principal.
-  session.defaultSession.setDisplayMediaRequestHandler(
-    async (_request, callback) => {
-      try {
-        const sources = await desktopCapturer.getSources({ types: ['screen'] })
-        callback({ video: sources[0], audio: 'loopback' })
-      } catch {
-        callback({})
-      }
-    },
-    { useSystemPicker: true }
-  )
+  // "morto" (o pedido de getDisplayMedia() nunca resolve). Em vez de
+  // escolher a tela automaticamente, manda a lista de telas/janelas
+  // disponíveis (com miniatura) pro app mostrar um seletor de verdade,
+  // e espera a pessoa escolher.
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 320, height: 200 },
+        fetchWindowIcons: true,
+      })
+      pendingDisplayMediaCallback = callback
+      mainWindow?.webContents.send(
+        'screen-share-sources',
+        sources.map((s) => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() }))
+      )
+    } catch {
+      callback({})
+    }
+  })
+
+  ipcMain.handle('screen-share:select', async (_event, sourceId) => {
+    if (!pendingDisplayMediaCallback) return
+    const resolve = pendingDisplayMediaCallback
+    pendingDisplayMediaCallback = null
+    if (!sourceId) {
+      resolve({})
+      return
+    }
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
+    const source = sources.find((s) => s.id === sourceId)
+    resolve(source ? { video: source, audio: 'loopback' } : {})
+  })
 
   Menu.setApplicationMenu(null)
 

@@ -8,6 +8,12 @@ export interface UpdateStatusPayload {
   message?: string
 }
 
+export interface ScreenShareSource {
+  id: string
+  name: string
+  thumbnail: string
+}
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -18,6 +24,8 @@ declare global {
       onGameStatusChanged: (callback: (game: string | null) => void) => () => void
       onUpdateStatus: (callback: (payload: UpdateStatusPayload) => void) => () => void
       restartToUpdate: () => Promise<void>
+      onScreenShareSources: (callback: (sources: ScreenShareSource[]) => void) => () => void
+      selectScreenShareSource: (sourceId: string | null) => Promise<void>
     }
   }
 }

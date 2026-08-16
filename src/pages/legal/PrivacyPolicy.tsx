@@ -10,9 +10,9 @@ export function PrivacyPolicy() {
 
       <LegalSection title="1. Quem é responsável pelos seus dados">
         <p>
-          O Mamacos Voip é operado por <strong>[SEU NOME OU RAZÃO SOCIAL AQUI]</strong>. Dúvidas sobre
+          O Mamacos Voip é operado por <strong>zomini</strong>. Dúvidas sobre
           privacidade, ou pra exercer qualquer um dos direitos listados abaixo, entre em contato por{' '}
-          <strong>[SEU E-MAIL DE CONTATO AQUI]</strong>.
+          <strong>jogos.fms@hotmail.com</strong>.
         </p>
       </LegalSection>
 

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
@@ -11,10 +11,18 @@ import { InviteRedirect } from './pages/InviteRedirect'
 import { PrivacyPolicy } from './pages/legal/PrivacyPolicy'
 import { TermsOfService } from './pages/legal/TermsOfService'
 
+// Dentro do app desktop, o documento é servido por um protocolo próprio
+// (app://bundle/index.html), então o "caminho" real da URL não é "/"
+// como o BrowserRouter espera — isso fazia nenhuma rota bater e a tela
+// ficar em branco. HashRouter usa a parte depois do "#" pra decidir a
+// rota, o que funciona independente de qual seja o caminho real do
+// documento. No site (Vercel), continua tudo em BrowserRouter normal.
+const Router = window.electronAPI?.isElectron ? HashRouter : BrowserRouter
+
 function App() {
   return (
     <ThemeProvider>
-      <BrowserRouter>
+      <Router>
         <AuthProvider>
           <ConnectionBanner />
           <UpdateStatusBadge />
@@ -42,7 +50,7 @@ function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AuthProvider>
-      </BrowserRouter>
+      </Router>
     </ThemeProvider>
   )
 }

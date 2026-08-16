@@ -71,7 +71,8 @@
     "publish": {
       "provider": "github",
       "owner": "Felipe-M-Soares",
-      "repo": "mamacoVoip"
+      "repo": "mamacoVoip",
+      "releaseType": "release"
     }
   }
 }

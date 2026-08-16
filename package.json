@@ -2,6 +2,8 @@
   "name": "mamacos-voip",
   "private": true,
   "version": "1.0.0",
+  "description": "Mamacos Voip — servidores, canais, chat em tempo real, voz e vídeo.",
+  "author": "Felipe M. Soares",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -66,8 +68,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "SEU_USUARIO_GITHUB",
-      "repo": "SEU_REPOSITORIO"
+      "owner": "Felipe-M-Soares",
+      "repo": "mamacoVoip"
     }
   }
 }

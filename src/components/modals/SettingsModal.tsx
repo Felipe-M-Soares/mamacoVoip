@@ -47,6 +47,24 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+function AppVersionInfo() {
+  const [version, setVersion] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.electronAPI?.getVersion().then(setVersion)
+  }, [])
+
+  // Só existe dentro do app desktop — no site não faz sentido mostrar
+  // versão de instalador nenhuma.
+  if (!version) return null
+
+  return (
+    <p className="text-xs text-discord-text-muted text-center pt-2">
+      Mamacos Voip — versão {version}
+    </p>
+  )
+}
+
 function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut: () => void }) {
   const [newPassword, setNewPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -108,6 +126,8 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
       >
         Sair da conta
       </button>
+
+      <AppVersionInfo />
     </div>
   )
 }

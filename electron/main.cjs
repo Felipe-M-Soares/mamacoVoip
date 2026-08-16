@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, shell, ipcMain, dialog, protocol, net } = require('electron')
+const { app, BrowserWindow, session, Menu, shell, ipcMain, dialog, protocol, net, desktopCapturer } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { exec } = require('node:child_process')
@@ -226,6 +226,25 @@ app.whenReady().then(() => {
     const allowed = ['media', 'display-capture', 'notifications']
     callback(allowed.includes(permission))
   })
+
+  // Diferente de um navegador comum, o Electron não tem um seletor de
+  // tela/janela embutido — sem isso, o botão de compartilhar tela fica
+  // "morto" (o pedido de getDisplayMedia() nunca resolve). No Windows
+  // 10 2004+/Windows 11, isso abre o seletor NATIVO do próprio sistema
+  // (o mesmo que aparece no Teams/Zoom). Em sistemas sem suporte a
+  // esse seletor nativo, cai automaticamente pra compartilhar a tela
+  // principal.
+  session.defaultSession.setDisplayMediaRequestHandler(
+    async (_request, callback) => {
+      try {
+        const sources = await desktopCapturer.getSources({ types: ['screen'] })
+        callback({ video: sources[0], audio: 'loopback' })
+      } catch {
+        callback({})
+      }
+    },
+    { useSystemPicker: true }
+  )
 
   Menu.setApplicationMenu(null)
 

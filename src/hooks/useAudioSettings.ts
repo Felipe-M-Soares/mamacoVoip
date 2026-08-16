@@ -112,12 +112,34 @@ export function useAudioSettings() {
 
   function getAudioConstraints(overrideDeviceId?: string): MediaTrackConstraints {
     const deviceId = overrideDeviceId ?? settings.micId
+    const extraChromiumConstraints: Record<string, boolean> = settings.noiseSuppression
+      ? {
+          // Constraints extras do motor Chromium (usado tanto pelo app
+          // desktop quanto por navegadores baseados em Chrome/Edge) —
+          // reforçam a redução de ruído além do padrão da Web Audio
+          // API, bom pra ambientes barulhentos (teclado mecânico,
+          // ventoinha, ventilador do PC). Em navegadores sem suporte,
+          // essas propriedades são simplesmente ignoradas.
+          googNoiseSuppression: true,
+          googNoiseSuppression2: true,
+          googHighpassFilter: true,
+          googTypingNoiseDetection: true,
+        }
+      : {}
+
     return {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
       echoCancellation: settings.echoCancellation,
       noiseSuppression: settings.noiseSuppression,
       autoGainControl: settings.autoGainControl,
-    }
+      // Qualidade de captura mais alta que o padrão do navegador —
+      // áudio de voz mais nítido, sem exigir praticamente nada a mais
+      // de banda (a diferença é irrelevante frente ao vídeo/tela).
+      sampleRate: { ideal: 48000 },
+      sampleSize: { ideal: 16 },
+      channelCount: { ideal: 1 },
+      ...extraChromiumConstraints,
+    } as MediaTrackConstraints
   }
 
   return {

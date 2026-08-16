@@ -47,12 +47,14 @@
       "icon": "build/icon.png"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": true,
-      "artifactName": "MamacosVoip-Setup.exe"
+      "artifactName": "MamacosVoip-Setup.exe",
+      "license": "build/license.txt"
     },
     "portable": {
       "artifactName": "MamacosVoip-Portatil.exe"

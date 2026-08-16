@@ -23,6 +23,24 @@ const ICE_SERVERS: RTCIceServer[] = [
 ]
 
 const MAX_PARTICIPANTS = 8
+
+// No Windows, a PRIMEIRA chamada de getUserMedia às vezes esbarra numa
+// corrida com a permissão de microfone do próprio sistema operacional
+// (mais comum dentro do app desktop) — falha na primeira tentativa e
+// funciona normalmente na segunda. Tentando de novo automaticamente
+// aqui, a pessoa não precisa clicar duas vezes pra entrar na call.
+async function getUserMediaWithRetry(constraints: MediaStreamConstraints, attempts = 2): Promise<MediaStream> {
+  let lastError: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints)
+    } catch (err) {
+      lastError = err
+      if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+  }
+  throw lastError
+}
 const SPEAKING_THRESHOLD = 12
 
 interface PeerState {
@@ -220,8 +238,28 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const peerState: PeerState = { pc, makingOffer: false, polite }
     peersRef.current.set(peerId, peerState)
 
-    localStreamRef.current?.getTracks().forEach((track) => pc.addTrack(track, localStreamRef.current!))
-    screenStreamRef.current?.getTracks().forEach((track) => pc.addTrack(track, screenStreamRef.current!))
+    localStreamRef.current?.getTracks().forEach((track) => {
+      const sender = pc.addTrack(track, localStreamRef.current!)
+      if (track.kind === 'audio') {
+        const params = sender.getParameters()
+        params.encodings = params.encodings?.length ? params.encodings : [{}]
+        // O padrão do Opus fica bem baixo (~32kbps) — subindo pra
+        // 64kbps a voz fica bem mais nítida, por um custo de banda
+        // irrelevante (poucos KB/s a mais).
+        params.encodings[0].maxBitrate = 64_000
+        sender.setParameters(params).catch(() => {})
+      }
+    })
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => {
+        const sender = pc.addTrack(track, screenStreamRef.current!)
+        const params = sender.getParameters()
+        params.encodings = params.encodings?.length ? params.encodings : [{}]
+        params.encodings[0].maxBitrate = 4_000_000
+        ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = 'maintain-framerate'
+        sender.setParameters(params).catch(() => {})
+      })
+    }
 
     pc.onnegotiationneeded = async () => {
       try {
@@ -311,7 +349,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     hasSyncedRef.current = false
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioSettingsRef.current.getAudioConstraints() })
+      const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
       localStreamRef.current = stream
       setupAnalyser('local', stream)
 
@@ -539,7 +577,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return
     }
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          // Trava em 1080p/30fps — dá uma imagem nítida sem exigir
+          // tanto da GPU/CPU quanto capturar em resolução/taxa maiores,
+          // que é o que mais rouba desempenho de jogos rodando junto.
+          width: { ideal: 1920, max: 1920 },
+          height: { ideal: 1080, max: 1080 },
+          frameRate: { ideal: 30, max: 30 },
+        },
+      })
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
       // Avisa a sala ANTES de adicionar a track — o broadcast chega quase
@@ -547,13 +594,30 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // leva alguns round-trips, então o aviso quase sempre chega primeiro.
       broadcastScreenMeta(stream.id)
       const track = stream.getVideoTracks()[0]
+      // "motion" prioriza fluidez de movimento em vez de nitidez de
+      // texto estático — melhor pra compartilhar jogo/vídeo do que a
+      // opção padrão, que otimiza pra tela parada (documento, planilha)
+      track.contentHint = 'motion'
       track.onended = () => {
         screenStreamRef.current = null
         setLocalScreenStream(null)
         setScreenSharing(false)
         broadcastScreenMeta(null)
       }
-      peersRef.current.forEach(({ pc }) => pc.addTrack(track, stream))
+      peersRef.current.forEach(({ pc }) => {
+        const sender = pc.addTrack(track, stream)
+        // Limita o bitrate e prioriza manter os quadros por segundo
+        // (em vez de resolução) quando a conexão/CPU não aguentar tudo
+        // — pra quem tá jogando, uma imagem um pouco mais simples mas
+        // fluida é bem melhor que uma nítida só que travando.
+        const params = sender.getParameters()
+        params.encodings = params.encodings?.length ? params.encodings : [{}]
+        params.encodings[0].maxBitrate = 4_000_000
+        ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = 'maintain-framerate'
+        sender.setParameters(params).catch(() => {
+          // alguns navegadores/drivers não suportam todos os campos — sem problema, segue com o padrão
+        })
+      })
       setScreenSharing(true)
     } catch {
       setError('Não foi possível compartilhar a tela.')

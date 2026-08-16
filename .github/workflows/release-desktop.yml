@@ -36,8 +36,17 @@ jobs:
         with:
           node-version: 20
 
-      - name: Instalar dependências
-        run: npm install
+      - name: Instalar dependências (resolução limpa, sem lock file)
+        shell: bash
+        # Apaga o package-lock.json antes de instalar — ele foi gerado
+        # num Linux e o npm tem um bug conhecido (npm/cli#4828) onde
+        # confia demais num lock file "incompleto" pra outras
+        # plataformas em vez de resolver do zero os binários nativos
+        # certos (rolldown, lightningcss) pra cada sistema operacional.
+        # Resolvendo do zero em cada runner, isso nunca acontece.
+        run: |
+          rm -f package-lock.json
+          npm install
 
       - name: Definir versão automática (baseada no nº de commits)
         shell: bash

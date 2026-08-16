@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Mamacos Voip — servidores, canais, chat em tempo real, voz e vídeo.",
-  "author": "Felipe M. Soares",
+  "author": "Felipe M. Soares <SEU-EMAIL-AQUI@exemplo.com>",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -64,7 +64,10 @@
     "linux": {
       "target": ["AppImage", "deb"],
       "icon": "build/icon.png",
-      "category": "Network"
+      "category": "Network",
+      "desktopName": "mamacos-voip.desktop",
+      "synopsis": "Chat em texto, voz e vídeo",
+      "syncDesktopName": true
     },
     "publish": {
       "provider": "github",

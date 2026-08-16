@@ -39,7 +39,7 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
         <button
           onClick={handleGenerate}
           disabled={loading}
-          className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
+          className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
         >
           {loading ? 'Gerando...' : 'Gerar link de convite'}
         </button>
@@ -52,7 +52,7 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
           />
           <button
             onClick={handleCopy}
-            className="px-4 py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors text-sm shrink-0"
+            className="px-4 py-2.5 rounded btn-primary text-sm shrink-0"
           >
             {copied ? 'Copiado!' : 'Copiar'}
           </button>

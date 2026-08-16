@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { DESKTOP_DOWNLOAD_URL } from '../lib/config'
 
 export function Login() {
   const { signIn } = useAuth()
@@ -128,6 +129,18 @@ export function Login() {
             </Link>
           </p>
         </form>
+
+        <a
+          href={DESKTOP_DOWNLOAD_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-5 flex items-center justify-center gap-2 text-sm text-discord-text-muted hover:text-white border-t border-white/5 pt-4 transition-colors"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+            <path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4l3.3 3.3V4a1 1 0 0 1 1-1zM4 19a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2H4z" />
+          </svg>
+          Baixar o app pra PC
+        </a>
       </div>
     </div>
   )

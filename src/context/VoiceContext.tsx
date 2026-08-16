@@ -62,6 +62,7 @@ interface VoiceContextValue {
   toggleVideo: () => Promise<void>
   toggleScreenShare: () => Promise<void>
   changeMicrophone: (deviceId: string) => Promise<void>
+  refreshAudioConstraints: () => Promise<void>
   audioSettings: ReturnType<typeof useAudioSettings>
   maxParticipants: number
   masterVolume: number
@@ -147,6 +148,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const screenStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analysersRef = useRef<Map<string, AnalyserNode>>(new Map())
+  // Cada peer pode mandar mais de uma MediaStream (mic/câmera + tela).
+  // Em vez de adivinhar qual é qual pela ordem de chegada (frágil e foi
+  // a causa do compartilhamento de tela não aparecer pros outros),
+  // guardamos toda stream recebida aqui e usamos o mapeamento explícito
+  // vindo do broadcast 'screen-meta' pra saber qual stream.id é a tela.
+  const rawStreamsRef = useRef<Map<string, Map<string, MediaStream>>>(new Map())
+  const screenStreamIdsRef = useRef<Map<string, string>>(new Map())
 
   function ensureAudioContext() {
     if (!audioContextRef.current) audioContextRef.current = new AudioContext()
@@ -171,6 +179,40 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const from = userIdRef.current
     if (!realtimeRef.current || !from) return
     realtimeRef.current.send({ type: 'broadcast', event: 'rtc', payload: { from, to, ...data } })
+  }
+
+  // Avisa todo mundo no canal (broadcast, não é dirigido a um peer
+  // específico) qual é o stream.id da MINHA tela compartilhada agora —
+  // ou null quando paro. É esse aviso explícito que os outros usam pra
+  // saber, com certeza, qual das minhas streams é a tela.
+  function broadcastScreenMeta(screenStreamId: string | null) {
+    const from = userIdRef.current
+    if (!realtimeRef.current || !from) return
+    realtimeRef.current.send({ type: 'broadcast', event: 'screen-meta', payload: { from, screenStreamId } })
+  }
+
+  // Recalcula cameraStream/screenStream de um peer a partir de TODAS as
+  // streams já recebidas dele + o mapeamento de qual stream.id é tela
+  // (vindo do broadcast). Funciona não importa a ordem de chegada.
+  function recomputeParticipant(peerId: string) {
+    const streams = rawStreamsRef.current.get(peerId)
+    if (!streams || streams.size === 0) return
+    const screenId = screenStreamIdsRef.current.get(peerId)
+    let cameraStream: MediaStream | null = null
+    let screenStream: MediaStream | null = null
+    streams.forEach((s, id) => {
+      if (screenId && id === screenId) screenStream = s
+      else if (!cameraStream) cameraStream = s
+    })
+    setParticipants((prev) => ({
+      ...prev,
+      [peerId]: {
+        userId: peerId,
+        speaking: prev[peerId]?.speaking ?? false,
+        cameraStream,
+        screenStream,
+      },
+    }))
   }
 
   function createPeerConnection(peerId: string, polite: boolean): RTCPeerConnection {
@@ -199,19 +241,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
     pc.ontrack = (event) => {
       const [stream] = event.streams
-      setParticipants((prev) => {
-        const existing = prev[peerId]
-        const isFirstStream = !existing?.cameraStream
-        return {
-          ...prev,
-          [peerId]: {
-            userId: peerId,
-            speaking: existing?.speaking ?? false,
-            cameraStream: isFirstStream ? stream : existing?.cameraStream ?? null,
-            screenStream: isFirstStream ? existing?.screenStream ?? null : stream,
-          },
-        }
-      })
+      if (!rawStreamsRef.current.has(peerId)) rawStreamsRef.current.set(peerId, new Map())
+      rawStreamsRef.current.get(peerId)!.set(stream.id, stream)
+      recomputeParticipant(peerId)
       if (!analysersRef.current.has(peerId)) setupAnalyser(peerId, stream)
     }
 
@@ -262,6 +294,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     peersRef.current.get(peerId)?.pc.close()
     peersRef.current.delete(peerId)
     analysersRef.current.delete(peerId)
+    rawStreamsRef.current.delete(peerId)
+    screenStreamIdsRef.current.delete(peerId)
     setParticipants((prev) => {
       if (!(peerId in prev)) return prev
       const next = { ...prev }
@@ -288,14 +322,25 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       rt.on('broadcast', { event: 'rtc' }, ({ payload }) => handleSignal(payload as SignalPayload))
 
+      rt.on('broadcast', { event: 'screen-meta' }, ({ payload }) => {
+        const { from, screenStreamId } = payload as { from: string; screenStreamId: string | null }
+        if (screenStreamId) screenStreamIdsRef.current.set(from, screenStreamId)
+        else screenStreamIdsRef.current.delete(from)
+        recomputeParticipant(from)
+      })
+
       rt.on('presence', { event: 'sync' }, () => {
         const state = rt.presenceState()
         const ids = Object.keys(state).filter((id) => id !== user.id)
         const isFirstSync = !hasSyncedRef.current
+        let hasNewPeer = false
 
         ids.forEach((id) => {
           const wasNew = ensurePeer(id)
-          if (wasNew && !isFirstSync) playUserJoinSound()
+          if (wasNew) {
+            hasNewPeer = true
+            if (!isFirstSync) playUserJoinSound()
+          }
         })
         Array.from(peersRef.current.keys()).forEach((id) => {
           if (!ids.includes(id)) {
@@ -304,6 +349,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           }
         })
         hasSyncedRef.current = true
+
+        // Quem chega depois de eu já estar compartilhando tela perdeu o
+        // aviso original (broadcast não guarda histórico) — reenvia
+        // sempre que alguém novo aparece na sala.
+        if (hasNewPeer && screenStreamRef.current) {
+          broadcastScreenMeta(screenStreamRef.current.id)
+        }
       })
 
       await new Promise<void>((resolve, reject) => {
@@ -405,6 +457,37 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Reaplica as configurações de áudio atuais (cancelamento de eco,
+  // redução de ruído, ganho automático) no microfone já conectado —
+  // usado pelo botão de liga/desliga redutor de ruído ao lado do perfil,
+  // pra a mudança valer na call em andamento sem precisar reconectar.
+  async function refreshAudioConstraints() {
+    if (!connectedRef.current) return
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        audio: audioSettingsRef.current.getAudioConstraints(),
+      })
+      const newTrack = newStream.getAudioTracks()[0]
+      newTrack.enabled = !muted
+
+      const oldTrack = localStreamRef.current?.getAudioTracks()[0]
+      if (oldTrack) {
+        oldTrack.stop()
+        localStreamRef.current?.removeTrack(oldTrack)
+      }
+      localStreamRef.current?.addTrack(newTrack)
+
+      peersRef.current.forEach(({ pc }) => {
+        const sender = pc.getSenders().find((s) => s.track?.kind === 'audio')
+        sender?.replaceTrack(newTrack)
+      })
+
+      setupAnalyser('local', newStream)
+    } catch {
+      // se falhar, o microfone atual continua funcionando com as configs antigas
+    }
+  }
+
   function toggleMute() {
     const track = localStreamRef.current?.getAudioTracks()[0]
     if (!track) return
@@ -449,6 +532,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           if (sender) pc.removeTrack(sender)
         })
       })
+      broadcastScreenMeta(null)
       screenStreamRef.current = null
       setLocalScreenStream(null)
       setScreenSharing(false)
@@ -458,11 +542,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
+      // Avisa a sala ANTES de adicionar a track — o broadcast chega quase
+      // instantâneo, enquanto a renegociação WebRTC (oferta/resposta/ICE)
+      // leva alguns round-trips, então o aviso quase sempre chega primeiro.
+      broadcastScreenMeta(stream.id)
       const track = stream.getVideoTracks()[0]
       track.onended = () => {
         screenStreamRef.current = null
         setLocalScreenStream(null)
         setScreenSharing(false)
+        broadcastScreenMeta(null)
       }
       peersRef.current.forEach(({ pc }) => pc.addTrack(track, stream))
       setScreenSharing(true)
@@ -512,6 +601,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         toggleVideo,
         toggleScreenShare,
         changeMicrophone,
+        refreshAudioConstraints,
         audioSettings,
         maxParticipants: MAX_PARTICIPANTS,
         masterVolume,

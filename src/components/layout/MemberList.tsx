@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
+import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useModeration } from '../../hooks/useModeration'
@@ -23,6 +24,8 @@ export function MemberList({
   const { permissions } = useModeration(serverId)
   const { rolesForUser } = useRoles(serverId)
   const [managingProfile, setManagingProfile] = useState<Profile | null>(null)
+  const [contextProfile, setContextProfile] = useState<Profile | null>(null)
+  const { menuState, openMenu, closeMenu } = useContextMenuState()
 
   const canModerate = permissions.kick_members || permissions.ban_members || permissions.timeout_members || permissions.manage_roles
 
@@ -33,13 +36,24 @@ export function MemberList({
   function MemberRow({ member }: { member: (typeof members)[number] }) {
     const topRole = rolesForUser(member.profile.id)[0]
     return (
-      <div className="group w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5">
+      <div
+        className="group w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5"
+        onContextMenu={(e) => {
+          setContextProfile(member.profile)
+          openMenu(e)
+        }}
+      >
         <button onClick={() => onViewProfile(member.profile)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
           <Avatar name={member.profile.username} avatarUrl={member.profile.avatar_url} status={member.profile.status} size={32} />
           <div className="min-w-0">
             <span className="text-sm truncate block" style={topRole ? { color: topRole.color } : { color: '#dcddde' }}>
               {member.profile.display_name || member.profile.username}
             </span>
+            {member.profile.playing && (
+              <span className="text-[10px] text-discord-text-muted truncate block">
+                🎮 {member.profile.playing}
+              </span>
+            )}
           </div>
         </button>
         {canModerate && (
@@ -119,6 +133,30 @@ export function MemberList({
             targetProfile={managingProfile}
             onClose={() => setManagingProfile(null)}
             onKicked={refresh}
+          />
+        )}
+
+        {menuState && contextProfile && (
+          <ContextMenu
+            x={menuState.x}
+            y={menuState.y}
+            onClose={closeMenu}
+            items={[
+              { label: 'Ver perfil', onClick: () => onViewProfile(contextProfile) },
+              {
+                label: 'Copiar nome de usuário',
+                onClick: () => navigator.clipboard.writeText(contextProfile.username),
+              },
+              ...(canModerate && contextProfile.id !== profile?.id
+                ? [
+                    {
+                      label: 'Gerenciar membro',
+                      divider: true,
+                      onClick: () => setManagingProfile(contextProfile),
+                    },
+                  ]
+                : []),
+            ]}
           />
         )}
       </aside>

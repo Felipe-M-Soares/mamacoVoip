@@ -13,7 +13,7 @@ interface AuthContextValue {
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
   updateProfile: (
-    updates: { display_name?: string; custom_status?: string | null },
+    updates: { display_name?: string; custom_status?: string | null; playing?: string | null },
     avatarFile?: File | null
   ) => Promise<{ error: string | null }>
   updateStatus: (status: ProfileStatus) => Promise<void>
@@ -132,12 +132,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function updateProfile(
-    updates: { display_name?: string; custom_status?: string | null },
+    updates: { display_name?: string; custom_status?: string | null; playing?: string | null },
     avatarFile?: File | null
   ) {
     if (!session?.user) return { error: 'Não autenticado' }
 
-    const patch: { display_name?: string; custom_status?: string | null; avatar_url?: string } = { ...updates }
+    const patch: {
+      display_name?: string
+      custom_status?: string | null
+      playing?: string | null
+      avatar_url?: string
+    } = { ...updates }
 
     if (avatarFile) {
       const ext = avatarFile.name.split('.').pop()

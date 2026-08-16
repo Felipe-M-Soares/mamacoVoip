@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
+import { InviteMessageCard } from './InviteMessageCard'
+import { parseInviteMessage } from '../../lib/inviteMessage'
 import type { DMMessage, Profile } from '../../types/database'
 
 function formatTime(iso: string) {
@@ -27,6 +29,7 @@ export function DMMessageItem({
   onDelete: () => void
   onReply: () => void
 }) {
+  const inviteData = parseInviteMessage(message.content)
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState(message.content)
 
@@ -129,6 +132,10 @@ export function DMMessageItem({
                 className="w-full bg-discord-lighter text-discord-text text-sm rounded px-3 py-2 outline-none resize-none"
                 rows={2}
               />
+            </div>
+          ) : inviteData ? (
+            <div className="mt-1">
+              <InviteMessageCard invite={inviteData} />
             </div>
           ) : (
             <p className="text-sm text-discord-text whitespace-pre-wrap break-words leading-relaxed">

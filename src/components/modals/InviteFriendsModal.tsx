@@ -6,6 +6,7 @@ import { useFriends } from '../../hooks/useFriends'
 import { useServers } from '../../hooks/useServers'
 import { useConversations } from '../../hooks/useConversations'
 import { supabase } from '../../lib/supabase'
+import { buildInviteMessage } from '../../lib/inviteMessage'
 
 export function InviteFriendsModal({
   serverId,
@@ -20,7 +21,7 @@ export function InviteFriendsModal({
 }) {
   const { user } = useAuth()
   const { friends } = useFriends()
-  const { createInvite } = useServers()
+  const { servers, createInvite } = useServers()
   const { openConversationWith } = useConversations()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -41,6 +42,7 @@ export function InviteFriendsModal({
     setError(null)
     setLoading(true)
 
+    const server = servers.find((s) => s.id === serverId)
     const { error: inviteError, invite } = await createInvite(serverId, undefined, 24 * 7)
     if (inviteError || !invite) {
       setError('Não foi possível gerar o convite.')
@@ -48,10 +50,13 @@ export function InviteFriendsModal({
       return
     }
 
-    const link = `${window.location.origin}/convite/${invite.code}${channelId ? `?canal=${channelId}` : ''}`
-    const message = channelName
-      ? `🎙️ Te chamando pra sala de voz **${channelName}**! Entra aqui: ${link}`
-      : `Te chamando pro servidor! Entra aqui: ${link}`
+    const message = buildInviteMessage({
+      code: invite.code,
+      serverId,
+      serverName: server?.name ?? 'um servidor',
+      channelId,
+      channelName,
+    })
 
     for (const friendId of selected) {
       const { conversation } = await openConversationWith(friendId)
@@ -108,7 +113,7 @@ export function InviteFriendsModal({
           <button
             onClick={handleSend}
             disabled={loading || selected.size === 0}
-            className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
+            className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
           >
             {loading ? 'Enviando...' : `Chamar${selected.size > 0 ? ` (${selected.size})` : ''}`}
           </button>

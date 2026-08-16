@@ -78,6 +78,41 @@ supabase/
 Veja `SECURITY_CHECKLIST.md` para o mapeamento completo de cada item do
 plano de segurança original contra o que foi implementado.
 
+## App desktop (Windows/Mac/Linux)
+
+O projeto tem um empacotamento Electron pronto em `electron/`. Pra gerar o instalador:
+
+```bash
+npm install          # baixa electron, electron-builder e electron-updater
+npm run electron:build
+```
+
+Isso gera os instaladores em `release/` — `.exe` (Windows, NSIS), `.dmg` (Mac) e `.AppImage`/`.deb` (Linux),
+dependendo do sistema operacional onde você rodar o comando (o electron-builder não faz cross-compile
+completo sem configuração extra — geralmente você gera o instalador de cada SO na própria máquina daquele SO,
+ou usa CI como GitHub Actions com runners de cada plataforma).
+
+**Permissões**: o app já vem configurado pra aceitar as permissões de microfone, câmera, compartilhamento
+de tela e notificações automaticamente (não fica perguntando toda vez) — veja `electron/main.cjs`.
+
+**Atualizações automáticas**: usa `electron-updater`, configurado pra checar releases no GitHub. Pra
+funcionar de verdade, você precisa:
+1. Trocar `SEU_USUARIO_GITHUB`/`SEU_REPOSITORIO` no bloco `"publish"` do `package.json` pelo seu repositório real
+2. Publicar os instaladores gerados como um GitHub Release
+3. Trocar a mesma URL em `src/lib/config.ts` (é o link do botão "Baixar o app pra PC" na tela de login)
+
+**Testar em desenvolvimento** (sem gerar instalador):
+```bash
+npm run dev              # em um terminal, sobe o Vite
+npm run electron:start   # em outro terminal, abre a janela do Electron apontando pro Vite
+```
+
+**Reconhecimento de jogos**: o app desktop verifica a cada 15 segundos quais processos estão rodando no
+seu PC (comparando com uma lista de jogos populares em `electron/main.cjs`) e atualiza automaticamente
+seu status pra "🎮 Jogando X". Isso só funciona no app desktop — nenhum navegador dá acesso à lista de
+processos do sistema por segurança, então essa função não existe na versão web. A detecção funciona melhor
+no Windows; no Mac/Linux a cobertura é mais limitada porque os nomes de processo variam mais.
+
 ## Deploy em produção (Vercel)
 
 1. Suba este repositório pro GitHub

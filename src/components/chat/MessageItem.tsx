@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
+import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { Message, MessageAttachment, MessageReaction, Profile } from '../../types/database'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉']
@@ -73,6 +74,7 @@ export function MessageItem({
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState(message.content)
   const [showReactionPicker, setShowReactionPicker] = useState(false)
+  const { menuState, openMenu, closeMenu } = useContextMenuState()
 
   async function handleSaveEdit() {
     if (editValue.trim().length === 0) return
@@ -90,6 +92,7 @@ export function MessageItem({
     <div
       className={`group relative px-4 py-0.5 hover:bg-black/10 ${showHeader ? 'mt-3 pt-1.5' : ''}`}
       onMouseLeave={() => setShowReactionPicker(false)}
+      onContextMenu={openMenu}
     >
       {/* barra de ferramentas no hover */}
       <div className="hidden group-hover:flex absolute -top-3 right-4 bg-discord-channels border border-black/30 rounded shadow-md overflow-hidden z-10">
@@ -289,6 +292,32 @@ export function MessageItem({
           )}
         </div>
       </div>
+
+      {menuState && (
+        <ContextMenu
+          x={menuState.x}
+          y={menuState.y}
+          onClose={closeMenu}
+          items={[
+            { label: 'Responder', onClick: onReply },
+            { label: 'Copiar texto', onClick: () => navigator.clipboard.writeText(message.content) },
+            { label: 'Adicionar reação', onClick: () => setShowReactionPicker(true) },
+            ...(isOwn ? [{ label: 'Editar', onClick: () => setEditing(true) }] : []),
+            ...(isOwn || canModerate
+              ? [
+                  {
+                    label: 'Excluir',
+                    danger: true,
+                    divider: true,
+                    onClick: () => {
+                      if (confirm('Excluir esta mensagem?')) onDelete()
+                    },
+                  },
+                ]
+              : []),
+          ]}
+        />
+      )}
     </div>
   )
 }

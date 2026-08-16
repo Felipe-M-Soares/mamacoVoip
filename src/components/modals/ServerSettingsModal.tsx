@@ -80,7 +80,7 @@ export function ServerSettingsModal({
           <button
             onClick={handleDelete}
             disabled={loading}
-            className="px-4 py-2 text-sm rounded bg-red-600 text-white font-medium hover:bg-red-700 transition-colors disabled:opacity-60"
+            className="px-4 py-2 text-sm rounded btn-danger disabled:opacity-60"
           >
             {loading ? 'Excluindo...' : 'Excluir servidor'}
           </button>
@@ -162,7 +162,7 @@ export function ServerSettingsModal({
           <button
             onClick={handleSave}
             disabled={loading}
-            className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
+            className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
           >
             {loading ? 'Salvando...' : 'Salvar alterações'}
           </button>

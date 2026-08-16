@@ -61,6 +61,9 @@ export function UserProfileModal({
           {targetProfile.display_name || targetProfile.username}
         </h3>
         <p className="text-sm text-discord-text-muted">@{targetProfile.username}</p>
+        {targetProfile.playing && (
+          <p className="text-sm text-discord-text-muted mt-2">🎮 Jogando {targetProfile.playing}</p>
+        )}
         {targetProfile.custom_status && (
           <p className="text-sm text-discord-text mt-2">{targetProfile.custom_status}</p>
         )}
@@ -73,7 +76,7 @@ export function UserProfileModal({
               <button
                 onClick={handleMessage}
                 disabled={loading}
-                className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
+                className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
               >
                 Enviar mensagem
               </button>

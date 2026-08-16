@@ -14,6 +14,11 @@ interface ChannelsContextValue {
   updateCategory: (categoryId: string, name: string) => Promise<{ error: string | null }>
   deleteCategory: (categoryId: string) => Promise<{ error: string | null }>
   moveChannel: (channelId: string, categoryId: string | null, direction: 'up' | 'down') => Promise<{ error: string | null }>
+  moveChannelToCategory: (
+    channelId: string,
+    categoryId: string | null,
+    beforeChannelId?: string | null
+  ) => Promise<{ error: string | null }>
   moveCategory: (categoryId: string, direction: 'up' | 'down') => Promise<{ error: string | null }>
 }
 
@@ -103,6 +108,35 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     return { error: error?.message ?? null }
   }
 
+  // Usado pelo arrastar-e-soltar: move um canal pra qualquer categoria
+  // (ou sem categoria) e, opcionalmente, insere antes de um canal
+  // específico dentro dela. Se não passar beforeChannelId, vai pro fim.
+  async function moveChannelToCategory(channelId: string, categoryId: string | null, beforeChannelId?: string | null) {
+    const targetSiblings = channels
+      .filter((c) => c.category_id === categoryId && c.id !== channelId)
+      .sort((a, b) => a.position - b.position)
+
+    let orderedIds: string[]
+    const insertIndex = beforeChannelId ? targetSiblings.findIndex((c) => c.id === beforeChannelId) : -1
+
+    if (insertIndex === -1) {
+      orderedIds = [...targetSiblings.map((c) => c.id), channelId]
+    } else {
+      orderedIds = [
+        ...targetSiblings.slice(0, insertIndex).map((c) => c.id),
+        channelId,
+        ...targetSiblings.slice(insertIndex).map((c) => c.id),
+      ]
+    }
+
+    const { error } = await supabase.rpc('reorder_channels', {
+      p_category_id: categoryId,
+      p_channel_ids: orderedIds,
+    })
+    if (!error) await refresh()
+    return { error: error?.message ?? null }
+  }
+
   async function moveCategory(categoryId: string, direction: 'up' | 'down') {
     const sorted = [...categories].sort((a, b) => a.position - b.position)
     const index = sorted.findIndex((c) => c.id === categoryId)
@@ -136,6 +170,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
         updateCategory,
         deleteCategory,
         moveChannel,
+        moveChannelToCategory,
         moveCategory,
       }}
     >

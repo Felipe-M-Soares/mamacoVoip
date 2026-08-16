@@ -116,7 +116,7 @@ export function CreateChannelModal({
         <button
           onClick={handleSubmit}
           disabled={loading}
-          className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
+          className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
         >
           {loading ? 'Criando...' : 'Criar canal'}
         </button>

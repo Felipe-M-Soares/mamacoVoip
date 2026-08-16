@@ -33,7 +33,7 @@ export function InviteRedirect() {
             <p className="text-discord-text-muted mt-3">{error}</p>
             <button
               onClick={() => navigate('/')}
-              className="mt-5 px-5 py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors"
+              className="mt-5 px-5 py-2.5 rounded btn-primary"
             >
               Voltar pro app
             </button>

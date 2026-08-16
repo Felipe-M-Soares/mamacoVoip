@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
+import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { UserPanel } from './UserPanel'
 import { InviteModal } from '../modals/InviteModal'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
@@ -11,9 +12,33 @@ import { useAuth } from '../../hooks/useAuth'
 import { useChannels } from '../../hooks/useChannels'
 import { useModeration } from '../../hooks/useModeration'
 import { useVoice } from '../../hooks/useVoice'
+import { useVoicePresence } from '../../hooks/useVoicePresence'
+import { useServerMembers } from '../../hooks/useServerMembers'
+import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
+import { Avatar } from '../ui/Avatar'
 import { RolesManagerModal } from '../modals/RolesManagerModal'
 import { ModerationLogModal } from '../modals/ModerationLogModal'
-import type { Channel, Server } from '../../types/database'
+import type { Channel, Profile, Server } from '../../types/database'
+
+function VoiceChannelPresence({ channelId, profileById }: { channelId: string; profileById: Record<string, Profile> }) {
+  const userIds = useVoicePresence(channelId)
+  if (userIds.length === 0) return null
+  return (
+    <div className="flex items-center gap-1 pl-7 pb-1 flex-wrap">
+      {userIds.map((id) => {
+        const p = profileById[id]
+        return (
+          <div key={id} className="flex items-center gap-1 bg-discord-darker/60 rounded-full pl-0.5 pr-2 py-0.5">
+            <Avatar name={p?.username ?? '?'} avatarUrl={p?.avatar_url} size={16} />
+            <span className="text-[10px] text-discord-text-muted truncate max-w-[70px]">
+              {p?.display_name || p?.username || '...'}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 function VoiceStatusBar({ serverId }: { serverId: string }) {
   const voice = useVoice()
@@ -74,34 +99,111 @@ function ChannelIcon({ type }: { type: 'text' | 'voice' }) {
   )
 }
 
+function InlineEditableLabel({
+  value,
+  onSave,
+  editable,
+  className,
+}: {
+  value: string
+  onSave: (value: string) => void
+  editable: boolean
+  className?: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+
+  function startEdit(e: React.MouseEvent) {
+    if (!editable) return
+    e.stopPropagation()
+    setDraft(value)
+    setEditing(true)
+  }
+
+  function commit() {
+    setEditing(false)
+    const cleaned = draft.trim()
+    if (cleaned && cleaned !== value) onSave(cleaned)
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+          if (e.key === 'Escape') setEditing(false)
+        }}
+        className={`bg-discord-darker text-discord-text rounded px-1 outline-none ring-1 ring-discord-blurple ${className ?? ''}`}
+      />
+    )
+  }
+
+  return (
+    <span onDoubleClick={startEdit} title={editable ? 'Clique duas vezes para renomear' : undefined} className={className}>
+      {value}
+    </span>
+  )
+}
+
 function ChannelRow({
   channel,
   active,
   unread,
   isOwner,
+  isDragOver,
   onSelect,
   onEdit,
   onMoveUp,
   onMoveDown,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onRename,
+  onContextMenu,
 }: {
   channel: Channel
   active: boolean
   unread: boolean
   isOwner: boolean
+  isDragOver: boolean
   onSelect: () => void
   onEdit: () => void
   onMoveUp: () => void
   onMoveDown: () => void
+  onDragStart: (e: React.DragEvent) => void
+  onDragOver: (e: React.DragEvent) => void
+  onDragLeave: () => void
+  onDrop: (e: React.DragEvent) => void
+  onRename: (name: string) => void
+  onContextMenu: (e: React.MouseEvent) => void
 }) {
   return (
     <div
-      className={`group flex items-center gap-1.5 px-2 py-1.5 rounded text-sm font-medium transition-colors cursor-pointer
+      draggable={isOwner}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onContextMenu={onContextMenu}
+      className={`group flex items-center gap-1.5 px-2 py-1.5 rounded text-sm font-medium transition-colors ${isOwner ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
         ${active ? 'bg-discord-lighter text-white' : unread ? 'text-white' : 'text-discord-text-muted hover:bg-white/5 hover:text-discord-text'}
+        ${isDragOver ? 'ring-2 ring-discord-blurple' : ''}
       `}
       onClick={onSelect}
     >
       <ChannelIcon type={channel.type} />
-      <span className="truncate flex-1">{channel.name}</span>
+      <InlineEditableLabel
+        value={channel.name}
+        editable={isOwner}
+        onSave={onRename}
+        className="truncate flex-1 text-sm"
+      />
       {unread && !active && <span className="w-2 h-2 rounded-full bg-white shrink-0" />}
 
       {isOwner && (
@@ -165,8 +267,20 @@ export function ChannelSidebar({
 }) {
   const { user } = useAuth()
   const isOwner = server.owner_id === user?.id
-  const { categories, channels, moveChannel, moveCategory } = useChannels()
+  const {
+    categories,
+    channels,
+    moveChannel,
+    moveChannelToCategory,
+    moveCategory,
+    updateCategory,
+    updateChannel,
+    deleteChannel,
+  } = useChannels()
   const { permissions } = useModeration(server.id)
+  const { members } = useServerMembers(server.id)
+  const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
+  const { collapsed: collapsedCategories, toggle: toggleCategoryCollapse } = useCollapsedCategories()
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
@@ -176,6 +290,49 @@ export function ChannelSidebar({
   const [showCreateChannel, setShowCreateChannel] = useState<{ categoryId: string | null } | null>(null)
   const [showCreateCategory, setShowCreateCategory] = useState(false)
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
+  const [draggedChannelId, setDraggedChannelId] = useState<string | null>(null)
+  const [contextChannel, setContextChannel] = useState<Channel | null>(null)
+  const { menuState, openMenu, closeMenu } = useContextMenuState()
+
+  function handleChannelContextMenu(e: React.MouseEvent, channel: Channel) {
+    setContextChannel(channel)
+    openMenu(e)
+  }
+  const [dragOverTarget, setDragOverTarget] = useState<string | null>(null)
+
+  function handleDragStart(e: React.DragEvent, channelId: string) {
+    e.dataTransfer.setData('text/plain', channelId)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggedChannelId(channelId)
+  }
+
+  function handleDragOverChannel(e: React.DragEvent, targetId: string) {
+    e.preventDefault()
+    setDragOverTarget(targetId)
+  }
+
+  function handleDragOverCategory(e: React.DragEvent, categoryKey: string) {
+    e.preventDefault()
+    setDragOverTarget(categoryKey)
+  }
+
+  async function handleDropOnChannel(e: React.DragEvent, targetChannel: Channel) {
+    e.preventDefault()
+    const draggedId = e.dataTransfer.getData('text/plain')
+    setDragOverTarget(null)
+    setDraggedChannelId(null)
+    if (!draggedId || draggedId === targetChannel.id) return
+    await moveChannelToCategory(draggedId, targetChannel.category_id, targetChannel.id)
+  }
+
+  async function handleDropOnCategory(e: React.DragEvent, categoryId: string | null) {
+    e.preventDefault()
+    const draggedId = e.dataTransfer.getData('text/plain')
+    setDragOverTarget(null)
+    setDraggedChannelId(null)
+    if (!draggedId) return
+    await moveChannelToCategory(draggedId, categoryId)
+  }
   const [showRoles, setShowRoles] = useState(false)
   const [showModeration, setShowModeration] = useState(false)
 
@@ -290,19 +447,34 @@ export function ChannelSidebar({
 
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
         {uncategorized.length > 0 && (
-          <div className="space-y-0.5">
+          <div
+            className={`space-y-0.5 rounded ${dragOverTarget === 'uncategorized' ? 'bg-white/5' : ''}`}
+            onDragOver={(e) => handleDragOverCategory(e, 'uncategorized')}
+            onDrop={(e) => handleDropOnCategory(e, null)}
+          >
             {uncategorized.map((channel) => (
-              <ChannelRow
-                key={channel.id}
-                channel={channel}
-                active={activeChannelId === channel.id}
-                unread={unreadChannelIds.has(channel.id)}
-                isOwner={isOwner}
-                onSelect={() => onSelectChannel(channel)}
-                onEdit={() => setEditingChannel(channel)}
-                onMoveUp={() => moveChannel(channel.id, null, 'up')}
-                onMoveDown={() => moveChannel(channel.id, null, 'down')}
-              />
+              <Fragment key={channel.id}>
+                <ChannelRow
+                  channel={channel}
+                  active={activeChannelId === channel.id}
+                  unread={unreadChannelIds.has(channel.id)}
+                  isOwner={isOwner}
+                  isDragOver={dragOverTarget === channel.id && draggedChannelId !== channel.id}
+                  onSelect={() => onSelectChannel(channel)}
+                  onEdit={() => setEditingChannel(channel)}
+                  onMoveUp={() => moveChannel(channel.id, null, 'up')}
+                  onMoveDown={() => moveChannel(channel.id, null, 'down')}
+                  onDragStart={(e) => handleDragStart(e, channel.id)}
+                  onDragOver={(e) => handleDragOverChannel(e, channel.id)}
+                  onDragLeave={() => setDragOverTarget(null)}
+                  onDrop={(e) => handleDropOnChannel(e, channel)}
+                  onRename={(name) => updateChannel(channel.id, { name: name.toLowerCase().replace(/\s+/g, "-") })}
+                  onContextMenu={(e) => handleChannelContextMenu(e, channel)}
+                />
+                {channel.type === 'voice' && (
+                  <VoiceChannelPresence channelId={channel.id} profileById={profileById} />
+                )}
+              </Fragment>
             ))}
           </div>
         )}
@@ -314,15 +486,37 @@ export function ChannelSidebar({
 
           return (
             <div key={category.id} className="group/category">
-              <div className="px-1 mb-1 flex items-center justify-between">
-                <span className="text-xs font-semibold text-discord-text-muted tracking-wide">
-                  {category.name}
-                </span>
+              <div
+                className={`px-1 mb-1 flex items-center justify-between rounded cursor-pointer select-none ${dragOverTarget === category.id ? 'bg-white/5' : ''}`}
+                onDragOver={(e) => handleDragOverCategory(e, category.id)}
+                onDrop={(e) => handleDropOnCategory(e, category.id)}
+                onClick={() => toggleCategoryCollapse(category.id)}
+              >
+                <div className="flex items-center gap-1 min-w-0">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className={`w-3 h-3 shrink-0 text-discord-text-muted transition-transform ${
+                      collapsedCategories.has(category.id) ? '-rotate-90' : ''
+                    }`}
+                  >
+                    <path d="M12 16a1 1 0 0 1-.7-.3l-6-6a1 1 0 1 1 1.4-1.4L12 13.6l5.3-5.3a1 1 0 0 1 1.4 1.4l-6 6a1 1 0 0 1-.7.3z" />
+                  </svg>
+                  <InlineEditableLabel
+                    value={category.name}
+                    editable={isOwner}
+                    onSave={(name) => updateCategory(category.id, name.toUpperCase())}
+                    className="text-xs font-semibold text-discord-text-muted tracking-wide truncate"
+                  />
+                </div>
                 {isOwner && (
-                  <div className="hidden group-hover/category:flex items-center gap-1">
+                  <div className="hidden group-hover/category:flex items-center gap-1 shrink-0">
                     <button
                       title="Mover categoria para cima"
-                      onClick={() => moveCategory(category.id, 'up')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        moveCategory(category.id, 'up')
+                      }}
                       className="text-discord-text-muted hover:text-white"
                     >
                       <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
@@ -331,7 +525,10 @@ export function ChannelSidebar({
                     </button>
                     <button
                       title="Mover categoria para baixo"
-                      onClick={() => moveCategory(category.id, 'down')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        moveCategory(category.id, 'down')
+                      }}
                       className="text-discord-text-muted hover:text-white"
                     >
                       <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
@@ -340,7 +537,10 @@ export function ChannelSidebar({
                     </button>
                     <button
                       title="Criar canal nesta categoria"
-                      onClick={() => setShowCreateChannel({ categoryId: category.id })}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setShowCreateChannel({ categoryId: category.id })
+                      }}
                       className="text-discord-text-muted hover:text-white"
                     >
                       <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
@@ -350,21 +550,34 @@ export function ChannelSidebar({
                   </div>
                 )}
               </div>
-              <div className="space-y-0.5">
-                {categoryChannels.map((channel) => (
-                  <ChannelRow
-                    key={channel.id}
-                    channel={channel}
-                    active={activeChannelId === channel.id}
-                    unread={unreadChannelIds.has(channel.id)}
-                    isOwner={isOwner}
-                    onSelect={() => onSelectChannel(channel)}
-                    onEdit={() => setEditingChannel(channel)}
-                    onMoveUp={() => moveChannel(channel.id, category.id, 'up')}
-                    onMoveDown={() => moveChannel(channel.id, category.id, 'down')}
-                  />
-                ))}
-              </div>
+              {!collapsedCategories.has(category.id) && (
+                <div className="space-y-0.5">
+                  {categoryChannels.map((channel) => (
+                    <Fragment key={channel.id}>
+                      <ChannelRow
+                        channel={channel}
+                        active={activeChannelId === channel.id}
+                        unread={unreadChannelIds.has(channel.id)}
+                        isOwner={isOwner}
+                        isDragOver={dragOverTarget === channel.id && draggedChannelId !== channel.id}
+                        onSelect={() => onSelectChannel(channel)}
+                        onEdit={() => setEditingChannel(channel)}
+                        onMoveUp={() => moveChannel(channel.id, category.id, 'up')}
+                        onMoveDown={() => moveChannel(channel.id, category.id, 'down')}
+                        onDragStart={(e) => handleDragStart(e, channel.id)}
+                        onDragOver={(e) => handleDragOverChannel(e, channel.id)}
+                        onDragLeave={() => setDragOverTarget(null)}
+                        onDrop={(e) => handleDropOnChannel(e, channel)}
+                        onRename={(name) => updateChannel(channel.id, { name: name.toLowerCase().replace(/\s+/g, '-') })}
+                        onContextMenu={(e) => handleChannelContextMenu(e, channel)}
+                      />
+                      {channel.type === 'voice' && (
+                        <VoiceChannelPresence channelId={channel.id} profileById={profileById} />
+                      )}
+                    </Fragment>
+                  ))}
+                </div>
+              )}
             </div>
           )
         })}
@@ -417,6 +630,44 @@ export function ChannelSidebar({
       )}
       {showRoles && <RolesManagerModal serverId={server.id} onClose={() => setShowRoles(false)} />}
       {showModeration && <ModerationLogModal serverId={server.id} onClose={() => setShowModeration(false)} />}
+
+      {menuState && contextChannel && (
+        <ContextMenu
+          x={menuState.x}
+          y={menuState.y}
+          onClose={closeMenu}
+          items={[
+            { label: 'Abrir canal', onClick: () => onSelectChannel(contextChannel) },
+            {
+              label: 'Copiar nome do canal',
+              onClick: () => navigator.clipboard.writeText(contextChannel.name),
+            },
+            ...(isOwner
+              ? [
+                  { label: 'Editar canal', onClick: () => setEditingChannel(contextChannel) },
+                  {
+                    label: 'Mover para cima',
+                    onClick: () => moveChannel(contextChannel.id, contextChannel.category_id, 'up'),
+                  },
+                  {
+                    label: 'Mover para baixo',
+                    onClick: () => moveChannel(contextChannel.id, contextChannel.category_id, 'down'),
+                  },
+                  {
+                    label: 'Excluir canal',
+                    danger: true,
+                    divider: true,
+                    onClick: () => {
+                      if (confirm(`Excluir o canal "${contextChannel.name}"? Essa ação não pode ser desfeita.`)) {
+                        deleteChannel(contextChannel.id)
+                      }
+                    },
+                  },
+                ]
+              : []),
+          ]}
+        />
+      )}
     </aside>
   )
 }

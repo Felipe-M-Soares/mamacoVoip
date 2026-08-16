@@ -95,7 +95,7 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
       <button
         onClick={handleChangePassword}
         disabled={loading}
-        className="w-full py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
+        className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
       >
         {loading ? 'Salvando...' : 'Alterar senha'}
       </button>
@@ -142,7 +142,7 @@ function NotificationsTab() {
       ) : (
         <button
           onClick={handleEnable}
-          className="px-4 py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors text-sm"
+          className="px-4 py-2.5 rounded btn-primary text-sm"
         >
           Ativar notificações
         </button>
@@ -294,7 +294,7 @@ function AudioTab() {
           </p>
           <button
             onClick={handleRequestPermission}
-            className="text-sm px-3 py-1.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors"
+            className="text-sm px-3 py-1.5 rounded btn-primary"
           >
             Permitir acesso ao microfone
           </button>
@@ -369,7 +369,7 @@ function AudioTab() {
       <div>
         <button
           onClick={testing ? stopTest : startTest}
-          className="text-sm px-4 py-2 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors"
+          className="text-sm px-4 py-2 rounded btn-primary"
         >
           {testing ? 'Parar teste' : 'Testar microfone'}
         </button>

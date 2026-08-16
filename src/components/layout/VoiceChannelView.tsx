@@ -215,7 +215,7 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
         <div className="flex-1" />
         <button
           onClick={() => setShowInvite(true)}
-          className="text-xs px-3 py-1.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors flex items-center gap-1.5 shrink-0"
+          className="text-xs px-3 py-1.5 rounded btn-primary flex items-center gap-1.5 shrink-0"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
             <path d="M15 12a5 5 0 1 0-4.9-6H9a1 1 0 1 0 0 2h1.1c.1.4.2.7.4 1H9a1 1 0 1 0 0 2h2.5c.9.6 2 1 3.2 1zM3 20a6 6 0 0 1 6-6h1a6 6 0 0 1 6 6 1 1 0 1 1-2 0 4 4 0 0 0-4-4H9a4 4 0 0 0-4 4 1 1 0 1 1-2 0zm16-2v-2h-2v-2h2v-2h2v2h2v2h-2v2h-2z" />
@@ -238,7 +238,7 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
           <button
             onClick={handleSwitchHere}
             disabled={voice.connecting}
-            className="mt-4 px-5 py-2.5 rounded bg-discord-blurple text-white font-medium hover:opacity-90 transition-colors disabled:opacity-60"
+            className="mt-4 px-5 py-2.5 rounded btn-primary disabled:opacity-60"
           >
             {voice.connecting ? 'Trocando...' : 'Trocar de canal'}
           </button>

@@ -42,7 +42,7 @@ export function LeaveServerModal({
         <button
           onClick={handleLeave}
           disabled={loading}
-          className="px-4 py-2 text-sm rounded bg-red-600 text-white font-medium hover:bg-red-700 transition-colors disabled:opacity-60"
+          className="px-4 py-2 text-sm rounded btn-danger disabled:opacity-60"
         >
           {loading ? 'Saindo...' : 'Sair do servidor'}
         </button>

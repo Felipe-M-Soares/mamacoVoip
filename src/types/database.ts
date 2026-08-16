@@ -7,6 +7,7 @@ export type Profile = {
   avatar_url: string | null
   status: ProfileStatus
   custom_status: string | null
+  playing: string | null
   created_at: string
   updated_at: string
 }
@@ -213,7 +214,7 @@ export type Database = {
       profiles: {
         Row: Profile
         Insert: Pick<Profile, 'id' | 'username'> & Partial<Omit<Profile, 'id' | 'username'>>
-        Update: Partial<Pick<Profile, 'username' | 'display_name' | 'avatar_url' | 'status' | 'custom_status'>>
+        Update: Partial<Pick<Profile, 'username' | 'display_name' | 'avatar_url' | 'status' | 'custom_status' | 'playing'>>
         Relationships: []
       }
       servers: {

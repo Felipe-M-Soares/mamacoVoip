@@ -33,7 +33,7 @@ export function UserPanel() {
         <div className="min-w-0 text-left">
           <p className="text-sm font-medium text-white truncate">{profile.display_name || profile.username}</p>
           <p className="text-xs text-discord-text-muted truncate">
-            {profile.custom_status || `@${profile.username}`}
+            {profile.playing ? `🎮 Jogando ${profile.playing}` : profile.custom_status || `@${profile.username}`}
           </p>
         </div>
       </button>
@@ -74,6 +74,26 @@ export function UserPanel() {
           </div>
         )}
       </div>
+
+      <button
+        title={voice.audioSettings.noiseSuppression ? 'Desativar redutor de ruído' : 'Ativar redutor de ruído'}
+        onClick={async () => {
+          voice.audioSettings.setNoiseSuppression(!voice.audioSettings.noiseSuppression)
+          await voice.refreshAudioConstraints()
+        }}
+        className={`w-8 h-8 flex items-center justify-center rounded transition-colors shrink-0 ${
+          voice.audioSettings.noiseSuppression
+            ? 'text-discord-blurple hover:bg-white/10'
+            : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
+        }`}
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+          <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM7 11a1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-2.08A7 7 0 0 0 19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0z" />
+          {!voice.audioSettings.noiseSuppression && (
+            <path d="M3.6 3.6a1 1 0 0 0-1.4 1.4l18.8 18.8a1 1 0 0 0 1.4-1.4L3.6 3.6z" />
+          )}
+        </svg>
+      </button>
 
       <button
         title="Configurações"

@@ -66,6 +66,61 @@ body {
   box-shadow: 0 0 14px 0 color-mix(in srgb, var(--color-discord-blurple) 45%, transparent);
 }
 
+/* Botões modernos e reutilizáveis — usados nos CTAs principais do app */
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-discord-blurple), color-mix(in srgb, var(--color-discord-blurple) 75%, black));
+  color: white;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px 0 color-mix(in srgb, var(--color-discord-blurple) 35%, transparent);
+  transition: transform 0.12s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: 0 4px 16px 0 color-mix(in srgb, var(--color-discord-blurple) 50%, transparent);
+  transform: translateY(-1px);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--color-discord-lighter);
+  color: var(--color-discord-text);
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: background-color 0.15s ease, transform 0.12s ease;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-discord-lighter) 80%, white);
+  transform: translateY(-1px);
+}
+.btn-secondary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #dc2626, #991b1b);
+  color: white;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px 0 rgba(220, 38, 38, 0.3);
+  transition: transform 0.12s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: 0 4px 16px 0 rgba(220, 38, 38, 0.45);
+  transform: translateY(-1px);
+}
+.btn-danger:active:not(:disabled) {
+  transform: translateY(0);
+}
+
 .font-display {
   font-family: var(--font-display);
   letter-spacing: 0.02em;

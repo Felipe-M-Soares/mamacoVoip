@@ -16,6 +16,7 @@ import { useServers } from '../hooks/useServers'
 import { useChannels } from '../hooks/useChannels'
 import { useConversations } from '../hooks/useConversations'
 import { useUnreadOverview } from '../hooks/useUnreadOverview'
+import { useGamePresence } from '../hooks/useGamePresence'
 import type { Channel, Profile, Server } from '../types/database'
 
 const VoiceChannelView = lazy(() =>
@@ -146,6 +147,7 @@ function ActiveServerContent({
 }
 
 function MainLayoutInner() {
+  useGamePresence()
   const { servers, loading: loadingServers } = useServers()
   const location = useLocation()
   const navigate = useNavigate()

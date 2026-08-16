@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Mamacos Voip — servidores, canais, chat em tempo real, voz e vídeo.",
-  "author": "Felipe M. Soares <SEU-EMAIL-AQUI@exemplo.com>",
+  "author": "Felipe M. Soares <jogos.fms@hotmail.com>",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

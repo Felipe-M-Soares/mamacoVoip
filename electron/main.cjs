@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, shell, ipcMain } = require('electron')
+const { app, BrowserWindow, session, Menu, shell, ipcMain, dialog } = require('electron')
 const path = require('node:path')
 const { exec } = require('node:child_process')
 const { autoUpdater } = require('electron-updater')
@@ -142,6 +142,24 @@ function createWindow() {
     win.loadFile(PROD_INDEX_FILE)
   }
 
+  // Se o arquivo/página falhar ao carregar (ex: caminho errado, arquivo
+  // ausente), mostra um alerta nativo do sistema automaticamente — sem
+  // isso, uma falha de carregamento vira só uma tela preta muda, sem
+  // nenhuma pista visível de por que.
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    if (errorCode === -3) return // ERR_ABORTED — comum durante navegação normal, não é erro de verdade
+    dialog.showErrorBox(
+      'Mamacos Voip — falha ao carregar',
+      `Código: ${errorCode}\nDescrição: ${errorDescription}\nCaminho: ${validatedURL}`,
+    )
+  })
+
+  // Se a página carregar mas travar depois (aba/processo interno
+  // morreu), avisa também — outro jeito comum de "tela preta muda".
+  win.webContents.on('render-process-gone', (_event, details) => {
+    dialog.showErrorBox('Mamacos Voip — processo travou', `Motivo: ${details.reason}`)
+  })
+
   // Bloqueia navegação pra qualquer lugar que não seja o próprio app —
   // se algo tentar redirecionar a janela (XSS, link malicioso, etc.),
   // isso é barrado aqui e a URL abre no navegador do sistema, fora do
@@ -185,6 +203,13 @@ app.whenReady().then(() => {
   win.once('ready-to-show', () => {
     splash.close()
     win.show()
+  })
+
+  win.webContents.once('did-fail-load', () => {
+    if (!splash.isDestroyed()) splash.close()
+  })
+  win.webContents.once('render-process-gone', () => {
+    if (!splash.isDestroyed()) splash.close()
   })
 
   startGameDetection()

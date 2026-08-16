@@ -14,7 +14,34 @@ permissions:
   contents: write
 
 jobs:
+  # Cria e envia a tag da versão ANTES de qualquer build começar. Sem
+  # isso, cada uma das 3 plataformas tentava criar o release já
+  # "publicado" referenciando uma tag que ainda não existia de verdade
+  # no repositório — o GitHub rejeita isso ("must have a valid tag").
+  # Criando a tag aqui primeiro, ela já existe de verdade quando os
+  # builds tentam publicar nela.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calcular e criar a tag da versão
+        id: version
+        run: |
+          VERSION="1.0.$(git rev-list --count HEAD)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
   build:
+    needs: prepare
     strategy:
       matrix:
         include:
@@ -50,9 +77,9 @@ jobs:
           rm -f package-lock.json
           npm install
 
-      - name: Definir versão automática (baseada no nº de commits)
+      - name: Definir a versão (mesma calculada no job "prepare")
         shell: bash
-        run: npm version "1.0.$(git rev-list --count HEAD)" --no-git-tag-version --allow-same-version
+        run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Build do app desktop (tsc + vite, caminhos relativos)
         run: npm run build:electron

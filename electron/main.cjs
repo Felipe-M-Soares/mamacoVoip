@@ -165,30 +165,6 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Content-Security-Policy: mesmo o app já sendo same-origin (só
-  // carrega o próprio dist/index.html), isso é uma segunda camada
-  // contra XSS — impede que qualquer script/estilo/conexão de origem
-  // não autorizada rode dentro da janela, mesmo que algum conteúdo
-  // malicioso consiga se injetar na página por outro meio.
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self'; " +
-            "script-src 'self'; " +
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-            "font-src 'self' https://fonts.gstatic.com; " +
-            "img-src 'self' data: blob: https:; " +
-            "media-src 'self' blob:; " +
-            "connect-src 'self' https://*.supabase.co wss://*.supabase.co stun:stun.l.google.com stun:stun1.l.google.com; " +
-            "object-src 'none'; " +
-            "base-uri 'self';",
-        ],
-      },
-    })
-  })
-
   // O app web pede permissão de microfone/câmera/compartilhamento de tela
   // via getUserMedia/getDisplayMedia — sem isso o Electron bloqueia por
   // padrão e a Fase 8 (voz) não funcionaria dentro do app desktop.
@@ -217,16 +193,34 @@ app.whenReady().then(() => {
   ipcMain.handle('app:getCurrentGame', () => currentGame)
 
   if (!isDev) {
-    // Checa, baixa e notifica sobre atualizações automaticamente.
-    // Exige que "build.publish" esteja configurado (veja package.json)
-    // e que exista pelo menos um release publicado no provedor escolhido.
+    // Checa, baixa e aplica atualizações — cada etapa é avisada pra
+    // janela principal via IPC, pra mostrar um indicador visual (em vez
+    // de tudo acontecer em silêncio como antes). Exige que
+    // "build.publish" esteja configurado (veja package.json) e que
+    // exista pelo menos um release publicado no provedor escolhido.
     // electron-updater também valida a ASSINATURA do instalador antes
     // de aplicar a atualização (veja seção de assinatura de código no
     // README) — sem isso, atualizações automáticas são um vetor de
     // ataque em vez de proteção.
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {
-      // sem conexão ou nenhum release publicado ainda — falha silenciosa,
-      // não deve impedir o app de abrir
+    function sendUpdateStatus(status, extra = {}) {
+      mainWindow?.webContents.send('update-status', { status, ...extra })
+    }
+
+    autoUpdater.on('checking-for-update', () => sendUpdateStatus('checking'))
+    autoUpdater.on('update-available', (info) => sendUpdateStatus('downloading', { version: info.version }))
+    autoUpdater.on('update-not-available', () => sendUpdateStatus('up-to-date'))
+    autoUpdater.on('download-progress', (progress) =>
+      sendUpdateStatus('downloading', { percent: Math.round(progress.percent) })
+    )
+    autoUpdater.on('update-downloaded', (info) => sendUpdateStatus('ready', { version: info.version }))
+    autoUpdater.on('error', (err) => sendUpdateStatus('error', { message: err?.message ?? 'Erro desconhecido' }))
+
+    ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall())
+
+    autoUpdater.checkForUpdates().catch(() => {
+      // sem conexão ou nenhum release publicado ainda — o evento 'error'
+      // acima já avisa a janela, então não precisa fazer nada aqui além
+      // de não deixar isso impedir o app de abrir
     })
   }
 

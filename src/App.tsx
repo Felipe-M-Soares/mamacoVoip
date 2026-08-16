@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { ConnectionBanner } from './components/ui/ConnectionBanner'
+import { UpdateStatusBadge } from './components/ui/UpdateStatusBadge'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { MainLayout } from './pages/MainLayout'
@@ -16,6 +17,7 @@ function App() {
       <BrowserRouter>
         <AuthProvider>
           <ConnectionBanner />
+          <UpdateStatusBadge />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Register />} />

@@ -1,6 +1,21 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+
+// O Vite adiciona crossorigin nas tags <script>/<link> por padrão — bom
+// pra um site normal, mas isso faz o Chromium tentar um fetch em modo
+// CORS pros arquivos, o que FALHA EM SILÊNCIO quando o app é aberto
+// via file:// (como o Electron faz). Resultado: nenhum script carrega,
+// tela preta, e nem aparece erro nenhum no console. Isso é o que
+// provavelmente estava causando a tela preta no app instalado.
+function stripCrossoriginForElectron(): Plugin {
+  return {
+    name: 'strip-crossorigin-for-electron',
+    transformIndexHtml(html) {
+      return html.replace(/\s+crossorigin(="[^"]*")?/g, '')
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -13,7 +28,7 @@ export default defineConfig(({ mode }) => ({
   // usa roteamento do lado do cliente), então só usamos "./" quando o
   // build é especificamente pro Electron (`npm run build:electron`).
   base: mode === 'electron' ? './' : '/',
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), ...(mode === 'electron' ? [stripCrossoriginForElectron()] : [])],
   build: {
     rollupOptions: {
       output: {

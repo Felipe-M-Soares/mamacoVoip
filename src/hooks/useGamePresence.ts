@@ -1,6 +1,13 @@
 import { useEffect } from 'react'
 import { useAuth } from './useAuth'
 
+export interface UpdateStatusPayload {
+  status: 'checking' | 'downloading' | 'up-to-date' | 'ready' | 'error'
+  version?: string
+  percent?: number
+  message?: string
+}
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -9,6 +16,8 @@ declare global {
       getVersion: () => Promise<string>
       getCurrentGame: () => Promise<string | null>
       onGameStatusChanged: (callback: (game: string | null) => void) => () => void
+      onUpdateStatus: (callback: (payload: UpdateStatusPayload) => void) => () => void
+      restartToUpdate: () => Promise<void>
     }
   }
 }

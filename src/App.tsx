@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { ConnectionBanner } from './components/ui/ConnectionBanner'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { MainLayout } from './pages/MainLayout'
@@ -14,6 +15,7 @@ function App() {
     <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
+          <ConnectionBanner />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Register />} />

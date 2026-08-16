@@ -52,8 +52,18 @@ jobs:
         shell: bash
         run: npm version "1.0.$(git rev-list --count HEAD)" --no-git-tag-version --allow-same-version
 
-      - name: Build do site (tsc + vite)
-        run: npm run build
+      - name: Build do app desktop (tsc + vite, caminhos relativos)
+        run: npm run build:electron
+        env:
+          # Sem isso, o app abre com tela preta — o cliente do Supabase
+          # trava o app inteiro se essas variáveis não existirem no
+          # momento do build (o Vite "grava" elas dentro dos arquivos
+          # gerados, não dá pra configurar depois). Use os MESMOS
+          # valores que você já colocou nas Environment Variables da
+          # Vercel. Configure em: Settings > Secrets and variables >
+          # Actions > New repository secret, no seu repositório GitHub.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Empacotar + publicar release (${{ matrix.os }})
         run: npx electron-builder ${{ matrix.platform_flag }} --publish always

@@ -6,6 +6,8 @@ import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { MainLayout } from './pages/MainLayout'
 import { InviteRedirect } from './pages/InviteRedirect'
+import { PrivacyPolicy } from './pages/legal/PrivacyPolicy'
+import { TermsOfService } from './pages/legal/TermsOfService'
 
 function App() {
   return (
@@ -15,6 +17,8 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Register />} />
+            <Route path="/privacidade" element={<PrivacyPolicy />} />
+            <Route path="/termos" element={<TermsOfService />} />
             <Route
               path="/convite/:code"
               element={

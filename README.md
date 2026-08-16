@@ -101,6 +101,15 @@ funcionar de verdade, você precisa:
 2. Publicar os instaladores gerados como um GitHub Release
 3. Trocar a mesma URL em `src/lib/config.ts` (é o link do botão "Baixar o app pra PC" na tela de login)
 
+**Atualização automática ao dar deploy**: existe um workflow em `.github/workflows/release-desktop.yml`
+que roda sozinho toda vez que você der `push` pra branch `main` — ele gera os instaladores de Windows,
+Mac e Linux e já publica como um novo GitHub Release. Como o `electron-updater` (configurado em
+`electron/main.cjs`) checa por atualizações toda vez que o app abre, isso significa que o mesmo `push` que
+atualiza o site na Vercel também deixa uma atualização pronta pra quem já tem o app instalado — na próxima
+vez que a pessoa abrir o Mamacos Voip, ele baixa e aplica sozinho. Só precisa:
+1. Trocar `SEU_USUARIO_GITHUB`/`SEU_REPOSITORIO` no `package.json` (bloco `"publish"`)
+2. Isso já é suficiente — o workflow usa o token automático do GitHub Actions, não precisa configurar nada a mais
+
 **Testar em desenvolvimento** (sem gerar instalador):
 ```bash
 npm run dev              # em um terminal, sobe o Vite
@@ -112,6 +121,44 @@ seu PC (comparando com uma lista de jogos populares em `electron/main.cjs`) e at
 seu status pra "🎮 Jogando X". Isso só funciona no app desktop — nenhum navegador dá acesso à lista de
 processos do sistema por segurança, então essa função não existe na versão web. A detecção funciona melhor
 no Windows; no Mac/Linux a cobertura é mais limitada porque os nomes de processo variam mais.
+
+## Segurança
+
+Um app "impossível de invadir" não existe — nem pra Mamacos Voip, nem pro Discord de verdade, nem pra nenhum
+software que roda no computador de alguém. Quem tem o `.exe` instalado sempre consegue, em algum grau,
+inspecionar como ele funciona. O que dá pra fazer de verdade é: (1) fechar as portas que existem no app
+desktop, e (2) garantir que a decisão de "quem pode ver/editar o quê" fique no servidor, não no aplicativo —
+porque isso é a única parte que ninguém com acesso ao instalador consegue burlar.
+
+**O que já está implementado:**
+
+- **RLS (Row Level Security) em toda tabela do banco** — essa é a proteção real. Mesmo que alguém
+  desmontasse o app inteiro e recriasse toda chamada que ele faz, o Postgres ainda barra qualquer
+  leitura/escrita que a pessoa não tenha permissão de fazer. É por isso que a chave pública do Supabase
+  (`VITE_SUPABASE_ANON_KEY`) pode aparecer no código sem problema — ela não é secreta, é a RLS que protege.
+- **Content-Security-Policy** (`index.html` + `vercel.json`) — trava de onde o app pode carregar
+  script/estilo/conexão, reduzindo bastante o impacto de um ataque de XSS caso um dia apareça algum.
+- **Configuração de segurança do Electron** (`electron/main.cjs`): `contextIsolation`, `nodeIntegration:
+  false`, `sandbox: true`, `webSecurity: true`, sem tag `<webview>`, navegação travada só pro próprio app
+  (qualquer link externo abre no navegador do sistema, não dentro da janela do app).
+- **ASAR habilitado** no empacotamento — o código fonte vai compactado num arquivo único em vez de arquivos
+  soltos e editáveis. Isso NÃO é criptografia (existem ferramentas públicas que desempacotam ASAR em
+  segundos), só dificulta um pouco a alteração casual.
+- **Rate limit de mensagens** (8 mensagens/10s por usuário), já configurado no banco desde a Fase 5.
+- **Cabeçalhos de segurança** no deploy web (`vercel.json`): `X-Frame-Options`, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Permissions-Policy`.
+- **Nenhuma senha passa pelo nosso código** — login/cadastro vai direto pro Supabase Auth via HTTPS, que
+  faz o hash da senha do lado dele. O app nunca vê nem guarda senha em texto puro.
+
+**O que ainda vale a pena fazer, mas exige algo fora do meu alcance aqui:**
+
+- **Assinatura de código (code signing)** — um certificado (pago, ~200-400 USD/ano pra Windows) que faz o
+  Windows/Mac pararem de mostrar aviso de "editor desconhecido" no instalador, e garante que ninguém
+  consiga adulterar o `.exe` sem invalidar a assinatura. Sem isso, o SmartScreen do Windows vai avisar que
+  o app "não é comumente baixado" — é chato, mas não significa que o app tem algum problema.
+  `electron-builder` já suporta assinatura automática assim que você tiver o certificado.
+  [Guia oficial](https://www.electron.build/code-signing).
+- Manter as dependências atualizadas (`npm audit` de tempos em tempos).
 
 ## Deploy em produção (Vercel)
 

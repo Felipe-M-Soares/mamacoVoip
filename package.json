@@ -38,15 +38,21 @@
     "icon": "build/icon.png",
     "files": ["dist/**/*", "electron/**/*", "package.json"],
     "directories": { "output": "release" },
+    "asar": true,
     "win": {
-      "target": "nsis",
+      "target": ["nsis", "portable"],
       "icon": "build/icon.png"
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "perMachine": false,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": true,
+      "artifactName": "MamacosVoip-Setup.exe"
+    },
+    "portable": {
+      "artifactName": "MamacosVoip-Portatil.exe"
     },
     "mac": {
       "target": "dmg",

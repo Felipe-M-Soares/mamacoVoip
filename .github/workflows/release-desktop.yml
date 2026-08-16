@@ -1,0 +1,55 @@
+name: Build e publicar app desktop
+
+# Roda sempre que algo é enviado pra main — o mesmo push que a Vercel
+# usa pra atualizar o site também dispara isso aqui, então o app
+# instalado no PC das pessoas recebe a atualização automaticamente na
+# próxima vez que o electron-updater checar (ele checa toda vez que o
+# app abre). Também pode ser disparado manualmente pela aba Actions.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform_flag: --win
+          - os: macos-latest
+            platform_flag: --mac
+          - os: ubuntu-latest
+            platform_flag: --linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Definir versão automática (baseada no nº de commits)
+        shell: bash
+        run: npm version "1.0.$(git rev-list --count HEAD)" --no-git-tag-version --allow-same-version
+
+      - name: Build do site (tsc + vite)
+        run: npm run build
+
+      - name: Empacotar + publicar release (${{ matrix.os }})
+        run: npx electron-builder ${{ matrix.platform_flag }} --publish always
+        env:
+          # Token automático do GitHub Actions — já tem permissão de
+          # publicar releases neste mesmo repositório, não precisa
+          # configurar nada extra.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

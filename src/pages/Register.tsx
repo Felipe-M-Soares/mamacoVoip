@@ -28,6 +28,7 @@ export function Register() {
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [confirmationSent, setConfirmationSent] = useState(false)
@@ -37,6 +38,7 @@ export function Register() {
     if (!/^[a-zA-Z0-9_.]+$/.test(username))
       return 'O nome de usuário só pode ter letras, números, ponto e underline.'
     if (password.length < 6) return 'A senha precisa ter no mínimo 6 caracteres.'
+    if (!acceptedTerms) return 'Você precisa aceitar os Termos de Uso e a Política de Privacidade pra continuar.'
     return null
   }
 
@@ -131,6 +133,26 @@ export function Register() {
               autoComplete="new-password"
             />
           </div>
+
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={acceptedTerms}
+              onChange={(e) => setAcceptedTerms(e.target.checked)}
+              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
+            />
+            <span className="text-xs text-discord-text-muted">
+              Eu li e concordo com os{' '}
+              <Link to="/termos" target="_blank" className="text-discord-blurple hover:underline">
+                Termos de Uso
+              </Link>{' '}
+              e a{' '}
+              <Link to="/privacidade" target="_blank" className="text-discord-blurple hover:underline">
+                Política de Privacidade
+              </Link>
+              .
+            </span>
+          </label>
 
           {error && (
             <p className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded px-3 py-2">

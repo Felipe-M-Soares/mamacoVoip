@@ -65,7 +65,6 @@
       "target": ["AppImage", "deb"],
       "icon": "build/icon.png",
       "category": "Network",
-      "desktopName": "mamacos-voip.desktop",
       "synopsis": "Chat em texto, voz e vídeo",
       "syncDesktopName": true
     },

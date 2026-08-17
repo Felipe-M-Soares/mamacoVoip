@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { InviteMessageCard } from './InviteMessageCard'
 import { parseInviteMessage } from '../../lib/inviteMessage'
+import { parseMessageContent } from '../../lib/messageFormatting'
+import { LinkPreviewCard, extractFirstUrl } from './LinkPreviewCard'
 import type { DMMessage, Profile } from '../../types/database'
 
 function formatTime(iso: string) {
@@ -139,10 +141,14 @@ export function DMMessageItem({
             </div>
           ) : (
             <p className="text-sm text-discord-text whitespace-pre-wrap break-words leading-relaxed">
-              {message.content}
+              {parseMessageContent(message.content, [])}
               {message.edited_at && <span className="text-[10px] text-discord-text-muted ml-1">(editado)</span>}
             </p>
           )}
+          {(() => {
+            const url = extractFirstUrl(message.content)
+            return url ? <LinkPreviewCard url={url} /> : null
+          })()}
         </div>
       </div>
     </div>

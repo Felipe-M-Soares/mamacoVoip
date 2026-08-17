@@ -18,9 +18,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
     "electron-updater": "^6.8.9",
+    "uiohook-napi": "^1.5.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.2"
+    "react-router-dom": "^7.18.2",
+    "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -39,11 +41,24 @@
     "appId": "com.mamacosvoip.app",
     "productName": "Mamacos Voip",
     "icon": "build/icon.png",
-    "files": ["dist/**/*", "electron/**/*", "package.json"],
-    "directories": { "output": "release" },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
     "asar": true,
+    "npmRebuild": false,
+    "asarUnpack": [
+      "**/node_modules/uiohook-napi/**"
+    ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "build/icon.png"
     },
     "nsis": {
@@ -65,7 +80,10 @@
       "category": "public.app-category.social-networking"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "build/icon.png",
       "category": "Network",
       "synopsis": "Chat em texto, voz e vídeo",

@@ -10,7 +10,14 @@ interface ServersContextValue {
   createServer: (name: string, iconFile?: File | null) => Promise<{ error: string | null; server?: Server }>
   updateServer: (
     serverId: string,
-    updates: { name?: string; description?: string | null; iconFile?: File | null; bannerFile?: File | null }
+    updates: {
+      name?: string
+      description?: string | null
+      iconFile?: File | null
+      bannerFile?: File | null
+      afkChannelId?: string | null
+      afkTimeoutMinutes?: number
+    }
   ) => Promise<{ error: string | null }>
   deleteServer: (serverId: string) => Promise<{ error: string | null }>
   leaveServer: (serverId: string) => Promise<{ error: string | null }>
@@ -103,11 +110,27 @@ export function ServersProvider({ children }: { children: ReactNode }) {
 
   async function updateServer(
     serverId: string,
-    updates: { name?: string; description?: string | null; iconFile?: File | null; bannerFile?: File | null }
+    updates: {
+      name?: string
+      description?: string | null
+      iconFile?: File | null
+      bannerFile?: File | null
+      afkChannelId?: string | null
+      afkTimeoutMinutes?: number
+    }
   ) {
-    const patch: { name?: string; description?: string | null; icon_url?: string; banner_url?: string } = {}
+    const patch: {
+      name?: string
+      description?: string | null
+      icon_url?: string
+      banner_url?: string
+      afk_channel_id?: string | null
+      afk_timeout_minutes?: number
+    } = {}
     if (updates.name) patch.name = updates.name
     if (updates.description !== undefined) patch.description = updates.description
+    if (updates.afkChannelId !== undefined) patch.afk_channel_id = updates.afkChannelId
+    if (updates.afkTimeoutMinutes !== undefined) patch.afk_timeout_minutes = updates.afkTimeoutMinutes
 
     if (updates.iconFile) {
       const { error: uploadError, url: iconUrl } = await uploadServerImage(serverId, updates.iconFile, 'icon')

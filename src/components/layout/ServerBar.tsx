@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useServers } from '../../hooks/useServers'
 import { useServerOrder } from '../../hooks/useLocalOrganization'
@@ -7,7 +7,8 @@ import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { LeaveServerModal } from '../modals/LeaveServerModal'
 import { ServerSettingsModal } from '../modals/ServerSettingsModal'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
-import type { Server } from '../../types/database'
+import { supabase } from '../../lib/supabase'
+import type { Server, Channel } from '../../types/database'
 
 function ServerIcon({
   name,
@@ -120,6 +121,19 @@ export function ServerBar({
   const [showInviteFor, setShowInviteFor] = useState<Server | null>(null)
   const [showLeaveFor, setShowLeaveFor] = useState<Server | null>(null)
   const [showSettingsFor, setShowSettingsFor] = useState<Server | null>(null)
+  const [settingsChannels, setSettingsChannels] = useState<Channel[]>([])
+
+  useEffect(() => {
+    if (!showSettingsFor) {
+      setSettingsChannels([])
+      return
+    }
+    supabase
+      .from('channels')
+      .select('*')
+      .eq('server_id', showSettingsFor.id)
+      .then(({ data }) => setSettingsChannels(data ?? []))
+  }, [showSettingsFor])
   const { menuState, openMenu, closeMenu } = useContextMenuState()
 
   const orderedServers = sortByOrder(servers)
@@ -229,6 +243,7 @@ export function ServerBar({
         <ServerSettingsModal
           server={showSettingsFor}
           isOwner={showSettingsFor.owner_id === user?.id}
+          channels={settingsChannels}
           onClose={() => setShowSettingsFor(null)}
           onDeleted={() => setShowSettingsFor(null)}
         />

@@ -26,6 +26,11 @@ declare global {
       restartToUpdate: () => Promise<void>
       onScreenShareSources: (callback: (sources: ScreenShareSource[]) => void) => () => void
       selectScreenShareSource: (sourceId: string | null) => Promise<void>
+      isGlobalPTTAvailable: () => Promise<boolean>
+      startPTTCapture: () => Promise<{ keycode: number; name: string } | null>
+      setGlobalPTTKey: (keycode: number | null) => Promise<void>
+      onPTTState: (callback: (active: boolean) => void) => () => void
+      sendVoiceStateToOverlay: (state: unknown) => void
     }
   }
 }

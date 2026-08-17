@@ -3,6 +3,7 @@ import { Modal } from './Modal'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { useAudioSettings } from '../../hooks/useAudioSettings'
+import { useVoice } from '../../hooks/useVoice'
 import { useTheme } from '../../hooks/useTheme'
 import { THEMES } from '../../context/ThemeContext'
 import { getNotificationPermission, requestNotificationPermission } from '../../lib/notifications'
@@ -439,12 +440,111 @@ function AudioTab() {
         </button>
       </div>
 
+      <div className="bg-discord-darker rounded-lg p-3 space-y-3">
+        <PushToTalkSection />
+      </div>
+
+      {window.electronAPI?.isElectron && (
+        <div className="bg-discord-darker rounded-lg p-3">
+          <p className="text-sm font-medium text-white">Sobreposição em jogos</p>
+          <p className="text-xs text-discord-text-muted mt-1">
+            Aperte <kbd className="bg-discord-lighter px-1.5 py-0.5 rounded font-mono text-[10px]">Ctrl+Shift+O</kbd>{' '}
+            a qualquer momento (mesmo com o jogo em foco) pra mostrar/esconder quem está falando na call, por cima
+            do jogo. Funciona com o jogo em janela sem borda — não aparece por cima de jogos em tela cheia
+            exclusiva.
+          </p>
+        </div>
+      )}
+
       <p className="text-xs text-discord-text-muted">
         As mudanças aqui valem pra próxima vez que você entrar em um canal de voz. Trocar o microfone durante uma
         chamada já em andamento também dá — use o seletor que aparece na barra de controles da chamada.
       </p>
     </div>
   )
+}
+
+function PushToTalkSection() {
+  const voice = useVoice()
+  const [capturing, setCapturing] = useState(false)
+
+  useEffect(() => {
+    if (!capturing || voice.globalPushToTalkAvailable) return
+    // Reserva: só usada quando o modo global não está disponível
+    // nesse sistema — captura via teclado normal do navegador/app,
+    // que só funciona com o app em foco.
+    function handleKey(e: KeyboardEvent) {
+      e.preventDefault()
+      voice.setPushToTalkKey(e.code)
+      setCapturing(false)
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [capturing, voice])
+
+  async function handleCaptureClick() {
+    if (voice.globalPushToTalkAvailable) {
+      setCapturing(true)
+      await voice.captureGlobalPushToTalkKey()
+      setCapturing(false)
+      return
+    }
+    setCapturing(true)
+  }
+
+  const currentKeyLabel = voice.globalPushToTalkAvailable
+    ? voice.pushToTalkGlobalKeyName ?? 'Nenhuma definida'
+    : formatKeyCode(voice.pushToTalkKey)
+
+  return (
+    <>
+      <label className="flex items-center justify-between cursor-pointer">
+        <div>
+          <p className="text-sm font-medium text-white">Push-to-talk</p>
+          <p className="text-xs text-discord-text-muted">
+            Microfone fica desligado o tempo todo — só transmite enquanto você segura a tecla escolhida.{' '}
+            {voice.globalPushToTalkAvailable
+              ? 'Funciona mesmo com outro programa (o jogo, por exemplo) em foco.'
+              : 'Só funciona com o Mamacos Voip em foco (não funciona por cima de um jogo em tela cheia).'}
+          </p>
+        </div>
+        <input
+          type="checkbox"
+          checked={voice.pushToTalkEnabled}
+          onChange={(e) => voice.setPushToTalkEnabled(e.target.checked)}
+          className="w-4 h-4 accent-discord-blurple shrink-0 ml-3"
+        />
+      </label>
+
+      {voice.pushToTalkEnabled && (
+        <div className="flex items-center justify-between pt-1">
+          <span className="text-xs text-discord-text-muted">Tecla</span>
+          <button
+            onClick={handleCaptureClick}
+            className={`text-xs px-3 py-1.5 rounded font-mono transition-colors ${
+              capturing ? 'bg-discord-blurple text-white animate-pulse' : 'bg-discord-lighter text-discord-text hover:opacity-90'
+            }`}
+          >
+            {capturing ? 'Pressione uma tecla...' : currentKeyLabel}
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
+function formatKeyCode(code: string): string {
+  const map: Record<string, string> = {
+    ControlLeft: 'Ctrl (esquerdo)',
+    ControlRight: 'Ctrl (direito)',
+    ShiftLeft: 'Shift (esquerdo)',
+    ShiftRight: 'Shift (direito)',
+    AltLeft: 'Alt (esquerdo)',
+    AltRight: 'Alt (direito)',
+    Space: 'Espaço',
+    CapsLock: 'Caps Lock',
+  }
+  return map[code] ?? code.replace(/^Key/, '').replace(/^Digit/, '')
 }
 
 function PrivacyTab() {

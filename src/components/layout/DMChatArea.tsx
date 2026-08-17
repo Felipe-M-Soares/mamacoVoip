@@ -4,6 +4,8 @@ import { DMMessageItem } from '../chat/DMMessageItem'
 import { useDirectMessages } from '../../hooks/useDirectMessages'
 import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../hooks/useFriends'
+import { useTypingIndicator } from '../../hooks/useTypingIndicator'
+import { getDraft, setDraft } from '../../lib/messageDrafts'
 import type { DMMessage, Profile } from '../../types/database'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
@@ -13,8 +15,17 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   const { user } = useAuth()
   const { messages, sendMessage, editMessage, deleteMessage } = useDirectMessages(conversationId)
   const { blocked, blockUser, unblockUser } = useFriends()
+  const { typingUserIds, notifyTyping } = useTypingIndicator(conversationId, user?.id)
   const [replyingTo, setReplyingTo] = useState<DMMessage | null>(null)
-  const [value, setValue] = useState('')
+  const [value, setValue] = useState(() => getDraft(`dm-${conversationId}`))
+
+  useEffect(() => {
+    setValue(getDraft(`dm-${conversationId}`))
+  }, [conversationId])
+
+  useEffect(() => {
+    setDraft(`dm-${conversationId}`, value)
+  }, [conversationId, value])
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -106,6 +117,16 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
       )}
 
       <div className="px-4 pb-6 shrink-0">
+        {typingUserIds.length > 0 && (
+          <p className="text-xs text-discord-text-muted mb-1 flex items-center gap-2">
+            <span className="flex gap-0.5">
+              <span className="w-1 h-1 rounded-full bg-discord-text-muted animate-bounce [animation-delay:-0.3s]" />
+              <span className="w-1 h-1 rounded-full bg-discord-text-muted animate-bounce [animation-delay:-0.15s]" />
+              <span className="w-1 h-1 rounded-full bg-discord-text-muted animate-bounce" />
+            </span>
+            {otherProfile.display_name || otherProfile.username} está digitando...
+          </p>
+        )}
         {isBlocked ? (
           <p className="text-center text-sm text-discord-text-muted bg-discord-lighter rounded-lg py-3">
             Você bloqueou {otherProfile.display_name || otherProfile.username}. Desbloqueie para enviar mensagens.
@@ -131,7 +152,10 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
               <textarea
                 ref={textareaRef}
                 value={value}
-                onChange={(e) => setValue(e.target.value)}
+                onChange={(e) => {
+                  setValue(e.target.value)
+                  if (e.target.value.length > 0) notifyTyping()
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()

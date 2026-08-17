@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { useServers } from '../../hooks/useServers'
-import type { Server } from '../../types/database'
+import { useServerEmojis } from '../../hooks/useServerEmojis'
+import type { Server, Channel } from '../../types/database'
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -10,17 +11,21 @@ function formatDate(iso: string) {
 export function ServerSettingsModal({
   server,
   isOwner,
+  channels,
   onClose,
   onDeleted,
 }: {
   server: Server
   isOwner: boolean
+  channels: Channel[]
   onClose: () => void
   onDeleted: () => void
 }) {
   const { updateServer, deleteServer } = useServers()
   const [name, setName] = useState(server.name)
   const [description, setDescription] = useState(server.description ?? '')
+  const [afkChannelId, setAfkChannelId] = useState(server.afk_channel_id ?? '')
+  const [afkTimeoutMinutes, setAfkTimeoutMinutes] = useState(server.afk_timeout_minutes)
   const [iconFile, setIconFile] = useState<File | null>(null)
   const [iconPreview, setIconPreview] = useState<string | null>(server.icon_url)
   const [bannerFile, setBannerFile] = useState<File | null>(null)
@@ -61,6 +66,8 @@ export function ServerSettingsModal({
       description: description.trim() || null,
       iconFile,
       bannerFile,
+      afkChannelId: afkChannelId || null,
+      afkTimeoutMinutes,
     })
     setLoading(false)
     if (error) {
@@ -194,6 +201,49 @@ export function ServerSettingsModal({
           />
         </div>
 
+        {isOwner && (
+          <div>
+            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+              Canal AFK
+            </label>
+            <p className="text-[10px] text-discord-text-muted mb-2">
+              Quem ficar inativo (sem mexer o mouse/teclado) numa chamada por muito tempo é movido pra cá
+              automaticamente.
+            </p>
+            <div className="flex gap-2">
+              <select
+                value={afkChannelId}
+                onChange={(e) => setAfkChannelId(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              >
+                <option value="">Desativado</option>
+                {channels
+                  .filter((c) => c.type === 'voice')
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      🔊 {c.name}
+                    </option>
+                  ))}
+              </select>
+              {afkChannelId && (
+                <select
+                  value={afkTimeoutMinutes}
+                  onChange={(e) => setAfkTimeoutMinutes(Number(e.target.value))}
+                  className="px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+                >
+                  {[5, 10, 15, 30, 60].map((m) => (
+                    <option key={m} value={m}>
+                      {m} min
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+        )}
+
+        <EmojiManagementSection serverId={server.id} isOwner={isOwner} />
+
         <div className="bg-discord-darker rounded-lg p-3 text-xs text-discord-text-muted">
           Servidor criado em {formatDate(server.created_at)}
         </div>
@@ -226,5 +276,95 @@ export function ServerSettingsModal({
         )}
       </div>
     </Modal>
+  )
+}
+
+function EmojiManagementSection({ serverId, isOwner }: { serverId: string; isOwner: boolean }) {
+  const { emojis, uploadEmoji, deleteEmoji } = useServerEmojis(serverId)
+  const [name, setName] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!name.trim()) {
+      setError('Digite um nome pro emoji antes de escolher a imagem.')
+      return
+    }
+    setError(null)
+    setUploading(true)
+    const { error } = await uploadEmoji(name, file)
+    setUploading(false)
+    if (error) {
+      setError(error)
+      return
+    }
+    setName('')
+  }
+
+  return (
+    <div>
+      <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+        Emojis customizados ({emojis.length})
+      </label>
+
+      {emojis.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {emojis.map((emoji) => (
+            <div key={emoji.id} className="relative group">
+              <img
+                src={emoji.image_url}
+                alt={emoji.name}
+                title={`:${emoji.name}:`}
+                className="w-9 h-9 rounded bg-discord-darker object-contain p-1"
+              />
+              {isOwner && (
+                <button
+                  onClick={() => deleteEmoji(emoji.id)}
+                  title="Remover"
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 rounded-full text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isOwner && (
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="nome_do_emoji"
+            maxLength={32}
+            className="flex-1 px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="px-3 py-2 text-sm rounded btn-secondary disabled:opacity-60 shrink-0"
+          >
+            {uploading ? 'Enviando...' : 'Adicionar'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={handleFileSelected}
+          />
+        </div>
+      )}
+      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+      <p className="text-[10px] text-discord-text-muted mt-1">
+        Até 256KB, aceita GIF animado. Use assim no chat: <code>:nome_do_emoji:</code>
+      </p>
+    </div>
   )
 }

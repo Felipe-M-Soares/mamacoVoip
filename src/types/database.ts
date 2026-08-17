@@ -12,6 +12,27 @@ export type Profile = {
   updated_at: string
 }
 
+export type ServerEmoji = {
+  id: string
+  server_id: string
+  name: string
+  image_url: string
+  created_by: string | null
+  created_at: string
+}
+
+export type ServerEvent = {
+  id: string
+  server_id: string
+  channel_id: string | null
+  name: string
+  description: string | null
+  starts_at: string
+  ends_at: string | null
+  created_by: string | null
+  created_at: string
+}
+
 export type Server = {
   id: string
   name: string
@@ -19,6 +40,8 @@ export type Server = {
   banner_url: string | null
   description: string | null
   owner_id: string
+  afk_channel_id: string | null
+  afk_timeout_minutes: number
   created_at: string
   updated_at: string
 }
@@ -131,7 +154,19 @@ export type Channel = {
   category_id: string | null
   name: string
   type: ChannelType
+  topic: string | null
+  is_stage: boolean
   position: number
+  created_at: string
+}
+
+export type Thread = {
+  id: string
+  channel_id: string
+  server_id: string
+  parent_message_id: string
+  name: string
+  created_by: string | null
   created_at: string
 }
 
@@ -143,6 +178,9 @@ export type Message = {
   content: string
   reply_to_id: string | null
   edited_at: string | null
+  pinned_at: string | null
+  pinned_by: string | null
+  thread_id: string | null
   created_at: string
 }
 
@@ -221,7 +259,7 @@ export type Database = {
       servers: {
         Row: Server
         Insert: Pick<Server, 'name' | 'owner_id'> & Partial<Pick<Server, 'icon_url' | 'description' | 'banner_url'>>
-        Update: Partial<Pick<Server, 'name' | 'icon_url' | 'description' | 'banner_url'>>
+        Update: Partial<Pick<Server, 'name' | 'icon_url' | 'description' | 'banner_url' | 'afk_channel_id' | 'afk_timeout_minutes'>>
         Relationships: []
       }
       server_members: {
@@ -246,15 +284,21 @@ export type Database = {
       channels: {
         Row: Channel
         Insert: Pick<Channel, 'server_id' | 'name' | 'type'> &
-          Partial<Pick<Channel, 'category_id' | 'position'>>
-        Update: Partial<Pick<Channel, 'name' | 'category_id' | 'position'>>
+          Partial<Pick<Channel, 'category_id' | 'position' | 'is_stage'>>
+        Update: Partial<Pick<Channel, 'name' | 'category_id' | 'position' | 'topic' | 'is_stage'>>
         Relationships: []
       }
       messages: {
         Row: Message
         Insert: Pick<Message, 'channel_id' | 'server_id' | 'author_id' | 'content'> &
-          Partial<Pick<Message, 'reply_to_id'>>
-        Update: Partial<Pick<Message, 'content'>>
+          Partial<Pick<Message, 'reply_to_id' | 'thread_id'>>
+        Update: Partial<Pick<Message, 'content' | 'pinned_at' | 'pinned_by'>>
+        Relationships: []
+      }
+      threads: {
+        Row: Thread
+        Insert: Pick<Thread, 'channel_id' | 'server_id' | 'parent_message_id' | 'name' | 'created_by'>
+        Update: Record<string, never>
         Relationships: []
       }
       message_attachments: {
@@ -321,6 +365,31 @@ export type Database = {
         Row: ChannelReadState
         Insert: Pick<ChannelReadState, 'channel_id' | 'user_id'> & Partial<Pick<ChannelReadState, 'last_read_at'>>
         Update: Partial<Pick<ChannelReadState, 'last_read_at'>>
+        Relationships: []
+      }
+      channel_mutes: {
+        Row: { user_id: string; channel_id: string; created_at: string }
+        Insert: { user_id: string; channel_id: string }
+        Update: Record<string, never>
+        Relationships: []
+      }
+      server_emojis: {
+        Row: ServerEmoji
+        Insert: Pick<ServerEmoji, 'server_id' | 'name' | 'image_url'> & Partial<Pick<ServerEmoji, 'created_by'>>
+        Update: Record<string, never>
+        Relationships: []
+      }
+      server_events: {
+        Row: ServerEvent
+        Insert: Pick<ServerEvent, 'server_id' | 'name' | 'starts_at' | 'created_by'> &
+          Partial<Pick<ServerEvent, 'channel_id' | 'description' | 'ends_at'>>
+        Update: Record<string, never>
+        Relationships: []
+      }
+      server_event_rsvps: {
+        Row: { event_id: string; user_id: string; created_at: string }
+        Insert: { event_id: string; user_id: string }
+        Update: Record<string, never>
         Relationships: []
       }
       dm_read_state: {

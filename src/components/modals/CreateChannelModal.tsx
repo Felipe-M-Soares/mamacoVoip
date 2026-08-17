@@ -15,6 +15,7 @@ export function CreateChannelModal({
   const { createChannel } = useChannels()
   const [name, setName] = useState('')
   const [type, setType] = useState<ChannelType>('text')
+  const [isStage, setIsStage] = useState(false)
   const [categoryId, setCategoryId] = useState<string>(defaultCategoryId ?? '')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -27,7 +28,7 @@ export function CreateChannelModal({
       return
     }
     setLoading(true)
-    const { error } = await createChannel(cleanName, type, categoryId || null)
+    const { error } = await createChannel(cleanName, type, categoryId || null, type === 'voice' && isStage)
     setLoading(false)
     if (error) {
       setError(error)
@@ -92,6 +93,21 @@ export function CreateChannelModal({
             />
           </div>
         </div>
+
+        {type === 'voice' && (
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isStage}
+              onChange={(e) => setIsStage(e.target.checked)}
+              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
+            />
+            <span className="text-xs text-discord-text-muted">
+              <span className="text-discord-text font-medium">Canal Palco</span> — só donos/moderadores podem
+              falar, o resto só escuta (bom pra anúncios, palestras, eventos)
+            </span>
+          </label>
+        )}
 
         {categories.length > 0 && (
           <div>

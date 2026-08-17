@@ -12,6 +12,8 @@ export function EditChannelModal({
 }) {
   const { updateChannel, deleteChannel } = useChannels()
   const [name, setName] = useState(channel.name)
+  const [topic, setTopic] = useState(channel.topic ?? '')
+  const [isStage, setIsStage] = useState(channel.is_stage)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -24,7 +26,11 @@ export function EditChannelModal({
       return
     }
     setLoading(true)
-    const { error } = await updateChannel(channel.id, { name: cleanName })
+    const { error } = await updateChannel(channel.id, {
+      name: cleanName,
+      topic: topic.trim() || null,
+      is_stage: channel.type === 'voice' ? isStage : channel.is_stage,
+    })
     setLoading(false)
     if (error) {
       setError(error)
@@ -94,6 +100,37 @@ export function EditChannelModal({
             />
           </div>
         </div>
+
+        {channel.type === 'text' && (
+          <div>
+            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+              Tópico do canal
+            </label>
+            <textarea
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              maxLength={200}
+              rows={2}
+              placeholder="Uma frase curta descrevendo o assunto do canal (opcional)"
+              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple resize-none"
+            />
+          </div>
+        )}
+
+        {channel.type === 'voice' && (
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isStage}
+              onChange={(e) => setIsStage(e.target.checked)}
+              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
+            />
+            <span className="text-xs text-discord-text-muted">
+              <span className="text-discord-text font-medium">Canal Palco</span> — só donos/moderadores podem
+              falar, o resto só escuta (bom pra anúncios, palestras, eventos)
+            </span>
+          </label>
+        )}
 
         {error && <p className="text-sm text-red-400">{error}</p>}
 

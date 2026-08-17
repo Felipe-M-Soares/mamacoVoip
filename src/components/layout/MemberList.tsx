@@ -6,7 +6,7 @@ import { useServerMembers } from '../../hooks/useServerMembers'
 import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
 import { ManageMemberModal } from '../modals/ManageMemberModal'
-import type { Profile } from '../../types/database'
+import type { Profile, Role } from '../../types/database'
 
 export function MemberList({
   serverId,
@@ -22,7 +22,7 @@ export function MemberList({
   const { profile } = useAuth()
   const { members, loading, refresh } = useServerMembers(serverId)
   const { permissions } = useModeration(serverId)
-  const { rolesForUser } = useRoles(serverId)
+  const { rolesForUser, roles } = useRoles(serverId)
   const [managingProfile, setManagingProfile] = useState<Profile | null>(null)
   const [contextProfile, setContextProfile] = useState<Profile | null>(null)
   const { menuState, openMenu, closeMenu } = useContextMenuState()
@@ -32,6 +32,17 @@ export function MemberList({
   const others = members.filter((m) => m.profile.id !== profile?.id)
   const online = others.filter((m) => m.profile.status !== 'offline')
   const offline = others.filter((m) => m.profile.status === 'offline')
+
+  // Agrupa quem está online pelo cargo mais alto de cada um — igual
+  // ao Discord, com o nome e a cor do cargo como título do grupo.
+  // Quem não tem nenhum cargo cai num grupo "ONLINE" genérico no final.
+  const groupedOnline: { role: Role | null; members: typeof online }[] = []
+  for (const role of roles) {
+    const inRole = online.filter((m) => rolesForUser(m.profile.id)[0]?.id === role.id)
+    if (inRole.length > 0) groupedOnline.push({ role, members: inRole })
+  }
+  const noRole = online.filter((m) => !rolesForUser(m.profile.id)[0])
+  if (noRole.length > 0 || groupedOnline.length === 0) groupedOnline.push({ role: null, members: noRole })
 
   function MemberRow({ member }: { member: (typeof members)[number] }) {
     const topRole = rolesForUser(member.profile.id)[0]
@@ -109,11 +120,20 @@ export function MemberList({
             </div>
           )}
 
-          <h3 className="px-2 text-xs font-bold text-discord-text-muted tracking-wider mt-4 mb-1.5">
-            ONLINE — {online.length}
-          </h3>
-          {online.map((m) => (
-            <MemberRow key={m.user_id} member={m} />
+          {groupedOnline.map(({ role, members: group }) => (
+            <div key={role?.id ?? 'no-role'}>
+              <h3
+                className="px-2 text-xs font-bold tracking-wider mt-4 mb-1.5"
+                style={{ color: role?.color ?? undefined }}
+              >
+                <span className={role ? '' : 'text-discord-text-muted'}>
+                  {(role?.name ?? 'ONLINE').toUpperCase()} — {group.length}
+                </span>
+              </h3>
+              {group.map((m) => (
+                <MemberRow key={m.user_id} member={m} />
+              ))}
+            </div>
           ))}
 
           <h3 className="px-2 text-xs font-bold text-discord-text-muted tracking-wider mt-4 mb-1.5">

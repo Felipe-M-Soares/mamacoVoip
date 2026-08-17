@@ -22,4 +22,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('screen-share-sources', handler)
   },
   selectScreenShareSource: (sourceId) => ipcRenderer.invoke('screen-share:select', sourceId),
+  isGlobalPTTAvailable: () => ipcRenderer.invoke('ptt:is-global-available'),
+  startPTTCapture: () => ipcRenderer.invoke('ptt:start-capture'),
+  setGlobalPTTKey: (keycode) => ipcRenderer.invoke('ptt:set-active-key', keycode),
+  onPTTState: (callback) => {
+    const handler = (_event, active) => callback(active)
+    ipcRenderer.on('ptt-state', handler)
+    return () => ipcRenderer.removeListener('ptt-state', handler)
+  },
+  sendVoiceStateToOverlay: (state) => ipcRenderer.send('overlay:update-state', state),
 })

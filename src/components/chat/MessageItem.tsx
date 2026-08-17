@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
-import type { Message, MessageAttachment, MessageReaction, Profile } from '../../types/database'
+import { parseMessageContent } from '../../lib/messageFormatting'
+import { LinkPreviewCard, extractFirstUrl } from './LinkPreviewCard'
+import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji, Thread, Role } from '../../types/database'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉']
 
@@ -21,19 +23,8 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-function renderContent(content: string, members: Profile[]) {
-  const usernames = new Set(members.map((m) => m.username.toLowerCase()))
-  const parts = content.split(/(@[a-zA-Z0-9_.]+)/g)
-  return parts.map((part, i) => {
-    if (part.startsWith('@') && usernames.has(part.slice(1).toLowerCase())) {
-      return (
-        <span key={i} className="bg-discord-blurple/30 text-discord-blurple rounded px-1 font-medium">
-          {part}
-        </span>
-      )
-    }
-    return <span key={i}>{part}</span>
-  })
+function renderContent(content: string, members: Profile[], emojis: ServerEmoji[], roles: Role[]) {
+  return parseMessageContent(content, members, emojis, roles)
 }
 
 export function MessageItem({
@@ -48,11 +39,25 @@ export function MessageItem({
   reactions,
   currentUserId,
   members,
+  emojis,
+  roles,
   onEdit,
   onDelete,
   onReply,
   onToggleReaction,
   onViewProfile,
+  onPin,
+  onUnpin,
+  thread,
+  replyCount,
+  onCreateThread,
+  onOpenThread,
+  onJumpToMessage,
+  isHighlighted,
+  onForward,
+  selectionMode,
+  selected,
+  onToggleSelect,
 }: {
   message: Message
   author: Profile | undefined
@@ -65,11 +70,25 @@ export function MessageItem({
   reactions: MessageReaction[]
   currentUserId: string | undefined
   members: Profile[]
+  emojis: ServerEmoji[]
+  roles: Role[]
   onEdit: (content: string) => Promise<{ error: string | null }>
   onDelete: () => void
   onReply: () => void
   onToggleReaction: (emoji: string) => void
   onViewProfile: (profile: Profile) => void
+  onPin?: () => void
+  onUnpin?: () => void
+  thread?: Thread
+  replyCount?: number
+  onCreateThread?: () => void
+  onOpenThread?: (thread: Thread) => void
+  onJumpToMessage?: (messageId: string) => void
+  isHighlighted?: boolean
+  onForward?: () => void
+  selectionMode?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
   }) {
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState(message.content)
@@ -158,7 +177,10 @@ export function MessageItem({
 
       {/* preview da mensagem respondida */}
       {message.reply_to_id && (
-        <div className="flex items-center gap-1.5 text-xs text-discord-text-muted ml-12 mb-0.5">
+        <button
+          onClick={() => replyToMessage && onJumpToMessage?.(replyToMessage.id)}
+          className="flex items-center gap-1.5 text-xs text-discord-text-muted ml-12 mb-0.5 hover:text-discord-text text-left"
+        >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 rotate-180 shrink-0">
             <path d="M10 8V5l-7 7 7 7v-3.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
           </svg>
@@ -172,10 +194,21 @@ export function MessageItem({
           ) : (
             <span className="italic">Mensagem original não encontrada</span>
           )}
-        </div>
+        </button>
       )}
 
-      <div className="flex gap-4">
+      <div
+        id={`message-${message.id}`}
+        onClick={selectionMode ? onToggleSelect : undefined}
+        className={`flex gap-4 ${selectionMode ? 'cursor-pointer' : ''} ${
+          isHighlighted ? 'bg-yellow-500/10 -mx-2 px-2 rounded transition-colors' : selected ? 'bg-discord-blurple/10 -mx-2 px-2 rounded' : ''
+        }`}
+      >
+        {selectionMode && (
+          <div className="pt-1 shrink-0">
+            <input type="checkbox" checked={Boolean(selected)} readOnly className="w-4 h-4 accent-discord-blurple" />
+          </div>
+        )}
         {showHeader ? (
           <div className="pt-0.5">
             <button
@@ -210,6 +243,14 @@ export function MessageItem({
               >
                 {formatTime(message.created_at)}
               </span>
+              {message.pinned_at && (
+                <span className="flex items-center gap-0.5 text-[10px] text-discord-blurple">
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+                    <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
+                  </svg>
+                  Fixada
+                </span>
+              )}
             </div>
           )}
 
@@ -236,11 +277,26 @@ export function MessageItem({
             </div>
           ) : (
             <p className="text-sm text-discord-text whitespace-pre-wrap break-words leading-relaxed">
-              {renderContent(message.content, members)}
+              {renderContent(message.content, members, emojis, roles)}
               {message.edited_at && (
                 <span className="text-[10px] text-discord-text-muted ml-1">(editado)</span>
               )}
             </p>
+          )}
+          {(() => {
+            const url = extractFirstUrl(message.content)
+            return url ? <LinkPreviewCard url={url} /> : null
+          })()}
+          {thread && (
+            <button
+              onClick={() => onOpenThread?.(thread)}
+              className="mt-1.5 flex items-center gap-1.5 text-xs text-discord-blurple hover:underline"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                <path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8l-4 4V6a1 1 0 0 1 1-1z" />
+              </svg>
+              {replyCount} {replyCount === 1 ? 'resposta' : 'respostas'} — {thread.name}
+            </button>
           )}
 
           {attachments.length > 0 && (
@@ -307,7 +363,20 @@ export function MessageItem({
           items={[
             { label: 'Responder', onClick: onReply },
             { label: 'Copiar texto', onClick: () => navigator.clipboard.writeText(message.content) },
+            {
+              label: 'Copiar link da mensagem',
+              onClick: () => navigator.clipboard.writeText(`mamacos://message/${message.channel_id}/${message.id}`),
+            },
             { label: 'Adicionar reação', onClick: () => setShowReactionPicker(true) },
+            ...(onForward ? [{ label: 'Encaminhar', onClick: onForward }] : []),
+            ...(!thread && onCreateThread ? [{ label: 'Criar thread', onClick: onCreateThread }] : []),
+            ...(canModerate && (onPin || onUnpin)
+              ? [
+                  message.pinned_at
+                    ? { label: 'Desafixar mensagem', onClick: () => onUnpin?.() }
+                    : { label: 'Fixar mensagem', onClick: () => onPin?.() },
+                ]
+              : []),
             ...(isOwn ? [{ label: 'Editar', onClick: () => setEditing(true) }] : []),
             ...(isOwn || canModerate
               ? [

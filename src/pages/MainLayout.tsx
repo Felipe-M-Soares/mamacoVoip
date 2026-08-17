@@ -8,6 +8,7 @@ import { HomeSidebar } from '../components/layout/HomeSidebar'
 import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
+import { QuickSwitcher } from '../components/modals/QuickSwitcher'
 import { ServersProvider } from '../context/ServersContext'
 import { ChannelsProvider } from '../context/ChannelsContext'
 import { VoiceProvider } from '../context/VoiceContext'
@@ -17,6 +18,7 @@ import { useConversations } from '../hooks/useConversations'
 import { useUnreadOverview } from '../hooks/useUnreadOverview'
 import { useGamePresence } from '../hooks/useGamePresence'
 import { GameDetectedToast } from '../components/ui/GameDetectedToast'
+import { OverlayStateSync } from '../components/layout/OverlayStateSync'
 import type { Channel, Profile, Server } from '../types/database'
 
 const VoiceChannelView = lazy(() =>
@@ -156,6 +158,18 @@ function MainLayoutInner() {
   const [pendingChannelId, setPendingChannelId] = useState<string | null>(null)
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [showQuickSwitcher, setShowQuickSwitcher] = useState(false)
+
+  useEffect(() => {
+    function handleGlobalKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setShowQuickSwitcher(true)
+      }
+    }
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown)
+  }, [])
 
   // Quem vem de um link de convite (/convite/CODIGO) chega aqui com o
   // servidor (e opcionalmente o canal) que acabou de entrar guardado no
@@ -299,6 +313,29 @@ function MainLayoutInner() {
       )}
 
       <GameDetectedToast />
+      <OverlayStateSync />
+
+      {showQuickSwitcher && (
+        <QuickSwitcher
+          servers={servers}
+          conversations={conversations.map((c) => ({ id: c.id, otherProfile: c.otherProfile }))}
+          activeServerId={activeServer?.id ?? null}
+          onSelectServer={(server) => {
+            handleSelectServer(server)
+            setShowQuickSwitcher(false)
+          }}
+          onSelectChannel={(channel) => {
+            handleSelectChannel(channel)
+            setShowQuickSwitcher(false)
+          }}
+          onSelectConversation={(id) => {
+            handleSelectHome()
+            handleOpenConversation(id)
+            setShowQuickSwitcher(false)
+          }}
+          onClose={() => setShowQuickSwitcher(false)}
+        />
+      )}
     </div>
   )
 }

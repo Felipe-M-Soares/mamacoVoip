@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
+import { useChannelMutes } from './useChannelMutes'
 import { notify } from '../lib/notifications'
 import type { Message, MessageAttachment, MessageReaction } from '../types/database'
 
-export function useMessages(channelId: string | null, serverId: string | null) {
+export function useMessages(channelId: string | null, serverId: string | null, threadId: string | null = null) {
   const { user } = useAuth()
+  const { mutedChannelIds } = useChannelMutes()
   const [messages, setMessages] = useState<Message[]>([])
   const [attachments, setAttachments] = useState<Record<string, MessageAttachment[]>>({})
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({})
@@ -46,36 +48,42 @@ export function useMessages(channelId: string | null, serverId: string | null) {
       return
     }
     setLoading(true)
-    const { data } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('channel_id', channelId)
-      .order('created_at', { ascending: true })
-      .limit(100)
+    let query = supabase.from('messages').select('*').order('created_at', { ascending: true }).limit(100)
+    // Mensagens de dentro de uma thread ficam separadas das mensagens
+    // "normais" do canal — sem esse filtro, elas apareceriam
+    // duplicadas na visão principal do canal.
+    query = threadId ? query.eq('thread_id', threadId) : query.eq('channel_id', channelId).is('thread_id', null)
+    const { data } = await query
 
     const list = data ?? []
     setMessages(list)
     await refreshExtras(list.map((m) => m.id))
     setLoading(false)
-  }, [channelId, refreshExtras])
+  }, [channelId, threadId, refreshExtras])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  // Realtime: novas mensagens, edições e exclusões neste canal
+  // Realtime: novas mensagens, edições e exclusões neste canal (ou
+  // nesta thread específica, se threadId estiver definido)
   useEffect(() => {
     if (!channelId) return
 
     const channel = supabase
-      .channel(`messages:${channelId}`)
+      .channel(`messages:${channelId}${threadId ? `:${threadId}` : ''}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
         (payload) => {
           const newMessage = payload.new as Message
+          // Só aceita a mensagem se ela pertence à mesma "visão" que
+          // esse hook está mostrando — canal principal (sem thread) ou
+          // a thread específica que foi pedida.
+          const belongsHere = threadId ? newMessage.thread_id === threadId : newMessage.thread_id === null
+          if (!belongsHere) return
           setMessages((prev) => (prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]))
-          if (newMessage.author_id !== user?.id) {
+          if (newMessage.author_id !== user?.id && !mutedChannelIds.has(newMessage.channel_id)) {
             notify('Nova mensagem', newMessage.content.slice(0, 120))
           }
         }
@@ -85,7 +93,7 @@ export function useMessages(channelId: string | null, serverId: string | null) {
         { event: 'UPDATE', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
         (payload) => {
           const updated = payload.new as Message
-          setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+          setMessages((prev) => (prev.some((m) => m.id === updated.id) ? prev.map((m) => (m.id === updated.id ? updated : m)) : prev))
         }
       )
       .on(
@@ -113,7 +121,7 @@ export function useMessages(channelId: string | null, serverId: string | null) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [channelId, refreshExtras])
+  }, [channelId, threadId, refreshExtras])
 
   async function sendMessage(content: string, replyToId: string | null, files: File[] = []) {
     if (!channelId || !serverId || !user) return { error: 'Não foi possível enviar a mensagem' }
@@ -126,6 +134,7 @@ export function useMessages(channelId: string | null, serverId: string | null) {
         author_id: user.id,
         content,
         reply_to_id: replyToId ?? undefined,
+        thread_id: threadId ?? undefined,
       })
       .select()
       .single()
@@ -162,6 +171,34 @@ export function useMessages(channelId: string | null, serverId: string | null) {
     return { error: error?.message ?? null }
   }
 
+  async function pinMessage(messageId: string) {
+    if (!user) return { error: 'Não autenticado' }
+    const { error } = await supabase
+      .from('messages')
+      .update({ pinned_at: new Date().toISOString(), pinned_by: user.id })
+      .eq('id', messageId)
+    return { error: error?.message ?? null }
+  }
+
+  async function unpinMessage(messageId: string) {
+    const { error } = await supabase.from('messages').update({ pinned_at: null, pinned_by: null }).eq('id', messageId)
+    return { error: error?.message ?? null }
+  }
+
+  // Busca as fixadas de verdade em vez de depender das mensagens já
+  // carregadas na tela — uma mensagem fixada pode ter sido enviada há
+  // muito tempo, fora da janela recente que normalmente é exibida.
+  async function fetchPinnedMessages(): Promise<Message[]> {
+    if (!channelId) return []
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('channel_id', channelId)
+      .not('pinned_at', 'is', null)
+      .order('pinned_at', { ascending: false })
+    return (data as Message[] | null) ?? []
+  }
+
   async function toggleReaction(messageId: string, emoji: string) {
     if (!user) return
     const existing = reactions[messageId]?.find((r) => r.user_id === user.id && r.emoji === emoji)
@@ -188,5 +225,8 @@ export function useMessages(channelId: string | null, serverId: string | null) {
     editMessage,
     deleteMessage,
     toggleReaction,
+    pinMessage,
+    unpinMessage,
+    fetchPinnedMessages,
   }
 }

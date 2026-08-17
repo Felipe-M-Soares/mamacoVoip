@@ -1,28 +1,51 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import type { Message, Profile } from '../../types/database'
+import type { Message, Profile, ServerEmoji, Role } from '../../types/database'
+import { getDraft, setDraft } from '../../lib/messageDrafts'
 
 const MAX_LENGTH = 4000
 
 export function MessageComposer({
   channelName,
   members,
+  emojis,
+  roles,
+  draftKey,
   replyingTo,
   replyingToAuthor,
   onCancelReply,
   onSend,
+  onTyping,
 }: {
   channelName: string
   members: Profile[]
+  emojis?: ServerEmoji[]
+  roles?: Role[]
+  draftKey?: string
   replyingTo: Message | null
   replyingToAuthor: Profile | undefined
   onCancelReply: () => void
   onSend: (content: string, files: File[]) => Promise<void>
+  onTyping?: () => void
 }) {
-  const [value, setValue] = useState('')
+  const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey) : ''))
   const [files, setFiles] = useState<File[]>([])
+
+  // Troca de canal/thread — carrega o rascunho salvo daquele lugar
+  // (ou texto vazio, se nunca digitou nada lá)
+  useEffect(() => {
+    if (draftKey) setValue(getDraft(draftKey))
+  }, [draftKey])
+
+  // Salva o rascunho a cada mudança, pro texto não se perder se a
+  // pessoa trocar de canal no meio de uma mensagem
+  useEffect(() => {
+    if (!draftKey) return
+    setDraft(draftKey, value)
+  }, [draftKey, value])
   const [sending, setSending] = useState(false)
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [emojiQuery, setEmojiQuery] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -30,14 +53,30 @@ export function MessageComposer({
     mentionQuery !== null
       ? members.filter((m) => m.username.toLowerCase().startsWith(mentionQuery.toLowerCase())).slice(0, 5)
       : []
+  const specialMentionMatches =
+    mentionQuery !== null
+      ? (['everyone', 'here'] as const).filter((s) => s.startsWith(mentionQuery.toLowerCase()))
+      : []
+  const roleMatches =
+    mentionQuery !== null && mentionQuery.length > 0
+      ? (roles ?? []).filter((r) => r.name.toLowerCase().startsWith(mentionQuery.toLowerCase())).slice(0, 5)
+      : []
+  const emojiMatches =
+    emojiQuery !== null && emojiQuery.length > 0
+      ? (emojis ?? []).filter((e) => e.name.startsWith(emojiQuery.toLowerCase())).slice(0, 6)
+      : []
 
   function handleChange(text: string) {
     setValue(text)
+    if (text.length > 0) onTyping?.()
 
     const cursor = textareaRef.current?.selectionStart ?? text.length
     const uptoCursor = text.slice(0, cursor)
-    const match = uptoCursor.match(/(?:^|\s)@([a-zA-Z0-9_.]*)$/)
-    setMentionQuery(match ? match[1] : null)
+    const mentionMatch = uptoCursor.match(/(?:^|\s)@([a-zA-Z0-9_.]*)$/)
+    setMentionQuery(mentionMatch ? mentionMatch[1] : null)
+
+    const emojiMatch = uptoCursor.match(/(?:^|\s):([a-z0-9_]*)$/)
+    setEmojiQuery(emojiMatch ? emojiMatch[1] : null)
   }
 
   function insertMention(username: string) {
@@ -47,6 +86,16 @@ export function MessageComposer({
     const rest = value.slice(cursor)
     setValue(replaced + rest)
     setMentionQuery(null)
+    textareaRef.current?.focus()
+  }
+
+  function insertEmoji(name: string) {
+    const cursor = textareaRef.current?.selectionStart ?? value.length
+    const uptoCursor = value.slice(0, cursor)
+    const replaced = uptoCursor.replace(/:([a-z0-9_]*)$/, `:${name}: `)
+    const rest = value.slice(cursor)
+    setValue(replaced + rest)
+    setEmojiQuery(null)
     textareaRef.current?.focus()
   }
 
@@ -79,10 +128,85 @@ export function MessageComposer({
     e.target.value = ''
   }
 
+  const [isDraggingFile, setIsDraggingFile] = useState(false)
+  const dragCounterRef = useRef(0)
+
+  function handleDragEnter(e: React.DragEvent) {
+    e.preventDefault()
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    dragCounterRef.current++
+    setIsDraggingFile(true)
+  }
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault()
+    dragCounterRef.current--
+    if (dragCounterRef.current <= 0) setIsDraggingFile(false)
+  }
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault()
+  }
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    dragCounterRef.current = 0
+    setIsDraggingFile(false)
+    const dropped = Array.from(e.dataTransfer.files ?? [])
+    if (dropped.length > 0) setFiles((prev) => [...prev, ...dropped])
+  }
+
   return (
-    <div className="px-4 pb-6 shrink-0 relative">
-      {mentionMatches.length > 0 && (
+    <div
+      className="px-4 pb-6 shrink-0 relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {isDraggingFile && (
+        <div className="absolute inset-x-4 bottom-6 top-0 z-10 rounded-xl border-2 border-dashed border-discord-blurple bg-discord-blurple/10 flex items-center justify-center pointer-events-none">
+          <p className="text-sm text-discord-blurple font-medium">Solte pra anexar</p>
+        </div>
+      )}
+      {emojiMatches.length > 0 && (
         <div className="absolute bottom-full left-4 right-4 mb-1 bg-[#111214] border border-black/40 rounded-lg shadow-xl overflow-hidden">
+          {emojiMatches.map((e) => (
+            <button
+              key={e.id}
+              onClick={() => insertEmoji(e.name)}
+              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/5 text-left"
+            >
+              <img src={e.image_url} alt="" className="w-5 h-5 object-contain" />
+              <span className="text-sm text-white">:{e.name}:</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {(mentionMatches.length > 0 || specialMentionMatches.length > 0 || roleMatches.length > 0) && (
+        <div className="absolute bottom-full left-4 right-4 mb-1 bg-[#111214] border border-black/40 rounded-lg shadow-xl overflow-hidden">
+          {specialMentionMatches.map((s) => (
+            <button
+              key={s}
+              onClick={() => insertMention(s)}
+              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/5 text-left"
+            >
+              <span className="text-sm text-yellow-400">@{s}</span>
+              <span className="text-xs text-discord-text-muted">
+                {s === 'everyone' ? 'Notifica todo mundo do servidor' : 'Notifica quem está online'}
+              </span>
+            </button>
+          ))}
+          {roleMatches.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => insertMention(r.name)}
+              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/5 text-left"
+            >
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: r.color }} />
+              <span className="text-sm" style={{ color: r.color }}>
+                @{r.name}
+              </span>
+            </button>
+          ))}
           {mentionMatches.map((m) => (
             <button
               key={m.id}

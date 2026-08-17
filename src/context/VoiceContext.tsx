@@ -67,6 +67,7 @@ interface SignalPayload {
 interface VoiceContextValue {
   connectedChannelId: string | null
   joiningChannelId: string | null
+  connectedAt: number | null
   connectedServerId: string | null
   connecting: boolean
   error: string | null
@@ -79,6 +80,14 @@ interface VoiceContextValue {
   join: (channelId: string, serverId: string) => Promise<void>
   leave: () => void
   toggleMute: () => void
+  pushToTalkEnabled: boolean
+  setPushToTalkEnabled: (enabled: boolean) => void
+  pushToTalkKey: string
+  setPushToTalkKey: (code: string) => void
+  pushToTalkActive: boolean
+  globalPushToTalkAvailable: boolean
+  pushToTalkGlobalKeyName: string | null
+  captureGlobalPushToTalkKey: () => Promise<string | null>
   toggleVideo: () => Promise<void>
   toggleScreenShare: () => Promise<void>
   changeMicrophone: (deviceId: string) => Promise<void>
@@ -111,13 +120,170 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null)
   const [joiningChannelId, setJoiningChannelId] = useState<string | null>(null)
   const [connectedServerId, setConnectedServerId] = useState<string | null>(null)
+  const [connectedAt, setConnectedAt] = useState<number | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [participants, setParticipants] = useState<Record<string, VoiceParticipant>>({})
   const [muted, setMuted] = useState(false)
+  const mutedRef = useRef(false)
   const [videoEnabled, setVideoEnabled] = useState(false)
   const [screenSharing, setScreenSharing] = useState(false)
   const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null)
+
+  // Push-to-talk: quando ativado, o microfone fica DESLIGADO por
+  // padrão e só liga enquanto a tecla escolhida está pressionada — bom
+  // pra quem não quer vazar áudio de fundo (jogo, teclado mecânico,
+  // etc.) sem precisar ficar mutando/desmutando manualmente toda hora.
+  // Só funciona com o app em foco (ver aviso no README sobre a
+  // limitação de não capturar tecla globalmente).
+  const [pushToTalkEnabled, setPushToTalkEnabledState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mamacos-ptt-enabled') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [pushToTalkKey, setPushToTalkKeyState] = useState<string>(() => {
+    try {
+      return localStorage.getItem('mamacos-ptt-key') || 'ControlLeft'
+    } catch {
+      return 'ControlLeft'
+    }
+  })
+  const [pushToTalkActive, setPushToTalkActive] = useState(false)
+  const pushToTalkEnabledRef = useRef(pushToTalkEnabled)
+  pushToTalkEnabledRef.current = pushToTalkEnabled
+  const pushToTalkKeyRef = useRef(pushToTalkKey)
+  pushToTalkKeyRef.current = pushToTalkKey
+
+  // Push-to-talk GLOBAL — funciona mesmo com o app fora de foco (tipo
+  // com um jogo em tela cheia por cima). Só existe dentro do app
+  // desktop, e só se o módulo nativo (uiohook-napi) tiver carregado
+  // com sucesso naquele sistema especificamente — se não, cai
+  // automaticamente pro modo antigo (só com o app em foco), sem
+  // quebrar nada.
+  const [globalPushToTalkAvailable, setGlobalPushToTalkAvailable] = useState(false)
+  const [pushToTalkGlobalKeyName, setPushToTalkGlobalKeyNameState] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('mamacos-ptt-global-keyname')
+    } catch {
+      return null
+    }
+  })
+  const pushToTalkGlobalKeycodeRef = useRef<number | null>(null)
+  try {
+    const raw = localStorage.getItem('mamacos-ptt-global-keycode')
+    pushToTalkGlobalKeycodeRef.current = raw ? Number(raw) : null
+  } catch {
+    pushToTalkGlobalKeycodeRef.current = null
+  }
+  const usingGlobalPTTRef = useRef(false)
+  usingGlobalPTTRef.current = globalPushToTalkAvailable && pushToTalkGlobalKeycodeRef.current !== null
+
+  // Combina mudo manual + push-to-talk numa única fonte de verdade pra
+  // saber se a track de áudio deve estar transmitindo ou não.
+  function applyMicEnabledState(pttHeld: boolean) {
+    const track = localStreamRef.current?.getAudioTracks()[0]
+    if (!track) return
+    if (mutedRef.current) {
+      track.enabled = false
+      return
+    }
+    if (pushToTalkEnabledRef.current) {
+      track.enabled = pttHeld
+      return
+    }
+    track.enabled = true
+  }
+
+  function setPushToTalkEnabled(enabled: boolean) {
+    setPushToTalkEnabledState(enabled)
+    try {
+      localStorage.setItem('mamacos-ptt-enabled', String(enabled))
+    } catch {
+      // best-effort
+    }
+    setPushToTalkActive(false)
+    applyMicEnabledState(false)
+  }
+
+  function setPushToTalkKey(code: string) {
+    setPushToTalkKeyState(code)
+    try {
+      localStorage.setItem('mamacos-ptt-key', code)
+    } catch {
+      // best-effort
+    }
+  }
+
+  // Pede pro processo principal escutar a PRÓXIMA tecla pressionada em
+  // qualquer lugar (mesmo com outro app em foco) e usa ela como a
+  // tecla de push-to-talk global. Retorna null se a captura falhar,
+  // expirar (10s sem apertar nada), ou se o modo global não estiver
+  // disponível nesse sistema.
+  async function captureGlobalPushToTalkKey(): Promise<string | null> {
+    if (!window.electronAPI?.startPTTCapture) return null
+    const result = await window.electronAPI.startPTTCapture()
+    if (!result) return null
+    pushToTalkGlobalKeycodeRef.current = result.keycode
+    setPushToTalkGlobalKeyNameState(result.name)
+    try {
+      localStorage.setItem('mamacos-ptt-global-keycode', String(result.keycode))
+      localStorage.setItem('mamacos-ptt-global-keyname', result.name)
+    } catch {
+      // best-effort
+    }
+    window.electronAPI.setGlobalPTTKey?.(result.keycode)
+    return result.name
+  }
+
+  useEffect(() => {
+    if (!window.electronAPI?.isGlobalPTTAvailable) return
+    window.electronAPI.isGlobalPTTAvailable().then((available) => {
+      setGlobalPushToTalkAvailable(available)
+      // Se já tinha uma tecla global configurada de uma sessão
+      // anterior, reativa ela agora — o processo principal não guarda
+      // isso sozinho entre reinícios do app.
+      if (available && pushToTalkGlobalKeycodeRef.current !== null) {
+        window.electronAPI?.setGlobalPTTKey?.(pushToTalkGlobalKeycodeRef.current)
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!window.electronAPI?.onPTTState) return
+    return window.electronAPI.onPTTState((active) => {
+      if (!usingGlobalPTTRef.current) return
+      setPushToTalkActive(active)
+      applyMicEnabledState(active)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Se o modo global já está cuidando disso, o listener local não
+      // faz nada — evita os dois mecanismos brigando entre si.
+      if (usingGlobalPTTRef.current) return
+      if (!pushToTalkEnabledRef.current || e.code !== pushToTalkKeyRef.current) return
+      e.preventDefault()
+      setPushToTalkActive(true)
+      applyMicEnabledState(true)
+    }
+    function handleKeyUp(e: KeyboardEvent) {
+      if (usingGlobalPTTRef.current) return
+      if (!pushToTalkEnabledRef.current || e.code !== pushToTalkKeyRef.current) return
+      setPushToTalkActive(false)
+      applyMicEnabledState(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [speaking, setSpeaking] = useState(false)
 
   const [masterVolume, setMasterVolumeState] = useState<number>(() => {
@@ -397,6 +563,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     try {
       const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
       localStreamRef.current = stream
+      mutedRef.current = false
+      applyMicEnabledState(false)
       setupAnalyser('local', stream)
 
       const rt = supabase.channel(`voice:${channelId}`, {
@@ -457,6 +625,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       connectedRef.current = true
       setConnectedChannelId(channelId)
       setConnectedServerId(serverId)
+      setConnectedAt(Date.now())
       playConnectSound()
     } catch (err) {
       setError(
@@ -496,6 +665,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     connectedRef.current = false
     setConnectedChannelId(null)
     setConnectedServerId(null)
+    setConnectedAt(null)
     setConnecting(false)
     setMuted(false)
     setVideoEnabled(false)
@@ -513,6 +683,57 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // --- Canal AFK: move automaticamente quem fica inativo -------------
+  const afkConfigRef = useRef<{ channelId: string | null; timeoutMinutes: number } | null>(null)
+  const lastActivityRef = useRef(Date.now())
+
+  useEffect(() => {
+    if (!connectedServerId) {
+      afkConfigRef.current = null
+      return
+    }
+    supabase
+      .from('servers')
+      .select('afk_channel_id, afk_timeout_minutes')
+      .eq('id', connectedServerId)
+      .single()
+      .then(({ data }) => {
+        afkConfigRef.current = data
+          ? { channelId: data.afk_channel_id, timeoutMinutes: data.afk_timeout_minutes }
+          : null
+      })
+  }, [connectedServerId])
+
+  useEffect(() => {
+    function markActive() {
+      lastActivityRef.current = Date.now()
+    }
+    window.addEventListener('mousemove', markActive)
+    window.addEventListener('mousedown', markActive)
+    window.addEventListener('keydown', markActive)
+    return () => {
+      window.removeEventListener('mousemove', markActive)
+      window.removeEventListener('mousedown', markActive)
+      window.removeEventListener('keydown', markActive)
+    }
+  }, [])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const config = afkConfigRef.current
+      if (!connectedRef.current || !config?.channelId || !connectedChannelId || !connectedServerId) return
+      if (connectedChannelId === config.channelId) return // já está no canal AFK
+      const idleMs = Date.now() - lastActivityRef.current
+      if (idleMs >= config.timeoutMinutes * 60_000) {
+        const afkChannelId = config.channelId
+        const serverId = connectedServerId
+        leave()
+        setTimeout(() => join(afkChannelId, serverId), 300)
+      }
+    }, 30_000)
+    return () => clearInterval(interval)
+  }, [connectedChannelId, connectedServerId, leave, join])
 
   async function changeMicrophone(deviceId: string) {
     audioSettingsRef.current.setMicId(deviceId)
@@ -577,8 +798,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const track = localStreamRef.current?.getAudioTracks()[0]
     if (!track) return
     const newMuted = !muted
-    track.enabled = !newMuted
+    mutedRef.current = newMuted
     setMuted(newMuted)
+    applyMicEnabledState(pushToTalkActive)
     if (newMuted) playMuteSound()
     else playUnmuteSound()
   }
@@ -701,6 +923,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       value={{
         connectedChannelId,
         joiningChannelId,
+        connectedAt,
         connectedServerId,
         connecting,
         error,
@@ -713,6 +936,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         join,
         leave,
         toggleMute,
+        pushToTalkEnabled,
+        setPushToTalkEnabled,
+        pushToTalkKey,
+        setPushToTalkKey,
+        pushToTalkActive,
+        globalPushToTalkAvailable,
+        pushToTalkGlobalKeyName,
+        captureGlobalPushToTalkKey,
         toggleVideo,
         toggleScreenShare,
         changeMicrophone,

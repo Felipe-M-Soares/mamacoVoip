@@ -7,8 +7,8 @@ interface ChannelsContextValue {
   channels: Channel[]
   loading: boolean
   refresh: () => Promise<void>
-  createChannel: (name: string, type: ChannelType, categoryId: string | null) => Promise<{ error: string | null }>
-  updateChannel: (channelId: string, updates: { name?: string }) => Promise<{ error: string | null }>
+  createChannel: (name: string, type: ChannelType, categoryId: string | null, isStage?: boolean) => Promise<{ error: string | null }>
+  updateChannel: (channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean }) => Promise<{ error: string | null }>
   deleteChannel: (channelId: string) => Promise<{ error: string | null }>
   createCategory: (name: string) => Promise<{ error: string | null }>
   updateCategory: (categoryId: string, name: string) => Promise<{ error: string | null }>
@@ -49,16 +49,16 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     refresh()
   }, [refresh])
 
-  async function createChannel(name: string, type: ChannelType, categoryId: string | null) {
+  async function createChannel(name: string, type: ChannelType, categoryId: string | null, isStage = false) {
     const position = channels.filter((c) => c.category_id === categoryId).length
     const { error } = await supabase
       .from('channels')
-      .insert({ server_id: serverId, name, type, category_id: categoryId, position })
+      .insert({ server_id: serverId, name, type, category_id: categoryId, position, is_stage: isStage })
     if (!error) await refresh()
     return { error: error?.message ?? null }
   }
 
-  async function updateChannel(channelId: string, updates: { name?: string }) {
+  async function updateChannel(channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean }) {
     const { error } = await supabase.from('channels').update(updates).eq('id', channelId)
     if (!error) await refresh()
     return { error: error?.message ?? null }

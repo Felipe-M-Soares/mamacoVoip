@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { MessageItem } from './MessageItem'
-import type { Message, MessageAttachment, MessageReaction, Profile } from '../../types/database'
+import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji, Thread, Role } from '../../types/database'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
 
@@ -13,11 +13,25 @@ export function MessageList({
   currentUserId,
   isServerOwner,
   members,
+  emojis,
+  roles,
   onEdit,
   onDelete,
   onReply,
   onToggleReaction,
   onViewProfile,
+  onPin,
+  onUnpin,
+  threadsByMessageId,
+  replyCounts,
+  onCreateThread,
+  onOpenThread,
+  onJumpToMessage,
+  highlightedMessageId,
+  onForward,
+  selectionMode,
+  selectedMessageIds,
+  onToggleSelect,
 }: {
   channelName: string
   messages: Message[]
@@ -27,11 +41,25 @@ export function MessageList({
   currentUserId: string | undefined
   isServerOwner: boolean
   members: Profile[]
+  emojis: ServerEmoji[]
+  roles?: Role[]
   onEdit: (messageId: string, content: string) => Promise<{ error: string | null }>
   onDelete: (messageId: string) => void
   onReply: (message: Message) => void
   onToggleReaction: (messageId: string, emoji: string) => void
   onViewProfile: (profile: Profile) => void
+  onPin?: (messageId: string) => void
+  onUnpin?: (messageId: string) => void
+  threadsByMessageId?: Record<string, Thread>
+  replyCounts?: Record<string, number>
+  onCreateThread?: (messageId: string) => void
+  onOpenThread?: (thread: Thread) => void
+  onJumpToMessage?: (messageId: string) => void
+  highlightedMessageId?: string | null
+  onForward?: (messageId: string) => void
+  selectionMode?: boolean
+  selectedMessageIds?: Set<string>
+  onToggleSelect?: (messageId: string) => void
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesById = Object.fromEntries(messages.map((m) => [m.id, m]))
@@ -90,8 +118,22 @@ export function MessageList({
             reactions={reactions[message.id] ?? []}
             currentUserId={currentUserId}
             members={members}
+            emojis={emojis}
+            roles={roles ?? []}
             onEdit={(content) => onEdit(message.id, content)}
             onDelete={() => onDelete(message.id)}
+            onPin={onPin ? () => onPin(message.id) : undefined}
+            onUnpin={onUnpin ? () => onUnpin(message.id) : undefined}
+            thread={threadsByMessageId?.[message.id]}
+            replyCount={threadsByMessageId?.[message.id] ? replyCounts?.[threadsByMessageId[message.id].id] ?? 0 : 0}
+            onCreateThread={onCreateThread ? () => onCreateThread(message.id) : undefined}
+            onOpenThread={onOpenThread}
+            onJumpToMessage={onJumpToMessage}
+            isHighlighted={highlightedMessageId === message.id}
+            onForward={onForward ? () => onForward(message.id) : undefined}
+            selectionMode={selectionMode}
+            selected={selectedMessageIds?.has(message.id)}
+            onToggleSelect={onToggleSelect ? () => onToggleSelect(message.id) : undefined}
             onReply={() => onReply(message)}
             onToggleReaction={(emoji) => onToggleReaction(message.id, emoji)}
             onViewProfile={onViewProfile}

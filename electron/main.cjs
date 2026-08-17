@@ -1,10 +1,46 @@
-const { app, BrowserWindow, session, Menu, shell, ipcMain, dialog, protocol, net, desktopCapturer } = require('electron')
+const { app, BrowserWindow, session, Menu, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { exec } = require('node:child_process')
 const { autoUpdater } = require('electron-updater')
 
+// Push-to-talk GLOBAL (funciona mesmo com o app fora de foco, tipo
+// com um jogo em tela cheia). Isso depende de um módulo nativo
+// (uiohook-napi) que só existe pra certas combinações de sistema
+// operacional/arquitetura — por isso é carregado só na primeira vez
+// que a pessoa realmente tentar usar isso (não toda vez que o app
+// abre), e todo uso fica protegido: se falhar em carregar ou iniciar
+// (plataforma sem suporte, permissão de Acessibilidade negada no
+// macOS, Linux sem X11, etc.), o push-to-talk continua funcionando do
+// jeito antigo (só com o app em foco), sem afetar mais nada no app.
+let uIOhook = null
+let UiohookKey = null
+let uiohookAvailable = null // null = ainda não tentou carregar
+
+function tryLoadUiohook() {
+  if (uiohookAvailable !== null) return uiohookAvailable
+  try {
+    const uiohook = require('uiohook-napi')
+    uIOhook = uiohook.uIOhook
+    UiohookKey = uiohook.UiohookKey
+    uiohookAvailable = true
+  } catch (err) {
+    console.error('uiohook-napi indisponível — push-to-talk global desativado, só funciona com o app em foco:', err?.message)
+    uiohookAvailable = false
+  }
+  return uiohookAvailable
+}
+
 const isDev = !app.isPackaged
+
+// Rede de segurança geral: se algum erro escapar de todos os try/catch
+// (de qualquer parte do app, não só do push-to-talk), isso evita que
+// ele derrube o processo principal inteiro — o que travaria o app
+// inteiro pra todo mundo, muito pior do que uma função específica
+// falhar sozinha.
+process.on('uncaughtException', (err) => {
+  console.error('Erro não tratado no processo principal:', err)
+})
 
 // URL/arquivo que o app tem permissão de carregar — qualquer tentativa
 // de navegar pra outro lugar (ex: um link malicioso injetado de algum
@@ -194,6 +230,46 @@ function createSplashWindow() {
   return splash
 }
 
+let overlayWindow = null
+let overlayVisible = false
+
+// Sobreposição dentro de jogos — janela transparente, sem borda,
+// sempre por cima, que só mostra quem está na call e quem tá falando.
+// Fica "clique-através" (ignora o mouse) o tempo todo, porque não tem
+// nenhum botão nela — é só informação, pra não atrapalhar o jogo.
+//
+// LIMITAÇÃO CONHECIDA: funciona bem com o jogo em janela sem borda,
+// mas normalmente NÃO aparece por cima de jogos em tela cheia
+// exclusiva — mesma limitação técnica do compartilhamento de tela,
+// sem solução sem uma ferramenta bem mais arriscada (hook de DirectX).
+function createOverlayWindow() {
+  const overlay = new BrowserWindow({
+    width: 280,
+    height: 200,
+    x: 40,
+    y: 40,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    focusable: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, 'overlay-preload.cjs'),
+    },
+  })
+  overlay.setAlwaysOnTop(true, 'screen-saver')
+  overlay.setIgnoreMouseEvents(true)
+  overlay.loadFile(path.join(__dirname, 'overlay.html'))
+  overlay.hide()
+  return overlay
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -360,10 +436,116 @@ app.whenReady().then(() => {
     if (!splash.isDestroyed()) splash.close()
   })
 
+  // --- Overlay dentro de jogos -----------------------------------
+  overlayWindow = createOverlayWindow()
+
+  // O app principal manda o estado atual da call pra cá sempre que
+  // muda (quem tá na sala, quem tá falando, quem tá mudo) — só
+  // repassa pra janela do overlay, sem guardar nada aqui.
+  ipcMain.on('overlay:update-state', (_event, state) => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send('overlay:voice-state', state)
+    }
+  })
+
+  // Atalho global (funciona mesmo com o jogo em foco) pra ligar/desligar
+  // a sobreposição — usa o mecanismo embutido do próprio Electron
+  // (não depende do módulo nativo do push-to-talk), já que só precisa
+  // reagir a "tecla apertada", não "segurando ou não".
+  const registered = globalShortcut.register('Control+Shift+O', () => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return
+    overlayVisible = !overlayVisible
+    if (overlayVisible) overlayWindow.showInactive()
+    else overlayWindow.hide()
+  })
+  if (!registered) {
+    console.error('Não foi possível registrar o atalho da sobreposição (Ctrl+Shift+O) — pode já estar em uso por outro programa.')
+  }
+
   startGameDetection()
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getCurrentGame', () => currentGame)
+
+  // --- Push-to-talk global -----------------------------------------
+  let pttGlobalKeycode = null
+  let pttCaptureResolver = null
+  let uiohookStarted = false
+  let uiohookListenersAttached = false
+
+  function attachUiohookListeners() {
+    if (uiohookListenersAttached) return
+    uiohookListenersAttached = true
+    uIOhook.on('keydown', (e) => {
+      if (pttCaptureResolver) {
+        const resolve = pttCaptureResolver
+        pttCaptureResolver = null
+        const name = Object.entries(UiohookKey).find(([, code]) => code === e.keycode)?.[0] ?? `Tecla ${e.keycode}`
+        resolve({ keycode: e.keycode, name })
+        return
+      }
+      if (pttGlobalKeycode !== null && e.keycode === pttGlobalKeycode) {
+        mainWindow?.webContents.send('ptt-state', true)
+      }
+    })
+    uIOhook.on('keyup', (e) => {
+      if (pttGlobalKeycode !== null && e.keycode === pttGlobalKeycode) {
+        mainWindow?.webContents.send('ptt-state', false)
+      }
+    })
+  }
+
+  function ensureUiohookStarted() {
+    if (uiohookStarted) return true
+    if (!tryLoadUiohook()) return false
+    try {
+      attachUiohookListeners()
+      uIOhook.start()
+      uiohookStarted = true
+      return true
+    } catch (err) {
+      // Acontece principalmente no macOS sem permissão de
+      // Acessibilidade concedida, ou em ambientes Linux sem X11 —
+      // desiste de vez do modo global pra essa sessão do app.
+      console.error('Falha ao iniciar uiohook (push-to-talk vai funcionar só com o app em foco):', err?.message)
+      uiohookAvailable = false
+      return false
+    }
+  }
+
+  ipcMain.handle('ptt:is-global-available', () => tryLoadUiohook())
+
+  ipcMain.handle('ptt:start-capture', () => {
+    if (!ensureUiohookStarted()) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      pttCaptureResolver = resolve
+      // Se ninguém apertar nada em 10s, desiste — evita ficar
+      // "escutando" pra sempre se a pessoa fechar a janelinha sem
+      // escolher tecla nenhuma.
+      setTimeout(() => {
+        if (pttCaptureResolver === resolve) {
+          pttCaptureResolver = null
+          resolve(null)
+        }
+      }, 10_000)
+    })
+  })
+
+  ipcMain.handle('ptt:set-active-key', (_event, keycode) => {
+    pttGlobalKeycode = typeof keycode === 'number' ? keycode : null
+    if (pttGlobalKeycode !== null) ensureUiohookStarted()
+  })
+
+  app.once('before-quit', () => {
+    if (uiohookAvailable && uiohookStarted) {
+      try {
+        uIOhook.stop()
+      } catch {
+        // já estamos fechando o app mesmo, sem problema
+      }
+    }
+  })
+  // -------------------------------------------------------------------
 
   if (!isDev) {
     // Checa, baixa e aplica atualizações — cada etapa é avisada pra
@@ -423,6 +605,20 @@ app.whenReady().then(() => {
 
     ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall())
 
+    // O provedor "github" padrão (usado só aqui, na hora de CHECAR
+    // atualização) depende do feed releases.atom do GitHub — que, por
+    // algum motivo específico desse repositório, sempre retorna 404
+    // (confirmado até direto no navegador, fora do app). Só a
+    // PUBLICAÇÃO continua usando "github" no package.json, porque essa
+    // parte funciona perfeitamente. Aqui, só pra checar, aponta direto
+    // pro mesmo formato de link "releases/latest/download/" que já
+    // testamos e sabemos que funciona (o botão de baixar usa esse
+    // mesmo formato).
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/',
+    })
+
     // A checagem em si só dispara depois que a janela terminou de
     // carregar (+ uma folga extra) — se disparasse aqui, os avisos de
     // "verificando"/"baixando" seriam mandados pro app ANTES dele
@@ -453,6 +649,8 @@ app.on('web-contents-created', (_event, contents) => {
 
 app.on('window-all-closed', () => {
   if (gameCheckTimer) clearInterval(gameCheckTimer)
+  globalShortcut.unregisterAll()
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()
   if (process.platform !== 'darwin') {
     // Se uma atualização já terminou de baixar em segundo plano, instala
     // e reabre o app automaticamente ao fechar — a pessoa não precisa

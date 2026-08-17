@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { UserPanel } from './UserPanel'
 import { InviteModal } from '../modals/InviteModal'
@@ -13,12 +13,33 @@ import { useChannels } from '../../hooks/useChannels'
 import { useModeration } from '../../hooks/useModeration'
 import { useVoice } from '../../hooks/useVoice'
 import { useVoicePresence } from '../../hooks/useVoicePresence'
+import { useChannelMutes } from '../../hooks/useChannelMutes'
+import { useServerEvents } from '../../hooks/useServerEvents'
+import { EventsModal } from '../modals/EventsModal'
+import { useServerWelcomeScreen, ServerWelcomeModal } from '../modals/ServerWelcomeModal'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
 import { Avatar } from '../ui/Avatar'
 import { RolesManagerModal } from '../modals/RolesManagerModal'
 import { ModerationLogModal } from '../modals/ModerationLogModal'
 import type { Channel, Profile, Server } from '../../types/database'
+
+function CallDurationTimer({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const totalSeconds = Math.max(0, Math.floor((now - startedAt) / 1000))
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  const label = h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`
+
+  return <span className="text-[11px] text-discord-green font-mono tabular-nums shrink-0">{label}</span>
+}
 
 function VoiceChannelPresence({ channelId, profileById }: { channelId: string; profileById: Record<string, Profile> }) {
   const { user } = useAuth()
@@ -41,6 +62,7 @@ function VoiceChannelPresence({ channelId, profileById }: { channelId: string; p
         const p = id === user?.id ? undefined : profileById[id]
         const name = id === user?.id ? 'Você' : p?.display_name || p?.username || '...'
         const isSpeaking = id === user?.id ? voice.speaking : voice.participants[id]?.speaking ?? false
+        const isSharingScreen = id === user?.id ? voice.screenSharing : Boolean(voice.participants[id]?.screenStream)
         return (
           <div
             key={id}
@@ -50,6 +72,13 @@ function VoiceChannelPresence({ channelId, profileById }: { channelId: string; p
           >
             <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={16} />
             <span className="text-[10px] text-discord-text-muted truncate max-w-[70px]">{name}</span>
+            {isSharingScreen && (
+              <span title="Compartilhando tela" className="shrink-0">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 text-discord-green">
+                  <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
+                </svg>
+              </span>
+            )}
           </div>
         )
       })}
@@ -101,7 +130,14 @@ function VoiceStatusBar({ serverId }: { serverId: string }) {
   )
 }
 
-function ChannelIcon({ type }: { type: 'text' | 'voice' }) {
+function ChannelIcon({ type, isStage }: { type: 'text' | 'voice'; isStage?: boolean }) {
+  if (type === 'voice' && isStage) {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0 text-yellow-400">
+        <path d="M11 2a1 1 0 0 1 1 1v.06a8 8 0 0 1 7 7.94v3a3 3 0 0 1-3 3h-1l-3 4-3-4H8a3 3 0 0 1-3-3v-3a8 8 0 0 1 7-7.94V3a1 1 0 0 1-1-1zm1 5a5 5 0 0 0-5 5v3a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3a5 5 0 0 0-5-5z" />
+      </svg>
+    )
+  }
   if (type === 'voice') {
     return (
       <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0">
@@ -171,6 +207,7 @@ function ChannelRow({
   channel,
   active,
   unread,
+  muted,
   isOwner,
   isDragOver,
   onSelect,
@@ -187,6 +224,7 @@ function ChannelRow({
   channel: Channel
   active: boolean
   unread: boolean
+  muted: boolean
   isOwner: boolean
   isDragOver: boolean
   onSelect: () => void
@@ -200,6 +238,7 @@ function ChannelRow({
   onRename: (name: string) => void
   onContextMenu: (e: React.MouseEvent) => void
 }) {
+  const voice = useVoice()
   return (
     <div
       draggable={isOwner}
@@ -214,14 +253,22 @@ function ChannelRow({
       `}
       onClick={onSelect}
     >
-      <ChannelIcon type={channel.type} />
+      <ChannelIcon type={channel.type} isStage={channel.is_stage} />
       <InlineEditableLabel
         value={channel.name}
         editable={isOwner}
         onSave={onRename}
         className="truncate flex-1 text-sm"
       />
-      {unread && !active && <span className="w-2 h-2 rounded-full bg-white shrink-0" />}
+      {unread && !active && !muted && <span className="w-2 h-2 rounded-full bg-white shrink-0" />}
+      {channel.type === 'voice' && voice.connectedChannelId === channel.id && voice.connectedAt && (
+        <CallDurationTimer startedAt={voice.connectedAt} />
+      )}
+      {muted && (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 text-discord-text-muted shrink-0">
+          <path d="M16.5 12A4.5 4.5 0 0 0 14 8v1.2l2.4 2.4c.06-.2.1-.4.1-.6zm2.5 0c0 .94-.2 1.83-.55 2.64l1.51 1.51A8.94 8.94 0 0 0 21 12h-2zM4.27 3L3 4.27l6 6V12a4.5 4.5 0 0 0 6.16 4.18l1.6 1.6a6.5 6.5 0 0 1-9.26-5.87v-.36l-.01.01L3 8.27V12a9 9 0 0 0 8 8.94V22h2v-1.06a8.93 8.93 0 0 0 3.36-1.09L19.73 22 21 20.73 4.27 3z" />
+        </svg>
+      )}
 
       {isOwner && (
         <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
@@ -296,6 +343,11 @@ export function ChannelSidebar({
   } = useChannels()
   const { permissions } = useModeration(server.id)
   const { members } = useServerMembers(server.id)
+  const { mutedChannelIds, toggleChannelMute } = useChannelMutes()
+  const { events } = useServerEvents(server.id)
+  const [showEvents, setShowEvents] = useState(false)
+  const { show: showWelcome, dismiss: dismissWelcome } = useServerWelcomeScreen(server, user?.id)
+  const upcomingEventsCount = events.filter((e) => new Date(e.starts_at).getTime() >= Date.now()).length
   const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
   const { collapsed: collapsedCategories, toggle: toggleCategoryCollapse } = useCollapsedCategories()
 
@@ -468,6 +520,21 @@ export function ChannelSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
+        <button
+          onClick={() => setShowEvents(true)}
+          className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-sm font-medium text-discord-text-muted hover:bg-white/5 hover:text-discord-text transition-colors"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0">
+            <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zM4 10v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9H4zm3 3h4v4H7v-4z" />
+          </svg>
+          Eventos
+          {upcomingEventsCount > 0 && (
+            <span className="ml-auto bg-discord-blurple text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+              {upcomingEventsCount}
+            </span>
+          )}
+        </button>
+
         {uncategorized.length > 0 && (
           <div
             className={`space-y-0.5 rounded ${dragOverTarget === 'uncategorized' ? 'bg-white/5' : ''}`}
@@ -480,6 +547,7 @@ export function ChannelSidebar({
                   channel={channel}
                   active={activeChannelId === channel.id}
                   unread={unreadChannelIds.has(channel.id)}
+                  muted={mutedChannelIds.has(channel.id)}
                   isOwner={isOwner}
                   isDragOver={dragOverTarget === channel.id && draggedChannelId !== channel.id}
                   onSelect={() => onSelectChannel(channel)}
@@ -501,17 +569,27 @@ export function ChannelSidebar({
           </div>
         )}
 
+        {uncategorized.length > 0 && sortedCategories.length > 0 && (
+          <div className="h-px bg-white/5 -my-1" />
+        )}
+
         {sortedCategories.map((category) => {
           const categoryChannels = channels
             .filter((c) => c.category_id === category.id)
             .sort((a, b) => a.position - b.position)
 
           return (
-            <div key={category.id} className="group/category">
+            <div
+              key={category.id}
+              className={`group/category rounded transition-colors ${
+                dragOverTarget === category.id ? 'bg-white/5 ring-1 ring-dashed ring-discord-blurple/50' : ''
+              }`}
+              onDragOver={(e) => handleDragOverCategory(e, category.id)}
+              onDragLeave={() => setDragOverTarget(null)}
+              onDrop={(e) => handleDropOnCategory(e, category.id)}
+            >
               <div
-                className={`px-1 mb-1 flex items-center justify-between rounded cursor-pointer select-none ${dragOverTarget === category.id ? 'bg-white/5' : ''}`}
-                onDragOver={(e) => handleDragOverCategory(e, category.id)}
-                onDrop={(e) => handleDropOnCategory(e, category.id)}
+                className="px-1 mb-1 flex items-center justify-between rounded cursor-pointer select-none"
                 onClick={() => toggleCategoryCollapse(category.id)}
               >
                 <div className="flex items-center gap-1 min-w-0">
@@ -580,6 +658,7 @@ export function ChannelSidebar({
                         channel={channel}
                         active={activeChannelId === channel.id}
                         unread={unreadChannelIds.has(channel.id)}
+                        muted={mutedChannelIds.has(channel.id)}
                         isOwner={isOwner}
                         isDragOver={dragOverTarget === channel.id && draggedChannelId !== channel.id}
                         onSelect={() => onSelectChannel(channel)}
@@ -616,6 +695,7 @@ export function ChannelSidebar({
         <ServerSettingsModal
           server={server}
           isOwner={isOwner}
+          channels={channels}
           onClose={() => setShowSettings(false)}
           onDeleted={() => {
             setShowSettings(false)
@@ -664,6 +744,10 @@ export function ChannelSidebar({
               label: 'Copiar nome do canal',
               onClick: () => navigator.clipboard.writeText(contextChannel.name),
             },
+            {
+              label: mutedChannelIds.has(contextChannel.id) ? 'Reativar notificações' : 'Silenciar canal',
+              onClick: () => toggleChannelMute(contextChannel.id),
+            },
             ...(isOwner
               ? [
                   { label: 'Editar canal', onClick: () => setEditingChannel(contextChannel) },
@@ -675,6 +759,25 @@ export function ChannelSidebar({
                     label: 'Mover para baixo',
                     onClick: () => moveChannel(contextChannel.id, contextChannel.category_id, 'down'),
                   },
+                  ...(sortedCategories.length > 0
+                    ? [
+                        ...sortedCategories
+                          .filter((cat) => cat.id !== contextChannel.category_id)
+                          .map((cat) => ({
+                            label: `Mover para "${cat.name}"`,
+                            divider: cat.id === sortedCategories.filter((c) => c.id !== contextChannel.category_id)[0]?.id,
+                            onClick: () => moveChannelToCategory(contextChannel.id, cat.id),
+                          })),
+                        ...(contextChannel.category_id !== null
+                          ? [
+                              {
+                                label: 'Remover da categoria',
+                                onClick: () => moveChannelToCategory(contextChannel.id, null),
+                              },
+                            ]
+                          : []),
+                      ]
+                    : []),
                   {
                     label: 'Excluir canal',
                     danger: true,
@@ -688,6 +791,18 @@ export function ChannelSidebar({
                 ]
               : []),
           ]}
+        />
+      )}
+
+      {showWelcome && <ServerWelcomeModal server={server} onDismiss={dismissWelcome} />}
+
+      {showEvents && (
+        <EventsModal
+          serverId={server.id}
+          channels={channels}
+          canCreate={isOwner || permissions.manage_channels}
+          membersById={profileById}
+          onClose={() => setShowEvents(false)}
         />
       )}
     </aside>

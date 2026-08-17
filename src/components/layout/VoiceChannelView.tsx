@@ -3,6 +3,7 @@ import { Avatar } from '../ui/Avatar'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useVoice } from '../../hooks/useVoice'
+import { useModeration } from '../../hooks/useModeration'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import type { VoiceParticipant } from '../../context/VoiceContext'
 import type { Channel } from '../../types/database'
@@ -219,7 +220,13 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
   const { profile } = useAuth()
   const { members } = useServerMembers(serverId)
   const voice = useVoice()
+  const { permissions } = useModeration(serverId)
   const [showInvite, setShowInvite] = useState(false)
+
+  // Em canal Palco, só quem modera pode falar — has_permission() já
+  // conta o dono do servidor como tendo qualquer permissão, então não
+  // precisa checar owner separado.
+  const isSpeaker = !channel.is_stage || permissions.manage_channels
 
   const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
   const isConnectedHere = voice.connectedChannelId === channel.id
@@ -228,6 +235,7 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
   async function handleSwitchHere() {
     voice.leave()
     await voice.join(channel.id, serverId)
+    if (!isSpeaker) voice.toggleMute()
   }
 
   const screenShares: { key: string; name: string; stream: MediaStream; isLocal: boolean }[] = []
@@ -308,7 +316,10 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
           </p>
           {voice.error && <p className="text-sm text-red-400 mt-3">{voice.error}</p>}
           <button
-            onClick={() => voice.join(channel.id, serverId)}
+            onClick={async () => {
+              await voice.join(channel.id, serverId)
+              if (!isSpeaker) voice.toggleMute()
+            }}
             disabled={voice.connecting}
             className="mt-4 px-5 py-2.5 rounded bg-discord-green text-white font-medium hover:brightness-110 transition-colors disabled:opacity-60"
           >
@@ -382,10 +393,29 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
           </div>
 
           <div className="px-4 pb-6 shrink-0 flex flex-wrap items-center justify-center gap-3">
+            {voice.pushToTalkEnabled ? (
+              <div
+                title={`Push-to-talk: segure ${voice.pushToTalkKey} pra falar`}
+                className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
+                  voice.pushToTalkActive ? 'bg-discord-green text-white' : 'bg-discord-lighter text-discord-text-muted'
+                }`}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                  <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
+                </svg>
+              </div>
+            ) : (
             <button
               onClick={voice.toggleMute}
-              title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
+              disabled={!isSpeaker}
+              title={
+                !isSpeaker
+                  ? 'Só donos/moderadores podem falar neste canal Palco'
+                  : voice.muted
+                    ? 'Ativar microfone'
+                    : 'Mutar microfone'
+              }
+              className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 voice.muted ? 'bg-red-600 text-white' : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'
               }`}
             >
@@ -399,6 +429,7 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
                 </svg>
               )}
             </button>
+            )}
 
             {voice.audioSettings.microphones.length > 1 && (
               <select

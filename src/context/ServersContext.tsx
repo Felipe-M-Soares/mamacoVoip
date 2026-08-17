@@ -10,7 +10,7 @@ interface ServersContextValue {
   createServer: (name: string, iconFile?: File | null) => Promise<{ error: string | null; server?: Server }>
   updateServer: (
     serverId: string,
-    updates: { name?: string; description?: string | null; iconFile?: File | null }
+    updates: { name?: string; description?: string | null; iconFile?: File | null; bannerFile?: File | null }
   ) => Promise<{ error: string | null }>
   deleteServer: (serverId: string) => Promise<{ error: string | null }>
   leaveServer: (serverId: string) => Promise<{ error: string | null }>
@@ -24,9 +24,13 @@ interface ServersContextValue {
 
 export const ServersContext = createContext<ServersContextValue | undefined>(undefined)
 
-async function uploadServerIcon(serverId: string, file: File): Promise<{ error: string | null; iconUrl?: string }> {
+async function uploadServerImage(
+  serverId: string,
+  file: File,
+  prefix: 'icon' | 'banner'
+): Promise<{ error: string | null; url?: string }> {
   const ext = file.name.split('.').pop()
-  const path = `${serverId}/icon-${Date.now()}.${ext}`
+  const path = `${serverId}/${prefix}-${Date.now()}.${ext}`
 
   const { error } = await supabase.storage.from('server-icons').upload(path, file, {
     cacheControl: '3600',
@@ -35,7 +39,7 @@ async function uploadServerIcon(serverId: string, file: File): Promise<{ error: 
   if (error) return { error: error.message }
 
   const { data } = supabase.storage.from('server-icons').getPublicUrl(path)
-  return { error: null, iconUrl: data.publicUrl }
+  return { error: null, url: data.publicUrl }
 }
 
 // Estado de servidores compartilhado entre TODA a árvore de componentes.
@@ -86,7 +90,7 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     }
 
     if (iconFile) {
-      const { error: uploadError, iconUrl } = await uploadServerIcon(server.id, iconFile)
+      const { error: uploadError, url: iconUrl } = await uploadServerImage(server.id, iconFile, 'icon')
       if (!uploadError && iconUrl) {
         await supabase.from('servers').update({ icon_url: iconUrl }).eq('id', server.id)
         server.icon_url = iconUrl
@@ -99,16 +103,22 @@ export function ServersProvider({ children }: { children: ReactNode }) {
 
   async function updateServer(
     serverId: string,
-    updates: { name?: string; description?: string | null; iconFile?: File | null }
+    updates: { name?: string; description?: string | null; iconFile?: File | null; bannerFile?: File | null }
   ) {
-    const patch: { name?: string; description?: string | null; icon_url?: string } = {}
+    const patch: { name?: string; description?: string | null; icon_url?: string; banner_url?: string } = {}
     if (updates.name) patch.name = updates.name
     if (updates.description !== undefined) patch.description = updates.description
 
     if (updates.iconFile) {
-      const { error: uploadError, iconUrl } = await uploadServerIcon(serverId, updates.iconFile)
+      const { error: uploadError, url: iconUrl } = await uploadServerImage(serverId, updates.iconFile, 'icon')
       if (uploadError) return { error: uploadError }
       if (iconUrl) patch.icon_url = iconUrl
+    }
+
+    if (updates.bannerFile) {
+      const { error: uploadError, url: bannerUrl } = await uploadServerImage(serverId, updates.bannerFile, 'banner')
+      if (uploadError) return { error: uploadError }
+      if (bannerUrl) patch.banner_url = bannerUrl
     }
 
     const { error } = await supabase.from('servers').update(patch).eq('id', serverId)

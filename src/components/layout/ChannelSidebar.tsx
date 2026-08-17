@@ -23,7 +23,7 @@ import type { Channel, Profile, Server } from '../../types/database'
 function VoiceChannelPresence({ channelId, profileById }: { channelId: string; profileById: Record<string, Profile> }) {
   const { user } = useAuth()
   const voice = useVoice()
-  const isConnectedHere = voice.connectedChannelId === channelId
+  const isConnectedHere = voice.connectedChannelId === channelId || voice.joiningChannelId === channelId
 
   // Pro canal que você já está conectado de verdade, usa a lista de
   // participantes que já vem da própria conexão — evita se inscrever
@@ -356,6 +356,11 @@ export function ChannelSidebar({
 
   return (
     <aside className="w-60 bg-discord-sidebar flex flex-col shrink-0">
+      {server.banner_url && (
+        <div className="h-20 w-full overflow-hidden shrink-0 border-b border-discord-blurple/30">
+          <img src={server.banner_url} alt="" className="w-full h-full object-cover" />
+        </div>
+      )}
       <div className="relative">
         <button
           onClick={() => setMenuOpen((v) => !v)}

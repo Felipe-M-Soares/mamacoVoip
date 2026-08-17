@@ -23,16 +23,30 @@ export function ServerSettingsModal({
   const [description, setDescription] = useState(server.description ?? '')
   const [iconFile, setIconFile] = useState<File | null>(null)
   const [iconPreview, setIconPreview] = useState<string | null>(server.icon_url)
+  const [bannerFile, setBannerFile] = useState<File | null>(null)
+  const [bannerPreview, setBannerPreview] = useState<string | null>(server.banner_url)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const bannerInputRef = useRef<HTMLInputElement>(null)
 
   function handleIconChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setIconFile(file)
     setIconPreview(URL.createObjectURL(file))
+  }
+
+  function handleBannerChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setError('A capa precisa ter no máximo 5MB.')
+      return
+    }
+    setBannerFile(file)
+    setBannerPreview(URL.createObjectURL(file))
   }
 
   async function handleSave() {
@@ -42,7 +56,12 @@ export function ServerSettingsModal({
       return
     }
     setLoading(true)
-    const { error } = await updateServer(server.id, { name, description: description.trim() || null, iconFile })
+    const { error } = await updateServer(server.id, {
+      name,
+      description: description.trim() || null,
+      iconFile,
+      bannerFile,
+    })
     setLoading(false)
     if (error) {
       setError(error)
@@ -92,6 +111,35 @@ export function ServerSettingsModal({
   return (
     <Modal title="Configurações do servidor" onClose={onClose}>
       <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+            Capa do servidor
+          </label>
+          <button
+            onClick={() => isOwner && bannerInputRef.current?.click()}
+            className={`w-full aspect-[3/1] rounded-lg bg-discord-darker border-2 border-dashed border-discord-text-muted flex items-center justify-center overflow-hidden ${
+              isOwner ? 'hover:border-discord-blurple transition-colors' : 'cursor-not-allowed opacity-70'
+            }`}
+          >
+            {bannerPreview ? (
+              <img src={bannerPreview} alt="Capa" className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-xs text-discord-text-muted text-center px-2">
+                Sem capa — clique pra adicionar uma imagem ou GIF
+              </span>
+            )}
+          </button>
+          <input
+            ref={bannerInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={handleBannerChange}
+            disabled={!isOwner}
+          />
+          <p className="text-[10px] text-discord-text-muted mt-1">Até 5MB — aceita GIF animado</p>
+        </div>
+
         <div className="flex justify-center">
           <button
             onClick={() => isOwner && fileInputRef.current?.click()}

@@ -68,6 +68,7 @@ const GAME_CHECK_INTERVAL_MS = 15_000
 
 let mainWindow = null
 let pendingDisplayMediaCallback = null
+let updateReadyToInstall = false
 let gameCheckTimer = null
 let currentGame = null
 
@@ -306,7 +307,10 @@ app.whenReady().then(() => {
     autoUpdater.on('download-progress', (progress) =>
       sendUpdateStatus('downloading', { percent: Math.round(progress.percent) })
     )
-    autoUpdater.on('update-downloaded', (info) => sendUpdateStatus('ready', { version: info.version }))
+    autoUpdater.on('update-downloaded', (info) => {
+      updateReadyToInstall = true
+      sendUpdateStatus('ready', { version: info.version })
+    })
     autoUpdater.on('error', (err) => sendUpdateStatus('error', { message: err?.message ?? 'Erro desconhecido' }))
 
     ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall())
@@ -332,6 +336,16 @@ app.on('web-contents-created', (_event, contents) => {
 
 app.on('window-all-closed', () => {
   if (gameCheckTimer) clearInterval(gameCheckTimer)
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin') {
+    // Se uma atualização já terminou de baixar em segundo plano, instala
+    // e reabre o app automaticamente ao fechar — a pessoa não precisa
+    // clicar em "Reiniciar", só fechar e abrir o app normalmente já
+    // basta pra receber a versão nova.
+    if (updateReadyToInstall) {
+      autoUpdater.quitAndInstall()
+    } else {
+      app.quit()
+    }
+  }
 })
 

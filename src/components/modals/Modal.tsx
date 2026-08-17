@@ -18,7 +18,7 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className={`bg-discord-dark rounded-lg shadow-xl w-full ${maxWidth} max-h-[90vh] overflow-y-auto`}
+        className={`bg-discord-dark rounded-2xl shadow-2xl border border-discord-blurple/10 w-full ${maxWidth} max-h-[90vh] overflow-y-auto`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5">

@@ -65,6 +65,7 @@ interface SignalPayload {
 
 interface VoiceContextValue {
   connectedChannelId: string | null
+  joiningChannelId: string | null
   connectedServerId: string | null
   connecting: boolean
   error: string | null
@@ -103,6 +104,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   audioSettingsRef.current = audioSettings
 
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null)
+  const [joiningChannelId, setJoiningChannelId] = useState<string | null>(null)
   const [connectedServerId, setConnectedServerId] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -375,6 +377,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const join = useCallback(async (channelId: string, serverId: string) => {
     if (!user || connectedRef.current) return
+    // Avisa a UI (a lista de canais) IMEDIATAMENTE que estamos prestes a
+    // entrar nesse canal, antes de qualquer trabalho assíncrono (pedir
+    // microfone, etc.) — isso dá tempo do observador de presença na
+    // barra lateral (useVoicePresence) se desinscrever do mesmo canal
+    // Realtime ANTES da gente tentar se inscrever de verdade nele.
+    // Sem isso, a primeira tentativa de entrar sempre colidia com essa
+    // inscrição de observação já existente.
+    setJoiningChannelId(channelId)
     setConnecting(true)
     setError(null)
     hasSyncedRef.current = false
@@ -457,6 +467,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       setConnecting(false)
+      setJoiningChannelId(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, handleSignal])
@@ -686,6 +697,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     <VoiceContext.Provider
       value={{
         connectedChannelId,
+        joiningChannelId,
         connectedServerId,
         connecting,
         error,

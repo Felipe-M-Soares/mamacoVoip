@@ -45,6 +45,16 @@ function ServerIcon({
     .join('')
     .toUpperCase()
 
+  // Gradiente único por servidor (baseado no nome) — cada servidor sem
+  // ícone próprio fica com uma cor diferente, em vez de todos caírem
+  // no mesmo cinza/azul genérico.
+  const gradient = (() => {
+    let hash = 0
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+    const hue = Math.abs(hash) % 360
+    return `linear-gradient(135deg, hsl(${hue} 70% 45%), hsl(${(hue + 45) % 360} 65% 28%))`
+  })()
+
   return (
     <div
       className="relative group"
@@ -66,8 +76,10 @@ function ServerIcon({
       <button
         onClick={onClick}
         title={name}
-        className={`w-12 h-12 flex items-center justify-center font-medium text-white transition-all duration-150 overflow-hidden
-          ${active ? 'rounded-2xl bg-discord-blurple brand-glow-sm' : 'rounded-3xl hover:rounded-2xl bg-discord-channels hover:bg-discord-blurple'}
+        style={!iconUrl && variant === 'server' ? { background: gradient } : undefined}
+        className={`w-12 h-12 flex items-center justify-center font-display font-semibold text-white transition-all duration-150 overflow-hidden
+          ${active ? 'rounded-2xl brand-glow-sm' : 'rounded-3xl hover:rounded-2xl'}
+          ${variant === 'server' && !iconUrl ? '' : active ? 'bg-discord-blurple' : 'bg-discord-channels hover:bg-discord-blurple'}
           ${variant === 'add' ? 'text-discord-green hover:text-white' : ''}
           ${isDragOver ? 'ring-2 ring-discord-blurple' : ''}
           ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}

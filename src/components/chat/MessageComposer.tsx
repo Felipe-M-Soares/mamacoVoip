@@ -132,16 +132,16 @@ export function MessageComposer({
       )}
 
       <div
-        className={`bg-discord-lighter px-4 py-2.5 flex items-end gap-3 ${
-          replyingTo || files.length > 0 ? 'rounded-b-lg' : 'rounded-lg'
+        className={`bg-discord-lighter px-4 py-3 flex items-end gap-3 border border-white/5 focus-within:border-discord-blurple/40 transition-colors ${
+          replyingTo || files.length > 0 ? 'rounded-b-xl' : 'rounded-xl'
         }`}
       >
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="text-discord-text-muted hover:text-discord-text shrink-0 pb-1"
+          className="text-discord-text-muted hover:text-white hover:bg-white/10 rounded-full p-1.5 shrink-0 transition-colors"
           title="Anexar arquivo"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
             <path d="M12 2a1 1 0 0 1 1 1v8h8a1 1 0 1 1 0 2h-8v8a1 1 0 1 1-2 0v-8H3a1 1 0 1 1 0-2h8V3a1 1 0 0 1 1-1z" />
           </svg>
         </button>
@@ -167,10 +167,14 @@ export function MessageComposer({
         <button
           onClick={handleSend}
           disabled={sending || (value.trim().length === 0 && files.length === 0)}
-          className="text-discord-text-muted hover:text-discord-blurple shrink-0 pb-1 disabled:opacity-40"
+          className={`shrink-0 rounded-full p-1.5 transition-colors disabled:opacity-40 ${
+            value.trim().length > 0 || files.length > 0
+              ? 'bg-discord-blurple text-white hover:brightness-110'
+              : 'text-discord-text-muted hover:bg-white/10'
+          }`}
           title="Enviar"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
             <path d="M3.4 20.6l17.5-8.2a1 1 0 0 0 0-1.8L3.4 2.4a1 1 0 0 0-1.4 1.1L4.5 12l-2.5 8.5a1 1 0 0 0 1.4 1.1z" />
           </svg>
         </button>

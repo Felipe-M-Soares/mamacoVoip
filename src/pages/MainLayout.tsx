@@ -17,6 +17,7 @@ import { useChannels } from '../hooks/useChannels'
 import { useConversations } from '../hooks/useConversations'
 import { useUnreadOverview } from '../hooks/useUnreadOverview'
 import { useGamePresence } from '../hooks/useGamePresence'
+import { GameDetectedToast } from '../components/ui/GameDetectedToast'
 import type { Channel, Profile, Server } from '../types/database'
 
 const VoiceChannelView = lazy(() =>
@@ -303,6 +304,8 @@ function MainLayoutInner() {
           onOpenConversation={handleOpenConversation}
         />
       )}
+
+      <GameDetectedToast />
     </div>
   )
 }

@@ -63,13 +63,14 @@ export function UpdateStatusBadge() {
 
   // status === 'error'
   return (
-    <div className="fixed bottom-4 right-4 z-[250] flex items-center gap-2 bg-discord-darker border border-red-900/50 rounded-full pl-3 pr-4 py-2 shadow-xl">
-      <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-red-400 shrink-0">
+    <div className="fixed bottom-4 right-4 z-[250] max-w-sm flex items-start gap-2 bg-discord-darker border border-red-900/50 rounded-lg px-3 py-2.5 shadow-xl">
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-red-400 shrink-0 mt-0.5">
         <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2zm0-4h-2V7h2z" />
       </svg>
-      <span className="text-xs text-discord-text-muted" title={status.message}>
-        Não foi possível verificar atualizações
-      </span>
+      <div className="min-w-0">
+        <p className="text-xs text-discord-text-muted">Não foi possível verificar atualizações</p>
+        {status.message && <p className="text-[10px] text-discord-text-muted/70 mt-0.5 break-words">{status.message}</p>}
+      </div>
     </div>
   )
 }

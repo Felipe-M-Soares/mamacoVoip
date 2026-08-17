@@ -96,7 +96,7 @@ export function MemberList({
         <>
           {profile && (
             <div>
-              <h3 className="px-2 text-xs font-semibold text-discord-text-muted mb-1">VOCÊ</h3>
+              <h3 className="px-2 text-xs font-bold text-discord-text-muted tracking-wider mb-1.5">VOCÊ</h3>
               <button
                 onClick={() => onViewProfile(profile)}
                 className="w-full flex items-center gap-3 px-2 py-1.5 rounded hover:bg-white/5 text-left"
@@ -109,14 +109,14 @@ export function MemberList({
             </div>
           )}
 
-          <h3 className="px-2 text-xs font-semibold text-discord-text-muted mt-4 mb-1">
+          <h3 className="px-2 text-xs font-bold text-discord-text-muted tracking-wider mt-4 mb-1.5">
             ONLINE — {online.length}
           </h3>
           {online.map((m) => (
             <MemberRow key={m.user_id} member={m} />
           ))}
 
-          <h3 className="px-2 text-xs font-semibold text-discord-text-muted mt-4 mb-1">
+          <h3 className="px-2 text-xs font-bold text-discord-text-muted tracking-wider mt-4 mb-1.5">
             OFFLINE — {offline.length}
           </h3>
           {offline.map((m) => (

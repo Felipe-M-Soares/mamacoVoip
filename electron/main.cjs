@@ -389,8 +389,26 @@ app.whenReady().then(() => {
       updateReadyToInstall = true
       sendUpdateStatus('ready', { version: info.version })
     })
+    let updateRetryCount = 0
+    const MAX_UPDATE_RETRIES = 3
+
     autoUpdater.on('error', (err) => {
       const raw = err?.message ?? 'Erro desconhecido'
+
+      // Um release recém-publicado pode demorar alguns minutos pra o
+      // GitHub "enxergar" ele como o mais recente (atraso normal de
+      // indexação do próprio GitHub, não é bug daqui) — isso costuma
+      // aparecer como 404 bem na primeira checagem depois de abrir o
+      // app. Em vez de desistir na hora (ou pior, fingir que está tudo
+      // certo), tenta de novo com uma pausa antes de qualquer coisa.
+      if (raw.includes('404') && updateRetryCount < MAX_UPDATE_RETRIES) {
+        updateRetryCount++
+        setTimeout(() => {
+          autoUpdater.checkForUpdates().catch(() => {})
+        }, 45_000)
+        return
+      }
+
       const short = raw.split('\n')[0].slice(0, 120)
       sendUpdateStatus('error', { message: short })
     })

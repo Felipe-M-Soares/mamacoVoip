@@ -393,24 +393,32 @@ app.whenReady().then(() => {
     const MAX_UPDATE_RETRIES = 3
 
     autoUpdater.on('error', (err) => {
-      const raw = err?.message ?? 'Erro desconhecido'
+      // Antes a gente só olhava err.message, que às vezes vem bem curto
+      // ("404" sozinho) sem dizer QUAL endpoint falhou. Isso pega todas
+      // as propriedades do erro (inclusive as que não aparecem em
+      // JSON.stringify por padrão) pra dar um diagnóstico de verdade.
+      let raw = 'Erro desconhecido'
+      try {
+        raw = JSON.stringify(err, Object.getOwnPropertyNames(err))
+      } catch {
+        raw = err?.message ?? String(err)
+      }
 
       // Um release recém-publicado pode demorar alguns minutos pra o
       // GitHub "enxergar" ele como o mais recente (atraso normal de
       // indexação do próprio GitHub, não é bug daqui) — isso costuma
       // aparecer como 404 bem na primeira checagem depois de abrir o
-      // app. Em vez de desistir na hora (ou pior, fingir que está tudo
-      // certo), tenta de novo com uma pausa antes de qualquer coisa.
+      // app. Em vez de desistir na hora, tenta de novo com uma pausa
+      // curta antes de qualquer coisa.
       if (raw.includes('404') && updateRetryCount < MAX_UPDATE_RETRIES) {
         updateRetryCount++
         setTimeout(() => {
           autoUpdater.checkForUpdates().catch(() => {})
-        }, 45_000)
+        }, 15_000)
         return
       }
 
-      const short = raw.split('\n')[0].slice(0, 120)
-      sendUpdateStatus('error', { message: short })
+      sendUpdateStatus('error', { message: raw.slice(0, 400) })
     })
 
     ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall())

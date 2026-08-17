@@ -91,12 +91,20 @@ export function UpdateStatusBadge() {
       <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-red-400 shrink-0 mt-0.5">
         <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2zm0-4h-2V7h2z" />
       </svg>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-xs text-discord-text-muted">Não foi possível verificar atualizações</p>
         {status.message && (
-          <p className="text-[10px] text-discord-text-muted/70 mt-0.5 break-words">
-            {status.message.split('\n')[0].slice(0, 80)}
-          </p>
+          <>
+            <p className="text-[10px] text-discord-text-muted/70 mt-0.5 break-words max-h-24 overflow-y-auto font-mono">
+              {status.message}
+            </p>
+            <button
+              onClick={() => navigator.clipboard.writeText(status.message ?? '')}
+              className="text-[10px] text-discord-blurple hover:underline mt-1"
+            >
+              Copiar detalhes
+            </button>
+          </>
         )}
       </div>
     </div>

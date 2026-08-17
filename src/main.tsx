@@ -29,13 +29,26 @@ function showFatalError(message: string) {
   el.appendChild(container)
 }
 
-window.addEventListener('error', (e) => {
+function handleWindowError(e: ErrorEvent) {
   showFatalError(`${e.message}${e.filename ? `\n(${e.filename}:${e.lineno})` : ''}`)
-})
-window.addEventListener('unhandledrejection', (e) => {
+}
+function handleUnhandledRejection(e: PromiseRejectionEvent) {
   const reason = e.reason
   showFatalError(reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason))
-})
+}
+
+// Esses dois só existem pra pegar falhas durante a INICIALIZAÇÃO do
+// app (arquivo não carregou, configuração ausente, etc.) — uma vez que
+// o app abriu com sucesso, eles são removidos. Sem isso, qualquer erro
+// bobo acontecendo DEPOIS do app já estar funcionando (tipo cancelar
+// um compartilhamento de tela) derrubava a tela inteira de novo.
+window.addEventListener('error', handleWindowError)
+window.addEventListener('unhandledrejection', handleUnhandledRejection)
+
+function detachStartupErrorHandlers() {
+  window.removeEventListener('error', handleWindowError)
+  window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+}
 
 // Checa ANTES de importar o resto do app — se importássemos ./App.tsx
 // de forma estática lá em cima, o cliente do Supabase seria avaliado
@@ -56,6 +69,10 @@ if (!hasSupabaseConfig) {
           <App />
         </StrictMode>,
       )
+      // Dá um instante pro React terminar de montar antes de soltar a
+      // rede de segurança — depois disso, erros do dia a dia não usam
+      // mais essa tela de emergência.
+      setTimeout(detachStartupErrorHandlers, 3000)
     })
     .catch((err) => {
       showFatalError(err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err))

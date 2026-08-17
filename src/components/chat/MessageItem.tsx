@@ -75,6 +75,7 @@ export function MessageItem({
   const [editValue, setEditValue] = useState(message.content)
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const { menuState, openMenu, closeMenu } = useContextMenuState()
+  const { menuState: userMenuState, openMenu: openUserMenu, closeMenu: closeUserMenu } = useContextMenuState()
 
   async function handleSaveEdit() {
     if (editValue.trim().length === 0) return
@@ -177,7 +178,11 @@ export function MessageItem({
       <div className="flex gap-4">
         {showHeader ? (
           <div className="pt-0.5">
-            <button onClick={() => author && onViewProfile(author)} className="block">
+            <button
+              onClick={() => author && onViewProfile(author)}
+              onContextMenu={openUserMenu}
+              className="block"
+            >
               <Avatar name={author?.username ?? '?'} avatarUrl={author?.avatar_url} size={40} />
             </button>
           </div>
@@ -194,6 +199,7 @@ export function MessageItem({
             <div className="flex items-baseline gap-2">
               <button
                 onClick={() => author && onViewProfile(author)}
+                onContextMenu={openUserMenu}
                 className="font-medium text-white text-sm hover:underline"
               >
                 {author?.display_name || author?.username || 'Usuário'}
@@ -315,6 +321,18 @@ export function MessageItem({
                   },
                 ]
               : []),
+          ]}
+        />
+      )}
+
+      {userMenuState && author && (
+        <ContextMenu
+          x={userMenuState.x}
+          y={userMenuState.y}
+          onClose={closeUserMenu}
+          items={[
+            { label: 'Ver perfil', onClick: () => onViewProfile(author) },
+            { label: 'Copiar nome de usuário', onClick: () => navigator.clipboard.writeText(author.username) },
           ]}
         />
       )}

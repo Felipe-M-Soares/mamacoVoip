@@ -1,21 +1,18 @@
 import { Avatar } from '../ui/Avatar'
 import { UserPanel } from './UserPanel'
 import { useConversations } from '../../hooks/useConversations'
-import { TEST_BOT_PROFILE } from '../../lib/testBot'
 
 export function HomeSidebar({
   view,
   activeConversationId,
   unreadConversationIds,
   onSelectFriends,
-  onSelectBot,
   onSelectConversation,
 }: {
-  view: 'friends' | 'bot' | 'conversation'
+  view: 'friends' | 'conversation'
   activeConversationId: string | null
   unreadConversationIds: Set<string>
   onSelectFriends: () => void
-  onSelectBot: () => void
   onSelectConversation: (conversationId: string) => void
 }) {
   const { conversations, loading } = useConversations()
@@ -38,16 +35,6 @@ export function HomeSidebar({
             <path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zM8 11c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
           </svg>
           Amigos
-        </button>
-
-        <button
-          onClick={onSelectBot}
-          className={`w-full flex items-center gap-2.5 px-2 py-1.5 mt-0.5 rounded text-sm font-medium transition-colors ${
-            view === 'bot' ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:bg-white/5 hover:text-discord-text'
-          }`}
-        >
-          <Avatar name={TEST_BOT_PROFILE.username} avatarUrl={TEST_BOT_PROFILE.avatar_url} size={20} />
-          Bot de Testes
         </button>
 
         <div className="px-2 mt-4 mb-1 text-xs font-semibold text-discord-text-muted tracking-wide">

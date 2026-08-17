@@ -12,7 +12,9 @@ export function ScreenSharePicker() {
   if (!sources) return null
 
   function choose(id: string | null) {
-    window.electronAPI?.selectScreenShareSource(id)
+    window.electronAPI?.selectScreenShareSource(id).catch(() => {
+      // best-effort — cancelar o compartilhamento não deve nunca quebrar a tela
+    })
     setSources(null)
   }
 

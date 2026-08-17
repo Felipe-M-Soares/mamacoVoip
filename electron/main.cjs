@@ -44,26 +44,94 @@ function isAllowedNavigation(url) {
 // motivo de segurança — é uma limitação de qualquer navegador, não
 // só do nosso app.
 const KNOWN_GAMES = {
+  // Tiro/competitivo
   'valorant.exe': 'Valorant',
-  'javaw.exe': 'Minecraft',
-  'minecraft.exe': 'Minecraft',
+  'valorant-win64-shipping.exe': 'Valorant',
   'csgo.exe': 'Counter-Strike',
   'cs2.exe': 'Counter-Strike 2',
-  'league of legends.exe': 'League of Legends',
-  'leagueclient.exe': 'League of Legends',
-  'gta5.exe': 'GTA V',
-  'fortniteclient-win64-shipping.exe': 'Fortnite',
+  'rainbowsix.exe': 'Rainbow Six Siege',
+  'rainbowsix_be.exe': 'Rainbow Six Siege',
+  'rainbowsix_vulkan.exe': 'Rainbow Six Siege',
+  'rainbowsix_dx11.exe': 'Rainbow Six Siege',
   'r5apex.exe': 'Apex Legends',
-  'destiny2.exe': 'Destiny 2',
   'overwatch.exe': 'Overwatch 2',
-  'dota2.exe': 'Dota 2',
-  'rocketleague.exe': 'Rocket League',
-  'eldenring.exe': 'Elden Ring',
+  'pubg.exe': 'PUBG: Battlegrounds',
+  'tslgame.exe': 'PUBG: Battlegrounds',
+  'escapefromtarkov.exe': 'Escape from Tarkov',
+  'destiny2.exe': 'Destiny 2',
+  'thefinals.exe': 'The Finals',
+  'delta_force.exe': 'Delta Force',
+
+  // Battle royale / multiplayer casual
+  'fortniteclient-win64-shipping.exe': 'Fortnite',
   'robloxplayerbeta.exe': 'Roblox',
   'among us.exe': 'Among Us',
+  'amongus.exe': 'Among Us',
+
+  // MOBA
+  'league of legends.exe': 'League of Legends',
+  'leagueclient.exe': 'League of Legends',
+  'dota2.exe': 'Dota 2',
+  'smite.exe': 'Smite',
+
+  // Mundo aberto / RPG / ação
+  'gta5.exe': 'GTA V',
+  'gta5_enhanced.exe': 'GTA V',
+  'eldenring.exe': 'Elden Ring',
+  'starfield.exe': 'Starfield',
+  'cyberpunk2077.exe': 'Cyberpunk 2077',
+  'witcher3.exe': 'The Witcher 3',
+  'reddeadredemption2.exe': 'Red Dead Redemption 2',
+  'rdr2.exe': 'Red Dead Redemption 2',
+  'skyrimse.exe': 'Skyrim',
+  'baldur\'s gate 3.exe': "Baldur's Gate 3",
+  'bg3.exe': "Baldur's Gate 3",
+  'hogwartslegacy.exe': 'Hogwarts Legacy',
+  'palworld.exe': 'Palworld',
+  'blackmythwukong.exe': 'Black Myth: Wukong',
+
+  // Sandbox / construção / sobrevivência
+  'javaw.exe': 'Minecraft',
+  'minecraft.exe': 'Minecraft',
+  'minecraftlauncher.exe': 'Minecraft',
   'terraria.exe': 'Terraria',
+  'rust.exe': 'Rust',
+  'dayzps.exe': 'DayZ',
+  'dayz_x64.exe': 'DayZ',
+  'ark.exe': 'ARK: Survival Evolved',
+  'arkascended.exe': 'ARK: Survival Ascended',
+  'valheim.exe': 'Valheim',
+  '7daystodie.exe': '7 Days to Die',
+  'stardewvalley.exe': 'Stardew Valley',
+
+  // Esportes / corrida
+  'rocketleague.exe': 'Rocket League',
+  'fc24.exe': 'EA Sports FC 24',
+  'fc25.exe': 'EA Sports FC 25',
+  'nba2k24.exe': 'NBA 2K24',
+  'forzahorizon5.exe': 'Forza Horizon 5',
+  'assettocorsa.exe': 'Assetto Corsa',
+
+  // Outros populares
+  'wow.exe': 'World of Warcraft',
+  'wowclassic.exe': 'World of Warcraft',
+  'ffxiv_dx11.exe': 'Final Fantasy XIV',
+  'genshinimpact.exe': 'Genshin Impact',
+  'starrail.exe': 'Honkai: Star Rail',
+  'wutheringwaves.exe': 'Wuthering Waves',
+  'phasmophobia.exe': 'Phasmophobia',
+  'lethalcompany.exe': 'Lethal Company',
+  'helldivers2.exe': 'Helldivers 2',
+  'palia.exe': 'Palia',
+  'sea of thieves.exe': 'Sea of Thieves',
+  'seaofthieves.exe': 'Sea of Thieves',
+  'itsvertigo.exe': 'Vertigo',
 }
 
+// Combina o nome do processo (chave do dicionário acima) SEM a
+// extensão .exe também, já que no Mac/Linux processos não costumam
+// ter esse sufixo — melhora um pouco a cobertura fora do Windows,
+// mesmo que a lista tenha sido pensada primariamente pra ele.
 const GAME_CHECK_INTERVAL_MS = 15_000
 
 let mainWindow = null
@@ -256,13 +324,23 @@ app.whenReady().then(() => {
     if (!pendingDisplayMediaCallback) return
     const resolve = pendingDisplayMediaCallback
     pendingDisplayMediaCallback = null
-    if (!sourceId) {
-      resolve({})
-      return
+    try {
+      if (!sourceId) {
+        // Cancelamento (usuário clicou fora ou em "Cancelar"). Chamar o
+        // callback com um objeto vazio é como o Electron espera que a
+        // gente negue o pedido — mas isso pode lançar uma exceção
+        // interna dependendo da versão, por isso o try/catch em volta.
+        resolve({})
+        return
+      }
+      const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
+      const source = sources.find((s) => s.id === sourceId)
+      resolve(source ? { video: source, audio: 'loopback' } : {})
+    } catch {
+      // Engolir aqui de propósito — sem isso, cancelar o compartilhamento
+      // de tela derrubava o app inteiro (o erro escapava até o processo
+      // renderer via IPC e acionava a tela de "Erro ao iniciar o app").
     }
-    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
-    const source = sources.find((s) => s.id === sourceId)
-    resolve(source ? { video: source, audio: 'loopback' } : {})
   })
 
   Menu.setApplicationMenu(null)

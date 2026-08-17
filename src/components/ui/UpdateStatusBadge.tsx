@@ -69,7 +69,11 @@ export function UpdateStatusBadge() {
       </svg>
       <div className="min-w-0">
         <p className="text-xs text-discord-text-muted">Não foi possível verificar atualizações</p>
-        {status.message && <p className="text-[10px] text-discord-text-muted/70 mt-0.5 break-words">{status.message}</p>}
+        {status.message && (
+          <p className="text-[10px] text-discord-text-muted/70 mt-0.5 break-words">
+            {status.message.split('\n')[0].slice(0, 80)}
+          </p>
+        )}
       </div>
     </div>
   )

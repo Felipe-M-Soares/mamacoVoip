@@ -389,14 +389,27 @@ app.whenReady().then(() => {
       updateReadyToInstall = true
       sendUpdateStatus('ready', { version: info.version })
     })
-    autoUpdater.on('error', (err) => sendUpdateStatus('error', { message: err?.message ?? 'Erro desconhecido' }))
+    autoUpdater.on('error', (err) => {
+      const raw = err?.message ?? 'Erro desconhecido'
+      const short = raw.split('\n')[0].slice(0, 120)
+      sendUpdateStatus('error', { message: short })
+    })
 
     ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall())
 
-    autoUpdater.checkForUpdates().catch(() => {
-      // sem conexão ou nenhum release publicado ainda — o evento 'error'
-      // acima já avisa a janela, então não precisa fazer nada aqui além
-      // de não deixar isso impedir o app de abrir
+    // A checagem em si só dispara depois que a janela terminou de
+    // carregar (+ uma folga extra) — se disparasse aqui, os avisos de
+    // "verificando"/"baixando" seriam mandados pro app ANTES dele
+    // terminar de montar e começar a escutar essas mensagens, e se
+    // perderiam no caminho (por isso nenhum aviso aparecia na tela).
+    win.once('ready-to-show', () => {
+      setTimeout(() => {
+        autoUpdater.checkForUpdates().catch(() => {
+          // sem conexão ou nenhum release publicado ainda — o evento 'error'
+          // acima já avisa a janela, então não precisa fazer nada aqui além
+          // de não deixar isso impedir o app de abrir
+        })
+      }, 1500)
     })
   }
 

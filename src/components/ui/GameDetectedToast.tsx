@@ -17,7 +17,7 @@ export function GameDetectedToast() {
   }
 
   return (
-    <div className="fixed bottom-16 left-3 z-[260] w-72 bg-discord-dark border border-discord-blurple/30 rounded-xl shadow-2xl p-3.5 brand-glow-sm">
+    <div className="fixed bottom-48 left-3 z-[260] w-72 bg-discord-dark border border-discord-blurple/30 rounded-xl shadow-2xl p-3.5 brand-glow-sm">
       <div className="flex items-start gap-3">
         <div className="w-9 h-9 rounded-full bg-discord-blurple/20 flex items-center justify-center shrink-0">
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-blurple">

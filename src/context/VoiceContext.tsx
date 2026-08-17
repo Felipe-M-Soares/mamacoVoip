@@ -3,6 +3,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
+import { useScreenShareQuality } from '../hooks/useScreenShareQuality'
 import {
   playConnectSound,
   playDisconnectSound,
@@ -83,6 +84,7 @@ interface VoiceContextValue {
   changeMicrophone: (deviceId: string) => Promise<void>
   refreshAudioConstraints: () => Promise<void>
   audioSettings: ReturnType<typeof useAudioSettings>
+  screenShareQuality: ReturnType<typeof useScreenShareQuality>
   maxParticipants: number
   masterVolume: number
   setMasterVolume: (volume: number) => void
@@ -100,6 +102,9 @@ export const VoiceContext = createContext<VoiceContextValue | undefined>(undefin
 export function VoiceProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const audioSettings = useAudioSettings()
+  const screenShareQuality = useScreenShareQuality()
+  const screenShareQualityRef = useRef(screenShareQuality.preset)
+  screenShareQualityRef.current = screenShareQuality.preset
   const audioSettingsRef = useRef(audioSettings)
   audioSettingsRef.current = audioSettings
 
@@ -619,14 +624,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return
     }
     try {
+      const preset = screenShareQualityRef.current
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          // Trava em 1080p/30fps — dá uma imagem nítida sem exigir
-          // tanto da GPU/CPU quanto capturar em resolução/taxa maiores,
-          // que é o que mais rouba desempenho de jogos rodando junto.
-          width: { ideal: 1920, max: 1920 },
-          height: { ideal: 1080, max: 1080 },
-          frameRate: { ideal: 30, max: 30 },
+          // Usa o preset de qualidade escolhido pela pessoa (Desempenho
+          // ou Qualidade máxima) — em vez de um valor fixo, ela decide
+          // o equilíbrio entre nitidez e não travar o jogo.
+          width: { ideal: preset.width, max: preset.width },
+          height: { ideal: preset.height, max: preset.height },
+          frameRate: { ideal: preset.frameRate, max: preset.frameRate },
         },
         // Inclui o áudio do sistema/jogo na transmissão, não só a
         // imagem — quem estiver assistindo ouve o som do jogo junto.
@@ -652,14 +658,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
       peersRef.current.forEach(({ pc }) => {
         const sender = pc.addTrack(videoTrack, stream)
-        // Limita o bitrate e prioriza manter os quadros por segundo
-        // (em vez de resolução) quando a conexão/CPU não aguentar tudo
-        // — pra quem tá jogando, uma imagem um pouco mais simples mas
-        // fluida é bem melhor que uma nítida só que travando.
         const params = sender.getParameters()
         params.encodings = params.encodings?.length ? params.encodings : [{}]
-        params.encodings[0].maxBitrate = 4_000_000
-        ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = 'maintain-framerate'
+        params.encodings[0].maxBitrate = preset.maxBitrate
+        ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
+          preset.degradationPreference
         sender.setParameters(params).catch(() => {
           // alguns navegadores/drivers não suportam todos os campos — sem problema, segue com o padrão
         })
@@ -715,6 +718,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         changeMicrophone,
         refreshAudioConstraints,
         audioSettings,
+        screenShareQuality,
         maxParticipants: MAX_PARTICIPANTS,
         masterVolume,
         setMasterVolume,

@@ -40,8 +40,14 @@ function VoiceChannelPresence({ channelId, profileById }: { channelId: string; p
       {userIds.map((id) => {
         const p = id === user?.id ? undefined : profileById[id]
         const name = id === user?.id ? 'Você' : p?.display_name || p?.username || '...'
+        const isSpeaking = id === user?.id ? voice.speaking : voice.participants[id]?.speaking ?? false
         return (
-          <div key={id} className="flex items-center gap-1 bg-discord-darker/60 rounded-full pl-0.5 pr-2 py-0.5">
+          <div
+            key={id}
+            className={`flex items-center gap-1 bg-discord-darker/60 rounded-full pl-0.5 pr-2 py-0.5 transition-shadow ${
+              isSpeaking ? 'ring-2 ring-discord-blurple shadow-[0_0_8px_0] shadow-discord-blurple/60 animate-pulse' : ''
+            }`}
+          >
             <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={16} />
             <span className="text-[10px] text-discord-text-muted truncate max-w-[70px]">{name}</span>
           </div>

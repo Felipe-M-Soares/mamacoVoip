@@ -183,7 +183,7 @@ function ParticipantTile({
   if (compact) {
     return (
       <div className="flex flex-col items-center gap-1 w-16 shrink-0" onMouseLeave={() => setShowVolumeSlider(false)}>
-        <div className={`relative rounded-full ${speaking ? 'ring-2 ring-discord-green' : ''}`}>
+        <div className={`relative rounded-full ${speaking ? 'ring-2 ring-discord-blurple' : ''}`}>
           <Avatar name={name} avatarUrl={avatarUrl} size={48} />
           {audioEl}
         </div>
@@ -196,7 +196,7 @@ function ParticipantTile({
   return (
     <div
       className={`relative aspect-video bg-discord-darker rounded-lg flex items-center justify-center overflow-hidden border-2 transition-colors group/tile ${
-        speaking ? 'border-discord-green' : 'border-transparent'
+        speaking ? 'border-discord-blurple' : 'border-transparent'
       }`}
       onMouseLeave={() => setShowVolumeSlider(false)}
     >
@@ -438,6 +438,18 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
                 <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
               </svg>
             </button>
+
+            {!voice.screenSharing && (
+              <select
+                value={voice.screenShareQuality.quality}
+                onChange={(e) => voice.screenShareQuality.setQuality(e.target.value as 'performance' | 'quality')}
+                title="Qualidade do compartilhamento de tela"
+                className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none max-w-[160px] truncate"
+              >
+                <option value="performance">Desempenho (1080p/30fps)</option>
+                <option value="quality">Qualidade máxima (4K/60fps)</option>
+              </select>
+            )}
 
             <button
               onClick={voice.leave}

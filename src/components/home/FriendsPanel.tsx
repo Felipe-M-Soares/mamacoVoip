@@ -12,6 +12,7 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
   const { openConversationWith } = useConversations()
   const [tab, setTab] = useState<Tab>('online')
   const [addUsername, setAddUsername] = useState('')
+  const [addNote, setAddNote] = useState('')
   const [addError, setAddError] = useState<string | null>(null)
   const [addSuccess, setAddSuccess] = useState<string | null>(null)
 
@@ -22,13 +23,14 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
     setAddError(null)
     setAddSuccess(null)
     if (addUsername.trim().length === 0) return
-    const { error } = await sendRequest(addUsername.trim())
+    const { error } = await sendRequest(addUsername.trim(), addNote.trim() || undefined)
     if (error) {
       setAddError(error)
       return
     }
     setAddSuccess(`Pedido enviado para ${addUsername.trim()}!`)
     setAddUsername('')
+    setAddNote('')
   }
 
   async function handleMessage(userId: string) {
@@ -85,6 +87,15 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
             Enviar pedido
           </button>
         </div>
+        <input
+          type="text"
+          value={addNote}
+          onChange={(e) => setAddNote(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSendRequest()}
+          placeholder="Adicionar uma nota (opcional) — ex: 'a gente jogou junto ontem'"
+          maxLength={200}
+          className="w-full mt-2 px-3 py-2 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-xs"
+        />
         {addError && <p className="text-sm text-red-400 mt-2">{addError}</p>}
         {addSuccess && <p className="text-sm text-discord-green mt-2">{addSuccess}</p>}
       </div>
@@ -107,9 +118,16 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
                   {incoming.map((req) => (
                     <div key={req.id} className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5">
                       <Avatar name={req.profile.username} avatarUrl={req.profile.avatar_url} size={36} />
-                      <span className="flex-1 text-sm text-white truncate">
-                        {req.profile.display_name || req.profile.username}
-                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-white truncate block">
+                          {req.profile.display_name || req.profile.username}
+                        </span>
+                        {req.request_note && (
+                          <span className="text-xs text-discord-text-muted italic truncate block">
+                            "{req.request_note}"
+                          </span>
+                        )}
+                      </div>
                       <button
                         onClick={() => acceptRequest(req.id)}
                         className="px-3 py-1 rounded bg-discord-green text-white text-xs font-medium hover:bg-green-600"

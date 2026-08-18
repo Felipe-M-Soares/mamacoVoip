@@ -4,7 +4,7 @@ import { InviteMessageCard } from './InviteMessageCard'
 import { parseInviteMessage } from '../../lib/inviteMessage'
 import { parseMessageContent } from '../../lib/messageFormatting'
 import { LinkPreviewCard, extractFirstUrl } from './LinkPreviewCard'
-import type { DMMessage, Profile } from '../../types/database'
+import type { DMMessage, Profile, DMMessageAttachment } from '../../types/database'
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -20,6 +20,7 @@ export function DMMessageItem({
   onEdit,
   onDelete,
   onReply,
+  attachments,
 }: {
   message: DMMessage
   author: Profile | undefined
@@ -30,6 +31,7 @@ export function DMMessageItem({
   onEdit: (content: string) => Promise<{ error: string | null }>
   onDelete: () => void
   onReply: () => void
+  attachments?: DMMessageAttachment[]
 }) {
   const inviteData = parseInviteMessage(message.content)
   const [editing, setEditing] = useState(false)
@@ -149,6 +151,41 @@ export function DMMessageItem({
             const url = extractFirstUrl(message.content)
             return url ? <LinkPreviewCard url={url} /> : null
           })()}
+          {attachments && attachments.length > 0 && (
+            <div className="mt-2 flex flex-col gap-2 max-w-md">
+              {attachments.map((att) =>
+                att.mime_type.startsWith('image/') ? (
+                  <a key={att.id} href={att.file_url} target="_blank" rel="noreferrer">
+                    <img
+                      src={att.file_url}
+                      alt={att.file_name}
+                      className="rounded-lg max-h-80 object-cover border border-black/20"
+                    />
+                  </a>
+                ) : att.mime_type.startsWith('audio/') ? (
+                  <div key={att.id} className="flex items-center gap-2 bg-discord-darker rounded-lg px-3 py-2.5">
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-blurple shrink-0">
+                      <path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4l3.3 3.3V4a1 1 0 0 1 1-1z" />
+                    </svg>
+                    <audio controls src={att.file_url} className="h-9 max-w-xs" />
+                  </div>
+                ) : (
+                  <a
+                    key={att.id}
+                    href={att.file_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-3 bg-discord-darker rounded-lg px-3 py-2.5 hover:bg-discord-lighter transition-colors"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-text-muted shrink-0">
+                      <path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5L14 3.5z" />
+                    </svg>
+                    <span className="text-sm text-discord-text truncate">{att.file_name}</span>
+                  </a>
+                )
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -5,8 +5,9 @@ import { useServerMembers } from '../../hooks/useServerMembers'
 import { useVoice } from '../../hooks/useVoice'
 import { useModeration } from '../../hooks/useModeration'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
+import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { VoiceParticipant } from '../../context/VoiceContext'
-import type { Channel } from '../../types/database'
+import type { Channel, Profile } from '../../types/database'
 
 function VideoTile({ stream, sinkId }: { stream: MediaStream; sinkId?: string | null }) {
   const ref = useRef<HTMLVideoElement>(null)
@@ -59,64 +60,160 @@ function ScreenShareStage({
 }) {
   const voice = useVoice()
   const [openVolumeFor, setOpenVolumeFor] = useState<string | null>(null)
-  const cols = shares.length <= 1 ? 1 : shares.length <= 2 ? 2 : shares.length <= 4 ? 2 : 3
+  const [openModeFor, setOpenModeFor] = useState<string | null>(null)
+  // Cada pessoa que assiste escolhe como prefere ver cada transmissão —
+  // essa escolha é só local (não afeta o que os outros veem).
+  const [displayModes, setDisplayModes] = useState<Record<string, 'grid' | 'fullscreen' | 'popup'>>({})
 
-  return (
-    <div
-      className="grid gap-3 mb-4"
-      style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-    >
-      {shares.map((share) => {
-        const hasAudio = share.stream.getAudioTracks().length > 0
-        const shareVolume = voice.getScreenShareVolume(share.key)
-        const effectiveVolume = (voice.masterVolume / 100) * (shareVolume / 100)
+  function modeOf(key: string) {
+    return displayModes[key] ?? 'grid'
+  }
+  function setMode(key: string, mode: 'grid' | 'fullscreen' | 'popup') {
+    setDisplayModes((prev) => ({ ...prev, [key]: mode }))
+    setOpenModeFor(null)
+  }
 
-        return (
-          <div
-            key={share.key}
-            className="relative aspect-video rounded-lg overflow-hidden border border-black/30 bg-black group/share"
-            onMouseLeave={() => setOpenVolumeFor((v) => (v === share.key ? null : v))}
-          >
-            <VideoTile stream={share.stream} />
-            {!share.isLocal && <ScreenShareAudio stream={share.stream} volume={effectiveVolume} />}
-            <span className="absolute bottom-1.5 left-2 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded flex items-center gap-1">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
-                <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
-              </svg>
-              {share.name}
-              {share.isLocal && ' (você)'}
-            </span>
+  const gridShares = shares.filter((s) => modeOf(s.key) === 'grid')
+  const fullscreenShare = shares.find((s) => modeOf(s.key) === 'fullscreen')
+  const popupShares = shares.filter((s) => modeOf(s.key) === 'popup')
+  const cols = gridShares.length <= 1 ? 1 : gridShares.length <= 2 ? 2 : gridShares.length <= 4 ? 2 : 3
 
-            {!share.isLocal && hasAudio && (
-              <div className="absolute top-1.5 right-2 opacity-0 group-hover/share:opacity-100 transition-opacity">
-                <button
-                  onClick={() => setOpenVolumeFor((v) => (v === share.key ? null : share.key))}
-                  title="Ajustar volume do áudio desta transmissão"
-                  className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
-                >
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                    <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8z" />
-                  </svg>
-                </button>
-                {openVolumeFor === share.key && (
-                  <div className="absolute top-7 right-0 bg-[#111214] rounded-lg shadow-xl border border-black/40 p-2.5 w-36 z-10">
-                    <p className="text-[10px] text-discord-text-muted mb-1.5">Áudio da transmissão: {shareVolume}%</p>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={shareVolume}
-                      onChange={(e) => voice.setScreenShareVolume(share.key, Number(e.target.value))}
-                      className="w-full accent-discord-blurple"
-                    />
-                  </div>
+  function renderTile(share: (typeof shares)[number]) {
+    const hasAudio = share.stream.getAudioTracks().length > 0
+    const shareVolume = voice.getScreenShareVolume(share.key)
+    const isMuted = shareVolume === 0
+    const effectiveVolume = (voice.masterVolume / 100) * (shareVolume / 100)
+
+    return (
+      <div
+        key={share.key}
+        className="relative aspect-video rounded-lg overflow-hidden border border-black/30 bg-black group/share w-full h-full"
+        onMouseLeave={() => {
+          setOpenVolumeFor((v) => (v === share.key ? null : v))
+          setOpenModeFor((v) => (v === share.key ? null : v))
+        }}
+      >
+        <VideoTile stream={share.stream} />
+        {!share.isLocal && <ScreenShareAudio stream={share.stream} volume={effectiveVolume} />}
+        <span className="absolute bottom-1.5 left-2 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded flex items-center gap-1">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+            <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
+          </svg>
+          {share.name}
+          {share.isLocal && ' (você)'}
+        </span>
+
+        <div className="absolute top-1.5 right-2 flex items-center gap-1.5 opacity-0 group-hover/share:opacity-100 transition-opacity">
+          {!share.isLocal && hasAudio && (
+            <button
+              onClick={() => voice.setScreenShareVolume(share.key, isMuted ? 100 : 0)}
+              title={isMuted ? 'Reativar áudio' : 'Silenciar essa transmissão'}
+              className={`w-6 h-6 flex items-center justify-center rounded-full text-white ${
+                isMuted ? 'bg-red-600' : 'bg-black/60 hover:bg-black/80'
+              }`}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                {isMuted ? (
+                  <path d="M16.5 12A4.5 4.5 0 0 0 14 8v1.2l2.4 2.4c.06-.2.1-.4.1-.6zM3 3l18 18-1.4 1.4-3.4-3.4A4.5 4.5 0 0 1 14 20v-2a2.5 2.5 0 0 0 1-2v-.2L3 3.4 3 3z" />
+                ) : (
+                  <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8z" />
                 )}
+              </svg>
+            </button>
+          )}
+
+          {!share.isLocal && hasAudio && (
+            <div className="relative">
+              <button
+                onClick={() => setOpenVolumeFor((v) => (v === share.key ? null : share.key))}
+                title="Ajustar volume do áudio desta transmissão"
+                className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M12 3a1 1 0 0 1 1 1v16a1 1 0 0 1-1.7.7L7 16H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h3l4.3-4.7A1 1 0 0 1 12 3z" />
+                </svg>
+              </button>
+              {openVolumeFor === share.key && (
+                <div className="absolute top-7 right-0 bg-[#111214] rounded-lg shadow-xl border border-black/40 p-2.5 w-36 z-10">
+                  <p className="text-[10px] text-discord-text-muted mb-1.5">Áudio da transmissão: {shareVolume}%</p>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={shareVolume}
+                    onChange={(e) => voice.setScreenShareVolume(share.key, Number(e.target.value))}
+                    className="w-full accent-discord-blurple"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="relative">
+            <button
+              onClick={() => setOpenModeFor((v) => (v === share.key ? null : share.key))}
+              title="Como quero ver isso"
+              className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                <path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+              </svg>
+            </button>
+            {openModeFor === share.key && (
+              <div className="absolute top-7 right-0 bg-[#111214] rounded-lg shadow-xl border border-black/40 py-1 w-36 z-10">
+                {(
+                  [
+                    ['grid', 'Na grade'],
+                    ['fullscreen', 'Tela cheia'],
+                    ['popup', 'Janela flutuante'],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setMode(share.key, mode)}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 ${
+                      modeOf(share.key) === mode ? 'text-discord-blurple' : 'text-discord-text'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
-        )
-      })}
-    </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+        {gridShares.map((share) => renderTile(share))}
+      </div>
+
+      {fullscreenShare && (
+        <div className="fixed inset-0 z-[350] bg-black p-4 flex items-center justify-center">
+          <div className="w-full h-full max-w-6xl">{renderTile(fullscreenShare)}</div>
+          <button
+            onClick={() => setMode(fullscreenShare.key, 'grid')}
+            className="absolute top-4 right-4 px-3 py-1.5 rounded-full bg-discord-darker text-white text-sm hover:bg-black/80"
+          >
+            Sair da tela cheia
+          </button>
+        </div>
+      )}
+
+      {popupShares.map((share, i) => (
+        <div
+          key={share.key}
+          className="fixed z-[340] w-64 shadow-2xl"
+          style={{ bottom: 16 + i * 156, right: 16 }}
+        >
+          {renderTile(share)}
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -129,6 +226,7 @@ function ParticipantTile({
   localVideoEnabled,
   sinkId,
   compact = false,
+  onViewProfile,
 }: {
   userId: string
   name: string
@@ -138,9 +236,11 @@ function ParticipantTile({
   localVideoEnabled?: boolean
   sinkId?: string | null
   compact?: boolean
+  onViewProfile?: (userId: string) => void
 }) {
   const voice = useVoice()
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
+  const { menuState, openMenu, closeMenu } = useContextMenuState()
   const speaking = data?.speaking ?? false
   const hasCameraVideo = isLocal ? localVideoEnabled : Boolean(data?.cameraStream?.getVideoTracks().length)
   const participantVolume = isLocal ? 100 : voice.getParticipantVolume(userId)
@@ -183,13 +283,28 @@ function ParticipantTile({
 
   if (compact) {
     return (
-      <div className="flex flex-col items-center gap-1 w-16 shrink-0" onMouseLeave={() => setShowVolumeSlider(false)}>
+      <div
+        className="flex flex-col items-center gap-1 w-16 shrink-0"
+        onMouseLeave={() => setShowVolumeSlider(false)}
+        onContextMenu={!isLocal ? openMenu : undefined}
+      >
         <div className={`relative rounded-full ${speaking ? 'ring-2 ring-discord-blurple' : ''}`}>
           <Avatar name={name} avatarUrl={avatarUrl} size={48} />
           {audioEl}
         </div>
         <span className="text-[10px] text-discord-text truncate max-w-full">{isLocal ? 'Você' : name}</span>
         {volumeButton}
+        {menuState && !isLocal && (
+          <ContextMenu
+            x={menuState.x}
+            y={menuState.y}
+            onClose={closeMenu}
+            items={[
+              { label: 'Ver perfil', onClick: () => onViewProfile?.(userId) },
+              { label: 'Ajustar volume', onClick: () => setShowVolumeSlider(true) },
+            ]}
+          />
+        )}
       </div>
     )
   }
@@ -200,6 +315,7 @@ function ParticipantTile({
         speaking ? 'border-discord-blurple' : 'border-transparent'
       }`}
       onMouseLeave={() => setShowVolumeSlider(false)}
+      onContextMenu={!isLocal ? openMenu : undefined}
     >
       {hasCameraVideo && data?.cameraStream ? (
         <VideoTile stream={data.cameraStream} sinkId={sinkId} />
@@ -207,21 +323,45 @@ function ParticipantTile({
         <Avatar name={name} avatarUrl={avatarUrl} size={64} />
       )}
       {audioEl}
-      <span className="absolute bottom-1.5 left-2 text-xs text-white bg-black/50 px-1.5 py-0.5 rounded">
+      <span className="absolute bottom-1.5 left-2 text-sm font-medium text-white bg-black/50 px-1.5 py-0.5 rounded">
         {name}
         {isLocal && ' (você)'}
       </span>
       {volumeButton}
+      {menuState && !isLocal && (
+        <ContextMenu
+          x={menuState.x}
+          y={menuState.y}
+          onClose={closeMenu}
+          items={[
+            { label: 'Ver perfil', onClick: () => onViewProfile?.(userId) },
+            { label: 'Ajustar volume', onClick: () => setShowVolumeSlider(true) },
+          ]}
+        />
+      )}
     </div>
   )
 }
 
-export function VoiceChannelView({ channel, serverId }: { channel: Channel; serverId: string }) {
+export function VoiceChannelView({
+  channel,
+  serverId,
+  onViewProfile,
+}: {
+  channel: Channel
+  serverId: string
+  onViewProfile?: (profile: Profile) => void
+}) {
   const { profile } = useAuth()
   const { members } = useServerMembers(serverId)
   const voice = useVoice()
   const { permissions } = useModeration(serverId)
   const [showInvite, setShowInvite] = useState(false)
+
+  function handleViewParticipantProfile(userId: string) {
+    const p = members.find((m) => m.user_id === userId)?.profile
+    if (p) onViewProfile?.(p)
+  }
 
   // Em canal Palco, só quem modera pode falar — has_permission() já
   // conta o dono do servidor como tendo qualquer permissão, então não
@@ -358,6 +498,7 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
                       isLocal={false}
                       sinkId={voice.audioSettings.speakerId}
                       compact
+                      onViewProfile={handleViewParticipantProfile}
                     />
                   )
                 })}
@@ -385,6 +526,7 @@ export function VoiceChannelView({ channel, serverId }: { channel: Channel; serv
                       data={data}
                       isLocal={false}
                       sinkId={voice.audioSettings.speakerId}
+                      onViewProfile={handleViewParticipantProfile}
                     />
                   )
                 })}

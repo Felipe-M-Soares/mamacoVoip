@@ -92,8 +92,8 @@ export function useFriends() {
     }
   }, [user, refresh])
 
-  async function sendRequest(username: string) {
-    const { error } = await supabase.rpc('send_friend_request', { p_username: username })
+  async function sendRequest(username: string, note?: string) {
+    const { error } = await supabase.rpc('send_friend_request', { p_username: username, p_note: note ?? null })
     if (!error) await refresh()
     return { error: error?.message ?? null }
   }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Modal } from './Modal'
+import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { useAudioSettings } from '../../hooks/useAudioSettings'
@@ -11,27 +11,39 @@ import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sou
 
 type Tab = 'account' | 'appearance' | 'audio' | 'notifications' | 'privacy'
 
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'account', label: 'Minha conta' },
+  { id: 'appearance', label: 'Aparência' },
+  { id: 'audio', label: 'Voz e Vídeo' },
+  { id: 'notifications', label: 'Notificações' },
+  { id: 'privacy', label: 'Privacidade' },
+]
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { user, signOut } = useAuth()
   const [tab, setTab] = useState<Tab>('account')
 
-  return (
-    <Modal title="Configurações" onClose={onClose} maxWidth="max-w-lg">
-      <div className="flex gap-1 mb-4 bg-discord-darker rounded-lg p-1 overflow-x-auto">
-        {(
-          [
-            { id: 'account', label: 'Minha conta' },
-            { id: 'appearance', label: 'Aparência' },
-            { id: 'audio', label: 'Voz e Vídeo' },
-            { id: 'notifications', label: 'Notificações' },
-            { id: 'privacy', label: 'Privacidade' },
-          ] as const
-        ).map((t) => (
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-discord-darker flex">
+      {/* Navegação — só do lado esquerdo, igual ao Discord de verdade */}
+      <div className="w-56 shrink-0 bg-discord-sidebar flex flex-col py-8 px-3 overflow-y-auto">
+        <p className="px-2.5 text-xs font-bold uppercase text-discord-text-muted tracking-wide mb-1.5">
+          Configurações do usuário
+        </p>
+        {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`shrink-0 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors ${
-              tab === t.id ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:text-white'
+            className={`text-left px-2.5 py-1.5 rounded text-sm font-medium mb-0.5 transition-colors ${
+              tab === t.id ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:bg-white/5 hover:text-discord-text'
             }`}
           >
             {t.label}
@@ -39,12 +51,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      {tab === 'account' && <AccountTab email={user?.email} onSignOut={signOut} />}
-      {tab === 'appearance' && <AppearanceTab />}
-      {tab === 'audio' && <AudioTab />}
-      {tab === 'notifications' && <NotificationsTab />}
-      {tab === 'privacy' && <PrivacyTab />}
-    </Modal>
+      {/* Conteúdo */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-xl mx-auto px-6 py-8">
+          {tab === 'account' && <AccountTab email={user?.email} onSignOut={signOut} />}
+          {tab === 'appearance' && <AppearanceTab />}
+          {tab === 'audio' && <AudioTab />}
+          {tab === 'notifications' && <NotificationsTab />}
+          {tab === 'privacy' && <PrivacyTab />}
+        </div>
+      </div>
+
+      <button
+        onClick={onClose}
+        className="fixed top-6 right-6 w-10 h-10 rounded-full border-2 border-discord-text-muted text-discord-text-muted hover:border-white hover:text-white flex items-center justify-center transition-colors"
+        aria-label="Fechar"
+        title="Fechar (Esc)"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+          <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+        </svg>
+      </button>
+    </div>,
+    document.body
   )
 }
 
@@ -548,10 +577,54 @@ function formatKeyCode(code: string): string {
 }
 
 function PrivacyTab() {
+  const { profile, updateProfile } = useAuth()
+  const [saving, setSaving] = useState(false)
+
+  async function handleChange(visibility: 'everyone' | 'friends_only') {
+    setSaving(true)
+    await updateProfile({ profile_visibility: visibility })
+    setSaving(false)
+  }
+
   return (
     <div className="space-y-4">
+      <div>
+        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+          Quem pode ver seu perfil completo
+        </label>
+        <div className="space-y-2">
+          <button
+            onClick={() => handleChange('everyone')}
+            disabled={saving}
+            className={`w-full text-left px-3 py-2.5 rounded border transition-colors ${
+              (profile?.profile_visibility ?? 'everyone') === 'everyone'
+                ? 'border-discord-blurple bg-discord-blurple/10'
+                : 'border-transparent bg-discord-darker hover:bg-discord-lighter'
+            }`}
+          >
+            <p className="text-sm text-white font-medium">Todo mundo</p>
+            <p className="text-xs text-discord-text-muted">
+              Qualquer pessoa que compartilha um servidor com você vê seu perfil completo.
+            </p>
+          </button>
+          <button
+            onClick={() => handleChange('friends_only')}
+            disabled={saving}
+            className={`w-full text-left px-3 py-2.5 rounded border transition-colors ${
+              profile?.profile_visibility === 'friends_only'
+                ? 'border-discord-blurple bg-discord-blurple/10'
+                : 'border-transparent bg-discord-darker hover:bg-discord-lighter'
+            }`}
+          >
+            <p className="text-sm text-white font-medium">Só amigos</p>
+            <p className="text-xs text-discord-text-muted">
+              Quem não é seu amigo vê só seu nome e foto — nada de status, "jogando" ou outros detalhes.
+            </p>
+          </button>
+        </div>
+      </div>
       <p className="text-sm text-discord-text-muted">
-        Para gerenciar quem pode te adicionar como amigo ou ver seu perfil, use a lista de bloqueados na aba{' '}
+        Para gerenciar quem pode te adicionar como amigo, use a lista de bloqueados na aba{' '}
         <span className="text-white">Amigos</span> na tela inicial.
       </p>
       <p className="text-sm text-discord-text-muted">

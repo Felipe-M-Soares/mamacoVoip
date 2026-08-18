@@ -8,3 +8,11 @@
 // artefato publicado (veja "nsis.artifactName" no package.json).
 export const DESKTOP_DOWNLOAD_URL =
   'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/MamacosVoip-Setup.exe'
+
+// Busca de GIFs no chat (API do Tenor, gratuita). Essa é a chave
+// PÚBLICA de teste que o próprio Tenor disponibiliza pra qualquer
+// desenvolvedor experimentar — funciona, mas tem limite de uso
+// compartilhado com todo mundo que também estiver usando ela. Pra
+// produção de verdade, registre a sua (gratuito, alguns minutos):
+// https://tenor.com/gifapi → "Get API Key" → cole aqui embaixo.
+export const TENOR_API_KEY = 'LIVDSRZULELA'

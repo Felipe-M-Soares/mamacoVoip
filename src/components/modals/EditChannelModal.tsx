@@ -14,6 +14,8 @@ export function EditChannelModal({
   const [name, setName] = useState(channel.name)
   const [topic, setTopic] = useState(channel.topic ?? '')
   const [isStage, setIsStage] = useState(channel.is_stage)
+  const [slowmodeSeconds, setSlowmodeSeconds] = useState(channel.slowmode_seconds)
+  const [isSpoiler, setIsSpoiler] = useState(channel.is_spoiler)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -30,6 +32,8 @@ export function EditChannelModal({
       name: cleanName,
       topic: topic.trim() || null,
       is_stage: channel.type === 'voice' ? isStage : channel.is_stage,
+      slowmode_seconds: channel.type === 'text' ? slowmodeSeconds : channel.slowmode_seconds,
+      is_spoiler: channel.type === 'text' ? isSpoiler : channel.is_spoiler,
     })
     setLoading(false)
     if (error) {
@@ -115,6 +119,45 @@ export function EditChannelModal({
               className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple resize-none"
             />
           </div>
+        )}
+
+        {channel.type === 'text' && (
+          <div>
+            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+              Modo lento
+            </label>
+            <p className="text-[10px] text-discord-text-muted mb-2">
+              Tempo mínimo entre mensagens da mesma pessoa neste canal. Donos do servidor não são afetados.
+            </p>
+            <select
+              value={slowmodeSeconds}
+              onChange={(e) => setSlowmodeSeconds(Number(e.target.value))}
+              className="w-full px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+            >
+              <option value={0}>Desativado</option>
+              <option value={5}>5 segundos</option>
+              <option value={10}>10 segundos</option>
+              <option value={30}>30 segundos</option>
+              <option value={60}>1 minuto</option>
+              <option value={300}>5 minutos</option>
+              <option value={900}>15 minutos</option>
+            </select>
+          </div>
+        )}
+
+        {channel.type === 'text' && (
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isSpoiler}
+              onChange={(e) => setIsSpoiler(e.target.checked)}
+              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
+            />
+            <span className="text-xs text-discord-text-muted">
+              <span className="text-discord-text font-medium">Canal spoiler</span> — o conteúdo fica borrado até a
+              pessoa clicar pra revelar (bom pra spoiler de jogo, filme, série)
+            </span>
+          </label>
         )}
 
         {channel.type === 'voice' && (

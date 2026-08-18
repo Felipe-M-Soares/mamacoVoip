@@ -27,6 +27,8 @@ export function UserProfileModal({
   const incomingRequest = incoming.find((f) => f.profile.id === targetProfile.id)
   const outgoingRequest = outgoing.find((f) => f.profile.id === targetProfile.id)
   const isBlocked = blocked.some((b) => b.profile.id === targetProfile.id)
+  const isFriend = Boolean(friendship) && friendship?.status === 'accepted'
+  const isRestricted = !isSelf && !isFriend && targetProfile.profile_visibility === 'friends_only'
 
   async function handleMessage() {
     setLoading(true)
@@ -61,11 +63,22 @@ export function UserProfileModal({
           {targetProfile.display_name || targetProfile.username}
         </h3>
         <p className="text-sm text-discord-text-muted">@{targetProfile.username}</p>
-        {targetProfile.playing && (
-          <p className="text-sm text-discord-text-muted mt-2">🎮 Jogando {targetProfile.playing}</p>
-        )}
-        {targetProfile.custom_status && (
-          <p className="text-sm text-discord-text mt-2">{targetProfile.custom_status}</p>
+        {isRestricted ? (
+          <p className="text-xs text-discord-text-muted mt-2 flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+              <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3z" />
+            </svg>
+            Este perfil é privado — só amigos veem mais detalhes
+          </p>
+        ) : (
+          <>
+            {targetProfile.playing && (
+              <p className="text-sm text-discord-text-muted mt-2">🎮 Jogando {targetProfile.playing}</p>
+            )}
+            {targetProfile.custom_status && (
+              <p className="text-sm text-discord-text mt-2">{targetProfile.custom_status}</p>
+            )}
+          </>
         )}
 
         {error && <p className="text-sm text-red-400 mt-3">{error}</p>}

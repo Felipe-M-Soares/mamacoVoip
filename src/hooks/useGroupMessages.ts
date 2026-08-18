@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import { notify } from '../lib/notifications'
-import type { DMMessage, DMMessageAttachment } from '../types/database'
+import type { GroupMessage, GroupMessageAttachment } from '../types/database'
 
-export function useDirectMessages(conversationId: string | null) {
+export function useGroupMessages(groupId: string | null) {
   const { user } = useAuth()
-  const [messages, setMessages] = useState<DMMessage[]>([])
-  const [attachments, setAttachments] = useState<Record<string, DMMessageAttachment[]>>({})
+  const [messages, setMessages] = useState<GroupMessage[]>([])
+  const [attachments, setAttachments] = useState<Record<string, GroupMessageAttachment[]>>({})
   const [loading, setLoading] = useState(true)
-  const messagesRef = useRef<DMMessage[]>([])
+  const messagesRef = useRef<GroupMessage[]>([])
   messagesRef.current = messages
 
   const refreshAttachments = useCallback(async (messageIds: string[]) => {
@@ -17,8 +17,8 @@ export function useDirectMessages(conversationId: string | null) {
       setAttachments({})
       return
     }
-    const { data } = await supabase.from('dm_message_attachments').select('*').in('message_id', messageIds)
-    const map: Record<string, DMMessageAttachment[]> = {}
+    const { data } = await supabase.from('group_message_attachments').select('*').in('message_id', messageIds)
+    const map: Record<string, GroupMessageAttachment[]> = {}
     for (const att of data ?? []) {
       map[att.message_id] = [...(map[att.message_id] ?? []), att]
     }
@@ -26,7 +26,7 @@ export function useDirectMessages(conversationId: string | null) {
   }, [])
 
   const refresh = useCallback(async () => {
-    if (!conversationId) {
+    if (!groupId) {
       setMessages([])
       setAttachments({})
       setLoading(false)
@@ -34,55 +34,55 @@ export function useDirectMessages(conversationId: string | null) {
     }
     setLoading(true)
     const { data } = await supabase
-      .from('dm_messages')
+      .from('group_messages')
       .select('*')
-      .eq('conversation_id', conversationId)
+      .eq('group_id', groupId)
       .order('created_at', { ascending: true })
       .limit(100)
     const list = data ?? []
     setMessages(list)
     await refreshAttachments(list.map((m) => m.id))
     setLoading(false)
-  }, [conversationId, refreshAttachments])
+  }, [groupId, refreshAttachments])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
   useEffect(() => {
-    if (!conversationId) return
+    if (!groupId) return
 
     const channel = supabase
-      .channel(`dm_messages:${conversationId}`)
+      .channel(`group_messages:${groupId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'dm_messages', filter: `conversation_id=eq.${conversationId}` },
+        { event: 'INSERT', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
         (payload) => {
-          const newMessage = payload.new as DMMessage
+          const newMessage = payload.new as GroupMessage
           setMessages((prev) => (prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]))
           if (newMessage.author_id !== user?.id) {
-            notify('Nova mensagem direta', newMessage.content.slice(0, 120))
+            notify('Nova mensagem no grupo', newMessage.content.slice(0, 120))
           }
         }
       )
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'dm_messages', filter: `conversation_id=eq.${conversationId}` },
+        { event: 'UPDATE', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
         (payload) => {
-          const updated = payload.new as DMMessage
+          const updated = payload.new as GroupMessage
           setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
         }
       )
       .on(
         'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'dm_messages', filter: `conversation_id=eq.${conversationId}` },
+        { event: 'DELETE', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
         (payload) => {
           const deletedId = (payload.old as { id: string }).id
           setMessages((prev) => prev.filter((m) => m.id !== deletedId))
         }
       )
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_message_attachments' }, (payload) => {
-        const att = payload.new as DMMessageAttachment
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'group_message_attachments' }, (payload) => {
+        const att = payload.new as GroupMessageAttachment
         if (messagesRef.current.some((m) => m.id === att.message_id)) {
           refreshAttachments(messagesRef.current.map((m) => m.id))
         }
@@ -92,18 +92,13 @@ export function useDirectMessages(conversationId: string | null) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [conversationId, refreshAttachments])
+  }, [groupId, user, refreshAttachments])
 
   async function sendMessage(content: string, replyToId: string | null = null, files: File[] = []) {
-    if (!conversationId || !user) return { error: 'Não foi possível enviar' }
+    if (!groupId || !user) return { error: 'Não foi possível enviar' }
     const { data: message, error } = await supabase
-      .from('dm_messages')
-      .insert({
-        conversation_id: conversationId,
-        author_id: user.id,
-        content,
-        reply_to_id: replyToId ?? undefined,
-      })
+      .from('group_messages')
+      .insert({ group_id: groupId, author_id: user.id, content, reply_to_id: replyToId ?? undefined })
       .select()
       .single()
 
@@ -111,12 +106,12 @@ export function useDirectMessages(conversationId: string | null) {
 
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
-      const path = `${conversationId}/${message.id}-${safeName}`
-      const { error: uploadError } = await supabase.storage.from('dm-attachments').upload(path, file)
+      const path = `${groupId}/${message.id}-${safeName}`
+      const { error: uploadError } = await supabase.storage.from('group-attachments').upload(path, file)
       if (uploadError) continue
 
-      const { data: urlData } = supabase.storage.from('dm-attachments').getPublicUrl(path)
-      await supabase.from('dm_message_attachments').insert({
+      const { data: urlData } = supabase.storage.from('group-attachments').getPublicUrl(path)
+      await supabase.from('group_message_attachments').insert({
         message_id: message.id,
         file_url: urlData.publicUrl,
         file_name: file.name,
@@ -130,12 +125,12 @@ export function useDirectMessages(conversationId: string | null) {
   }
 
   async function editMessage(messageId: string, content: string) {
-    const { error } = await supabase.from('dm_messages').update({ content }).eq('id', messageId)
+    const { error } = await supabase.from('group_messages').update({ content }).eq('id', messageId)
     return { error: error?.message ?? null }
   }
 
   async function deleteMessage(messageId: string) {
-    const { error } = await supabase.from('dm_messages').delete().eq('id', messageId)
+    const { error } = await supabase.from('group_messages').delete().eq('id', messageId)
     return { error: error?.message ?? null }
   }
 

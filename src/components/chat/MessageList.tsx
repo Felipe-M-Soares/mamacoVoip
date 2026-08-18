@@ -1,8 +1,29 @@
-import { useEffect, useRef } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 import { MessageItem } from './MessageItem'
 import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji, Thread, Role } from '../../types/database'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
+
+function formatDateSeparator(iso: string): string {
+  const date = new Date(iso)
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+
+  if (date.toDateString() === today.toDateString()) return 'Hoje'
+  if (date.toDateString() === yesterday.toDateString()) return 'Ontem'
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+}
+
+function DateSeparator({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 px-4 my-3">
+      <div className="flex-1 h-px bg-white/10" />
+      <span className="text-xs font-semibold text-discord-text-muted whitespace-nowrap">{label}</span>
+      <div className="flex-1 h-px bg-white/10" />
+    </div>
+  )
+}
 
 export function MessageList({
   channelName,
@@ -97,17 +118,19 @@ export function MessageList({
     <div className="flex-1 overflow-y-auto py-4">
       {messages.map((message, i) => {
         const prev = messages[i - 1]
+        const isNewDay = !prev || new Date(message.created_at).toDateString() !== new Date(prev.created_at).toDateString()
         const showHeader =
-          !prev ||
+          isNewDay ||
           prev.author_id !== message.author_id ||
           new Date(message.created_at).getTime() - new Date(prev.created_at).getTime() > GROUP_WINDOW_MS
 
         const replyToMessage = message.reply_to_id ? messagesById[message.reply_to_id] ?? null : null
 
         return (
-          <MessageItem
-            key={message.id}
-            message={message}
+          <Fragment key={message.id}>
+            {isNewDay && <DateSeparator label={formatDateSeparator(message.created_at)} />}
+            <MessageItem
+              message={message}
             author={profilesById[message.author_id]}
             showHeader={showHeader}
             isOwn={message.author_id === currentUserId}
@@ -137,7 +160,8 @@ export function MessageList({
             onReply={() => onReply(message)}
             onToggleReaction={(emoji) => onToggleReaction(message.id, emoji)}
             onViewProfile={onViewProfile}
-          />
+            />
+          </Fragment>
         )
       })}
       <div ref={bottomRef} />

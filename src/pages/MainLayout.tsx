@@ -5,6 +5,8 @@ import { ChannelSidebar } from '../components/layout/ChannelSidebar'
 import { ChatArea } from '../components/layout/ChatArea'
 import { MemberList } from '../components/layout/MemberList'
 import { HomeSidebar } from '../components/layout/HomeSidebar'
+import { useGroupConversations } from '../hooks/useGroupConversations'
+import { GroupChatArea } from '../components/layout/GroupChatArea'
 import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
@@ -74,7 +76,7 @@ function ActiveServerBody({
         </div>
       }
     >
-      <VoiceChannelView channel={activeChannel} serverId={server.id} />
+      <VoiceChannelView channel={activeChannel} serverId={server.id} onViewProfile={onViewProfile} />
     </Suspense>
   ) : (
     <ChatArea
@@ -188,9 +190,11 @@ function MainLayoutInner() {
   }, [location.state, servers, loadingServers])
 
   // estado da "home" (quando nenhum servidor está selecionado)
-  const [homeView, setHomeView] = useState<'friends' | 'conversation'>('friends')
+  const [homeView, setHomeView] = useState<'friends' | 'conversation' | 'group'>('friends')
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const { conversations } = useConversations()
+  const { groups } = useGroupConversations()
   const unread = useUnreadOverview()
 
   useEffect(() => {
@@ -233,7 +237,15 @@ function MainLayoutInner() {
     setMobileSidebarOpen(false)
   }
 
+  function handleOpenGroup(groupId: string) {
+    setActiveServer(null)
+    setHomeView('group')
+    setActiveGroupId(groupId)
+    setMobileSidebarOpen(false)
+  }
+
   const activeConversation = conversations.find((c) => c.id === activeConversationId)
+  const activeGroup = groups.find((g) => g.id === activeGroupId)
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-discord-dark relative">
@@ -269,7 +281,9 @@ function MainLayoutInner() {
           <HomeSidebar
             view={homeView}
             activeConversationId={activeConversationId}
+            activeGroupId={activeGroupId}
             unreadConversationIds={unread.unreadConversationIds}
+            onSelectGroup={handleOpenGroup}
             onSelectFriends={() => {
               setHomeView('friends')
               setMobileSidebarOpen(false)
@@ -300,6 +314,8 @@ function MainLayoutInner() {
         </div>
       ) : homeView === 'conversation' && activeConversation ? (
         <DMChatArea conversationId={activeConversation.id} otherProfile={activeConversation.otherProfile} />
+      ) : homeView === 'group' && activeGroup ? (
+        <GroupChatArea group={activeGroup} onLeave={handleSelectHome} />
       ) : (
         <FriendsPanel onOpenConversation={handleOpenConversation} />
       )}

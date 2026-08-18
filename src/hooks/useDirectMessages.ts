@@ -2,18 +2,33 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import { notify } from '../lib/notifications'
-import type { DMMessage } from '../types/database'
+import type { DMMessage, DMMessageAttachment } from '../types/database'
 
 export function useDirectMessages(conversationId: string | null) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<DMMessage[]>([])
+  const [attachments, setAttachments] = useState<Record<string, DMMessageAttachment[]>>({})
   const [loading, setLoading] = useState(true)
   const messagesRef = useRef<DMMessage[]>([])
   messagesRef.current = messages
 
+  const refreshAttachments = useCallback(async (messageIds: string[]) => {
+    if (messageIds.length === 0) {
+      setAttachments({})
+      return
+    }
+    const { data } = await supabase.from('dm_message_attachments').select('*').in('message_id', messageIds)
+    const map: Record<string, DMMessageAttachment[]> = {}
+    for (const att of data ?? []) {
+      map[att.message_id] = [...(map[att.message_id] ?? []), att]
+    }
+    setAttachments(map)
+  }, [])
+
   const refresh = useCallback(async () => {
     if (!conversationId) {
       setMessages([])
+      setAttachments({})
       setLoading(false)
       return
     }
@@ -24,9 +39,11 @@ export function useDirectMessages(conversationId: string | null) {
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true })
       .limit(100)
-    setMessages(data ?? [])
+    const list = data ?? []
+    setMessages(list)
+    await refreshAttachments(list.map((m) => m.id))
     setLoading(false)
-  }, [conversationId])
+  }, [conversationId, refreshAttachments])
 
   useEffect(() => {
     refresh()
@@ -64,22 +81,52 @@ export function useDirectMessages(conversationId: string | null) {
           setMessages((prev) => prev.filter((m) => m.id !== deletedId))
         }
       )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_message_attachments' }, (payload) => {
+        const att = payload.new as DMMessageAttachment
+        if (messagesRef.current.some((m) => m.id === att.message_id)) {
+          refreshAttachments(messagesRef.current.map((m) => m.id))
+        }
+      })
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [conversationId])
+  }, [conversationId, refreshAttachments])
 
-  async function sendMessage(content: string, replyToId: string | null = null) {
+  async function sendMessage(content: string, replyToId: string | null = null, files: File[] = []) {
     if (!conversationId || !user) return { error: 'Não foi possível enviar' }
-    const { error } = await supabase.from('dm_messages').insert({
-      conversation_id: conversationId,
-      author_id: user.id,
-      content,
-      reply_to_id: replyToId ?? undefined,
-    })
-    return { error: error?.message ?? null }
+    const { data: message, error } = await supabase
+      .from('dm_messages')
+      .insert({
+        conversation_id: conversationId,
+        author_id: user.id,
+        content,
+        reply_to_id: replyToId ?? undefined,
+      })
+      .select()
+      .single()
+
+    if (error || !message) return { error: error?.message ?? 'Erro ao enviar mensagem' }
+
+    for (const file of files) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
+      const path = `${conversationId}/${message.id}-${safeName}`
+      const { error: uploadError } = await supabase.storage.from('dm-attachments').upload(path, file)
+      if (uploadError) continue
+
+      const { data: urlData } = supabase.storage.from('dm-attachments').getPublicUrl(path)
+      await supabase.from('dm_message_attachments').insert({
+        message_id: message.id,
+        file_url: urlData.publicUrl,
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type || 'application/octet-stream',
+      })
+    }
+
+    if (files.length > 0) await refreshAttachments([...messagesRef.current.map((m) => m.id), message.id])
+    return { error: null }
   }
 
   async function editMessage(messageId: string, content: string) {
@@ -92,5 +139,5 @@ export function useDirectMessages(conversationId: string | null) {
     return { error: error?.message ?? null }
   }
 
-  return { messages, loading, sendMessage, editMessage, deleteMessage }
+  return { messages, attachments, loading, sendMessage, editMessage, deleteMessage }
 }

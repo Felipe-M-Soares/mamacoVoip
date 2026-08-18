@@ -98,12 +98,24 @@ export function UpdateStatusBadge() {
             <p className="text-[10px] text-discord-text-muted/70 mt-0.5 break-words max-h-24 overflow-y-auto font-mono">
               {status.message}
             </p>
-            <button
-              onClick={() => navigator.clipboard.writeText(status.message ?? '')}
-              className="text-[10px] text-discord-blurple hover:underline mt-1"
-            >
-              Copiar detalhes
-            </button>
+            <div className="flex items-center gap-3 mt-1">
+              <button
+                onClick={() => navigator.clipboard.writeText(status.message ?? '')}
+                className="text-[10px] text-discord-blurple hover:underline"
+              >
+                Copiar detalhes
+              </button>
+              {status.downloadUrl && (
+                <a
+                  href={status.downloadUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-discord-green hover:underline font-medium"
+                >
+                  Baixar manualmente
+                </a>
+              )}
+            </div>
           </>
         )}
       </div>

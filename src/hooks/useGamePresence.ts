@@ -6,6 +6,7 @@ export interface UpdateStatusPayload {
   version?: string
   percent?: number
   message?: string
+  downloadUrl?: string
 }
 
 export interface ScreenShareSource {
@@ -31,6 +32,7 @@ declare global {
       setGlobalPTTKey: (keycode: number | null) => Promise<void>
       onPTTState: (callback: (active: boolean) => void) => () => void
       sendVoiceStateToOverlay: (state: unknown) => void
+      checkForUpdatesNow: () => void
     }
   }
 }

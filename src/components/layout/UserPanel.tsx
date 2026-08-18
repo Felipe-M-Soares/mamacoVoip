@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useVoice } from '../../hooks/useVoice'
+import { useConnectionPing } from '../../hooks/useConnectionPing'
 import { Avatar } from '../ui/Avatar'
 import { EditProfileModal } from '../modals/EditProfileModal'
 import { SettingsModal } from '../modals/SettingsModal'
@@ -16,6 +17,7 @@ const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
 export function UserPanel() {
   const { profile, signOut, updateStatus } = useAuth()
   const voice = useVoice()
+  const pingMs = useConnectionPing()
   const [menuOpen, setMenuOpen] = useState(false)
   const [volumeOpen, setVolumeOpen] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
@@ -24,7 +26,18 @@ export function UserPanel() {
   if (!profile) return null
 
   return (
-    <div className="relative h-[52px] bg-discord-darker/60 px-2 flex items-center gap-1 shrink-0">
+    <div className="shrink-0">
+      {pingMs !== null && (
+        <div className="h-5 px-3 flex items-center gap-1.5 bg-discord-darker/60 border-t border-black/20">
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              pingMs < 100 ? 'bg-discord-green' : pingMs < 250 ? 'bg-yellow-500' : 'bg-red-500'
+            }`}
+          />
+          <span className="text-[10px] text-discord-text-muted font-mono">{pingMs}ms</span>
+        </div>
+      )}
+      <div className="relative h-[52px] bg-discord-darker/60 px-2 flex items-center gap-1">
       <button
         onClick={() => setMenuOpen((v) => !v)}
         className="flex items-center gap-2 flex-1 min-w-0 px-1 py-1 rounded hover:bg-white/5 transition-colors"
@@ -147,6 +160,7 @@ export function UserPanel() {
 
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      </div>
     </div>
   )
 }

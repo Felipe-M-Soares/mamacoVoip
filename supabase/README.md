@@ -1,60 +1,46 @@
-# Setup do banco de dados
+# Migrations do Mamacos Voip
 
-## Como aplicar as migrations
+## Se seu banco já está configurado (a maioria dos casos)
 
-No dashboard do Supabase, vá em **SQL Editor** e rode cada arquivo de
-`migrations/` **na ordem numérica**, um de cada vez:
+Você já rodou as 22 migrations originais, uma por uma, ao longo do
+desenvolvimento — elas já estão aplicadas no seu banco Supabase.
 
-1. `001_profiles.sql` — perfis de usuário, sincronizados com `auth.users`
-2. `002_servers.sql` — servidores, membros, convites, ícones
-3. `003_channels.sql` — canais, categorias, reordenação
-4. `004_messages.sql` — mensagens, anexos, reações, rate limit
-5. `005_friends_dms.sql` — amizades, bloqueio, mensagens diretas, avatares
-6. `006_roles_moderation.sql` — cargos, permissões, kick/ban/timeout, log de moderação
-7. `007_read_state.sql` — estado de leitura (badges de não lido)
+**A única coisa que ainda precisa rodar é `006_content_constraint_fixes.sql`**
+(corrige um bug real: mensagem só-com-anexo, tipo mensagem de voz sem
+texto, estava sendo rejeitada pelo banco; e mensagens de grupo não
+tinham limite de tamanho). Roda ela uma vez no SQL Editor do Supabase.
 
-Cada arquivo depende dos anteriores (referências de chave estrangeira,
-funções reutilizadas como `is_server_member()` e `has_permission()`), então
-a ordem importa.
+**Nunca rode os arquivos 001 a 005 num banco que já tem as migrations
+originais aplicadas** — a maioria das tabelas usa `CREATE TABLE` sem
+`IF NOT EXISTS`, então vai dar erro de "relação já existe". Isso é
+esperado e não indica problema nenhum.
 
-## Configurações de Auth (dashboard, não SQL)
+## Se você está configurando um banco NOVO do zero
 
-Em **Authentication > Settings**:
-- ☐ Habilitar **Confirm email** (confirmação de e-mail no cadastro)
-- ☐ Configurar o template de **Reset Password**
-- ☐ Em **Rate Limits**, revisar o limite de tentativas de login (proteção contra brute-force)
-- ☐ Em **URL Configuration**, definir o Site URL (`localhost:5173` em dev, domínio de produção depois do deploy)
+Rode os arquivos de `migrations/`, em ordem (001 → 006), no SQL Editor
+do Supabase.
 
-## Realtime
+| Arquivo | Conteúdo |
+|---|---|
+| `001_core.sql` | Perfis, servidores, canais, categorias |
+| `002_messaging.sql` | Mensagens, anexos, reações, leitura, fixar, silenciar, modo lento |
+| `003_social.sql` | Amizades, bloqueios, DM 1-pra-1, DM em grupo |
+| `004_roles_moderation.sql` | Cargos, permissões, banimentos, log de moderação |
+| `005_extras.sql` | Debug, emoji customizado, threads, eventos do servidor |
+| `006_content_constraint_fixes.sql` | Correção de limite de tamanho de mensagem (rode por último, ou já nem precisa — os arquivos 002/003 acima já nascem corrigidos numa instalação nova) |
 
-As migrations 004 e 005 já adicionam `messages`, `message_reactions`,
-`dm_messages` e `friendships` à publicação `supabase_realtime`. Se o seu
-projeto Supabase tiver Realtime desabilitado por padrão em alguma dessas
-tabelas (verificável em **Database > Replication**), confirme que elas
-aparecem como habilitadas.
+Cada coluna que foi adicionada aos poucos ao longo do desenvolvimento
+(ex: `topic` do canal, `is_stage`, `slowmode_seconds`, etc.) já está
+fundida direto na tabela onde ela pertence — não sobrou nenhum
+`ALTER TABLE ADD COLUMN` solto de 1-2 linhas, exceto os pouquíssimos
+casos onde isso é tecnicamente obrigatório (referência circular entre
+`servers`/`channels`, e `messages.thread_id` que depende da tabela
+`threads`, criada só no arquivo 005). Esses casos ficam com um
+comentário explicando o motivo.
 
-## Storage
+## Histórico original
 
-Três buckets são criados automaticamente pelas migrations:
-- `server-icons` (público, 5MB, migration 002)
-- `attachments` (público, 25MB, migration 004)
-- `avatars` (público, 5MB, migration 005)
-
-Todos têm `allowed_mime_types` restrito a imagens/vídeos/documentos comuns
-— nada executável é aceito.
-
-## O que cada função `security definer` faz
-
-Várias regras de negócio (convites, amizades, moderação, cargos) vivem em
-funções PostgreSQL com `security definer`, chamadas via `supabase.rpc(...)`
-no frontend, em vez de `insert`/`update`/`delete` diretos. Isso existe
-porque essas operações têm validações que RLS sozinha não expressa bem
-(ex: "só aceita o pedido de amizade se você for o destinatário", "não deixa
-banir alguém com cargo igual ou superior ao seu"). Veja o comentário no
-topo de cada função no SQL pra entender a regra.
-
-## Segurança
-
-Veja `../SECURITY_CHECKLIST.md` na raiz do projeto para o mapeamento
-completo de cada item do plano de segurança original contra o que foi
-implementado em cada migration.
+A pasta `migrations_archive/` guarda os 22 arquivos originais,
+exatamente como foram criados e aplicados um por um — é só pra
+referência histórica de como o banco evoluiu ao longo do
+desenvolvimento. Não precisa rodar nada de lá.

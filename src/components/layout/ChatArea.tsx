@@ -40,6 +40,8 @@ export function ChatArea({
   const [activeThread, setActiveThread] = useState<Thread | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
   const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null)
+  const [revealedSpoilerChannelId, setRevealedSpoilerChannelId] = useState<string | null>(null)
+  const isSpoilerHidden = channel.is_spoiler && revealedSpoilerChannelId !== channel.id
 
   function handleJumpToMessage(messageId: string) {
     const el = document.getElementById(`message-${messageId}`)
@@ -100,6 +102,16 @@ export function ChatArea({
           <path d="M5.5 4.5c.5-.5 1.2-.8 2-.8h1.4l-.3 15h-1c-.8 0-1.5-.3-2-.8-.6-.5-.9-1.2-.9-2v-9.4c0-.8.3-1.5.8-2zm10 0c.5.5.8 1.2.8 2v9.4c0 .8-.3 1.5-.8 2-.5.5-1.2.8-2 .8h-1l-.3-15h1.4c.8 0 1.5.3 2 .8z" />
         </svg>
         <h2 className="font-display font-semibold tracking-wide text-white shrink-0">{channel.name}</h2>
+        {channel.slowmode_seconds > 0 && (
+          <span
+            title={`Modo lento: ${channel.slowmode_seconds}s entre mensagens`}
+            className="flex items-center gap-1 text-xs text-yellow-400 shrink-0"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+              <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 5v5.4l4 2.3-.7 1.3-4.8-2.8V7h1.5z" />
+            </svg>
+          </span>
+        )}
         {channel.topic && (
           <>
             <span className="text-discord-text-muted shrink-0">|</span>
@@ -151,6 +163,25 @@ export function ChatArea({
           </button>
         )}
       </header>
+
+      {isSpoilerHidden ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 relative overflow-hidden">
+          <div className="absolute inset-0 backdrop-blur-2xl bg-discord-channels/70" />
+          <div className="relative z-10 flex flex-col items-center gap-3 text-center px-4">
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-yellow-400">
+              <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3z" />
+            </svg>
+            <p className="text-white font-medium">Este canal tem conteúdo marcado como spoiler</p>
+            <button
+              onClick={() => setRevealedSpoilerChannelId(channel.id)}
+              className="px-4 py-2 rounded btn-primary text-sm"
+            >
+              Revelar conteúdo
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
 
       <MessageList
         channelName={channel.name}
@@ -274,6 +305,8 @@ export function ChatArea({
             Cancelar
           </button>
         </div>
+      )}
+      </>
       )}
     </section>
   )

@@ -16,5 +16,9 @@ export function useAppUpdater() {
     window.electronAPI?.restartToUpdate()
   }
 
-  return { status, restart }
+  function checkNow() {
+    window.electronAPI?.checkForUpdatesNow()
+  }
+
+  return { status, restart, checkNow }
 }

@@ -310,6 +310,13 @@ export function MessageItem({
                       className="rounded-lg max-h-80 object-cover border border-black/20"
                     />
                   </a>
+                ) : att.mime_type.startsWith('audio/') ? (
+                  <div key={att.id} className="flex items-center gap-2 bg-discord-darker rounded-lg px-3 py-2.5">
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-blurple shrink-0">
+                      <path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4l3.3 3.3V4a1 1 0 0 1 1-1z" />
+                    </svg>
+                    <audio controls src={att.file_url} className="h-9 max-w-xs" />
+                  </div>
                 ) : (
                   <a
                     key={att.id}
@@ -339,13 +346,13 @@ export function MessageItem({
                   <button
                     key={emoji}
                     onClick={() => onToggleReaction(emoji)}
-                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-all hover:scale-110 active:scale-95 ${
                       reactedByMe
-                        ? 'bg-discord-blurple/20 border-discord-blurple text-discord-blurple'
+                        ? 'bg-discord-blurple/20 border-discord-blurple text-discord-blurple shadow-[0_0_6px_0] shadow-discord-blurple/40'
                         : 'bg-discord-darker border-transparent text-discord-text-muted hover:border-discord-text-muted'
                     }`}
                   >
-                    <span>{emoji}</span>
+                    <span className="text-sm">{emoji}</span>
                     <span>{group.length}</span>
                   </button>
                 )

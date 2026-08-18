@@ -6,8 +6,8 @@ import { notify } from '../lib/notifications'
 import type { Message, MessageAttachment, MessageReaction } from '../types/database'
 
 export function useMessages(channelId: string | null, serverId: string | null, threadId: string | null = null) {
-  const { user } = useAuth()
-  const { mutedChannelIds } = useChannelMutes()
+  const { user, profile } = useAuth()
+  const { getLevel } = useChannelMutes()
   const [messages, setMessages] = useState<Message[]>([])
   const [attachments, setAttachments] = useState<Record<string, MessageAttachment[]>>({})
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({})
@@ -83,8 +83,15 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           const belongsHere = threadId ? newMessage.thread_id === threadId : newMessage.thread_id === null
           if (!belongsHere) return
           setMessages((prev) => (prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]))
-          if (newMessage.author_id !== user?.id && !mutedChannelIds.has(newMessage.channel_id)) {
-            notify('Nova mensagem', newMessage.content.slice(0, 120))
+          if (newMessage.author_id !== user?.id) {
+            const level = getLevel(newMessage.channel_id)
+            const mentionsMe =
+              level === 'mentions' && profile?.username
+                ? new RegExp(`@(everyone|here|${profile.username})\\b`, 'i').test(newMessage.content)
+                : false
+            if (level === 'all' || mentionsMe) {
+              notify('Nova mensagem', newMessage.content.slice(0, 120))
+            }
           }
         }
       )

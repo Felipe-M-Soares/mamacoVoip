@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import type { Message, Profile, ServerEmoji, Role } from '../../types/database'
+import type { Profile, ServerEmoji, Role } from '../../types/database'
 import { getDraft, setDraft } from '../../lib/messageDrafts'
+import { GifPicker } from './GifPicker'
 
 const MAX_LENGTH = 4000
 
@@ -11,6 +12,7 @@ export function MessageComposer({
   emojis,
   roles,
   draftKey,
+  placeholder,
   replyingTo,
   replyingToAuthor,
   onCancelReply,
@@ -22,10 +24,11 @@ export function MessageComposer({
   emojis?: ServerEmoji[]
   roles?: Role[]
   draftKey?: string
-  replyingTo: Message | null
+  placeholder?: string
+  replyingTo: { id: string } | null
   replyingToAuthor: Profile | undefined
   onCancelReply: () => void
-  onSend: (content: string, files: File[]) => Promise<void>
+  onSend: (content: string, files: File[]) => Promise<{ error: string | null } | void>
   onTyping?: () => void
 }) {
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey) : ''))
@@ -44,6 +47,7 @@ export function MessageComposer({
     setDraft(draftKey, value)
   }, [draftKey, value])
   const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [emojiQuery, setEmojiQuery] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -69,6 +73,7 @@ export function MessageComposer({
   function handleChange(text: string) {
     setValue(text)
     if (text.length > 0) onTyping?.()
+    if (sendError) setSendError(null)
 
     const cursor = textareaRef.current?.selectionStart ?? text.length
     const uptoCursor = text.slice(0, cursor)
@@ -105,8 +110,15 @@ export function MessageComposer({
     if (trimmed.length > MAX_LENGTH) return
 
     setSending(true)
-    await onSend(trimmed, files)
+    setSendError(null)
+    const result = await onSend(trimmed, files)
     setSending(false)
+
+    if (result && 'error' in result && result.error) {
+      setSendError(result.error)
+      return
+    }
+
     setValue('')
     setFiles([])
     setMentionQuery(null)
@@ -130,6 +142,58 @@ export function MessageComposer({
 
   const [isDraggingFile, setIsDraggingFile] = useState(false)
   const dragCounterRef = useRef(0)
+
+  // Gravação de mensagem de voz — usa a mesma via de upload de arquivo
+  // que já existe (o áudio vira um File comum, mandado junto com o resto)
+  const [recording, setRecording] = useState(false)
+  const [showGifPicker, setShowGifPicker] = useState(false)
+  const [recordSeconds, setRecordSeconds] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordedChunksRef = useRef<Blob[]>([])
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      recordedChunksRef.current = []
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data)
+      }
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' })
+        const file = new File([blob], `mensagem-de-voz-${Date.now()}.webm`, { type: 'audio/webm' })
+        setFiles((prev) => [...prev, file])
+      }
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setRecording(true)
+      setRecordSeconds(0)
+      recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000)
+    } catch {
+      // permissão negada ou sem microfone — sem problema, só não grava
+    }
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop()
+    mediaRecorderRef.current = null
+    setRecording(false)
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current)
+  }
+
+  function cancelRecording() {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.onstop = () => {
+        mediaRecorderRef.current?.stream.getTracks().forEach((t) => t.stop())
+      }
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+    setRecording(false)
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current)
+  }
 
   function handleDragEnter(e: React.DragEvent) {
     e.preventDefault()
@@ -236,6 +300,12 @@ export function MessageComposer({
         </div>
       )}
 
+      {sendError && (
+        <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded px-3 py-1.5 mb-1.5">
+          {sendError}
+        </p>
+      )}
+
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 bg-discord-lighter px-3 py-2 border-b border-black/20">
           {files.map((file, i) => (
@@ -271,12 +341,62 @@ export function MessageComposer({
         </button>
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFilesSelected} />
 
+        {recording ? (
+          <div className="flex items-center gap-2 bg-red-950/40 border border-red-900/50 rounded-full px-3 py-1.5 shrink-0">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-xs text-red-300 font-mono tabular-nums">
+              {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
+            </span>
+            <button onClick={cancelRecording} title="Cancelar gravação" className="text-red-400 hover:text-white">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+              </svg>
+            </button>
+            <button onClick={stopRecording} title="Parar e anexar" className="text-discord-green hover:text-white">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                <path d="M9 16.2l-3.5-3.5-1.4 1.4L9 19 20 8l-1.4-1.4z" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={startRecording}
+            className="text-discord-text-muted hover:text-white hover:bg-white/10 rounded-full p-1.5 shrink-0 transition-colors"
+            title="Gravar mensagem de voz"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+              <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
+            </svg>
+          </button>
+        )}
+
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setShowGifPicker((v) => !v)}
+            className="text-discord-text-muted hover:text-white hover:bg-white/10 rounded-full p-1.5 transition-colors"
+            title="Enviar GIF"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+              <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm2.5 4.5A2.5 2.5 0 0 0 4 11v2a2.5 2.5 0 0 0 4.5 1.5V13H7v-1h3v1.5A3.5 3.5 0 0 1 3 13v-2a3.5 3.5 0 0 1 6-2.5l-.7.7a2.5 2.5 0 0 0-1.8-.7zM11 8h1v8h-1V8zm3 0h4v1h-3v2.5h2.5v1H15V16h-1V8z" />
+            </svg>
+          </button>
+          {showGifPicker && (
+            <GifPicker
+              onSelect={async (gifUrl) => {
+                setShowGifPicker(false)
+                await onSend(gifUrl, [])
+              }}
+              onClose={() => setShowGifPicker(false)}
+            />
+          )}
+        </div>
+
         <textarea
           ref={textareaRef}
           value={value}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={`Conversar em #${channelName}`}
+          placeholder={placeholder ?? `Conversar em #${channelName}`}
           rows={1}
           maxLength={MAX_LENGTH}
           className="flex-1 bg-transparent outline-none text-discord-text placeholder:text-discord-text-muted resize-none py-1 max-h-48"

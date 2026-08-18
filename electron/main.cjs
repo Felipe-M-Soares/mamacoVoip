@@ -600,10 +600,31 @@ app.whenReady().then(() => {
         return
       }
 
-      sendUpdateStatus('error', { message: raw.slice(0, 400) })
+      // Esse app não tem certificado de assinatura de código (custa
+      // dinheiro, ~R$1.000-3.000/ano) — e no Windows, o electron-updater
+      // confirma a assinatura digital do instalador antes de aplicar a
+      // atualização baixada. Sem assinatura, essa verificação falha e a
+      // atualização baixa mas NÃO se aplica sozinha. Isso aparece
+      // tipicamente como "sha512 checksum mismatch" ou menção a
+      // "signature"/"publisher" na mensagem de erro.
+      const looksLikeSignatureIssue = /signature|publisher|checksum|sha512/i.test(raw)
+      if (looksLikeSignatureIssue) {
+        sendUpdateStatus('error', {
+          message:
+            'A atualização foi baixada mas não pôde ser verificada automaticamente (provavelmente porque o instalador não tem assinatura digital — isso exige um certificado pago). Baixe a versão mais recente manualmente pelo site.',
+          downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest',
+        })
+        return
+      }
+
+      sendUpdateStatus('error', { message: raw.slice(0, 400), downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest' })
     })
 
     ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall())
+    ipcMain.on('app:check-for-updates-now', () => {
+      updateRetryCount = 0
+      autoUpdater.checkForUpdates().catch(() => {})
+    })
 
     // O provedor "github" padrão (usado só aqui, na hora de CHECAR
     // atualização) depende do feed releases.atom do GitHub — que, por

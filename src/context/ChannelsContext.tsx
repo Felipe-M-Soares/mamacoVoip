@@ -8,7 +8,7 @@ interface ChannelsContextValue {
   loading: boolean
   refresh: () => Promise<void>
   createChannel: (name: string, type: ChannelType, categoryId: string | null, isStage?: boolean) => Promise<{ error: string | null }>
-  updateChannel: (channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean }) => Promise<{ error: string | null }>
+  updateChannel: (channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean }) => Promise<{ error: string | null }>
   deleteChannel: (channelId: string) => Promise<{ error: string | null }>
   createCategory: (name: string) => Promise<{ error: string | null }>
   updateCategory: (categoryId: string, name: string) => Promise<{ error: string | null }>
@@ -58,7 +58,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     return { error: error?.message ?? null }
   }
 
-  async function updateChannel(channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean }) {
+  async function updateChannel(channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean }) {
     const { error } = await supabase.from('channels').update(updates).eq('id', channelId)
     if (!error) await refresh()
     return { error: error?.message ?? null }

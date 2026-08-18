@@ -31,4 +31,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('ptt-state', handler)
   },
   sendVoiceStateToOverlay: (state) => ipcRenderer.send('overlay:update-state', state),
+  checkForUpdatesNow: () => ipcRenderer.send('app:check-for-updates-now'),
 })

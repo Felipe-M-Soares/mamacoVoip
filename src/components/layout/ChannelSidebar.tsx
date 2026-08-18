@@ -17,6 +17,7 @@ import { useChannelMutes } from '../../hooks/useChannelMutes'
 import { useServerEvents } from '../../hooks/useServerEvents'
 import { EventsModal } from '../modals/EventsModal'
 import { useServerWelcomeScreen, ServerWelcomeModal } from '../modals/ServerWelcomeModal'
+import { usePinnedItems } from '../../hooks/usePinnedItems'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
 import { Avatar } from '../ui/Avatar'
@@ -57,7 +58,7 @@ function VoiceChannelPresence({ channelId, profileById }: { channelId: string; p
 
   if (userIds.length === 0) return null
   return (
-    <div className="flex items-center gap-1 pl-7 pb-1 flex-wrap">
+    <div className="flex flex-col gap-0.5 pl-7 pb-1">
       {userIds.map((id) => {
         const p = id === user?.id ? undefined : profileById[id]
         const name = id === user?.id ? 'Você' : p?.display_name || p?.username || '...'
@@ -66,12 +67,12 @@ function VoiceChannelPresence({ channelId, profileById }: { channelId: string; p
         return (
           <div
             key={id}
-            className={`flex items-center gap-1 bg-discord-darker/60 rounded-full pl-0.5 pr-2 py-0.5 transition-shadow ${
+            className={`flex items-center gap-1.5 rounded px-1 py-0.5 transition-shadow ${
               isSpeaking ? 'ring-2 ring-discord-blurple shadow-[0_0_8px_0] shadow-discord-blurple/60 animate-pulse' : ''
             }`}
           >
             <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={16} />
-            <span className="text-[10px] text-discord-text-muted truncate max-w-[70px]">{name}</span>
+            <span className="text-[11px] text-discord-text-muted truncate">{name}</span>
             {isSharingScreen && (
               <span title="Compartilhando tela" className="shrink-0">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 text-discord-green">
@@ -208,6 +209,7 @@ function ChannelRow({
   active,
   unread,
   muted,
+  pinned,
   isOwner,
   isDragOver,
   onSelect,
@@ -225,6 +227,7 @@ function ChannelRow({
   active: boolean
   unread: boolean
   muted: boolean
+  pinned: boolean
   isOwner: boolean
   isDragOver: boolean
   onSelect: () => void
@@ -254,6 +257,20 @@ function ChannelRow({
       onClick={onSelect}
     >
       <ChannelIcon type={channel.type} isStage={channel.is_stage} />
+      {pinned && (
+        <span title="Canal fixado" className="shrink-0 text-yellow-400">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+            <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
+          </svg>
+        </span>
+      )}
+      {channel.is_spoiler && (
+        <span title="Canal spoiler" className="shrink-0">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 text-yellow-400">
+            <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3z" />
+          </svg>
+        </span>
+      )}
       <InlineEditableLabel
         value={channel.name}
         editable={isOwner}
@@ -343,10 +360,11 @@ export function ChannelSidebar({
   } = useChannels()
   const { permissions } = useModeration(server.id)
   const { members } = useServerMembers(server.id)
-  const { mutedChannelIds, toggleChannelMute } = useChannelMutes()
+  const { mutedChannelIds, getLevel, setNotificationLevel } = useChannelMutes()
   const { events } = useServerEvents(server.id)
   const [showEvents, setShowEvents] = useState(false)
   const { show: showWelcome, dismiss: dismissWelcome } = useServerWelcomeScreen(server, user?.id)
+  const { pinnedIds, toggle: togglePinChannel } = usePinnedItems()
   const upcomingEventsCount = events.filter((e) => new Date(e.starts_at).getTime() >= Date.now()).length
   const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
   const { collapsed: collapsedCategories, toggle: toggleCategoryCollapse } = useCollapsedCategories()
@@ -548,6 +566,7 @@ export function ChannelSidebar({
                   active={activeChannelId === channel.id}
                   unread={unreadChannelIds.has(channel.id)}
                   muted={mutedChannelIds.has(channel.id)}
+                  pinned={pinnedIds.has(channel.id)}
                   isOwner={isOwner}
                   isDragOver={dragOverTarget === channel.id && draggedChannelId !== channel.id}
                   onSelect={() => onSelectChannel(channel)}
@@ -570,7 +589,7 @@ export function ChannelSidebar({
         )}
 
         {uncategorized.length > 0 && sortedCategories.length > 0 && (
-          <div className="h-px bg-white/5 -my-1" />
+          <div className="h-px bg-white/10 mx-1" />
         )}
 
         {sortedCategories.map((category) => {
@@ -659,6 +678,7 @@ export function ChannelSidebar({
                         active={activeChannelId === channel.id}
                         unread={unreadChannelIds.has(channel.id)}
                         muted={mutedChannelIds.has(channel.id)}
+                        pinned={pinnedIds.has(channel.id)}
                         isOwner={isOwner}
                         isDragOver={dragOverTarget === channel.id && draggedChannelId !== channel.id}
                         onSelect={() => onSelectChannel(channel)}
@@ -741,12 +761,25 @@ export function ChannelSidebar({
           items={[
             { label: 'Abrir canal', onClick: () => onSelectChannel(contextChannel) },
             {
+              label: pinnedIds.has(contextChannel.id) ? 'Desafixar canal' : 'Fixar canal',
+              onClick: () => togglePinChannel(contextChannel.id),
+            },
+            {
               label: 'Copiar nome do canal',
               onClick: () => navigator.clipboard.writeText(contextChannel.name),
             },
             {
-              label: mutedChannelIds.has(contextChannel.id) ? 'Reativar notificações' : 'Silenciar canal',
-              onClick: () => toggleChannelMute(contextChannel.id),
+              label:
+                getLevel(contextChannel.id) === 'all'
+                  ? 'Notificar: só menções'
+                  : getLevel(contextChannel.id) === 'mentions'
+                    ? 'Silenciar totalmente'
+                    : 'Reativar notificações',
+              onClick: () => {
+                const current = getLevel(contextChannel.id)
+                const next = current === 'all' ? 'mentions' : current === 'mentions' ? 'muted' : 'all'
+                setNotificationLevel(contextChannel.id, next)
+              },
             },
             ...(isOwner
               ? [

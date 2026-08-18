@@ -1,34 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { DMMessageItem } from '../chat/DMMessageItem'
+import { MessageComposer } from '../chat/MessageComposer'
 import { useDirectMessages } from '../../hooks/useDirectMessages'
 import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../hooks/useFriends'
 import { useTypingIndicator } from '../../hooks/useTypingIndicator'
-import { getDraft, setDraft } from '../../lib/messageDrafts'
 import type { DMMessage, Profile } from '../../types/database'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
-const MAX_LENGTH = 4000
 
 export function DMChatArea({ conversationId, otherProfile }: { conversationId: string; otherProfile: Profile }) {
   const { user } = useAuth()
-  const { messages, sendMessage, editMessage, deleteMessage } = useDirectMessages(conversationId)
+  const { messages, attachments, sendMessage, editMessage, deleteMessage } = useDirectMessages(conversationId)
   const { blocked, blockUser, unblockUser } = useFriends()
   const { typingUserIds, notifyTyping } = useTypingIndicator(conversationId, user?.id)
   const [replyingTo, setReplyingTo] = useState<DMMessage | null>(null)
-  const [value, setValue] = useState(() => getDraft(`dm-${conversationId}`))
-
-  useEffect(() => {
-    setValue(getDraft(`dm-${conversationId}`))
-  }, [conversationId])
-
-  useEffect(() => {
-    setDraft(`dm-${conversationId}`, value)
-  }, [conversationId, value])
-  const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const isBlocked = blocked.some((b) => b.blocked_id === otherProfile.id)
   const messagesById = Object.fromEntries(messages.map((m) => [m.id, m]))
@@ -37,13 +25,8 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
 
-  async function handleSend() {
-    const trimmed = value.trim()
-    if (trimmed.length === 0 || trimmed.length > MAX_LENGTH) return
-    setSending(true)
-    await sendMessage(trimmed, replyingTo?.id ?? null)
-    setSending(false)
-    setValue('')
+  async function handleSend(content: string, files: File[]) {
+    await sendMessage(content, replyingTo?.id ?? null, files)
     setReplyingTo(null)
   }
 
@@ -109,6 +92,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
                 onEdit={(content) => editMessage(message.id, content)}
                 onDelete={() => deleteMessage(message.id)}
                 onReply={() => setReplyingTo(message)}
+                attachments={attachments[message.id] ?? []}
               />
             )
           })}
@@ -132,57 +116,23 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
             Você bloqueou {otherProfile.display_name || otherProfile.username}. Desbloqueie para enviar mensagens.
           </p>
         ) : (
-          <>
-            {replyingTo && (
-              <div className="flex items-center justify-between bg-discord-lighter/60 rounded-t-lg px-3 py-1.5 text-xs">
-                <span className="text-discord-text-muted">
-                  Respondendo a{' '}
-                  <span className="text-white font-medium">
-                    {replyingTo.author_id === user?.id ? 'você mesmo' : otherProfile.display_name || otherProfile.username}
-                  </span>
-                </span>
-                <button onClick={() => setReplyingTo(null)} className="text-discord-text-muted hover:text-white">
-                  ×
-                </button>
-              </div>
-            )}
-            <div
-              className={`bg-discord-lighter px-4 py-2.5 flex items-end gap-3 ${replyingTo ? 'rounded-b-lg' : 'rounded-lg'}`}
-            >
-              <textarea
-                ref={textareaRef}
-                value={value}
-                onChange={(e) => {
-                  setValue(e.target.value)
-                  if (e.target.value.length > 0) notifyTyping()
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    handleSend()
-                  }
-                }}
-                placeholder={`Conversar com ${otherProfile.display_name || otherProfile.username}`}
-                rows={1}
-                maxLength={MAX_LENGTH}
-                className="flex-1 bg-transparent outline-none text-discord-text placeholder:text-discord-text-muted resize-none py-1 max-h-48"
-                onInput={(e) => {
-                  const el = e.currentTarget
-                  el.style.height = 'auto'
-                  el.style.height = `${Math.min(el.scrollHeight, 192)}px`
-                }}
-              />
-              <button
-                onClick={handleSend}
-                disabled={sending || value.trim().length === 0}
-                className="text-discord-text-muted hover:text-discord-blurple shrink-0 pb-1 disabled:opacity-40"
-              >
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
-                  <path d="M3.4 20.6l17.5-8.2a1 1 0 0 0 0-1.8L3.4 2.4a1 1 0 0 0-1.4 1.1L4.5 12l-2.5 8.5a1 1 0 0 0 1.4 1.1z" />
-                </svg>
-              </button>
-            </div>
-          </>
+          <MessageComposer
+            channelName={otherProfile.display_name || otherProfile.username}
+            members={[]}
+            draftKey={`dm-${conversationId}`}
+            placeholder={`Conversar com ${otherProfile.display_name || otherProfile.username}`}
+            replyingTo={replyingTo}
+            replyingToAuthor={
+              replyingTo
+                ? replyingTo.author_id === otherProfile.id
+                  ? otherProfile
+                  : undefined
+                : undefined
+            }
+            onCancelReply={() => setReplyingTo(null)}
+            onSend={handleSend}
+            onTyping={notifyTyping}
+          />
         )}
       </div>
     </section>

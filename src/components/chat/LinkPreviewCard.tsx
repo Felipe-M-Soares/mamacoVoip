@@ -1,13 +1,29 @@
 import { useLinkPreview } from '../../hooks/useLinkPreview'
 
 const URL_REGEX = /https?:\/\/[^\s<]+/
+const IMAGE_EXTENSION_REGEX = /\.(gif|png|jpe?g|webp|apng)(\?.*)?$/i
 
 export function extractFirstUrl(text: string): string | null {
   const match = text.match(URL_REGEX)
   return match ? match[0] : null
 }
 
+export function isDirectImageUrl(url: string): boolean {
+  return IMAGE_EXTENSION_REGEX.test(url)
+}
+
 export function LinkPreviewCard({ url }: { url: string }) {
+  if (isDirectImageUrl(url)) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className="mt-2 block max-w-sm">
+        <img src={url} alt="" className="rounded-lg max-h-80 object-cover border border-black/20" />
+      </a>
+    )
+  }
+  return <LinkPreviewCardInner url={url} />
+}
+
+function LinkPreviewCardInner({ url }: { url: string }) {
   const { data } = useLinkPreview(url)
 
   if (!data || (!data.title && !data.description && !data.image)) return null

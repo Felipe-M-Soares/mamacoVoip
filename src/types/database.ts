@@ -1,5 +1,7 @@
 export type ProfileStatus = 'online' | 'idle' | 'dnd' | 'offline'
 
+export type ProfileVisibility = 'everyone' | 'friends_only'
+
 export type Profile = {
   id: string
   username: string
@@ -8,6 +10,7 @@ export type Profile = {
   status: ProfileStatus
   custom_status: string | null
   playing: string | null
+  profile_visibility: ProfileVisibility
   created_at: string
   updated_at: string
 }
@@ -156,6 +159,8 @@ export type Channel = {
   type: ChannelType
   topic: string | null
   is_stage: boolean
+  is_spoiler: boolean
+  slowmode_seconds: number
   position: number
   created_at: string
 }
@@ -208,6 +213,7 @@ export type Friendship = {
   user_id: string
   friend_id: string
   status: FriendshipStatus
+  request_note: string | null
   created_at: string
 }
 
@@ -221,6 +227,44 @@ export type DMConversation = {
   id: string
   user_a: string
   user_b: string
+  created_at: string
+}
+
+export type GroupConversation = {
+  id: string
+  name: string | null
+  icon_url: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export type GroupMessage = {
+  id: string
+  group_id: string
+  author_id: string
+  content: string
+  reply_to_id: string | null
+  edited_at: string | null
+  created_at: string
+}
+
+export type GroupMessageAttachment = {
+  id: string
+  message_id: string
+  file_url: string
+  file_name: string
+  file_size: number
+  mime_type: string
+  created_at: string
+}
+
+export type DMMessageAttachment = {
+  id: string
+  message_id: string
+  file_url: string
+  file_name: string
+  file_size: number
+  mime_type: string
   created_at: string
 }
 
@@ -253,7 +297,7 @@ export type Database = {
       profiles: {
         Row: Profile
         Insert: Pick<Profile, 'id' | 'username'> & Partial<Omit<Profile, 'id' | 'username'>>
-        Update: Partial<Pick<Profile, 'username' | 'display_name' | 'avatar_url' | 'status' | 'custom_status' | 'playing'>>
+        Update: Partial<Pick<Profile, 'username' | 'display_name' | 'avatar_url' | 'status' | 'custom_status' | 'playing' | 'profile_visibility'>>
         Relationships: []
       }
       servers: {
@@ -284,8 +328,8 @@ export type Database = {
       channels: {
         Row: Channel
         Insert: Pick<Channel, 'server_id' | 'name' | 'type'> &
-          Partial<Pick<Channel, 'category_id' | 'position' | 'is_stage'>>
-        Update: Partial<Pick<Channel, 'name' | 'category_id' | 'position' | 'topic' | 'is_stage'>>
+          Partial<Pick<Channel, 'category_id' | 'position' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler'>>
+        Update: Partial<Pick<Channel, 'name' | 'category_id' | 'position' | 'topic' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler'>>
         Relationships: []
       }
       messages: {
@@ -337,6 +381,36 @@ export type Database = {
         Update: Partial<Pick<DMMessage, 'content'>>
         Relationships: []
       }
+      dm_message_attachments: {
+        Row: DMMessageAttachment
+        Insert: Pick<DMMessageAttachment, 'message_id' | 'file_url' | 'file_name' | 'file_size' | 'mime_type'>
+        Update: Record<string, never>
+        Relationships: []
+      }
+      group_conversations: {
+        Row: GroupConversation
+        Insert: Partial<Pick<GroupConversation, 'name' | 'icon_url'>> & Pick<GroupConversation, 'created_by'>
+        Update: Partial<Pick<GroupConversation, 'name' | 'icon_url'>>
+        Relationships: []
+      }
+      group_conversation_members: {
+        Row: { group_id: string; user_id: string; joined_at: string }
+        Insert: { group_id: string; user_id: string }
+        Update: Record<string, never>
+        Relationships: []
+      }
+      group_messages: {
+        Row: GroupMessage
+        Insert: Pick<GroupMessage, 'group_id' | 'author_id' | 'content'> & Partial<Pick<GroupMessage, 'reply_to_id'>>
+        Update: Partial<Pick<GroupMessage, 'content'>>
+        Relationships: []
+      }
+      group_message_attachments: {
+        Row: GroupMessageAttachment
+        Insert: Pick<GroupMessageAttachment, 'message_id' | 'file_url' | 'file_name' | 'file_size' | 'mime_type'>
+        Update: Record<string, never>
+        Relationships: []
+      }
       roles: {
         Row: Role
         Insert: never // inserts só via create_role()
@@ -368,9 +442,9 @@ export type Database = {
         Relationships: []
       }
       channel_mutes: {
-        Row: { user_id: string; channel_id: string; created_at: string }
-        Insert: { user_id: string; channel_id: string }
-        Update: Record<string, never>
+        Row: { user_id: string; channel_id: string; created_at: string; mentions_only: boolean }
+        Insert: { user_id: string; channel_id: string; mentions_only?: boolean }
+        Update: Partial<{ mentions_only: boolean }>
         Relationships: []
       }
       server_emojis: {

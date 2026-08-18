@@ -4,6 +4,7 @@ import { Avatar } from '../ui/Avatar'
 import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../hooks/useFriends'
 import { useConversations } from '../../hooks/useConversations'
+import { getUserNote, setUserNote } from '../../lib/pinnedItems'
 import type { Profile } from '../../types/database'
 
 export function UserProfileModal({
@@ -83,6 +84,8 @@ export function UserProfileModal({
 
         {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
 
+        {!isSelf && <UserNoteField userId={targetProfile.id} />}
+
         {!isSelf && (
           <div className="w-full space-y-2 mt-5">
             {!isBlocked && (
@@ -155,5 +158,28 @@ export function UserProfileModal({
         )}
       </div>
     </Modal>
+  )
+}
+
+function UserNoteField({ userId }: { userId: string }) {
+  const [note, setNote] = useState(() => getUserNote(userId))
+
+  return (
+    <div className="mt-3">
+      <label className="block text-[10px] font-bold uppercase text-discord-text-muted mb-1">
+        Nota — visível apenas para você
+      </label>
+      <textarea
+        value={note}
+        onChange={(e) => {
+          setNote(e.target.value)
+          setUserNote(userId, e.target.value)
+        }}
+        placeholder="Escreva uma nota..."
+        maxLength={256}
+        rows={2}
+        className="w-full px-2.5 py-1.5 text-xs rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple resize-none"
+      />
+    </div>
   )
 }

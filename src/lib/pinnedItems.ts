@@ -37,3 +37,31 @@ export function togglePinned(id: string): boolean {
 export function getPinnedSet(): Set<string> {
   return new Set(Object.keys(readAll()))
 }
+
+// Nota privada sobre um usuário — só quem escreveu vê (não sincroniza
+// com o banco, fica só no seu dispositivo, igual o "fixar" acima).
+const NOTES_KEY = 'mamacos-user-notes'
+
+function readNotes(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(NOTES_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function getUserNote(userId: string): string {
+  return readNotes()[userId] ?? ''
+}
+
+export function setUserNote(userId: string, note: string) {
+  const all = readNotes()
+  if (note.trim()) all[userId] = note.trim()
+  else delete all[userId]
+  try {
+    localStorage.setItem(NOTES_KEY, JSON.stringify(all))
+  } catch {
+    // best-effort
+  }
+}

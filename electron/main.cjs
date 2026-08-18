@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut } = require('electron')
+const { app, BrowserWindow, session, Menu, Tray, nativeImage, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { exec } = require('node:child_process')
@@ -171,6 +171,7 @@ const KNOWN_GAMES = {
 const GAME_CHECK_INTERVAL_MS = 15_000
 
 let mainWindow = null
+let isQuitting = false
 let pendingDisplayMediaCallback = null
 let updateReadyToInstall = false
 let gameCheckTimer = null
@@ -338,8 +339,60 @@ function createWindow() {
     return { action: 'deny' }
   })
 
+  // Minimizar/fechar a janela vai pra bandeja do sistema em vez de
+  // sumir da barra de tarefas ou encerrar o app — igual o Discord de
+  // verdade faz, pra continuar recebendo notificações/call em segundo
+  // plano sem ocupar espaço na barra de tarefas.
+  win.on('minimize', (event) => {
+    event.preventDefault()
+    win.hide()
+  })
+  win.on('close', (event) => {
+    if (isQuitting) return
+    event.preventDefault()
+    win.hide()
+  })
+
   mainWindow = win
   return win
+}
+
+let tray = null
+
+function createTray(win) {
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'splash-logo.png')).resize({ width: 16, height: 16 })
+  tray = new Tray(icon)
+  tray.setToolTip('Mamacos Voip')
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Abrir Mamacos Voip',
+      click: () => {
+        win.show()
+        win.focus()
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Sair',
+      click: () => {
+        isQuitting = true
+        app.quit()
+      },
+    },
+  ])
+  tray.setContextMenu(contextMenu)
+
+  // Clique simples no ícone também abre a janela (padrão que a
+  // maioria dos apps de bandeja segue no Windows)
+  tray.on('click', () => {
+    if (win.isVisible()) {
+      win.focus()
+    } else {
+      win.show()
+      win.focus()
+    }
+  })
 }
 
 app.whenReady().then(() => {
@@ -423,6 +476,7 @@ app.whenReady().then(() => {
 
   const splash = createSplashWindow()
   const win = createWindow()
+  createTray(win)
 
   win.once('ready-to-show', () => {
     splash.close()
@@ -537,6 +591,7 @@ app.whenReady().then(() => {
   })
 
   app.once('before-quit', () => {
+    isQuitting = true
     if (uiohookAvailable && uiohookStarted) {
       try {
         uIOhook.stop()

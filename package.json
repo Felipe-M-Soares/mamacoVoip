@@ -56,8 +56,7 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "icon": "build/icon.png"
     },
@@ -70,9 +69,6 @@
       "deleteAppDataOnUninstall": true,
       "artifactName": "MamacosVoip-Setup.exe",
       "license": "build/license.txt"
-    },
-    "portable": {
-      "artifactName": "MamacosVoip-Portatil.exe"
     },
     "mac": {
       "target": "dmg",

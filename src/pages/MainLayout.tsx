@@ -37,6 +37,7 @@ function ActiveServerBody({
   pendingChannelId,
   onSelectChannel,
   onViewProfile,
+  onMessageUser,
   onToggleMembers,
 }: {
   server: Server
@@ -44,6 +45,7 @@ function ActiveServerBody({
   pendingChannelId?: string | null
   onSelectChannel: (channel: Channel) => void
   onViewProfile: (profile: Profile) => void
+  onMessageUser?: (userId: string) => void
   onToggleMembers: () => void
 }) {
   const { channels, loading: loadingChannels } = useChannels()
@@ -76,7 +78,7 @@ function ActiveServerBody({
         </div>
       }
     >
-      <VoiceChannelView channel={activeChannel} serverId={server.id} onViewProfile={onViewProfile} />
+      <VoiceChannelView channel={activeChannel} serverId={server.id} onViewProfile={onViewProfile} onMessageUser={onMessageUser} />
     </Suspense>
   ) : (
     <ChatArea
@@ -102,6 +104,7 @@ function ActiveServerContent({
   onSelectChannel,
   onServerGone,
   onViewProfile,
+  onMessageUser,
 }: {
   server: Server
   activeChannel: Channel | null
@@ -111,6 +114,7 @@ function ActiveServerContent({
   onSelectChannel: (channel: Channel) => void
   onServerGone: () => void
   onViewProfile: (profile: Profile) => void
+  onMessageUser?: (userId: string) => void
 }) {
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false)
 
@@ -137,6 +141,7 @@ function ActiveServerContent({
         pendingChannelId={pendingChannelId}
         onSelectChannel={onSelectChannel}
         onViewProfile={onViewProfile}
+        onMessageUser={onMessageUser}
         onToggleMembers={() => setMobileMembersOpen((v) => !v)}
       />
 
@@ -193,7 +198,12 @@ function MainLayoutInner() {
   const [homeView, setHomeView] = useState<'friends' | 'conversation' | 'group'>('friends')
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
-  const { conversations } = useConversations()
+  const { conversations, openConversationWith } = useConversations()
+
+  async function handleMessageUser(userId: string) {
+    const { conversation, error } = await openConversationWith(userId)
+    if (!error && conversation) handleOpenConversation(conversation.id)
+  }
   const { groups } = useGroupConversations()
   const unread = useUnreadOverview()
 
@@ -307,6 +317,7 @@ function MainLayoutInner() {
           onSelectChannel={handleSelectChannel}
           onServerGone={handleServerGone}
           onViewProfile={setViewingProfile}
+          onMessageUser={handleMessageUser}
         />
       ) : loadingServers ? (
         <div className="flex-1 flex items-center justify-center">

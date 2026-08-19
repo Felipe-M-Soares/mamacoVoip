@@ -148,6 +148,14 @@ export function useMessages(channelId: string | null, serverId: string | null, t
 
     if (error || !message) return { error: error?.message ?? 'Erro ao enviar mensagem' }
 
+    // Mostra a mensagem na hora, sem esperar ela "voltar" pelo canal de
+    // tempo real — antes, o app dependia inteiramente do evento de
+    // tempo real chegar de volta pra mostrar a PRÓPRIA mensagem que
+    // você acabou de mandar. Se esse evento atrasasse ou falhasse, a
+    // mensagem ficava salva no banco mas nunca aparecia sozinha (só
+    // depois de atualizar a página, que busca tudo de novo do zero).
+    setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
+
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
       const path = `${serverId}/${channelId}/${message.id}-${safeName}`
@@ -169,12 +177,14 @@ export function useMessages(channelId: string | null, serverId: string | null, t
   }
 
   async function editMessage(messageId: string, content: string) {
-    const { error } = await supabase.from('messages').update({ content }).eq('id', messageId)
+    const { data, error } = await supabase.from('messages').update({ content }).eq('id', messageId).select().single()
+    if (!error && data) setMessages((prev) => prev.map((m) => (m.id === messageId ? data : m)))
     return { error: error?.message ?? null }
   }
 
   async function deleteMessage(messageId: string) {
     const { error } = await supabase.from('messages').delete().eq('id', messageId)
+    if (!error) setMessages((prev) => prev.filter((m) => m.id !== messageId))
     return { error: error?.message ?? null }
   }
 

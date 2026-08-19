@@ -104,6 +104,8 @@ export function useGroupMessages(groupId: string | null) {
 
     if (error || !message) return { error: error?.message ?? 'Erro ao enviar mensagem' }
 
+    setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
+
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
       const path = `${groupId}/${message.id}-${safeName}`
@@ -125,12 +127,14 @@ export function useGroupMessages(groupId: string | null) {
   }
 
   async function editMessage(messageId: string, content: string) {
-    const { error } = await supabase.from('group_messages').update({ content }).eq('id', messageId)
+    const { data, error } = await supabase.from('group_messages').update({ content }).eq('id', messageId).select().single()
+    if (!error && data) setMessages((prev) => prev.map((m) => (m.id === messageId ? data : m)))
     return { error: error?.message ?? null }
   }
 
   async function deleteMessage(messageId: string) {
     const { error } = await supabase.from('group_messages').delete().eq('id', messageId)
+    if (!error) setMessages((prev) => prev.filter((m) => m.id !== messageId))
     return { error: error?.message ?? null }
   }
 

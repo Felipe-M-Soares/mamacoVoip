@@ -232,12 +232,27 @@ values (
   array[
     'image/png', 'image/jpeg', 'image/webp', 'image/gif',
     'video/mp4', 'video/webm',
-    'audio/mpeg', 'audio/ogg', 'audio/wav',
+    'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm',
     'application/pdf', 'text/plain',
     'application/zip'
   ]
 )
 on conflict (id) do nothing;
+
+-- Se o bucket já existia de antes (criado numa versão anterior desta
+-- migration), o INSERT acima não faz nada — "on conflict do nothing"
+-- não atualiza linha já existente. audio/webm é o formato que a
+-- gravação de mensagem de voz produz; sem ele na lista, o upload
+-- falha silenciosamente e a mensagem de voz nunca aparece no chat.
+update storage.buckets
+set allowed_mime_types = array[
+  'image/png', 'image/jpeg', 'image/webp', 'image/gif',
+  'video/mp4', 'video/webm',
+  'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm',
+  'application/pdf', 'text/plain',
+  'application/zip'
+]
+where id = 'attachments';
 
 create policy "Membros veem anexos do servidor"
   on storage.objects for select to authenticated

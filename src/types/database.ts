@@ -563,6 +563,10 @@ export type Database = {
         Args: Record<string, never>
         Returns: { jwt_uid: string | null; jwt_role: string | null }[]
       }
+      delete_own_account: {
+        Args: Record<string, never>
+        Returns: void
+      }
     }
   }
 }

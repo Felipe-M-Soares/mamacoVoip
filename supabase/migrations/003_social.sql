@@ -14,17 +14,18 @@
 -- Rode isto no SQL Editor do Supabase, depois da 004_messages.sql
 -- ============================================================
 
-create table public.friendships (
+create table if not exists public.friendships (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,   -- quem enviou o pedido
   friend_id uuid not null references auth.users(id) on delete cascade, -- quem recebeu
   status text not null default 'pending' check (status in ('pending', 'accepted')),
+  request_note text check (char_length(request_note) <= 200), -- mensagem opcional ao enviar o pedido
   created_at timestamptz not null default now(),
   unique (user_id, friend_id),
   check (user_id <> friend_id)
 );
 
-create table public.blocked_users (
+create table if not exists public.blocked_users (
   blocker_id uuid not null references auth.users(id) on delete cascade,
   blocked_id uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default now(),
@@ -32,7 +33,7 @@ create table public.blocked_users (
   check (blocker_id <> blocked_id)
 );
 
-create table public.dm_conversations (
+create table if not exists public.dm_conversations (
   id uuid primary key default gen_random_uuid(),
   user_a uuid not null references auth.users(id) on delete cascade, -- sempre o menor uuid dos dois
   user_b uuid not null references auth.users(id) on delete cascade,
@@ -40,7 +41,7 @@ create table public.dm_conversations (
   unique (user_a, user_b)
 );
 
-create table public.dm_messages (
+create table if not exists public.dm_messages (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.dm_conversations(id) on delete cascade,
   author_id uuid not null references auth.users(id) on delete cascade,
@@ -50,15 +51,31 @@ create table public.dm_messages (
   created_at timestamptz not null default now()
 );
 
-create index friendships_user_idx on public.friendships (user_id);
-create index friendships_friend_idx on public.friendships (friend_id);
-create index dm_conversations_user_a_idx on public.dm_conversations (user_a);
-create index dm_conversations_user_b_idx on public.dm_conversations (user_b);
-create index dm_messages_conversation_idx on public.dm_messages (conversation_id, created_at);
+create index if not exists friendships_user_idx on public.friendships (user_id);
+create index if not exists friendships_friend_idx on public.friendships (friend_id);
+create index if not exists dm_conversations_user_a_idx on public.dm_conversations (user_a);
+create index if not exists dm_conversations_user_b_idx on public.dm_conversations (user_b);
+create index if not exists dm_messages_conversation_idx on public.dm_messages (conversation_id, created_at);
+
+-- Rede de segurança pra bancos que já tinham essas tabelas criadas
+-- antes destas colunas/constraints existirem
+alter table public.friendships add column if not exists request_note text;
+do $$
+declare r record;
+begin
+  for r in
+    select conname from pg_constraint
+    where contype = 'c' and conrelid = 'public.dm_messages'::regclass and pg_get_constraintdef(oid) ilike '%content%'
+  loop
+    execute format('alter table public.dm_messages drop constraint %I', r.conname);
+  end loop;
+end $$;
+alter table public.dm_messages add constraint dm_messages_content_length check (char_length(content) between 0 and 4000);
 
 -- ============================================================
 -- Trigger: edited_at + rate limit (mesma lógica das mensagens de canal)
 -- ============================================================
+drop trigger if exists on_dm_message_edited on public.friendships;
 create trigger on_dm_message_edited
   before update on public.dm_messages
   for each row execute function public.handle_message_edited();
@@ -85,6 +102,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_dm_rate_limit on public.dm_messages;
 create trigger on_dm_rate_limit
   before insert on public.dm_messages
   for each row execute function public.check_dm_rate_limit();
@@ -154,7 +172,7 @@ create policy "Autor exclui a própria DM"
 -- Funções: amizade, bloqueio e conversas (security definer —
 -- validam regras de negócio que RLS sozinha não expressa bem)
 -- ============================================================
-create or replace function public.send_friend_request(p_username text)
+create or replace function public.send_friend_request(p_username text, p_note text default null)
 returns public.friendships
 language plpgsql
 security definer
@@ -200,8 +218,8 @@ begin
     return v_result;
   end if;
 
-  insert into public.friendships (user_id, friend_id, status)
-  values (auth.uid(), v_target_id, 'pending')
+  insert into public.friendships (user_id, friend_id, status, request_note)
+  values (auth.uid(), v_target_id, 'pending', nullif(trim(coalesce(p_note, '')), ''))
   returning * into v_result;
 
   return v_result;
@@ -479,6 +497,18 @@ create table if not exists public.group_message_attachments (
 );
 
 create index if not exists group_messages_group_idx on public.group_messages (group_id, created_at);
+
+do $$
+declare r record;
+begin
+  for r in
+    select conname from pg_constraint
+    where contype = 'c' and conrelid = 'public.group_messages'::regclass and pg_get_constraintdef(oid) ilike '%content%'
+  loop
+    execute format('alter table public.group_messages drop constraint %I', r.conname);
+  end loop;
+end $$;
+alter table public.group_messages add constraint group_messages_content_length check (char_length(content) between 0 and 4000);
 
 alter table public.group_conversations enable row level security;
 alter table public.group_conversation_members enable row level security;

@@ -18,7 +18,7 @@
 -- ============================================================
 
 -- Tabela de perfis públicos, espelhando auth.users (que é privada)
-create table public.profiles (
+create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text not null unique,
   display_name text,
@@ -26,16 +26,44 @@ create table public.profiles (
   status text not null default 'offline' check (status in ('online', 'idle', 'dnd', 'offline')),
   custom_status text,
   playing text, -- "Jogando X" — só o app desktop consegue detectar isso
+  -- 'everyone' = qualquer um que compartilhe um servidor vê o perfil
+  -- completo (padrão). 'friends_only' = só amigos veem o perfil
+  -- completo (reforçado no app, não no banco — o app ainda precisa
+  -- enxergar nome/foto básicos de qualquer um no mesmo servidor pro
+  -- chat funcionar).
+  profile_visibility text not null default 'everyone' check (profile_visibility in ('everyone', 'friends_only')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 -- Índice para buscas por username (ex: adicionar amigo por @usuario)
-create index profiles_username_idx on public.profiles (lower(username));
+create index if not exists profiles_username_idx on public.profiles (lower(username));
 
 -- ============================================================
 -- Trigger: cria o profile automaticamente quando alguém se cadastra
 -- ============================================================
+-- Exclusão da própria conta — a pessoa mesma decide, sem precisar
+-- pedir pra um admin. Como profiles/servers/mensagens etc. têm
+-- "on delete cascade" ligado no id do auth.users, apagar a linha ali
+-- já limpa o resto sozinho. IMPORTANTE: se a pessoa for dona de algum
+-- servidor, esse servidor inteiro é apagado junto (mesmo
+-- comportamento que já existia pro resto do app, não é novo aqui).
+create or replace function public.delete_own_account()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Não autenticado';
+  end if;
+  delete from auth.users where id = auth.uid();
+end;
+$$;
+
+grant execute on function public.delete_own_account() to authenticated;
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -53,6 +81,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_auth_user_created on public.profiles;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
@@ -70,6 +99,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_profiles_updated on public.profiles;
 create trigger on_profiles_updated
   before update on public.profiles
   for each row execute function public.handle_updated_at();
@@ -106,7 +136,7 @@ create policy "Usuário só pode atualizar seu próprio perfil"
 -- Rode isto no SQL Editor do Supabase, depois da 001_profiles.sql
 -- ============================================================
 
-create table public.servers (
+create table if not exists public.servers (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(name) between 2 and 100),
   icon_url text,
@@ -121,7 +151,7 @@ create table public.servers (
   updated_at timestamptz not null default now()
 );
 
-create table public.server_members (
+create table if not exists public.server_members (
   server_id uuid not null references public.servers(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   nickname text,
@@ -130,7 +160,7 @@ create table public.server_members (
   primary key (server_id, user_id)
 );
 
-create table public.server_invites (
+create table if not exists public.server_invites (
   id uuid primary key default gen_random_uuid(),
   server_id uuid not null references public.servers(id) on delete cascade,
   code text not null unique,
@@ -141,9 +171,10 @@ create table public.server_invites (
   created_at timestamptz not null default now()
 );
 
-create index server_members_user_idx on public.server_members (user_id);
-create index server_invites_server_idx on public.server_invites (server_id);
+create index if not exists server_members_user_idx on public.server_members (user_id);
+create index if not exists server_invites_server_idx on public.server_invites (server_id);
 
+drop trigger if exists on_servers_updated on public.servers;
 create trigger on_servers_updated
   before update on public.servers
   for each row execute function public.handle_updated_at();
@@ -163,6 +194,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_server_created on public.servers;
 create trigger on_server_created
   after insert on public.servers
   for each row execute function public.handle_new_server();
@@ -374,7 +406,7 @@ create policy "Dono pode remover o ícone do próprio servidor"
 -- Rode isto no SQL Editor do Supabase, depois da 002_servers.sql
 -- ============================================================
 
-create table public.categories (
+create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
   server_id uuid not null references public.servers(id) on delete cascade,
   name text not null check (char_length(name) between 1 and 100),
@@ -382,7 +414,7 @@ create table public.categories (
   created_at timestamptz not null default now()
 );
 
-create table public.channels (
+create table if not exists public.channels (
   id uuid primary key default gen_random_uuid(),
   server_id uuid not null references public.servers(id) on delete cascade,
   category_id uuid references public.categories(id) on delete set null,
@@ -391,13 +423,14 @@ create table public.channels (
   topic text,
   is_stage boolean not null default false, -- canal "Palco": só quem modera fala
   slowmode_seconds integer not null default 0,
+  is_spoiler boolean not null default false, -- conteúdo do canal borrado até clicar pra revelar
   position int not null default 0,
   created_at timestamptz not null default now()
 );
 
-create index categories_server_idx on public.categories (server_id);
-create index channels_server_idx on public.channels (server_id);
-create index channels_category_idx on public.channels (category_id);
+create index if not exists categories_server_idx on public.categories (server_id);
+create index if not exists channels_server_idx on public.channels (server_id);
+create index if not exists channels_category_idx on public.channels (category_id);
 
 -- ============================================================
 -- Trigger: cria canais padrão ("geral" e "Sala Geral") ao criar o servidor
@@ -416,6 +449,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_server_created_channels on public.categories;
 create trigger on_server_created_channels
   after insert on public.servers
   for each row execute function public.handle_new_server_channels();
@@ -526,3 +560,11 @@ $$;
 -- obrigatoriamente vem primeiro, e a referência da outra só pode ser
 -- adicionada depois que as duas já existem.
 alter table public.servers add column if not exists afk_channel_id uuid references public.channels(id) on delete set null;
+
+-- Rede de segurança pra bancos que já tinham essas tabelas criadas
+-- antes dessas colunas existirem (CREATE TABLE IF NOT EXISTS não
+-- adiciona coluna nova numa tabela que já existe)
+alter table public.profiles add column if not exists profile_visibility text not null default 'everyone';
+alter table public.profiles drop constraint if exists profiles_profile_visibility_check;
+alter table public.profiles add constraint profiles_profile_visibility_check check (profile_visibility in ('everyone', 'friends_only'));
+alter table public.channels add column if not exists is_spoiler boolean not null default false;

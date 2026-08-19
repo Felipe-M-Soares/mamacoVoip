@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, Tray, nativeImage, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut } = require('electron')
+const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { exec } = require('node:child_process')
@@ -289,6 +289,15 @@ function createWindow() {
       webSecurity: true, // mantém same-origin policy e bloqueios de conteúdo misto ativos
       allowRunningInsecureContent: false, // nunca carrega http:// dentro de um contexto https/file
       webviewTag: false, // desativa a tag <webview>, uma superfície de ataque clássica no Electron
+      // Sem isso, o Chromium desacelera os timers de JavaScript quando a
+      // janela fica escondida (minimizada pra bandeja, por exemplo) —
+      // incluindo o timer que a Supabase usa pra renovar o login antes
+      // dele expirar. Ficando escondido tempo suficiente, o token
+      // expirava sem renovar e a pessoa parecia "deslogada" ao reabrir
+      // o app. Manter os timers rodando normal resolve isso (e também
+      // mantém a call de voz/chamadas ativas corretamente em segundo
+      // plano).
+      backgroundThrottling: false,
       spellcheck: false,
     },
     autoHideMenuBar: true,
@@ -625,6 +634,16 @@ app.whenReady().then(() => {
     autoUpdater.on('update-downloaded', (info) => {
       updateReadyToInstall = true
       sendUpdateStatus('ready', { version: info.version })
+      // Como o app pode estar escondido na bandeja (minimizado) quando
+      // isso acontece, a pessoa não veria o aviso na tela — o tooltip
+      // do ícone e uma notificação nativa avisam mesmo assim.
+      if (tray) tray.setToolTip(`Mamacos Voip — atualização v${info.version} pronta (reinicie pra aplicar)`)
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Atualização pronta',
+          body: `Mamacos Voip v${info.version} já foi baixado. Reinicie o app pra aplicar.`,
+        }).show()
+      }
     })
     let updateRetryCount = 0
     const MAX_UPDATE_RETRIES = 3
@@ -708,6 +727,21 @@ app.whenReady().then(() => {
           // de não deixar isso impedir o app de abrir
         })
       }, 1500)
+
+      // Checar só quando o app abre não é suficiente — muita gente
+      // deixa o app aberto o dia inteiro, e nesse caso uma atualização
+      // publicada nesse meio tempo só seria vista no próximo reinício
+      // (que podia demorar dias). Rechecando a cada 30 minutos, uma
+      // atualização nova chega bem mais rápido pra quem já está com o
+      // app aberto, sem precisar fechar e abrir de novo.
+      setInterval(
+        () => {
+          if (!updateReadyToInstall) {
+            autoUpdater.checkForUpdates().catch(() => {})
+          }
+        },
+        30 * 60 * 1000
+      )
     })
   }
 

@@ -1,9 +1,10 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { LoadingScreen } from './ui/LoadingScreen'
+import { MfaChallengeScreen } from '../pages/MfaChallengeScreen'
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session, loading } = useAuth()
+  const { session, loading, mfaPending } = useAuth()
   const location = useLocation()
 
   if (loading) {
@@ -21,6 +22,10 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
       }
     }
     return <Navigate to="/login" replace />
+  }
+
+  if (mfaPending) {
+    return <MfaChallengeScreen />
   }
 
   return <>{children}</>

@@ -4,10 +4,12 @@ import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useVoice } from '../../hooks/useVoice'
 import { useModeration } from '../../hooks/useModeration'
+import { useRoles } from '../../hooks/useRoles'
+import { useFriends } from '../../hooks/useFriends'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { VoiceParticipant } from '../../context/VoiceContext'
-import type { Channel, Profile } from '../../types/database'
+import type { Channel, Profile, Role } from '../../types/database'
 
 const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sinkId?: string | null }>(function VideoTile(
   { stream, sinkId },
@@ -219,6 +221,14 @@ function ParticipantTile({
   onViewProfile,
   onMessageUser,
   username,
+  canModerate,
+  onKick,
+  onBan,
+  roles,
+  userRoleIds,
+  onToggleRole,
+  onAddFriend,
+  onInvite,
 }: {
   userId: string
   name: string
@@ -231,6 +241,14 @@ function ParticipantTile({
   compact?: boolean
   onViewProfile?: (userId: string) => void
   onMessageUser?: (userId: string) => void
+  canModerate?: boolean
+  onKick?: (userId: string) => void
+  onBan?: (userId: string) => void
+  roles?: Role[]
+  userRoleIds?: string[]
+  onToggleRole?: (userId: string, roleId: string) => void
+  onAddFriend?: (username: string) => void
+  onInvite?: () => void
 }) {
   const voice = useVoice()
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
@@ -276,6 +294,35 @@ function ParticipantTile({
     <RemoteAudio stream={data.cameraStream} sinkId={sinkId} volume={effectiveVolume} />
   )
 
+  const myRoleIds = new Set(userRoleIds ?? [])
+  const menuItems = [
+    { label: 'Ver perfil', onClick: () => onViewProfile?.(userId) },
+    { label: 'Mensagem', onClick: () => onMessageUser?.(userId) },
+    ...(username ? [{ label: 'Mencionar (copiar @)', onClick: () => navigator.clipboard.writeText(`@${username}`) }] : []),
+    { label: 'Ajustar volume', onClick: () => setShowVolumeSlider(true) },
+    {
+      label: videoHiddenLocally ? 'Mostrar vídeo' : 'Desativar vídeo (só pra você)',
+      onClick: () => setVideoHiddenLocally((v) => !v),
+    },
+    ...(username
+      ? [{ label: 'Adicionar amigo', onClick: () => onAddFriend?.(username) }]
+      : []),
+    ...(onInvite ? [{ label: 'Convidar para o servidor', onClick: () => onInvite() }] : []),
+    { label: 'Copiar ID do usuário', onClick: () => navigator.clipboard.writeText(userId) },
+    ...(roles && roles.length > 0 && canModerate
+      ? roles.map((r) => ({
+          label: `${myRoleIds.has(r.id) ? '✓ ' : '   '} Cargo: ${r.name}`,
+          onClick: () => onToggleRole?.(userId, r.id),
+        }))
+      : []),
+    ...(canModerate
+      ? [
+          { label: `Expulsar ${name}`, danger: true, onClick: () => onKick?.(userId) },
+          { label: `Banir ${name}`, danger: true, onClick: () => onBan?.(userId) },
+        ]
+      : []),
+  ]
+
   if (compact) {
     return (
       <div
@@ -289,24 +336,7 @@ function ParticipantTile({
         </div>
         <span className="text-[10px] text-discord-text truncate max-w-full">{isLocal ? 'Você' : name}</span>
         {volumeButton}
-        {menuState && !isLocal && (
-          <ContextMenu
-            x={menuState.x}
-            y={menuState.y}
-            onClose={closeMenu}
-            items={[
-              { label: 'Ver perfil', onClick: () => onViewProfile?.(userId) },
-              { label: 'Mensagem', onClick: () => onMessageUser?.(userId) },
-              ...(username ? [{ label: 'Mencionar (copiar @)', onClick: () => navigator.clipboard.writeText(`@${username}`) }] : []),
-              { label: 'Ajustar volume', onClick: () => setShowVolumeSlider(true) },
-              {
-                label: videoHiddenLocally ? 'Mostrar vídeo' : 'Desativar vídeo (só pra você)',
-                onClick: () => setVideoHiddenLocally((v) => !v),
-              },
-              { label: 'Copiar ID do usuário', onClick: () => navigator.clipboard.writeText(userId) },
-            ]}
-          />
-        )}
+        {menuState && !isLocal && <ContextMenu x={menuState.x} y={menuState.y} onClose={closeMenu} items={menuItems} />}
       </div>
     )
   }
@@ -330,24 +360,7 @@ function ParticipantTile({
         {isLocal && ' (você)'}
       </span>
       {volumeButton}
-      {menuState && !isLocal && (
-        <ContextMenu
-          x={menuState.x}
-          y={menuState.y}
-          onClose={closeMenu}
-          items={[
-            { label: 'Ver perfil', onClick: () => onViewProfile?.(userId) },
-            { label: 'Mensagem', onClick: () => onMessageUser?.(userId) },
-            ...(username ? [{ label: 'Mencionar (copiar @)', onClick: () => navigator.clipboard.writeText(`@${username}`) }] : []),
-            { label: 'Ajustar volume', onClick: () => setShowVolumeSlider(true) },
-            {
-              label: videoHiddenLocally ? 'Mostrar vídeo' : 'Desativar vídeo (só pra você)',
-              onClick: () => setVideoHiddenLocally((v) => !v),
-            },
-            { label: 'Copiar ID do usuário', onClick: () => navigator.clipboard.writeText(userId) },
-          ]}
-        />
-      )}
+      {menuState && !isLocal && <ContextMenu x={menuState.x} y={menuState.y} onClose={closeMenu} items={menuItems} />}
     </div>
   )
 }
@@ -366,7 +379,9 @@ export function VoiceChannelView({
   const { profile } = useAuth()
   const { members } = useServerMembers(serverId)
   const voice = useVoice()
-  const { permissions } = useModeration(serverId)
+  const { permissions, kickMember, banMember } = useModeration(serverId)
+  const { roles, rolesForUser, assignRole, removeRole } = useRoles(serverId)
+  const { sendRequest } = useFriends()
   const [showInvite, setShowInvite] = useState(false)
 
   function handleViewParticipantProfile(userId: string) {
@@ -512,6 +527,29 @@ export function VoiceChannelView({
                       compact
                       onViewProfile={handleViewParticipantProfile}
                       onMessageUser={onMessageUser}
+                      canModerate={permissions.kick_members || permissions.ban_members}
+                      onKick={async (uid) => {
+                        if (!confirm('Expulsar essa pessoa do servidor? Ela pode entrar de novo com um convite.')) return
+                        const { error } = await kickMember(uid)
+                        if (error) alert(error)
+                      }}
+                      onBan={async (uid) => {
+                        if (!confirm('Banir essa pessoa do servidor? Ela não vai conseguir voltar sem ser desbanida antes.')) return
+                        const { error } = await banMember(uid)
+                        if (error) alert(error)
+                      }}
+                      roles={roles}
+                      userRoleIds={rolesForUser(userId).map((r) => r.id)}
+                      onToggleRole={async (uid, roleId) => {
+                        const has = rolesForUser(uid).some((r) => r.id === roleId)
+                        const { error } = has ? await removeRole(uid, roleId) : await assignRole(uid, roleId)
+                        if (error) alert(error)
+                      }}
+                      onAddFriend={async (uname) => {
+                        const { error } = await sendRequest(uname)
+                        if (error) alert(error)
+                      }}
+                      onInvite={() => setShowInvite(true)}
                     />
                   )
                 })}
@@ -542,6 +580,29 @@ export function VoiceChannelView({
                       sinkId={voice.audioSettings.speakerId}
                       onViewProfile={handleViewParticipantProfile}
                       onMessageUser={onMessageUser}
+                      canModerate={permissions.kick_members || permissions.ban_members}
+                      onKick={async (uid) => {
+                        if (!confirm('Expulsar essa pessoa do servidor? Ela pode entrar de novo com um convite.')) return
+                        const { error } = await kickMember(uid)
+                        if (error) alert(error)
+                      }}
+                      onBan={async (uid) => {
+                        if (!confirm('Banir essa pessoa do servidor? Ela não vai conseguir voltar sem ser desbanida antes.')) return
+                        const { error } = await banMember(uid)
+                        if (error) alert(error)
+                      }}
+                      roles={roles}
+                      userRoleIds={rolesForUser(userId).map((r) => r.id)}
+                      onToggleRole={async (uid, roleId) => {
+                        const has = rolesForUser(uid).some((r) => r.id === roleId)
+                        const { error } = has ? await removeRole(uid, roleId) : await assignRole(uid, roleId)
+                        if (error) alert(error)
+                      }}
+                      onAddFriend={async (uname) => {
+                        const { error } = await sendRequest(uname)
+                        if (error) alert(error)
+                      }}
+                      onInvite={() => setShowInvite(true)}
                     />
                   )
                 })}

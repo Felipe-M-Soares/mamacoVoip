@@ -8,6 +8,8 @@ interface AuthContextValue {
   user: User | null
   profile: Profile | null
   loading: boolean
+  mfaPending: boolean
+  verifyMfaChallenge: (code: string) => Promise<{ error: string | null }>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string, username: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
@@ -25,6 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [mfaPending, setMfaPending] = useState(false)
 
   // Capturado de forma síncrona (fora de qualquer efeito) porque o próprio
   // cliente do Supabase pode "limpar" o hash da URL assim que processa a
@@ -63,7 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       isEmailConfirmationRef.current = false
       setSession(session)
-      if (session?.user) fetchProfile(session.user.id)
+      if (session?.user) {
+        fetchProfile(session.user.id)
+        checkMfaLevel()
+      }
       setLoading(false)
     })
 
@@ -75,12 +81,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session)
       if (session?.user) {
         fetchProfile(session.user.id)
+        checkMfaLevel()
       } else {
         setProfile(null)
+        setMfaPending(false)
       }
     })
 
     return () => listener.subscription.unsubscribe()
+  }, [])
+
+  // Checa se a sessão está travada esperando o código do autenticador
+  // (aal1 = só senha, aal2 = senha + segundo fator já verificado).
+  // Alguém com 2FA ativado fica preso em "mfaPending" até completar o
+  // desafio — o app não deixa entrar antes disso.
+  async function checkMfaLevel() {
+    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    setMfaPending(Boolean(data && data.currentLevel === 'aal1' && data.nextLevel === 'aal2'))
+  }
+
+  async function verifyMfaChallenge(code: string): Promise<{ error: string | null }> {
+    const { data: factors } = await supabase.auth.mfa.listFactors()
+    const factor = factors?.totp?.[0]
+    if (!factor) return { error: 'Nenhum fator de autenticação encontrado' }
+
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code: code.trim() })
+    if (error) return { error: traduzErro(error.message) }
+
+    setMfaPending(false)
+    return { error: null }
+  }
+
+  // Segunda camada de proteção pro problema de "token expira enquanto
+  // a janela fica escondida" — mesmo com os timers não mais
+  // desacelerados (veja backgroundThrottling no processo principal),
+  // essa é uma garantia a mais: sempre que a janela volta a ficar
+  // visível (reaberta da bandeja, ou só voltando o foco), confirma que
+  // a sessão ainda é válida e renova se precisar, em vez de esperar o
+  // próximo ciclo natural de renovação.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        supabase.auth.getSession()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
 
   // Marca online ao logar / abrir o app. Só muda se o usuário estava
@@ -175,6 +221,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user: session?.user ?? null,
         profile,
         loading,
+        mfaPending,
+        verifyMfaChallenge,
         signIn,
         signUp,
         signOut,

@@ -13,7 +13,7 @@
 -- Rode isto no SQL Editor do Supabase, depois da 005_friends_dms.sql
 -- ============================================================
 
-create table public.roles (
+create table if not exists public.roles (
   id uuid primary key default gen_random_uuid(),
   server_id uuid not null references public.servers(id) on delete cascade,
   name text not null check (char_length(name) between 1 and 100),
@@ -23,7 +23,7 @@ create table public.roles (
   created_at timestamptz not null default now()
 );
 
-create table public.server_member_roles (
+create table if not exists public.server_member_roles (
   server_id uuid not null references public.servers(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   role_id uuid not null references public.roles(id) on delete cascade,
@@ -31,7 +31,7 @@ create table public.server_member_roles (
   primary key (server_id, user_id, role_id)
 );
 
-create table public.bans (
+create table if not exists public.bans (
   server_id uuid not null references public.servers(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   banned_by uuid not null references auth.users(id) on delete cascade,
@@ -40,7 +40,7 @@ create table public.bans (
   primary key (server_id, user_id)
 );
 
-create table public.moderation_logs (
+create table if not exists public.moderation_logs (
   id uuid primary key default gen_random_uuid(),
   server_id uuid not null references public.servers(id) on delete cascade,
   actor_id uuid not null references auth.users(id) on delete cascade,
@@ -59,9 +59,9 @@ create table public.moderation_logs (
 
 -- timeout_until já está direto na tabela server_members, lá no 001_core.sql
 
-create index roles_server_idx on public.roles (server_id);
-create index server_member_roles_user_idx on public.server_member_roles (server_id, user_id);
-create index moderation_logs_server_idx on public.moderation_logs (server_id, created_at);
+create index if not exists roles_server_idx on public.roles (server_id);
+create index if not exists server_member_roles_user_idx on public.server_member_roles (server_id, user_id);
+create index if not exists moderation_logs_server_idx on public.moderation_logs (server_id, created_at);
 
 -- ============================================================
 -- Permissões válidas (documentação — não é um enum de verdade pra

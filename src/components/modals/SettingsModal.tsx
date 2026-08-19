@@ -9,11 +9,14 @@ import { useTheme } from '../../hooks/useTheme'
 import { THEMES } from '../../context/ThemeContext'
 import { getNotificationPermission, requestNotificationPermission } from '../../lib/notifications'
 import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sounds'
+import { SecurityTab } from './SecurityTab'
+import { exportUserData } from '../../lib/exportUserData'
 
-type Tab = 'account' | 'appearance' | 'audio' | 'notifications' | 'privacy'
+type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'notifications' | 'privacy'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'account', label: 'Minha conta' },
+  { id: 'security', label: 'Segurança' },
   { id: 'appearance', label: 'Aparência' },
   { id: 'audio', label: 'Voz e Vídeo' },
   { id: 'notifications', label: 'Notificações' },
@@ -56,6 +59,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-xl mx-auto px-6 py-8">
           {tab === 'account' && <AccountTab email={user?.email} onSignOut={signOut} />}
+          {tab === 'security' && <SecurityTab />}
           {tab === 'appearance' && <AppearanceTab />}
           {tab === 'audio' && <AudioTab />}
           {tab === 'notifications' && <NotificationsTab />}
@@ -171,7 +175,81 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
         Sair da conta
       </button>
 
+      <DeleteAccountSection />
+
       <AppVersionInfo />
+    </div>
+  )
+}
+
+function DeleteAccountSection() {
+  const { signOut } = useAuth()
+  const [confirming, setConfirming] = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleDelete() {
+    if (confirmText.trim().toLowerCase() !== 'excluir') return
+    setLoading(true)
+    setError(null)
+    const { error } = await supabase.rpc('delete_own_account')
+    if (error) {
+      setLoading(false)
+      setError(error.message)
+      return
+    }
+    await signOut()
+  }
+
+  return (
+    <div className="pt-2">
+      {!confirming ? (
+        <button
+          onClick={() => setConfirming(true)}
+          className="w-full py-2.5 rounded border border-red-900 text-red-500/70 hover:bg-red-600/10 hover:text-red-500 transition-colors text-sm"
+        >
+          Excluir minha conta
+        </button>
+      ) : (
+        <div className="bg-red-950/20 border border-red-900/50 rounded-lg p-3 space-y-2.5">
+          <p className="text-sm text-red-400 font-medium">Isso não pode ser desfeito.</p>
+          <p className="text-xs text-discord-text-muted">
+            Sua conta, mensagens e servidores que você é dono são apagados de vez. Se você é dono de algum
+            servidor, ele é apagado inteiro pra todo mundo — considere transferir a propriedade antes, se quiser
+            manter o servidor de pé.
+          </p>
+          <p className="text-xs text-discord-text-muted">
+            Digite <span className="text-white font-mono">excluir</span> pra confirmar.
+          </p>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="excluir"
+            className="w-full px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-red-600"
+          />
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setConfirming(false)
+                setConfirmText('')
+                setError(null)
+              }}
+              className="flex-1 py-2 rounded btn-secondary text-sm"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={confirmText.trim().toLowerCase() !== 'excluir' || loading}
+              className="flex-1 py-2 rounded bg-red-600 text-white text-sm font-medium hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Excluindo...' : 'Excluir de vez'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -593,11 +671,22 @@ function formatKeyCode(code: string): string {
 function PrivacyTab() {
   const { profile, updateProfile } = useAuth()
   const [saving, setSaving] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   async function handleChange(visibility: 'everyone' | 'friends_only') {
     setSaving(true)
     await updateProfile({ profile_visibility: visibility })
     setSaving(false)
+  }
+
+  async function handleExport() {
+    if (!profile) return
+    setExporting(true)
+    try {
+      await exportUserData(profile.id)
+    } finally {
+      setExporting(false)
+    }
   }
 
   return (
@@ -645,6 +734,20 @@ function PrivacyTab() {
         Seus dados (perfil, mensagens, servidores) são protegidos por Row Level Security no banco — só você e quem
         compartilha um servidor com você consegue ver seu conteúdo.
       </p>
+
+      <div>
+        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Seus dados</label>
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="w-full py-2.5 rounded btn-secondary text-sm disabled:opacity-60"
+        >
+          {exporting ? 'Preparando arquivo...' : 'Baixar meus dados'}
+        </button>
+        <p className="text-[10px] text-discord-text-muted mt-1.5">
+          Gera um arquivo com seu perfil, servidores, amizades e mensagens que você mandou.
+        </p>
+      </div>
     </div>
   )
 }

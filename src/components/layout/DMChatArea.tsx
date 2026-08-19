@@ -6,6 +6,7 @@ import { useDirectMessages } from '../../hooks/useDirectMessages'
 import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../hooks/useFriends'
 import { useTypingIndicator } from '../../hooks/useTypingIndicator'
+import { useDMSeenState } from '../../hooks/useDMSeenState'
 import type { DMMessage, Profile } from '../../types/database'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
@@ -15,6 +16,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   const { messages, attachments, sendMessage, editMessage, deleteMessage } = useDirectMessages(conversationId)
   const { blocked, blockUser, unblockUser } = useFriends()
   const { typingUserIds, notifyTyping } = useTypingIndicator(conversationId, user?.id)
+  const otherLastReadAt = useDMSeenState(conversationId, otherProfile.id)
   const [replyingTo, setReplyingTo] = useState<DMMessage | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -65,37 +67,54 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto py-4">
-          {messages.map((message, i) => {
-            const prev = messages[i - 1]
-            const showHeader =
-              !prev ||
-              prev.author_id !== message.author_id ||
-              new Date(message.created_at).getTime() - new Date(prev.created_at).getTime() > GROUP_WINDOW_MS
-            const replyToMessage = message.reply_to_id ? messagesById[message.reply_to_id] ?? null : null
-            const author = message.author_id === user?.id ? undefined : otherProfile
+          {(() => {
+            // Última mensagem MINHA que a outra pessoa já leu — só essa
+            // mostra "Visto", igual o Discord/WhatsApp fazem (não fica
+            // repetindo em toda mensagem antiga)
+            const myLastSeenMessage = otherLastReadAt
+              ? [...messages]
+                  .reverse()
+                  .find((m) => m.author_id === user?.id && new Date(m.created_at) <= new Date(otherLastReadAt))
+              : undefined
 
-            return (
-              <DMMessageItem
-                key={message.id}
-                message={message}
-                author={message.author_id === otherProfile.id ? otherProfile : author}
-                showHeader={showHeader}
-                isOwn={message.author_id === user?.id}
-                replyToMessage={replyToMessage}
-                replyToAuthor={
-                  replyToMessage
-                    ? replyToMessage.author_id === otherProfile.id
-                      ? otherProfile
-                      : undefined
-                    : undefined
-                }
-                onEdit={(content) => editMessage(message.id, content)}
-                onDelete={() => deleteMessage(message.id)}
-                onReply={() => setReplyingTo(message)}
-                attachments={attachments[message.id] ?? []}
-              />
-            )
-          })}
+            return messages.map((message, i) => {
+              const prev = messages[i - 1]
+              const showHeader =
+                !prev ||
+                prev.author_id !== message.author_id ||
+                new Date(message.created_at).getTime() - new Date(prev.created_at).getTime() > GROUP_WINDOW_MS
+              const replyToMessage = message.reply_to_id ? messagesById[message.reply_to_id] ?? null : null
+              const author = message.author_id === user?.id ? undefined : otherProfile
+
+              return (
+                <div key={message.id}>
+                  <DMMessageItem
+                    message={message}
+                    author={message.author_id === otherProfile.id ? otherProfile : author}
+                    showHeader={showHeader}
+                    isOwn={message.author_id === user?.id}
+                    replyToMessage={replyToMessage}
+                    replyToAuthor={
+                      replyToMessage
+                        ? replyToMessage.author_id === otherProfile.id
+                          ? otherProfile
+                          : undefined
+                        : undefined
+                    }
+                    onEdit={(content) => editMessage(message.id, content)}
+                    onDelete={() => deleteMessage(message.id)}
+                    onReply={() => setReplyingTo(message)}
+                    attachments={attachments[message.id] ?? []}
+                  />
+                  {myLastSeenMessage?.id === message.id && (
+                    <p className="px-4 pt-0.5 text-[10px] text-discord-text-muted text-right">
+                      Visto por {otherProfile.display_name || otherProfile.username}
+                    </p>
+                  )}
+                </div>
+              )
+            })
+          })()}
           <div ref={bottomRef} />
         </div>
       )}

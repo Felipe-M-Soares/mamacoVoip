@@ -11,6 +11,7 @@ import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
 import { QuickSwitcher } from '../components/modals/QuickSwitcher'
+import { KeyboardShortcutsModal } from '../components/modals/KeyboardShortcutsModal'
 import { ServersProvider } from '../context/ServersContext'
 import { ChannelsProvider } from '../context/ChannelsContext'
 import { VoiceProvider } from '../context/VoiceContext'
@@ -21,6 +22,7 @@ import { useUnreadOverview } from '../hooks/useUnreadOverview'
 import { useGamePresence } from '../hooks/useGamePresence'
 import { GameDetectedToast } from '../components/ui/GameDetectedToast'
 import { OverlayStateSync } from '../components/layout/OverlayStateSync'
+import { AutoIdleStatus } from '../components/layout/AutoIdleStatus'
 import type { Channel, Profile, Server } from '../types/database'
 
 const VoiceChannelView = lazy(() =>
@@ -166,12 +168,17 @@ function MainLayoutInner() {
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
 
   useEffect(() => {
     function handleGlobalKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setShowQuickSwitcher(true)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault()
+        setShowShortcuts((v) => !v)
       }
     }
     window.addEventListener('keydown', handleGlobalKeyDown)
@@ -341,6 +348,9 @@ function MainLayoutInner() {
 
       <GameDetectedToast />
       <OverlayStateSync />
+      <AutoIdleStatus />
+
+      {showShortcuts && <KeyboardShortcutsModal onClose={() => setShowShortcuts(false)} />}
 
       {showQuickSwitcher && (
         <QuickSwitcher

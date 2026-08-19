@@ -159,7 +159,7 @@ export function MessageItem({
       </div>
 
       {showReactionPicker && (
-        <div className="absolute -top-11 right-4 bg-[#111214] border border-black/40 rounded-lg shadow-xl px-2 py-1.5 flex gap-1 z-20">
+        <div className="absolute -top-11 right-4 bg-[#111214] border border-black/40 rounded-lg shadow-xl px-2 py-1.5 flex gap-1 z-20 max-w-xs flex-wrap">
           {QUICK_REACTIONS.map((emoji) => (
             <button
               key={emoji}
@@ -170,6 +170,20 @@ export function MessageItem({
               className="text-lg hover:scale-125 transition-transform"
             >
               {emoji}
+            </button>
+          ))}
+          {emojis.length > 0 && <div className="w-px bg-white/10 mx-0.5" />}
+          {emojis.slice(0, 12).map((e) => (
+            <button
+              key={e.id}
+              onClick={() => {
+                onToggleReaction(`:${e.name}:`)
+                setShowReactionPicker(false)
+              }}
+              title={`:${e.name}:`}
+              className="hover:scale-125 transition-transform"
+            >
+              <img src={e.image_url} alt={e.name} className="w-5 h-5 object-contain" />
             </button>
           ))}
         </div>
@@ -352,7 +366,15 @@ export function MessageItem({
                         : 'bg-discord-darker border-transparent text-discord-text-muted hover:border-discord-text-muted'
                     }`}
                   >
-                    <span className="text-sm">{emoji}</span>
+                    {(() => {
+                      const customMatch = emoji.match(/^:([a-z0-9_]+):$/)
+                      const customEmoji = customMatch ? emojis.find((e) => e.name === customMatch[1]) : undefined
+                      return customEmoji ? (
+                        <img src={customEmoji.image_url} alt={emoji} title={emoji} className="w-4 h-4 object-contain" />
+                      ) : (
+                        <span className="text-sm">{emoji}</span>
+                      )
+                    })()}
                     <span>{group.length}</span>
                   </button>
                 )

@@ -6,6 +6,8 @@ import { ConnectionBanner } from './components/ui/ConnectionBanner'
 import { UpdateStatusBadge } from './components/ui/UpdateStatusBadge'
 import { ScreenSharePicker } from './components/ui/ScreenSharePicker'
 import { Login } from './pages/Login'
+import { ForgotPassword } from './pages/ForgotPassword'
+import { ResetPassword } from './pages/ResetPassword'
 import { Register } from './pages/Register'
 import { MainLayout } from './pages/MainLayout'
 import { InviteRedirect } from './pages/InviteRedirect'
@@ -30,6 +32,8 @@ function App() {
           <ScreenSharePicker />
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/esqueci-senha" element={<ForgotPassword />} />
+            <Route path="/redefinir-senha" element={<ResetPassword />} />
             <Route path="/cadastro" element={<Register />} />
             <Route path="/privacidade" element={<PrivacyPolicy />} />
             <Route path="/termos" element={<TermsOfService />} />

@@ -15,7 +15,7 @@
 -- Rode isto no SQL Editor do Supabase, depois da 003_channels.sql
 -- ============================================================
 
-create table public.messages (
+create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   channel_id uuid not null references public.channels(id) on delete cascade,
   server_id uuid not null references public.servers(id) on delete cascade, -- denormalizado pra simplificar RLS
@@ -30,7 +30,7 @@ create table public.messages (
   created_at timestamptz not null default now()
 );
 
-create table public.message_attachments (
+create table if not exists public.message_attachments (
   id uuid primary key default gen_random_uuid(),
   message_id uuid not null references public.messages(id) on delete cascade,
   file_url text not null,
@@ -40,18 +40,46 @@ create table public.message_attachments (
   created_at timestamptz not null default now()
 );
 
-create table public.message_reactions (
+create table if not exists public.message_reactions (
   message_id uuid not null references public.messages(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
-  emoji text not null check (char_length(emoji) between 1 and 8),
+  emoji text not null check (char_length(emoji) between 1 and 34), -- 34 cobre :nome_de_emoji_customizado: além de emoji padrão
   created_at timestamptz not null default now(),
   primary key (message_id, user_id, emoji)
 );
 
-create index messages_channel_created_idx on public.messages (channel_id, created_at);
-create index messages_author_idx on public.messages (author_id);
-create index message_attachments_message_idx on public.message_attachments (message_id);
-create index message_reactions_message_idx on public.message_reactions (message_id);
+-- Rede de segurança pra bancos que já tinham essas tabelas criadas
+-- antes com uma constraint mais restritiva (não deixava mensagem
+-- vazia — quebrava envio de "só anexo" — nem emoji customizado longo
+-- em reação)
+do $$
+declare r record;
+begin
+  for r in
+    select conname from pg_constraint
+    where contype = 'c' and conrelid = 'public.messages'::regclass and pg_get_constraintdef(oid) ilike '%content%'
+  loop
+    execute format('alter table public.messages drop constraint %I', r.conname);
+  end loop;
+end $$;
+alter table public.messages add constraint messages_content_length check (char_length(content) between 0 and 4000);
+
+do $$
+declare r record;
+begin
+  for r in
+    select conname from pg_constraint
+    where contype = 'c' and conrelid = 'public.message_reactions'::regclass and pg_get_constraintdef(oid) ilike '%emoji%'
+  loop
+    execute format('alter table public.message_reactions drop constraint %I', r.conname);
+  end loop;
+end $$;
+alter table public.message_reactions add constraint message_reactions_emoji_length check (char_length(emoji) between 1 and 34);
+
+create index if not exists messages_channel_created_idx on public.messages (channel_id, created_at);
+create index if not exists messages_author_idx on public.messages (author_id);
+create index if not exists message_attachments_message_idx on public.message_attachments (message_id);
+create index if not exists message_reactions_message_idx on public.message_reactions (message_id);
 
 -- ============================================================
 -- Trigger: marca edited_at quando o conteúdo muda
@@ -68,6 +96,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_message_edited on public.messages;
 create trigger on_message_edited
   before update on public.messages
   for each row execute function public.handle_message_edited();
@@ -97,6 +126,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_message_rate_limit on public.messages;
 create trigger on_message_rate_limit
   before insert on public.messages
   for each row execute function public.check_message_rate_limit();
@@ -267,7 +297,12 @@ create policy "Usuário vê o próprio estado de leitura de canais"
 drop policy if exists "Usuário vê o próprio estado de leitura de DMs" on public.dm_read_state;
 create policy "Usuário vê o próprio estado de leitura de DMs"
   on public.dm_read_state for select to authenticated
-  using (user_id = auth.uid());
+  using (
+    exists (
+      select 1 from public.dm_conversations c
+      where c.id = conversation_id and (c.user_a = auth.uid() or c.user_b = auth.uid())
+    )
+  );
 
 -- Upsert só pelo próprio usuário, direto (não precisa de função aqui —
 -- não há regra de negócio sensível, só "marquei como lido até agora")

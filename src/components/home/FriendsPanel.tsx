@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
-import { useFriends } from '../../hooks/useFriends'
+import { useFriends } from '../../context/FriendsContext'
 import { useConversations } from '../../hooks/useConversations'
 import type { ProfileStatus } from '../../types/database'
 

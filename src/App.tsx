@@ -1,10 +1,14 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { FriendsProvider } from './context/FriendsContext'
+import { GroupConversationsProvider } from './context/GroupConversationsContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { ConnectionBanner } from './components/ui/ConnectionBanner'
 import { UpdateStatusBadge } from './components/ui/UpdateStatusBadge'
 import { ScreenSharePicker } from './components/ui/ScreenSharePicker'
+import { FriendRequestToast } from './components/ui/FriendRequestToast'
 import { Login } from './pages/Login'
 import { ForgotPassword } from './pages/ForgotPassword'
 import { ResetPassword } from './pages/ResetPassword'
@@ -24,12 +28,16 @@ const Router = window.electronAPI?.isElectron ? HashRouter : BrowserRouter
 
 function App() {
   return (
+    <ErrorBoundary>
     <ThemeProvider>
       <Router>
         <AuthProvider>
+          <FriendsProvider>
+          <GroupConversationsProvider>
           <ConnectionBanner />
           <UpdateStatusBadge />
           <ScreenSharePicker />
+          <FriendRequestToast />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/esqueci-senha" element={<ForgotPassword />} />
@@ -55,9 +63,12 @@ function App() {
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+        </GroupConversationsProvider>
+        </FriendsProvider>
         </AuthProvider>
       </Router>
     </ThemeProvider>
+    </ErrorBoundary>
   )
 }
 

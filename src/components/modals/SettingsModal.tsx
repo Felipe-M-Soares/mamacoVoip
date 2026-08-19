@@ -11,6 +11,7 @@ import { getNotificationPermission, requestNotificationPermission } from '../../
 import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sounds'
 import { SecurityTab } from './SecurityTab'
 import { exportUserData } from '../../lib/exportUserData'
+import { NetworkDiagnosticsPanel } from './NetworkDiagnosticsPanel'
 
 type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'notifications' | 'privacy'
 
@@ -581,6 +582,10 @@ function AudioTab() {
         As mudanças aqui valem pra próxima vez que você entrar em um canal de voz. Trocar o microfone durante uma
         chamada já em andamento também dá — use o seletor que aparece na barra de controles da chamada.
       </p>
+
+      <div className="h-px bg-white/10" />
+
+      <NetworkDiagnosticsPanel />
     </div>
   )
 }

@@ -68,6 +68,9 @@ interface VoiceContextValue {
   connectedChannelId: string | null
   joiningChannelId: string | null
   connectedAt: number | null
+  // Latência REAL da chamada de voz (peer a peer) — diferente do ping
+  // do banco de dados. userId -> milissegundos de ida-e-volta.
+  connectionQuality: Record<string, number>
   connectedServerId: string | null
   connecting: boolean
   error: string | null
@@ -121,6 +124,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [joiningChannelId, setJoiningChannelId] = useState<string | null>(null)
   const [connectedServerId, setConnectedServerId] = useState<string | null>(null)
   const [connectedAt, setConnectedAt] = useState<number | null>(null)
+  const [connectionQuality, setConnectionQuality] = useState<Record<string, number>>({})
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [participants, setParticipants] = useState<Record<string, VoiceParticipant>>({})
@@ -684,6 +688,30 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // --- Latência real da chamada (não confundir com o ping do banco de
+  // dados) — usa getStats() de cada conexão WebRTC ativa pra pegar o
+  // tempo de ida-e-volta de verdade, peer a peer, a cada 5s.
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (!connectedRef.current || peersRef.current.size === 0) return
+      const next: Record<string, number> = {}
+      for (const [peerId, { pc }] of peersRef.current) {
+        try {
+          const stats = await pc.getStats()
+          stats.forEach((report) => {
+            if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.currentRoundTripTime != null) {
+              next[peerId] = Math.round(report.currentRoundTripTime * 1000)
+            }
+          })
+        } catch {
+          // conexão pode ter caído nesse meio tempo — sem problema, só ignora
+        }
+      }
+      setConnectionQuality(next)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
   // --- Canal AFK: move automaticamente quem fica inativo -------------
   const afkConfigRef = useRef<{ channelId: string | null; timeoutMinutes: number } | null>(null)
   const lastActivityRef = useRef(Date.now())
@@ -924,6 +952,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         connectedChannelId,
         joiningChannelId,
         connectedAt,
+        connectionQuality,
         connectedServerId,
         connecting,
         error,

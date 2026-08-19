@@ -5,7 +5,7 @@ import { useServerMembers } from '../../hooks/useServerMembers'
 import { useVoice } from '../../hooks/useVoice'
 import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
-import { useFriends } from '../../hooks/useFriends'
+import { useFriends } from '../../context/FriendsContext'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { VoiceParticipant } from '../../context/VoiceContext'
@@ -355,9 +355,23 @@ function ParticipantTile({
         <Avatar name={name} avatarUrl={avatarUrl} size={64} />
       )}
       {audioEl}
-      <span className="absolute bottom-1.5 left-2 text-sm font-medium text-white bg-black/50 px-1.5 py-0.5 rounded">
+      <span className="absolute bottom-1.5 left-2 text-sm font-medium text-white bg-black/50 px-1.5 py-0.5 rounded flex items-center gap-1.5">
         {name}
         {isLocal && ' (você)'}
+        {!isLocal && voice.connectionQuality[userId] !== undefined && (
+          <span
+            className={`text-[10px] font-mono font-normal ${
+              voice.connectionQuality[userId] < 100
+                ? 'text-discord-green'
+                : voice.connectionQuality[userId] < 250
+                  ? 'text-yellow-400'
+                  : 'text-red-400'
+            }`}
+            title="Latência real da chamada com essa pessoa"
+          >
+            {voice.connectionQuality[userId]}ms
+          </span>
+        )}
       </span>
       {volumeButton}
       {menuState && !isLocal && <ContextMenu x={menuState.x} y={menuState.y} onClose={closeMenu} items={menuItems} />}

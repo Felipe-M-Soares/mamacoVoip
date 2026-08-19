@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
 import { Avatar } from '../ui/Avatar'
-import { useFriends } from '../../hooks/useFriends'
-import { useGroupConversations } from '../../hooks/useGroupConversations'
+import { useFriends } from '../../context/FriendsContext'
+import { useGroupConversations } from '../../context/GroupConversationsContext'
 
 export function CreateGroupModal({
   onClose,

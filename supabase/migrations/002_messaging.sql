@@ -256,8 +256,24 @@ create policy "Usuário remove a própria reação"
 -- ============================================================
 -- Realtime: habilita eventos de INSERT/UPDATE/DELETE nessas tabelas
 -- ============================================================
-alter publication supabase_realtime add table public.messages;
-alter publication supabase_realtime add table public.message_reactions;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'messages'
+  ) then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'message_reactions'
+  ) then
+    alter publication supabase_realtime add table public.message_reactions;
+  end if;
+end $$;
 
 -- ============================================================
 -- Storage: bucket de anexos

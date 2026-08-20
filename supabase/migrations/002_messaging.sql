@@ -302,6 +302,7 @@ set allowed_mime_types = array[
 ]
 where id = 'attachments';
 
+drop policy if exists "Membros veem anexos do servidor" on storage.objects;
 create policy "Membros veem anexos do servidor"
   on storage.objects for select to authenticated
   using (
@@ -309,6 +310,7 @@ create policy "Membros veem anexos do servidor"
     and public.is_server_member((storage.foldername(name))[1]::uuid, auth.uid())
   );
 
+drop policy if exists "Membros enviam anexos no servidor" on storage.objects;
 create policy "Membros enviam anexos no servidor"
   on storage.objects for insert to authenticated
   with check (
@@ -316,6 +318,7 @@ create policy "Membros enviam anexos no servidor"
     and public.is_server_member((storage.foldername(name))[1]::uuid, auth.uid())
   );
 
+drop policy if exists "Membros removem os próprios anexos" on storage.objects;
 create policy "Membros removem os próprios anexos"
   on storage.objects for delete to authenticated
   using (

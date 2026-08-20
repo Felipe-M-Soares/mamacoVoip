@@ -350,18 +350,22 @@ values ('avatars', 'avatars', true, 5242880, array['image/png', 'image/jpeg', 'i
 on conflict (id) do nothing;
 
 -- Convenção de path: {user_id}/avatar-{timestamp}.ext
+drop policy if exists "Avatares são publicamente visíveis" on storage.objects;
 create policy "Avatares são publicamente visíveis"
   on storage.objects for select
   using (bucket_id = 'avatars');
 
+drop policy if exists "Usuário envia o próprio avatar" on storage.objects;
 create policy "Usuário envia o próprio avatar"
   on storage.objects for insert to authenticated
   with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 
+drop policy if exists "Usuário atualiza o próprio avatar" on storage.objects;
 create policy "Usuário atualiza o próprio avatar"
   on storage.objects for update to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 
+drop policy if exists "Usuário remove o próprio avatar" on storage.objects;
 create policy "Usuário remove o próprio avatar"
   on storage.objects for delete to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);

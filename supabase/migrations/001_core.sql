@@ -379,10 +379,12 @@ on conflict (id) do nothing;
 
 -- Convenção de path: {server_id}/{filename}. Isso permite checar
 -- dono do servidor a partir do primeiro segmento do path.
+drop policy if exists "Ícones de servidor são publicamente visíveis" on storage.objects;
 create policy "Ícones de servidor são publicamente visíveis"
   on storage.objects for select
   using (bucket_id = 'server-icons');
 
+drop policy if exists "Dono pode enviar ícone do próprio servidor" on storage.objects;
 create policy "Dono pode enviar ícone do próprio servidor"
   on storage.objects for insert to authenticated
   with check (
@@ -392,6 +394,7 @@ create policy "Dono pode enviar ícone do próprio servidor"
     )
   );
 
+drop policy if exists "Dono pode atualizar o ícone do próprio servidor" on storage.objects;
 create policy "Dono pode atualizar o ícone do próprio servidor"
   on storage.objects for update to authenticated
   using (
@@ -401,6 +404,7 @@ create policy "Dono pode atualizar o ícone do próprio servidor"
     )
   );
 
+drop policy if exists "Dono pode remover o ícone do próprio servidor" on storage.objects;
 create policy "Dono pode remover o ícone do próprio servidor"
   on storage.objects for delete to authenticated
   using (

@@ -81,7 +81,7 @@ begin
 end;
 $$;
 
-drop trigger if exists on_auth_user_created on public.profiles;
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
@@ -465,7 +465,7 @@ begin
 end;
 $$;
 
-drop trigger if exists on_server_created_channels on public.categories;
+drop trigger if exists on_server_created_channels on public.servers;
 create trigger on_server_created_channels
   after insert on public.servers
   for each row execute function public.handle_new_server_channels();

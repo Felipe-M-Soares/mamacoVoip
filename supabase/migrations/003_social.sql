@@ -75,7 +75,7 @@ alter table public.dm_messages add constraint dm_messages_content_length check (
 -- ============================================================
 -- Trigger: edited_at + rate limit (mesma lógica das mensagens de canal)
 -- ============================================================
-drop trigger if exists on_dm_message_edited on public.friendships;
+drop trigger if exists on_dm_message_edited on public.dm_messages;
 create trigger on_dm_message_edited
   before update on public.dm_messages
   for each row execute function public.handle_message_edited();

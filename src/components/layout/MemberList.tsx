@@ -5,17 +5,21 @@ import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
+import { useFriends } from '../../context/FriendsContext'
 import { ManageMemberModal } from '../modals/ManageMemberModal'
+import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import type { Profile, Role } from '../../types/database'
 
 export function MemberList({
   serverId,
   onViewProfile,
+  onMessageUser,
   mobileOpen = false,
   onCloseMobile,
 }: {
   serverId: string
   onViewProfile: (profile: Profile) => void
+  onMessageUser?: (userId: string) => void
   mobileOpen?: boolean
   onCloseMobile?: () => void
 }) {
@@ -23,8 +27,10 @@ export function MemberList({
   const { members, loading, refresh } = useServerMembers(serverId)
   const { permissions } = useModeration(serverId)
   const { rolesForUser, roles } = useRoles(serverId)
+  const { sendRequest, friends } = useFriends()
   const [managingProfile, setManagingProfile] = useState<Profile | null>(null)
   const [contextProfile, setContextProfile] = useState<Profile | null>(null)
+  const [showInvite, setShowInvite] = useState(false)
   const { menuState, openMenu, closeMenu } = useContextMenuState()
 
   const canModerate = permissions.kick_members || permissions.ban_members || permissions.timeout_members || permissions.manage_roles
@@ -163,10 +169,32 @@ export function MemberList({
             onClose={closeMenu}
             items={[
               { label: 'Ver perfil', onClick: () => onViewProfile(contextProfile) },
+              ...(contextProfile.id !== profile?.id
+                ? [
+                    { label: 'Mensagem', onClick: () => onMessageUser?.(contextProfile.id) },
+                    {
+                      label: 'Mencionar (copiar @)',
+                      onClick: () => navigator.clipboard.writeText(`@${contextProfile.username}`),
+                    },
+                    ...(!friends.some((f) => f.profile.id === contextProfile.id)
+                      ? [
+                          {
+                            label: 'Adicionar amigo',
+                            onClick: async () => {
+                              const { error } = await sendRequest(contextProfile.username)
+                              if (error) alert(error)
+                            },
+                          },
+                        ]
+                      : []),
+                    { label: 'Convidar para o servidor', onClick: () => setShowInvite(true) },
+                  ]
+                : []),
               {
                 label: 'Copiar nome de usuário',
                 onClick: () => navigator.clipboard.writeText(contextProfile.username),
               },
+              { label: 'Copiar ID do usuário', onClick: () => navigator.clipboard.writeText(contextProfile.id) },
               ...(canModerate && contextProfile.id !== profile?.id
                 ? [
                     {
@@ -179,6 +207,8 @@ export function MemberList({
             ]}
           />
         )}
+
+        {showInvite && <InviteFriendsModal serverId={serverId} onClose={() => setShowInvite(false)} />}
       </aside>
     </>
   )

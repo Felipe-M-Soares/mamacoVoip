@@ -161,6 +161,8 @@ export type Channel = {
   is_stage: boolean
   is_spoiler: boolean
   slowmode_seconds: number
+  user_limit: number
+  is_restricted: boolean
   position: number
   created_at: string
 }
@@ -186,6 +188,7 @@ export type Message = {
   pinned_at: string | null
   pinned_by: string | null
   thread_id: string | null
+  system_event: string | null
   created_at: string
 }
 
@@ -328,8 +331,14 @@ export type Database = {
       channels: {
         Row: Channel
         Insert: Pick<Channel, 'server_id' | 'name' | 'type'> &
-          Partial<Pick<Channel, 'category_id' | 'position' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler'>>
-        Update: Partial<Pick<Channel, 'name' | 'category_id' | 'position' | 'topic' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler'>>
+          Partial<Pick<Channel, 'category_id' | 'position' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler' | 'user_limit' | 'is_restricted'>>
+        Update: Partial<Pick<Channel, 'name' | 'category_id' | 'position' | 'topic' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler' | 'user_limit' | 'is_restricted'>>
+        Relationships: []
+      }
+      channel_role_access: {
+        Row: { channel_id: string; role_id: string }
+        Insert: { channel_id: string; role_id: string }
+        Update: never
         Relationships: []
       }
       messages: {

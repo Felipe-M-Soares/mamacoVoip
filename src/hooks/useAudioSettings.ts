@@ -138,6 +138,10 @@ export function useAudioSettings() {
       sampleRate: { ideal: 48000 },
       sampleSize: { ideal: 16 },
       channelCount: { ideal: 1 },
+      // Pede pro navegador priorizar baixa latência ao capturar o
+      // microfone, quando o dispositivo permitir — de novo, um ajuste
+      // só do lado do código, sem depender de nenhum servidor.
+      latency: { ideal: 0 },
       ...extraChromiumConstraints,
     } as MediaTrackConstraints
   }

@@ -12,7 +12,7 @@ import type { DMMessage, Profile } from '../../types/database'
 const GROUP_WINDOW_MS = 5 * 60 * 1000
 
 export function DMChatArea({ conversationId, otherProfile }: { conversationId: string; otherProfile: Profile }) {
-  const { user } = useAuth()
+  const { user, profile: myProfile } = useAuth()
   const { messages, attachments, sendMessage, editMessage, deleteMessage } = useDirectMessages(conversationId)
   const { blocked, blockUser, unblockUser } = useFriends()
   const { typingUserIds, notifyTyping } = useTypingIndicator(conversationId, user?.id)
@@ -84,7 +84,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
                 prev.author_id !== message.author_id ||
                 new Date(message.created_at).getTime() - new Date(prev.created_at).getTime() > GROUP_WINDOW_MS
               const replyToMessage = message.reply_to_id ? messagesById[message.reply_to_id] ?? null : null
-              const author = message.author_id === user?.id ? undefined : otherProfile
+              const author = message.author_id === user?.id ? myProfile ?? undefined : otherProfile
 
               return (
                 <div key={message.id}>

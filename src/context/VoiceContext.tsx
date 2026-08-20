@@ -18,9 +18,21 @@ import {
 // em produção — sem ele, peers atrás de NAT simétrico/restritivo podem
 // não conseguir se conectar diretamente. Isso é uma limitação de
 // infraestrutura, não do código de sinalização.
+// TURN server opcional (retransmissão) — usado como reforço quando a
+// conexão direta entre duas pessoas não é boa o suficiente. Configura
+// via variáveis de ambiente (VITE_TURN_URL / VITE_TURN_USERNAME /
+// VITE_TURN_CREDENTIAL) — se não estiverem definidas, o app funciona
+// normal só com STUN, exatamente como já funcionava antes.
+const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined
+const turnUsername = import.meta.env.VITE_TURN_USERNAME as string | undefined
+const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined
+
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  ...(turnUrl && turnUsername && turnCredential
+    ? [{ urls: turnUrl, username: turnUsername, credential: turnCredential }]
+    : []),
 ]
 
 const MAX_PARTICIPANTS = 8
@@ -368,6 +380,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const connectedRef = useRef(false)
   const hasSyncedRef = useRef(false)
+  const channelUserLimitRef = useRef(0)
   const realtimeRef = useRef<RealtimeChannel | null>(null)
   const peersRef = useRef<Map<string, PeerState>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -442,7 +455,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }
 
   function createPeerConnection(peerId: string, polite: boolean): RTCPeerConnection {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    const pc = new RTCPeerConnection({
+      iceServers: ICE_SERVERS,
+      // Pré-coleta candidatos de conexão ANTES de precisar deles — sem
+      // isso, a busca só começa quando a chamada realmente começa a
+      // negociar, o que atrasa o tempo até a call conectar (não é a
+      // mesma coisa que a latência durante a conversa, mas melhora o
+      // "demora pra pegar" que você comentou antes).
+      iceCandidatePoolSize: 4,
+    })
     const peerState: PeerState = { pc, makingOffer: false, polite }
     peersRef.current.set(peerId, peerState)
 
@@ -455,6 +476,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // 64kbps a voz fica bem mais nítida, por um custo de banda
         // irrelevante (poucos KB/s a mais).
         params.encodings[0].maxBitrate = 64_000
+        // Marca o áudio como prioridade alta — quando a rede está
+        // congestionada (upload cheio, por exemplo), isso pede pro
+        // navegador tratar os pacotes de voz como mais urgentes do
+        // que outros tipos de tráfego (imagem/vídeo, por exemplo).
+        if ('priority' in params.encodings[0]) {
+          ;(params.encodings[0] as RTCRtpEncodingParameters & { priority?: string }).priority = 'high'
+        }
+        if ('networkPriority' in params.encodings[0]) {
+          ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: string }).networkPriority = 'high'
+        }
         sender.setParameters(params).catch(() => {})
       }
     })
@@ -463,8 +494,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const sender = pc.addTrack(track, screenStreamRef.current!)
         const params = sender.getParameters()
         params.encodings = params.encodings?.length ? params.encodings : [{}]
-        params.encodings[0].maxBitrate = 4_000_000
-        ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = 'maintain-framerate'
+        // Antes isso usava um valor fixo (4Mbps) sem olhar a preferência
+        // de qualidade escolhida — então quem entrava na call DEPOIS que
+        // a transmissão já tinha começado recebia uma versão bem pior
+        // do que quem já estava lá antes, mesmo com "Qualidade máxima"
+        // selecionada. Usando a mesma referência que o início da
+        // transmissão usa, todo mundo recebe a qualidade certa.
+        const preset = screenShareQualityRef.current
+        params.encodings[0].maxBitrate = preset.maxBitrate
+        ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
+          preset.degradationPreference
         sender.setParameters(params).catch(() => {})
       })
     }
@@ -491,6 +530,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       rawStreamsRef.current.get(peerId)!.set(stream.id, stream)
       recomputeParticipant(peerId)
       if (!analysersRef.current.has(peerId)) setupAnalyser(peerId, stream)
+
+      // Pede pro navegador priorizar latência baixa em vez de suavidade
+      // contra oscilação de rede (jitter) — só pra áudio, já que voz é
+      // mais sensível a atraso do que a pequenos engasgos ocasionais.
+      // Isso não depende de nenhum servidor, é só uma configuração do
+      // próprio navegador — funciona de graça, sem custo nenhum.
+      if (event.track.kind === 'audio' && 'playoutDelayHint' in event.receiver) {
+        try {
+          ;(event.receiver as RTCRtpReceiver & { playoutDelayHint: number }).playoutDelayHint = 0
+        } catch {
+          // navegador sem suporte a esse ajuste — sem problema, só não aplica
+        }
+      }
     }
 
     return pc
@@ -563,6 +615,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setConnecting(true)
     setError(null)
     hasSyncedRef.current = false
+    channelUserLimitRef.current = 0
+
+    const { data: channelRow } = await supabase.from('channels').select('user_limit').eq('id', channelId).single()
+    channelUserLimitRef.current = channelRow?.user_limit ?? 0
 
     try {
       const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
@@ -589,6 +645,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const state = rt.presenceState()
         const ids = Object.keys(state).filter((id) => id !== user.id)
         const isFirstSync = !hasSyncedRef.current
+
+        // Limite de pessoas no canal — só checa na primeira sincronização
+        // (a entrada em si), pra não expulsar quem já está dentro se o
+        // limite for reduzido depois por um moderador.
+        if (isFirstSync && channelUserLimitRef.current > 0 && ids.length >= channelUserLimitRef.current) {
+          setError('Esse canal de voz já está cheio.')
+          leave()
+          return
+        }
+
         let hasNewPeer = false
 
         ids.forEach((id) => {

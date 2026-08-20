@@ -30,6 +30,7 @@ function renderContent(content: string, members: Profile[], emojis: ServerEmoji[
 export function MessageItem({
   message,
   author,
+  authorRoleColor,
   showHeader,
   isOwn,
   canModerate,
@@ -61,6 +62,7 @@ export function MessageItem({
 }: {
   message: Message
   author: Profile | undefined
+  authorRoleColor?: string
   showHeader: boolean
   isOwn: boolean
   canModerate: boolean
@@ -108,9 +110,39 @@ export function MessageItem({
     return acc
   }, {})
 
+  if (message.system_event === 'member_join') {
+    const authorReactions = reactions.filter((r) => r.user_id === currentUserId && r.emoji === '👋')
+    return (
+      <div className="px-4 py-1.5 flex items-center gap-2 group">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-green shrink-0">
+          <path d="M12 4l-1.4 1.4L16.2 11H4v2h12.2l-5.6 5.6L12 20l8-8-8-8z" />
+        </svg>
+        <p className="text-sm text-discord-text-muted min-w-0 truncate">
+          <button onClick={() => author && onViewProfile(author)} className="font-medium text-discord-text hover:underline">
+            {author?.display_name || author?.username || 'Alguém'}
+          </button>{' '}
+          entrou no servidor.
+        </p>
+        <span className="text-[10px] text-discord-text-muted shrink-0">{formatTime(message.created_at)}</span>
+        {currentUserId && currentUserId !== message.author_id && (
+          <button
+            onClick={() => onToggleReaction('👋')}
+            className={`ml-auto text-xs px-2 py-1 rounded-full border shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${
+              authorReactions.length > 0
+                ? 'bg-discord-blurple/20 border-discord-blurple text-white opacity-100'
+                : 'border-white/10 text-discord-text-muted hover:text-white hover:border-white/30'
+            }`}
+          >
+            👋 Acenar
+          </button>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div
-      className={`group relative px-4 py-0.5 hover:bg-black/10 ${showHeader ? 'mt-3 pt-1.5' : ''}`}
+      className={`group relative px-4 py-0.5 hover:bg-black/10 animate-fade-slide-in ${showHeader ? 'mt-3 pt-1.5' : ''}`}
       onMouseLeave={() => setShowReactionPicker(false)}
       onContextMenu={openMenu}
     >
@@ -247,7 +279,8 @@ export function MessageItem({
               <button
                 onClick={() => author && onViewProfile(author)}
                 onContextMenu={openUserMenu}
-                className="font-medium text-white text-sm hover:underline"
+                style={authorRoleColor ? { color: authorRoleColor } : undefined}
+                className={`font-medium text-sm hover:underline ${authorRoleColor ? '' : 'text-white'}`}
               >
                 {author?.display_name || author?.username || 'Usuário'}
               </button>

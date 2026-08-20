@@ -4,6 +4,7 @@ import { MessageComposer } from '../chat/MessageComposer'
 import { useMessages } from '../../hooks/useMessages'
 import { useAuth } from '../../hooks/useAuth'
 import { useTypingIndicator } from '../../hooks/useTypingIndicator'
+import { useRoles } from '../../hooks/useRoles'
 import type { Thread, Profile, ServerEmoji, Message } from '../../types/database'
 
 export function ThreadPanel({
@@ -26,7 +27,8 @@ export function ThreadPanel({
   onClose: () => void
 }) {
   const { user } = useAuth()
-  const { messages, attachments, reactions, sendMessage, editMessage, deleteMessage, toggleReaction } = useMessages(
+  const { roles, rolesForUser } = useRoles(serverId)
+  const { messages, loading, attachments, reactions, sendMessage, editMessage, deleteMessage, toggleReaction } = useMessages(
     thread.channel_id,
     serverId,
     thread.id
@@ -62,6 +64,7 @@ export function ThreadPanel({
       <MessageList
         channelName={thread.name}
         messages={messages}
+        loading={loading}
         attachments={attachments}
         reactions={reactions}
         profilesById={profilesById}
@@ -69,6 +72,8 @@ export function ThreadPanel({
         isServerOwner={isServerOwner}
         members={memberProfiles}
         emojis={emojis}
+        roles={roles}
+        rolesForUser={rolesForUser}
         onEdit={editMessage}
         onDelete={deleteMessage}
         onReply={setReplyingTo}

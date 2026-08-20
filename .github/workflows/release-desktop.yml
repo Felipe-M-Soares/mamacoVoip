@@ -98,6 +98,9 @@ jobs:
           # Actions > New repository secret, no seu repositório GitHub.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_TURN_URL: ${{ secrets.VITE_TURN_URL }}
+          VITE_TURN_USERNAME: ${{ secrets.VITE_TURN_USERNAME }}
+          VITE_TURN_CREDENTIAL: ${{ secrets.VITE_TURN_CREDENTIAL }}
 
       - name: Empacotar + publicar release (${{ matrix.os }})
         run: npx electron-builder ${{ matrix.platform_flag }} --publish always

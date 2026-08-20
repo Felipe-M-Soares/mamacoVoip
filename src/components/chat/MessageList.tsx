@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef } from 'react'
 import { MessageItem } from './MessageItem'
+import { MessageListSkeleton } from './MessageListSkeleton'
 import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji, Thread, Role } from '../../types/database'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
@@ -28,6 +29,7 @@ function DateSeparator({ label }: { label: string }) {
 export function MessageList({
   channelName,
   messages,
+  loading,
   attachments,
   reactions,
   profilesById,
@@ -36,6 +38,7 @@ export function MessageList({
   members,
   emojis,
   roles,
+  rolesForUser,
   onEdit,
   onDelete,
   onReply,
@@ -56,6 +59,7 @@ export function MessageList({
 }: {
   channelName: string
   messages: Message[]
+  loading?: boolean
   attachments: Record<string, MessageAttachment[]>
   reactions: Record<string, MessageReaction[]>
   profilesById: Record<string, Profile>
@@ -64,6 +68,7 @@ export function MessageList({
   members: Profile[]
   emojis: ServerEmoji[]
   roles?: Role[]
+  rolesForUser?: (userId: string) => Role[]
   onEdit: (messageId: string, content: string) => Promise<{ error: string | null }>
   onDelete: (messageId: string) => void
   onReply: (message: Message) => void
@@ -88,6 +93,10 @@ export function MessageList({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
+
+  if (loading) {
+    return <MessageListSkeleton />
+  }
 
   if (messages.length === 0) {
     return (
@@ -125,6 +134,10 @@ export function MessageList({
           new Date(message.created_at).getTime() - new Date(prev.created_at).getTime() > GROUP_WINDOW_MS
 
         const replyToMessage = message.reply_to_id ? messagesById[message.reply_to_id] ?? null : null
+        // Cor do nome igual o Discord faz — usa o cargo de posição mais
+        // alta que tenha uma cor definida (ignora o cinza padrão, que
+        // significa "sem cor específica").
+        const authorRoleColor = rolesForUser?.(message.author_id).find((r) => r.color !== '#99aab5')?.color
 
         return (
           <Fragment key={message.id}>
@@ -132,6 +145,7 @@ export function MessageList({
             <MessageItem
               message={message}
             author={profilesById[message.author_id]}
+            authorRoleColor={authorRoleColor}
             showHeader={showHeader}
             isOwn={message.author_id === currentUserId}
             canModerate={isServerOwner}

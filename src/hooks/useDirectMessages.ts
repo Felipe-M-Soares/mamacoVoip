@@ -87,12 +87,16 @@ export function useDirectMessages(conversationId: string | null) {
           refreshAttachments(messagesRef.current.map((m) => m.id))
         }
       })
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          refresh()
+        }
+      })
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [conversationId, refreshAttachments])
+  }, [conversationId, refreshAttachments, refresh])
 
   async function sendMessage(content: string, replyToId: string | null = null, files: File[] = []) {
     if (!conversationId || !user) return { error: 'Não foi possível enviar' }
@@ -111,11 +115,17 @@ export function useDirectMessages(conversationId: string | null) {
 
     setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
 
+    const attachmentErrors: string[] = []
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
       const path = `${conversationId}/${message.id}-${safeName}`
-      const { error: uploadError } = await supabase.storage.from('dm-attachments').upload(path, file)
-      if (uploadError) continue
+      const { error: uploadError } = await supabase.storage
+        .from('dm-attachments')
+        .upload(path, file, { contentType: file.type || 'application/octet-stream' })
+      if (uploadError) {
+        attachmentErrors.push(uploadError.message)
+        continue
+      }
 
       const { data: urlData } = supabase.storage.from('dm-attachments').getPublicUrl(path)
       await supabase.from('dm_message_attachments').insert({
@@ -128,6 +138,9 @@ export function useDirectMessages(conversationId: string | null) {
     }
 
     if (files.length > 0) await refreshAttachments([...messagesRef.current.map((m) => m.id), message.id])
+    if (attachmentErrors.length > 0) {
+      return { error: `Mensagem enviada, mas o anexo falhou: ${attachmentErrors[0]}` }
+    }
     return { error: null }
   }
 

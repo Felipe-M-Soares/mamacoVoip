@@ -307,20 +307,9 @@ export function MessageComposer({
       )}
 
       {files.length > 0 && (
-        <div className="flex flex-wrap gap-2 bg-discord-lighter px-3 py-2 border-b border-black/20">
+        <div className="flex flex-wrap gap-2.5 bg-discord-lighter px-3 pt-3 pb-2 border-b border-black/20 rounded-t-xl">
           {files.map((file, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-1.5 bg-discord-darker rounded px-2 py-1 text-xs text-discord-text"
-            >
-              <span className="truncate max-w-[140px]">{file.name}</span>
-              <button
-                onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
-                className="text-discord-text-muted hover:text-white"
-              >
-                ×
-              </button>
-            </div>
+            <FileAttachmentPreview key={`${file.name}-${i}`} file={file} onRemove={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))} />
           ))}
         </div>
       )}
@@ -423,6 +412,95 @@ export function MessageComposer({
           </svg>
         </button>
       </div>
+    </div>
+  )
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function FileAttachmentPreview({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const isImage = file.type.startsWith('image/')
+  const isVideo = file.type.startsWith('video/')
+  const isAudio = file.type.startsWith('audio/')
+
+  useEffect(() => {
+    if (!isImage && !isVideo) return
+    const url = URL.createObjectURL(file)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file, isImage, isVideo])
+
+  if (isImage && previewUrl) {
+    return (
+      <div className="relative group/file w-20 h-20 shrink-0">
+        <img src={previewUrl} alt={file.name} className="w-full h-full object-cover rounded-lg" />
+        <button
+          onClick={onRemove}
+          title="Remover"
+          className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-discord-darker border border-black/40 text-white opacity-0 group-hover/file:opacity-100 transition-opacity hover:bg-red-600"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+            <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+          </svg>
+        </button>
+      </div>
+    )
+  }
+
+  if (isVideo && previewUrl) {
+    return (
+      <div className="relative group/file w-20 h-20 shrink-0">
+        <video src={previewUrl} muted className="w-full h-full object-cover rounded-lg bg-black" />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg pointer-events-none">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        </div>
+        <button
+          onClick={onRemove}
+          title="Remover"
+          className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-discord-darker border border-black/40 text-white opacity-0 group-hover/file:opacity-100 transition-opacity hover:bg-red-600"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+            <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+          </svg>
+        </button>
+      </div>
+    )
+  }
+
+  // Áudio ou qualquer outro tipo de arquivo — cartão com ícone + nome + tamanho
+  return (
+    <div className="relative group/file flex items-center gap-2 bg-discord-darker rounded-lg pl-2.5 pr-7 py-2 max-w-[220px]">
+      <span className="shrink-0 text-discord-text-muted">
+        {isAudio ? (
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M12 3a1 1 0 0 1 1 1v10.2a3.5 3.5 0 1 1-2-3.16V4a1 1 0 0 1 1-1z" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M6 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5z" />
+          </svg>
+        )}
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs text-discord-text truncate">{file.name}</p>
+        <p className="text-[10px] text-discord-text-muted">{formatFileSize(file.size)}</p>
+      </div>
+      <button
+        onClick={onRemove}
+        title="Remover"
+        className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full text-discord-text-muted opacity-0 group-hover/file:opacity-100 transition-opacity hover:bg-red-600 hover:text-white"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+          <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+        </svg>
+      </button>
     </div>
   )
 }

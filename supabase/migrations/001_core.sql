@@ -111,12 +111,14 @@ alter table public.profiles enable row level security;
 
 -- Qualquer usuário autenticado pode VER perfis (necessário para chat,
 -- lista de membros, busca de amigos etc.)
+drop policy if exists "Perfis são visíveis para usuários autenticados" on public.profiles;
 create policy "Perfis são visíveis para usuários autenticados"
   on public.profiles for select
   to authenticated
   using (true);
 
 -- Usuário só pode alterar o PRÓPRIO perfil
+drop policy if exists "Usuário só pode atualizar seu próprio perfil" on public.profiles;
 create policy "Usuário só pode atualizar seu próprio perfil"
   on public.profiles for update
   to authenticated
@@ -232,24 +234,29 @@ alter table public.server_invites enable row level security;
 -- checagem (AFTER INSERT triggers disparam ao final da query, não
 -- antes do RETURNING ser calculado). Deixando o dono passar direto
 -- por owner_id, a corrida deixa de ser um problema.
+drop policy if exists "Membros veem os servidores dos quais participam" on public.servers;
 create policy "Membros veem os servidores dos quais participam"
   on public.servers for select to authenticated
   using (owner_id = auth.uid() or public.is_server_member(id, auth.uid()));
 
+drop policy if exists "Usuário autenticado pode criar servidor" on public.servers;
 create policy "Usuário autenticado pode criar servidor"
   on public.servers for insert to authenticated
   with check (owner_id = auth.uid());
 
+drop policy if exists "Somente o dono edita o servidor" on public.servers;
 create policy "Somente o dono edita o servidor"
   on public.servers for update to authenticated
   using (owner_id = auth.uid())
   with check (owner_id = auth.uid());
 
+drop policy if exists "Somente o dono exclui o servidor" on public.servers;
 create policy "Somente o dono exclui o servidor"
   on public.servers for delete to authenticated
   using (owner_id = auth.uid());
 
 -- server_members --------------------------------------------
+drop policy if exists "Membros veem outros membros do mesmo servidor" on public.server_members;
 create policy "Membros veem outros membros do mesmo servidor"
   on public.server_members for select to authenticated
   using (public.is_server_member(server_id, auth.uid()));
@@ -259,6 +266,7 @@ create policy "Membros veem outros membros do mesmo servidor"
 -- que adiciona o dono. Isso evita gente se auto-adicionando a
 -- qualquer servidor sem convite válido.
 
+drop policy if exists "Membro sai do servidor, exceto o dono" on public.server_members;
 create policy "Membro sai do servidor, exceto o dono"
   on public.server_members for delete to authenticated
   using (
@@ -269,10 +277,12 @@ create policy "Membro sai do servidor, exceto o dono"
   );
 
 -- server_invites ----------------------------------------------
+drop policy if exists "Membros veem convites do servidor" on public.server_invites;
 create policy "Membros veem convites do servidor"
   on public.server_invites for select to authenticated
   using (public.is_server_member(server_id, auth.uid()));
 
+drop policy if exists "Criador ou dono pode revogar convite" on public.server_invites;
 create policy "Criador ou dono pode revogar convite"
   on public.server_invites for delete to authenticated
   using (
@@ -423,6 +433,8 @@ create table if not exists public.channels (
   topic text,
   is_stage boolean not null default false, -- canal "Palco": só quem modera fala
   slowmode_seconds integer not null default 0,
+  user_limit integer not null default 0, -- 0 = sem limite; canal de voz só
+  is_restricted boolean not null default false, -- true = só cargos listados em channel_role_access enxergam
   is_spoiler boolean not null default false, -- conteúdo do canal borrado até clicar pra revelar
   position int not null default 0,
   created_at timestamptz not null default now()
@@ -461,10 +473,12 @@ alter table public.categories enable row level security;
 alter table public.channels enable row level security;
 
 -- Leitura: qualquer membro do servidor
+drop policy if exists "Membros veem categorias do servidor" on public.categories;
 create policy "Membros veem categorias do servidor"
   on public.categories for select to authenticated
   using (public.is_server_member(server_id, auth.uid()));
 
+drop policy if exists "Membros veem canais do servidor" on public.channels;
 create policy "Membros veem canais do servidor"
   on public.channels for select to authenticated
   using (public.is_server_member(server_id, auth.uid()));
@@ -472,26 +486,32 @@ create policy "Membros veem canais do servidor"
 -- Escrita: por enquanto só o dono (cargos/permissões granulares chegam
 -- na Fase 7 — quando isso acontecer, essas policies serão substituídas
 -- por uma checagem de permissão "manage_channels" por cargo).
+drop policy if exists "Dono cria categorias" on public.categories;
 create policy "Dono cria categorias"
   on public.categories for insert to authenticated
   with check (exists (select 1 from public.servers s where s.id = server_id and s.owner_id = auth.uid()));
 
+drop policy if exists "Dono edita categorias" on public.categories;
 create policy "Dono edita categorias"
   on public.categories for update to authenticated
   using (exists (select 1 from public.servers s where s.id = server_id and s.owner_id = auth.uid()));
 
+drop policy if exists "Dono exclui categorias" on public.categories;
 create policy "Dono exclui categorias"
   on public.categories for delete to authenticated
   using (exists (select 1 from public.servers s where s.id = server_id and s.owner_id = auth.uid()));
 
+drop policy if exists "Dono cria canais" on public.channels;
 create policy "Dono cria canais"
   on public.channels for insert to authenticated
   with check (exists (select 1 from public.servers s where s.id = server_id and s.owner_id = auth.uid()));
 
+drop policy if exists "Dono edita canais" on public.channels;
 create policy "Dono edita canais"
   on public.channels for update to authenticated
   using (exists (select 1 from public.servers s where s.id = server_id and s.owner_id = auth.uid()));
 
+drop policy if exists "Dono exclui canais" on public.channels;
 create policy "Dono exclui canais"
   on public.channels for delete to authenticated
   using (exists (select 1 from public.servers s where s.id = server_id and s.owner_id = auth.uid()));
@@ -568,3 +588,5 @@ alter table public.profiles add column if not exists profile_visibility text not
 alter table public.profiles drop constraint if exists profiles_profile_visibility_check;
 alter table public.profiles add constraint profiles_profile_visibility_check check (profile_visibility in ('everyone', 'friends_only'));
 alter table public.channels add column if not exists is_spoiler boolean not null default false;
+alter table public.channels add column if not exists user_limit integer not null default 0;
+alter table public.channels add column if not exists is_restricted boolean not null default false;

@@ -79,7 +79,9 @@ export function GroupConversationsProvider({ children }: { children: ReactNode }
         { event: '*', schema: 'public', table: 'group_conversation_members', filter: `user_id=eq.${user.id}` },
         () => refresh()
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') refresh()
+      })
     return () => {
       supabase.removeChannel(channel)
     }

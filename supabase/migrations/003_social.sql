@@ -117,21 +117,25 @@ alter table public.dm_messages enable row level security;
 
 -- friendships: leitura pros dois lados; toda escrita passa por função
 -- (evita pedidos duplicados, respeita bloqueios, valida quem responde)
+drop policy if exists "Vê as próprias amizades e pedidos" on public.friendships;
 create policy "Vê as próprias amizades e pedidos"
   on public.friendships for select to authenticated
   using (auth.uid() = user_id or auth.uid() = friend_id);
 
 -- blocked_users: só o bloqueador vê a própria lista (não expõe pra quem foi bloqueado)
+drop policy if exists "Vê a própria lista de bloqueios" on public.blocked_users;
 create policy "Vê a própria lista de bloqueios"
   on public.blocked_users for select to authenticated
   using (auth.uid() = blocker_id);
 
 -- dm_conversations: só os participantes
+drop policy if exists "Participantes veem a própria conversa" on public.dm_conversations;
 create policy "Participantes veem a própria conversa"
   on public.dm_conversations for select to authenticated
   using (auth.uid() = user_a or auth.uid() = user_b);
 
 -- dm_messages
+drop policy if exists "Participantes veem as mensagens da conversa" on public.dm_messages;
 create policy "Participantes veem as mensagens da conversa"
   on public.dm_messages for select to authenticated
   using (
@@ -141,6 +145,7 @@ create policy "Participantes veem as mensagens da conversa"
     )
   );
 
+drop policy if exists "Participantes enviam DMs, se não bloqueados" on public.dm_messages;
 create policy "Participantes enviam DMs, se não bloqueados"
   on public.dm_messages for insert to authenticated
   with check (
@@ -159,11 +164,13 @@ create policy "Participantes enviam DMs, se não bloqueados"
     )
   );
 
+drop policy if exists "Autor edita a própria DM" on public.dm_messages;
 create policy "Autor edita a própria DM"
   on public.dm_messages for update to authenticated
   using (author_id = auth.uid())
   with check (author_id = auth.uid());
 
+drop policy if exists "Autor exclui a própria DM" on public.dm_messages;
 create policy "Autor exclui a própria DM"
   on public.dm_messages for delete to authenticated
   using (author_id = auth.uid());

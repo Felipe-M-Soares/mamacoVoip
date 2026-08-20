@@ -123,12 +123,22 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           }
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        // Se a conexão em tempo real cair (rede instável, Wi-Fi
+        // oscilando, etc.), sem isso o chat ficava "travado" —
+        // parecia que nada de novo tinha chegado, quando na verdade
+        // só a conexão morreu silenciosamente. Buscando tudo de novo
+        // quando isso acontece, o chat se recupera sozinho sem
+        // precisar que a pessoa atualize a página manualmente.
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          refresh()
+        }
+      })
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [channelId, threadId, refreshExtras])
+  }, [channelId, threadId, refreshExtras, refresh])
 
   async function sendMessage(content: string, replyToId: string | null, files: File[] = []) {
     if (!channelId || !serverId || !user) return { error: 'Não foi possível enviar a mensagem' }
@@ -156,11 +166,17 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     // depois de atualizar a página, que busca tudo de novo do zero).
     setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
 
+    const attachmentErrors: string[] = []
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
       const path = `${serverId}/${channelId}/${message.id}-${safeName}`
-      const { error: uploadError } = await supabase.storage.from('attachments').upload(path, file)
-      if (uploadError) continue
+      const { error: uploadError } = await supabase.storage
+        .from('attachments')
+        .upload(path, file, { contentType: file.type || 'application/octet-stream' })
+      if (uploadError) {
+        attachmentErrors.push(uploadError.message)
+        continue
+      }
 
       const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(path)
       await supabase.from('message_attachments').insert({
@@ -173,6 +189,9 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     }
 
     if (files.length > 0) await refreshExtras([...messagesRef.current.map((m) => m.id), message.id])
+    if (attachmentErrors.length > 0) {
+      return { error: `Mensagem enviada, mas o anexo falhou: ${attachmentErrors[0]}` }
+    }
     return { error: null }
   }
 

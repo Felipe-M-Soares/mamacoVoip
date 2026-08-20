@@ -17,6 +17,7 @@ import { useChannelMutes } from '../../hooks/useChannelMutes'
 import { useServerEvents } from '../../hooks/useServerEvents'
 import { EventsModal } from '../modals/EventsModal'
 import { useServerWelcomeScreen, ServerWelcomeModal } from '../modals/ServerWelcomeModal'
+import { ChannelSidebarSkeleton } from './ChannelSidebarSkeleton'
 import { usePinnedItems } from '../../hooks/usePinnedItems'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
@@ -42,7 +43,15 @@ function CallDurationTimer({ startedAt }: { startedAt: number }) {
   return <span className="text-[11px] text-discord-green font-mono tabular-nums shrink-0">{label}</span>
 }
 
-function VoiceChannelPresence({ channelId, profileById }: { channelId: string; profileById: Record<string, Profile> }) {
+function VoiceChannelPresence({
+  channelId,
+  profileById,
+  userLimit,
+}: {
+  channelId: string
+  profileById: Record<string, Profile>
+  userLimit?: number
+}) {
   const { user } = useAuth()
   const voice = useVoice()
   const isConnectedHere = voice.connectedChannelId === channelId || voice.joiningChannelId === channelId
@@ -59,6 +68,11 @@ function VoiceChannelPresence({ channelId, profileById }: { channelId: string; p
   if (userIds.length === 0) return null
   return (
     <div className="flex flex-col gap-0.5 pl-7 pb-1">
+      {Boolean(userLimit) && (
+        <p className="text-[10px] text-discord-text-muted">
+          {userIds.length}/{userLimit} pessoas
+        </p>
+      )}
       {userIds.map((id) => {
         const p = id === user?.id ? undefined : profileById[id]
         const name = id === user?.id ? 'Você' : p?.display_name || p?.username || '...'
@@ -148,7 +162,7 @@ function ChannelIcon({ type, isStage }: { type: 'text' | 'voice'; isStage?: bool
   }
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0 opacity-70">
-      <path d="M5.5 4.5c.5-.5 1.2-.8 2-.8h1.4l-.3 15h-1c-.8 0-1.5-.3-2-.8-.6-.5-.9-1.2-.9-2v-9.4c0-.8.3-1.5.8-2zm10 0c.5.5.8 1.2.8 2v9.4c0 .8-.3 1.5-.8 2-.5.5-1.2.8-2 .8h-1l-.3-15h1.4c.8 0 1.5.3 2 .8z" />
+      <path d="M9.3 3.1a1 1 0 0 1 1.94.48L10.6 6.5h3.24l.68-2.92a1 1 0 1 1 1.94.48L15.86 6.5h2.14a1 1 0 1 1 0 2h-2.6l-.7 3h2.3a1 1 0 1 1 0 2h-2.77l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H9.13l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H4.9a1 1 0 1 1 0-2h2.64l.7-3H6a1 1 0 1 1 0-2h2.6l.7-3zm.84 5.4-.7 3h3.24l.7-3z" />
     </svg>
   )
 }
@@ -271,6 +285,13 @@ function ChannelRow({
           </svg>
         </span>
       )}
+      {channel.is_restricted && (
+        <span title="Canal restrito — só cargos específicos veem" className="shrink-0">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 text-discord-text-muted">
+            <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3zm0 9a1.5 1.5 0 0 0-1 2.6V17a1 1 0 0 0 2 0v-1.4A1.5 1.5 0 0 0 12 13z" />
+          </svg>
+        </span>
+      )}
       <InlineEditableLabel
         value={channel.name}
         editable={isOwner}
@@ -351,6 +372,7 @@ export function ChannelSidebar({
   const {
     categories,
     channels,
+    loading: loadingChannels,
     moveChannel,
     moveChannelToCategory,
     moveCategory,
@@ -538,6 +560,10 @@ export function ChannelSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
+        {loadingChannels ? (
+          <ChannelSidebarSkeleton />
+        ) : (
+          <>
         <button
           onClick={() => setShowEvents(true)}
           className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-sm font-medium text-discord-text-muted hover:bg-white/5 hover:text-discord-text transition-colors"
@@ -581,7 +607,7 @@ export function ChannelSidebar({
                   onContextMenu={(e) => handleChannelContextMenu(e, channel)}
                 />
                 {channel.type === 'voice' && (
-                  <VoiceChannelPresence channelId={channel.id} profileById={profileById} />
+                  <VoiceChannelPresence channelId={channel.id} profileById={profileById} userLimit={channel.user_limit} />
                 )}
               </Fragment>
             ))}
@@ -693,7 +719,7 @@ export function ChannelSidebar({
                         onContextMenu={(e) => handleChannelContextMenu(e, channel)}
                       />
                       {channel.type === 'voice' && (
-                        <VoiceChannelPresence channelId={channel.id} profileById={profileById} />
+                        <VoiceChannelPresence channelId={channel.id} profileById={profileById} userLimit={channel.user_limit} />
                       )}
                     </Fragment>
                   ))}
@@ -702,6 +728,8 @@ export function ChannelSidebar({
             </div>
           )
         })}
+        </>
+        )}
       </div>
 
       <VoiceStatusBar serverId={server.id} />
@@ -747,6 +775,7 @@ export function ChannelSidebar({
       {editingChannel && (
         <EditChannelModal
           channel={editingChannel}
+          serverId={server.id}
           onClose={() => setEditingChannel(null)}
         />
       )}

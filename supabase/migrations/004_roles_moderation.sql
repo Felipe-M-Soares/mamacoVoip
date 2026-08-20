@@ -134,18 +134,22 @@ alter table public.server_member_roles enable row level security;
 alter table public.bans enable row level security;
 alter table public.moderation_logs enable row level security;
 
+drop policy if exists "Membros veem os cargos do servidor" on public.roles;
 create policy "Membros veem os cargos do servidor"
   on public.roles for select to authenticated
   using (public.is_server_member(server_id, auth.uid()));
 
+drop policy if exists "Membros veem os cargos atribuídos no servidor" on public.server_member_roles;
 create policy "Membros veem os cargos atribuídos no servidor"
   on public.server_member_roles for select to authenticated
   using (public.is_server_member(server_id, auth.uid()));
 
+drop policy if exists "Quem pode banir vê a lista de banidos" on public.bans;
 create policy "Quem pode banir vê a lista de banidos"
   on public.bans for select to authenticated
   using (public.has_permission(server_id, auth.uid(), 'ban_members'));
 
+drop policy if exists "Quem pode ver o log vê o log" on public.moderation_logs;
 create policy "Quem pode ver o log vê o log"
   on public.moderation_logs for select to authenticated
   using (public.has_permission(server_id, auth.uid(), 'view_audit_log'));
@@ -165,32 +169,39 @@ drop policy if exists "Dono cria canais" on public.channels;
 drop policy if exists "Dono edita canais" on public.channels;
 drop policy if exists "Dono exclui canais" on public.channels;
 
+drop policy if exists "Quem administra canais cria categorias" on public.categories;
 create policy "Quem administra canais cria categorias"
   on public.categories for insert to authenticated
   with check (public.has_permission(server_id, auth.uid(), 'manage_channels'));
 
+drop policy if exists "Quem administra canais edita categorias" on public.categories;
 create policy "Quem administra canais edita categorias"
   on public.categories for update to authenticated
   using (public.has_permission(server_id, auth.uid(), 'manage_channels'));
 
+drop policy if exists "Quem administra canais exclui categorias" on public.categories;
 create policy "Quem administra canais exclui categorias"
   on public.categories for delete to authenticated
   using (public.has_permission(server_id, auth.uid(), 'manage_channels'));
 
+drop policy if exists "Quem administra canais cria canais" on public.channels;
 create policy "Quem administra canais cria canais"
   on public.channels for insert to authenticated
   with check (public.has_permission(server_id, auth.uid(), 'manage_channels'));
 
+drop policy if exists "Quem administra canais edita canais" on public.channels;
 create policy "Quem administra canais edita canais"
   on public.channels for update to authenticated
   using (public.has_permission(server_id, auth.uid(), 'manage_channels'));
 
+drop policy if exists "Quem administra canais exclui canais" on public.channels;
 create policy "Quem administra canais exclui canais"
   on public.channels for delete to authenticated
   using (public.has_permission(server_id, auth.uid(), 'manage_channels'));
 
 drop policy if exists "Autor ou dono do servidor exclui mensagem" on public.messages;
 
+drop policy if exists "Autor ou moderador exclui mensagem" on public.messages;
 create policy "Autor ou moderador exclui mensagem"
   on public.messages for delete to authenticated
   using (
@@ -201,6 +212,7 @@ create policy "Autor ou moderador exclui mensagem"
 -- Bloqueia envio de mensagens por quem está em timeout
 drop policy if exists "Membros enviam mensagens" on public.messages;
 
+drop policy if exists "Membros enviam mensagens, se não estiverem em timeout" on public.messages;
 create policy "Membros enviam mensagens, se não estiverem em timeout"
   on public.messages for insert to authenticated
   with check (
@@ -517,3 +529,92 @@ begin
   values (p_server_id, auth.uid(), 'remove_timeout', p_user_id);
 end;
 $$;
+
+-- ============================================================
+-- Canal restrito por cargo — visibilidade específica por canal,
+-- além das permissões gerais do servidor. Fica aqui (não em
+-- 001_core.sql) porque depende de has_permission() e da tabela
+-- roles, que só existem a partir deste arquivo.
+-- ============================================================
+
+-- Quais cargos conseguem ver um canal marcado como restrito
+create table if not exists public.channel_role_access (
+  channel_id uuid not null references public.channels(id) on delete cascade,
+  role_id uuid not null references public.roles(id) on delete cascade,
+  primary key (channel_id, role_id)
+);
+
+alter table public.channel_role_access enable row level security;
+
+drop policy if exists "Quem vê o canal vê os cargos liberados" on public.channel_role_access;
+create policy "Quem vê o canal vê os cargos liberados"
+  on public.channel_role_access for select to authenticated
+  using (
+    exists (
+      select 1 from public.channels c
+      where c.id = channel_id and public.is_server_member(c.server_id, auth.uid())
+    )
+  );
+
+drop policy if exists "Quem gerencia canais define o acesso" on public.channel_role_access;
+create policy "Quem gerencia canais define o acesso"
+  on public.channel_role_access for all to authenticated
+  using (
+    exists (
+      select 1 from public.channels c
+      where c.id = channel_id and public.has_permission(c.server_id, auth.uid(), 'manage_channels')
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.channels c
+      where c.id = channel_id and public.has_permission(c.server_id, auth.uid(), 'manage_channels')
+    )
+  );
+
+-- Substitui a política de visibilidade de canal (criada em
+-- 001_core.sql) pra respeitar canais restritos: dono e quem tem
+-- manage_channels sempre vê tudo; o resto só vê canal restrito se
+-- tiver algum cargo liberado pra ele.
+drop policy if exists "Membros veem canais do servidor" on public.channels;
+create policy "Membros veem canais do servidor"
+  on public.channels for select to authenticated
+  using (
+    public.is_server_member(server_id, auth.uid())
+    and (
+      not is_restricted
+      or public.has_permission(server_id, auth.uid(), 'manage_channels')
+      or exists (
+        select 1 from public.channel_role_access cra
+        join public.server_member_roles smr on smr.role_id = cra.role_id
+        where cra.channel_id = channels.id
+          and smr.user_id = auth.uid()
+          and smr.server_id = channels.server_id
+      )
+    )
+  );
+
+-- Igual precisa valer pra mensagens também (defesa em profundidade —
+-- mesmo que o canal não apareça na lista, a mensagem não pode
+-- vazar por uma consulta direta).
+drop policy if exists "Membros veem mensagens do servidor" on public.messages;
+create policy "Membros veem mensagens do servidor"
+  on public.messages for select to authenticated
+  using (
+    exists (
+      select 1 from public.channels c
+      where c.id = channel_id
+        and public.is_server_member(c.server_id, auth.uid())
+        and (
+          not c.is_restricted
+          or public.has_permission(c.server_id, auth.uid(), 'manage_channels')
+          or exists (
+            select 1 from public.channel_role_access cra
+            join public.server_member_roles smr on smr.role_id = cra.role_id
+            where cra.channel_id = c.id
+              and smr.user_id = auth.uid()
+              and smr.server_id = c.server_id
+          )
+        )
+    )
+  );

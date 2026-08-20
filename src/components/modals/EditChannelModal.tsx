@@ -1,19 +1,32 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import { useChannels } from '../../hooks/useChannels'
+import { useRoles } from '../../hooks/useRoles'
+import { useChannelRoleAccess } from '../../hooks/useChannelRoleAccess'
 import type { Channel } from '../../types/database'
 
 export function EditChannelModal({
   channel,
+  serverId,
   onClose,
 }: {
   channel: Channel
+  serverId: string
   onClose: () => void
 }) {
   const { updateChannel, deleteChannel } = useChannels()
+  const { roles } = useRoles(serverId)
+  const { roleIds: allowedRoleIds, setAllowedRoles } = useChannelRoleAccess(channel.id)
+  const [isRestricted, setIsRestricted] = useState(channel.is_restricted)
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([])
   const [name, setName] = useState(channel.name)
   const [topic, setTopic] = useState(channel.topic ?? '')
+
+  useEffect(() => {
+    setSelectedRoleIds(allowedRoleIds)
+  }, [allowedRoleIds])
   const [isStage, setIsStage] = useState(channel.is_stage)
+  const [userLimit, setUserLimit] = useState(channel.user_limit)
   const [slowmodeSeconds, setSlowmodeSeconds] = useState(channel.slowmode_seconds)
   const [isSpoiler, setIsSpoiler] = useState(channel.is_spoiler)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -32,9 +45,19 @@ export function EditChannelModal({
       name: cleanName,
       topic: topic.trim() || null,
       is_stage: channel.type === 'voice' ? isStage : channel.is_stage,
+      user_limit: channel.type === 'voice' ? userLimit : channel.user_limit,
       slowmode_seconds: channel.type === 'text' ? slowmodeSeconds : channel.slowmode_seconds,
       is_spoiler: channel.type === 'text' ? isSpoiler : channel.is_spoiler,
+      is_restricted: isRestricted,
     })
+    if (!error && isRestricted) {
+      const { error: rolesError } = await setAllowedRoles(selectedRoleIds)
+      if (rolesError) {
+        setLoading(false)
+        setError(rolesError)
+        return
+      }
+    }
     setLoading(false)
     if (error) {
       setError(error)
@@ -174,6 +197,68 @@ export function EditChannelModal({
             </span>
           </label>
         )}
+
+        {channel.type === 'voice' && (
+          <div>
+            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-1.5">
+              Limite de pessoas
+            </label>
+            <select
+              value={userLimit}
+              onChange={(e) => setUserLimit(Number(e.target.value))}
+              className="w-full px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+            >
+              <option value={0}>Sem limite</option>
+              {[2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 50].map((n) => (
+                <option key={n} value={n}>
+                  {n} pessoas
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div>
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isRestricted}
+              onChange={(e) => setIsRestricted(e.target.checked)}
+              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
+            />
+            <span className="text-xs text-discord-text-muted">
+              <span className="text-discord-text font-medium">Canal restrito</span> — só cargos escolhidos abaixo
+              conseguem ver esse canal (donos e quem gerencia canais sempre veem)
+            </span>
+          </label>
+
+          {isRestricted && (
+            <div className="mt-2.5 pl-6 space-y-1.5 max-h-40 overflow-y-auto">
+              {roles.length === 0 ? (
+                <p className="text-xs text-discord-text-muted">
+                  Esse servidor ainda não tem cargos — crie um cargo primeiro na aba "Cargos".
+                </p>
+              ) : (
+                roles.map((role) => (
+                  <label key={role.id} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedRoleIds.includes(role.id)}
+                      onChange={(e) =>
+                        setSelectedRoleIds((prev) =>
+                          e.target.checked ? [...prev, role.id] : prev.filter((id) => id !== role.id)
+                        )
+                      }
+                      className="w-3.5 h-3.5 accent-discord-blurple shrink-0"
+                    />
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: role.color }} />
+                    <span className="text-xs text-discord-text">{role.name}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          )}
+        </div>
 
         {error && <p className="text-sm text-red-400">{error}</p>}
 

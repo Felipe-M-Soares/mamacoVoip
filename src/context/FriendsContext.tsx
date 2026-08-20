@@ -115,7 +115,9 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
         }
         refresh()
       })
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') refresh()
+      })
     return () => {
       supabase.removeChannel(channel)
     }

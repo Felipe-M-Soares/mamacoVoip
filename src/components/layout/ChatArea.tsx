@@ -29,13 +29,13 @@ export function ChatArea({
   onToggleMembers?: () => void
 }) {
   const { user } = useAuth()
-  const { messages, attachments, reactions, sendMessage, editMessage, deleteMessage, toggleReaction, pinMessage, unpinMessage, fetchPinnedMessages } =
+  const { messages, loading, attachments, reactions, sendMessage, editMessage, deleteMessage, toggleReaction, pinMessage, unpinMessage, fetchPinnedMessages } =
     useMessages(channel.id, server.id)
   const { members } = useServerMembers(server.id)
   const { channels } = useChannels()
   const { typingUserIds, notifyTyping } = useTypingIndicator(channel.id, user?.id)
   const { emojis } = useServerEmojis(server.id)
-  const { roles } = useRoles(server.id)
+  const { roles, rolesForUser } = useRoles(server.id)
   const { threadsByMessageId, replyCounts, createThread } = useChannelThreads(channel.id)
   const [activeThread, setActiveThread] = useState<Thread | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
@@ -186,6 +186,7 @@ export function ChatArea({
       <MessageList
         channelName={channel.name}
         messages={messages}
+        loading={loading}
         attachments={attachments}
         reactions={reactions}
         profilesById={profilesById}
@@ -194,6 +195,7 @@ export function ChatArea({
         members={memberProfiles}
         emojis={emojis}
         roles={roles}
+        rolesForUser={rolesForUser}
         onEdit={editMessage}
         onDelete={deleteMessage}
         onReply={setReplyingTo}

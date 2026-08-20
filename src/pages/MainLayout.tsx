@@ -150,6 +150,7 @@ function ActiveServerContent({
       <MemberList
         serverId={server.id}
         onViewProfile={onViewProfile}
+        onMessageUser={onMessageUser}
         mobileOpen={mobileMembersOpen}
         onCloseMobile={() => setMobileMembersOpen(false)}
       />

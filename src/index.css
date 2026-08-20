@@ -141,3 +141,21 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in srgb, var(--color-discord-lighter) 70%, white);
 }
+
+/* Entrada suave — mensagem nova, toast, item de lista aparecendo.
+   Sutil de propósito: um movimento pequeno demais pra "chamar
+   atenção" errada, só o suficiente pra não parecer que o conteúdo
+   simplesmente "piscou" na tela do nada. */
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-slide-in {
+  animation: fade-slide-in 0.15s ease-out;
+}

@@ -25,10 +25,48 @@ create table if not exists public.messages (
   edited_at timestamptz,
   pinned_at timestamptz,
   pinned_by uuid references public.profiles(id) on delete set null,
+  -- null pra mensagem normal; 'member_join' pra aviso automático de
+  -- "fulano entrou no servidor" (igual o Discord mostra) — o author_id
+  -- continua sendo a própria pessoa que entrou, então não precisa de
+  -- coluna nova pra isso.
+  system_event text,
   -- thread_id fica como ALTER TABLE no arquivo 005_extras.sql, já
   -- que referencia a tabela threads, que só existe a partir de lá.
   created_at timestamptz not null default now()
 );
+
+alter table public.messages add column if not exists system_event text;
+
+-- Aviso automático de entrada no servidor — posta na primeira sala de
+-- texto (por posição) assim que alguém entra, igual o Discord faz.
+create or replace function public.announce_member_join()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_channel_id uuid;
+begin
+  select id into v_channel_id
+  from public.channels
+  where server_id = new.server_id and type = 'text'
+  order by position asc
+  limit 1;
+
+  if v_channel_id is not null then
+    insert into public.messages (channel_id, server_id, author_id, content, system_event)
+    values (v_channel_id, new.server_id, new.user_id, '', 'member_join');
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_member_joined_announce on public.server_members;
+create trigger on_member_joined_announce
+  after insert on public.server_members
+  for each row execute function public.announce_member_join();
 
 create table if not exists public.message_attachments (
   id uuid primary key default gen_random_uuid(),
@@ -139,19 +177,23 @@ alter table public.message_attachments enable row level security;
 alter table public.message_reactions enable row level security;
 
 -- messages ---------------------------------------------------
+drop policy if exists "Membros veem mensagens do servidor" on public.messages;
 create policy "Membros veem mensagens do servidor"
   on public.messages for select to authenticated
   using (public.is_server_member(server_id, auth.uid()));
 
+drop policy if exists "Membros enviam mensagens" on public.messages;
 create policy "Membros enviam mensagens"
   on public.messages for insert to authenticated
   with check (public.is_server_member(server_id, auth.uid()) and author_id = auth.uid());
 
+drop policy if exists "Autor edita a própria mensagem" on public.messages;
 create policy "Autor edita a própria mensagem"
   on public.messages for update to authenticated
   using (author_id = auth.uid())
   with check (author_id = auth.uid());
 
+drop policy if exists "Autor ou dono do servidor exclui mensagem" on public.messages;
 create policy "Autor ou dono do servidor exclui mensagem"
   on public.messages for delete to authenticated
   using (
@@ -160,6 +202,7 @@ create policy "Autor ou dono do servidor exclui mensagem"
   );
 
 -- message_attachments -----------------------------------------
+drop policy if exists "Membros veem anexos" on public.message_attachments;
 create policy "Membros veem anexos"
   on public.message_attachments for select to authenticated
   using (
@@ -169,12 +212,14 @@ create policy "Membros veem anexos"
     )
   );
 
+drop policy if exists "Autor da mensagem anexa arquivos" on public.message_attachments;
 create policy "Autor da mensagem anexa arquivos"
   on public.message_attachments for insert to authenticated
   with check (
     exists (select 1 from public.messages m where m.id = message_id and m.author_id = auth.uid())
   );
 
+drop policy if exists "Autor remove os próprios anexos" on public.message_attachments;
 create policy "Autor remove os próprios anexos"
   on public.message_attachments for delete to authenticated
   using (
@@ -182,6 +227,7 @@ create policy "Autor remove os próprios anexos"
   );
 
 -- message_reactions ---------------------------------------------
+drop policy if exists "Membros veem reações" on public.message_reactions;
 create policy "Membros veem reações"
   on public.message_reactions for select to authenticated
   using (
@@ -191,6 +237,7 @@ create policy "Membros veem reações"
     )
   );
 
+drop policy if exists "Membros reagem com o próprio usuário" on public.message_reactions;
 create policy "Membros reagem com o próprio usuário"
   on public.message_reactions for insert to authenticated
   with check (
@@ -201,6 +248,7 @@ create policy "Membros reagem com o próprio usuário"
     )
   );
 
+drop policy if exists "Usuário remove a própria reação" on public.message_reactions;
 create policy "Usuário remove a própria reação"
   on public.message_reactions for delete to authenticated
   using (user_id = auth.uid());

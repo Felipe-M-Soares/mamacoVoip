@@ -646,7 +646,7 @@ app.whenReady().then(() => {
       }
     })
     let updateRetryCount = 0
-    const MAX_UPDATE_RETRIES = 3
+    const MAX_UPDATE_RETRIES = 6
 
     autoUpdater.on('error', (err) => {
       // Antes a gente só olhava err.message, que às vezes vem bem curto
@@ -670,7 +670,7 @@ app.whenReady().then(() => {
         updateRetryCount++
         setTimeout(() => {
           autoUpdater.checkForUpdates().catch(() => {})
-        }, 15_000)
+        }, 25_000)
         return
       }
 
@@ -700,15 +700,16 @@ app.whenReady().then(() => {
       autoUpdater.checkForUpdates().catch(() => {})
     })
 
-    // O provedor "github" padrão (usado só aqui, na hora de CHECAR
-    // atualização) depende do feed releases.atom do GitHub — que, por
-    // algum motivo específico desse repositório, sempre retorna 404
-    // (confirmado até direto no navegador, fora do app). Só a
-    // PUBLICAÇÃO continua usando "github" no package.json, porque essa
-    // parte funciona perfeitamente. Aqui, só pra checar, aponta direto
-    // pro mesmo formato de link "releases/latest/download/" que já
-    // testamos e sabemos que funciona (o botão de baixar usa esse
-    // mesmo formato).
+    // O provedor "github" padrão usa o feed releases.atom do GitHub pra
+    // checar a versão mais recente — e isso já foi confirmado, direto
+    // no navegador, que dá 404 nesse repositório específico. Por isso
+    // aponta pro mesmo link "releases/latest/download/" que o botão de
+    // baixar usa (que sabemos que funciona). O "?noCache=" que o
+    // electron-updater anexa nesse link é uma fonte conhecida de 404 em
+    // ALGUNS tipos de servidor genérico — mas não há confirmação de que
+    // isso afete o GitHub especificamente, então mantemos essa
+    // abordagem em vez de trocar por outra com um problema já
+    // confirmado e pior.
     autoUpdater.setFeedURL({
       provider: 'generic',
       url: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/',

@@ -487,7 +487,20 @@ app.whenReady().then(() => {
       pendingDisplayMediaCallback = callback
       mainWindow?.webContents.send(
         'screen-share-sources',
-        sources.map((s) => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() }))
+        // O id que o desktopCapturer devolve sempre começa com "screen:" ou
+        // "window:" (formato documentado e estável da API) — usamos esse
+        // prefixo pra dizer pro renderer se cada opção é uma tela inteira ou
+        // uma janela específica. Isso importa porque jogos em modo tela
+        // cheia exclusiva (comum em jogos no Windows) não aparecem como uma
+        // "janela" capturável — só a captura de tela inteira consegue
+        // pegá-los — então o app precisa saber diferenciar as duas pra
+        // oferecer o fallback certo (ver ScreenSharePicker.tsx).
+        sources.map((s) => ({
+          id: s.id,
+          name: s.name,
+          thumbnail: s.thumbnail.toDataURL(),
+          type: s.id.startsWith('screen:') ? 'screen' : 'window',
+        }))
       )
     } catch {
       callback({})
@@ -742,6 +755,23 @@ app.whenReady().then(() => {
         sendUpdateStatus('error', {
           message:
             'A atualização foi baixada mas não pôde ser verificada automaticamente (provavelmente porque o instalador não tem assinatura digital — isso exige um certificado pago). Baixe a versão mais recente manualmente pelo site.',
+          downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest',
+        })
+        return
+      }
+
+      // Depois de esgotar as tentativas, um 404 especificamente pro
+      // "latest.yml" quer dizer que o último release do GitHub não tem o
+      // arquivo de manifesto de atualização anexado — ou seja, ele foi
+      // publicado manualmente (só o .exe) em vez de via
+      // "npm run release" (que faz o electron-builder gerar e subir o
+      // latest.yml junto). Isso não é um problema de rede nem do app em
+      // si, então mostra uma mensagem que explica a causa real em vez do
+      // stack cru.
+      if (/latest\.yml|Cannot find channel/i.test(raw)) {
+        sendUpdateStatus('error', {
+          message:
+            'Ainda não existe uma atualização automática publicada pra essa versão (o último release no GitHub não tem o arquivo de atualização). Baixe a versão mais recente manualmente pelo site — atualizações automáticas vão funcionar a partir do próximo release publicado do jeito certo.',
           downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest',
         })
         return

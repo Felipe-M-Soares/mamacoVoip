@@ -13,6 +13,11 @@ export interface ScreenShareSource {
   id: string
   name: string
   thumbnail: string
+  // "screen" = uma tela inteira, "window" = uma janela específica. Jogos
+  // em modo tela cheia exclusiva não aparecem como "window" — só como
+  // parte da tela inteira — por isso o picker precisa saber diferenciar
+  // (ver ScreenSharePicker.tsx).
+  type: 'screen' | 'window'
 }
 
 declare global {

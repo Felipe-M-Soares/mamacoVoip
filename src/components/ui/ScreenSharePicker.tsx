@@ -41,7 +41,22 @@ export function ScreenSharePicker() {
     return window.electronAPI.onGameStatusChanged(setCurrentGame)
   }, [])
 
-  const gameSource = useMemo(() => (sources ? findGameSource(sources, currentGame) : null), [sources, currentGame])
+  const windowMatch = useMemo(() => (sources ? findGameSource(sources, currentGame) : null), [sources, currentGame])
+
+  // Muitos jogos rodam em modo "tela cheia exclusiva" no Windows — nesse
+  // modo, o compositor do sistema (DWM) nem "enxerga" o jogo como uma
+  // janela separada, só a API de tela inteira consegue capturá-lo. Então,
+  // se a gente sabe que tem um jogo aberto mas não achou nenhuma janela
+  // com esse nome na lista, a melhor aposta é oferecer a primeira tela
+  // inteira disponível como atalho "compartilhar seu jogo" — na prática é
+  // isso que vai mostrar o jogo pra quem está assistindo.
+  const fallbackScreen = useMemo(
+    () => (sources && currentGame && !windowMatch ? sources.find((s) => s.type === 'screen') ?? null : null),
+    [sources, currentGame, windowMatch]
+  )
+
+  const gameSource = windowMatch ?? fallbackScreen
+  const isFullscreenFallback = !windowMatch && Boolean(fallbackScreen)
 
   if (!sources) return null
 
@@ -81,6 +96,11 @@ export function ScreenSharePicker() {
                 Compartilhar seu jogo
               </p>
               <p className="text-sm font-semibold text-white truncate">🎮 {currentGame}</p>
+              {isFullscreenFallback && (
+                <p className="text-[11px] text-discord-text-muted mt-0.5 truncate">
+                  Vai compartilhar a tela inteira (jogos em tela cheia não aparecem como janela separada)
+                </p>
+              )}
             </div>
           </button>
         )}

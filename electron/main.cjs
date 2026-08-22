@@ -749,7 +749,12 @@ app.whenReady().then(() => {
       }
     })
     let updateRetryCount = 0
-    const MAX_UPDATE_RETRIES = 6
+    // Antes eram 6 tentativas de 25s (até 2min30 de espera, com a pessoa
+    // vendo "Verificando atualizações..." travado na tela o tempo todo) —
+    // um exagero pra um atraso de indexação do GitHub que, na prática, é
+    // de segundos, não minutos. Reduzido bem: só 2 tentativas rápidas.
+    const MAX_UPDATE_RETRIES = 2
+    const UPDATE_RETRY_DELAY_MS = 4_000
 
     autoUpdater.on('error', (err) => {
       // Antes a gente só olhava err.message, que às vezes vem bem curto
@@ -763,17 +768,32 @@ app.whenReady().then(() => {
         raw = err?.message ?? String(err)
       }
 
-      // Um release recém-publicado pode demorar alguns minutos pra o
+      // Um release recém-publicado pode demorar alguns segundos pra o
       // GitHub "enxergar" ele como o mais recente (atraso normal de
       // indexação do próprio GitHub, não é bug daqui) — isso costuma
       // aparecer como 404 bem na primeira checagem depois de abrir o
       // app. Em vez de desistir na hora, tenta de novo com uma pausa
-      // curta antes de qualquer coisa.
+      // curta antes de qualquer coisa — mas só duas vezes, rápido, pra
+      // não deixar a pessoa esperando minutos vendo "verificando".
       if (raw.includes('404') && updateRetryCount < MAX_UPDATE_RETRIES) {
         updateRetryCount++
         setTimeout(() => {
           autoUpdater.checkForUpdates().catch(() => {})
-        }, 25_000)
+        }, UPDATE_RETRY_DELAY_MS)
+        return
+      }
+
+      // Um 404 especificamente do "latest.yml" (o arquivo de manifesto
+      // que o electron-updater procura) depois de esgotar as tentativas
+      // quer dizer, na prática, que ainda não existe NENHUM release
+      // publicado com esse arquivo — ou seja, não tem atualização
+      // nenhuma disponível, o que do ponto de vista de quem está usando
+      // o app é exatamente a mesma coisa que "já está tudo atualizado".
+      // Mostrar isso como um erro assustador (ícone vermelho, stack de
+      // erro) é enganoso; mostra o mesmo aviso tranquilo de "App
+      // atualizado" que aparece quando não tem nada novo mesmo.
+      if (/latest\.yml|Cannot find channel/i.test(raw)) {
+        sendUpdateStatus('up-to-date')
         return
       }
 
@@ -789,23 +809,6 @@ app.whenReady().then(() => {
         sendUpdateStatus('error', {
           message:
             'A atualização foi baixada mas não pôde ser verificada automaticamente (provavelmente porque o instalador não tem assinatura digital — isso exige um certificado pago). Baixe a versão mais recente manualmente pelo site.',
-          downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest',
-        })
-        return
-      }
-
-      // Depois de esgotar as tentativas, um 404 especificamente pro
-      // "latest.yml" quer dizer que o último release do GitHub não tem o
-      // arquivo de manifesto de atualização anexado — ou seja, ele foi
-      // publicado manualmente (só o .exe) em vez de via
-      // "npm run release" (que faz o electron-builder gerar e subir o
-      // latest.yml junto). Isso não é um problema de rede nem do app em
-      // si, então mostra uma mensagem que explica a causa real em vez do
-      // stack cru.
-      if (/latest\.yml|Cannot find channel/i.test(raw)) {
-        sendUpdateStatus('error', {
-          message:
-            'Ainda não existe uma atualização automática publicada pra essa versão (o último release no GitHub não tem o arquivo de atualização). Baixe a versão mais recente manualmente pelo site — atualizações automáticas vão funcionar a partir do próximo release publicado do jeito certo.',
           downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest',
         })
         return

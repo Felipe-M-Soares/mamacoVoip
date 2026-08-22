@@ -11,6 +11,7 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
   const [query, setQuery] = useState('')
   const [gifs, setGifs] = useState<TenorGif[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -27,19 +28,36 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
 
   async function fetchGifs(q: string) {
     setLoading(true)
+    setLoadError(false)
     try {
       const endpoint = q.trim()
         ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=${TENOR_API_KEY}&client_key=mamacos_voip&limit=24&contentfilter=medium&media_filter=tinygif,gif`
         : `https://tenor.googleapis.com/v2/featured?key=${TENOR_API_KEY}&client_key=mamacos_voip&limit=24&contentfilter=medium&media_filter=tinygif,gif`
       const res = await fetch(endpoint)
       const data = await res.json()
+      // A Tenor devolve HTTP 200 mesmo em alguns casos de erro (chave
+      // inválida/sem cota), só com um campo "error" no corpo em vez de
+      // "results" — sem checar isso, esses casos pareciam silenciosamente
+      // "nenhum GIF encontrado" (igual uma busca sem resultado de
+      // verdade), impossível de diferenciar. Agora loga o motivo real no
+      // console (F12 no navegador, ou Ctrl+Shift+I no app desktop) e
+      // mostra uma mensagem diferente pra quem está usando o app.
+      if (!res.ok || data.error) {
+        console.error('[GifPicker] Tenor respondeu com erro:', res.status, data.error ?? data)
+        setLoadError(true)
+        setGifs([])
+        setLoading(false)
+        return
+      }
       const results: TenorGif[] = (data.results ?? []).map((r: any) => ({
         id: r.id,
         url: r.media_formats?.gif?.url ?? r.media_formats?.tinygif?.url,
         previewUrl: r.media_formats?.tinygif?.url ?? r.media_formats?.gif?.url,
       }))
       setGifs(results.filter((g) => g.url))
-    } catch {
+    } catch (err) {
+      console.error('[GifPicker] Falha ao buscar GIFs (rede/CORS/etc):', err)
+      setLoadError(true)
       setGifs([])
     }
     setLoading(false)
@@ -75,6 +93,10 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
           <div className="col-span-3 flex justify-center py-8">
             <div className="w-6 h-6 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : loadError ? (
+          <p className="col-span-3 text-center text-xs text-discord-text-muted py-8 px-2">
+            Não foi possível carregar GIFs agora. Verifique sua internet ou tente de novo em instantes.
+          </p>
         ) : gifs.length === 0 ? (
           <p className="col-span-3 text-center text-xs text-discord-text-muted py-8">Nenhum GIF encontrado.</p>
         ) : (

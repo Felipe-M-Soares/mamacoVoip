@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import { useChannelMutes } from './useChannelMutes'
 import { notify } from '../lib/notifications'
+import { describeError } from '../lib/errors'
 import type { Message, MessageAttachment, MessageReaction } from '../types/database'
 
 export function useMessages(channelId: string | null, serverId: string | null, threadId: string | null = null) {
@@ -153,71 +154,94 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     }
   }, [channelId, threadId, refreshExtras, refresh])
 
+  // Antes, se qualquer chamada aqui dentro lançasse uma exceção (em vez
+  // de resolver normalmente com { error }) — rede instável, RLS/policy
+  // travando de um jeito inesperado, resposta que não é JSON válido —
+  // a promise de sendMessage() quebrava sem passar pelo `return { error
+  // ... }`. Quem chama (MessageComposer) ficava esperando pra sempre:
+  // nenhum erro aparecia E a mensagem não ia pro estado local, então
+  // parecia que "escrever e mandar não faz nada". O try/catch garante
+  // que sempre volta uma resposta, com o motivo real do problema.
   async function sendMessage(content: string, replyToId: string | null, files: File[] = []) {
     if (!channelId || !serverId || !user) return { error: 'Não foi possível enviar a mensagem' }
 
-    const { data: message, error } = await supabase
-      .from('messages')
-      .insert({
-        channel_id: channelId,
-        server_id: serverId,
-        author_id: user.id,
-        content,
-        reply_to_id: replyToId ?? undefined,
-        thread_id: threadId ?? undefined,
-      })
-      .select()
-      .single()
+    try {
+      const { data: message, error } = await supabase
+        .from('messages')
+        .insert({
+          channel_id: channelId,
+          server_id: serverId,
+          author_id: user.id,
+          content,
+          reply_to_id: replyToId ?? undefined,
+          thread_id: threadId ?? undefined,
+        })
+        .select()
+        .single()
 
-    if (error || !message) return { error: error?.message ?? 'Erro ao enviar mensagem' }
+      if (error || !message) return { error: describeError(error, 'Erro ao enviar mensagem') }
 
-    // Mostra a mensagem na hora, sem esperar ela "voltar" pelo canal de
-    // tempo real — antes, o app dependia inteiramente do evento de
-    // tempo real chegar de volta pra mostrar a PRÓPRIA mensagem que
-    // você acabou de mandar. Se esse evento atrasasse ou falhasse, a
-    // mensagem ficava salva no banco mas nunca aparecia sozinha (só
-    // depois de atualizar a página, que busca tudo de novo do zero).
-    setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
+      // Mostra a mensagem na hora, sem esperar ela "voltar" pelo canal de
+      // tempo real — antes, o app dependia inteiramente do evento de
+      // tempo real chegar de volta pra mostrar a PRÓPRIA mensagem que
+      // você acabou de mandar. Se esse evento atrasasse ou falhasse, a
+      // mensagem ficava salva no banco mas nunca aparecia sozinha (só
+      // depois de atualizar a página, que busca tudo de novo do zero).
+      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
 
-    const attachmentErrors: string[] = []
-    for (const file of files) {
-      const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
-      const path = `${serverId}/${channelId}/${message.id}-${safeName}`
-      const { error: uploadError } = await supabase.storage
-        .from('attachments')
-        .upload(path, file, { contentType: file.type || 'application/octet-stream' })
-      if (uploadError) {
-        attachmentErrors.push(uploadError.message)
-        continue
+      const attachmentErrors: string[] = []
+      for (const file of files) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
+        const path = `${serverId}/${channelId}/${message.id}-${safeName}`
+        const { error: uploadError } = await supabase.storage
+          .from('attachments')
+          .upload(path, file, { contentType: file.type || 'application/octet-stream' })
+        if (uploadError) {
+          attachmentErrors.push(describeError(uploadError, 'Falha ao subir o anexo'))
+          continue
+        }
+
+        const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(path)
+        const { error: attError } = await supabase.from('message_attachments').insert({
+          message_id: message.id,
+          file_url: urlData.publicUrl,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type || 'application/octet-stream',
+        })
+        if (attError) attachmentErrors.push(describeError(attError, 'Falha ao registrar o anexo'))
       }
 
-      const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(path)
-      await supabase.from('message_attachments').insert({
-        message_id: message.id,
-        file_url: urlData.publicUrl,
-        file_name: file.name,
-        file_size: file.size,
-        mime_type: file.type || 'application/octet-stream',
-      })
+      if (files.length > 0) await refreshExtras([...messagesRef.current.map((m) => m.id), message.id])
+      if (attachmentErrors.length > 0) {
+        return { error: `Mensagem enviada, mas o anexo falhou: ${attachmentErrors[0]}` }
+      }
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Erro ao enviar mensagem') }
     }
-
-    if (files.length > 0) await refreshExtras([...messagesRef.current.map((m) => m.id), message.id])
-    if (attachmentErrors.length > 0) {
-      return { error: `Mensagem enviada, mas o anexo falhou: ${attachmentErrors[0]}` }
-    }
-    return { error: null }
   }
 
   async function editMessage(messageId: string, content: string) {
-    const { data, error } = await supabase.from('messages').update({ content }).eq('id', messageId).select().single()
-    if (!error && data) setMessages((prev) => prev.map((m) => (m.id === messageId ? data : m)))
-    return { error: error?.message ?? null }
+    try {
+      const { data, error } = await supabase.from('messages').update({ content }).eq('id', messageId).select().single()
+      if (error) return { error: describeError(error, 'Não foi possível editar a mensagem') }
+      if (data) setMessages((prev) => prev.map((m) => (m.id === messageId ? data : m)))
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Não foi possível editar a mensagem') }
+    }
   }
 
   async function deleteMessage(messageId: string) {
-    const { error } = await supabase.from('messages').delete().eq('id', messageId)
-    if (!error) setMessages((prev) => prev.filter((m) => m.id !== messageId))
-    return { error: error?.message ?? null }
+    try {
+      const { error } = await supabase.from('messages').delete().eq('id', messageId)
+      if (error) return { error: describeError(error, 'Não foi possível excluir a mensagem') }
+      setMessages((prev) => prev.filter((m) => m.id !== messageId))
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Não foi possível excluir a mensagem') }
+    }
   }
 
   async function pinMessage(messageId: string) {

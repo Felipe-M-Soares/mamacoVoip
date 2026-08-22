@@ -107,7 +107,7 @@ export function ManageMemberModal({
         {roles.length > 0 && permissions.manage_roles && (
           <div>
             <p className="text-xs font-bold uppercase text-discord-text-muted mb-2">Cargos</p>
-            <div className="space-y-1">
+            <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
               {roles.map((role) => (
                 <label key={role.id} className="flex items-center gap-2.5 text-sm text-discord-text cursor-pointer">
                   <input

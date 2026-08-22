@@ -68,7 +68,7 @@ export function UserPanel() {
           )}
         </button>
         {volumeOpen && (
-          <div className="absolute bottom-full right-0 mb-2 w-40 bg-[#111214] rounded-md shadow-xl border border-black/40 p-3 z-20">
+          <div className="absolute bottom-full right-0 mb-2 w-40 bg-discord-darker rounded-md shadow-xl border border-black/40 p-3 z-20">
             <div className="flex items-center justify-between mb-1.5">
               <p className="text-xs font-bold uppercase text-discord-text-muted">Volume geral</p>
               <span className="text-xs text-discord-text-muted">{voice.masterVolume}%</span>
@@ -119,7 +119,7 @@ export function UserPanel() {
       </button>
 
       {menuOpen && (
-        <div className="absolute bottom-full left-2 mb-2 w-52 bg-[#111214] rounded-md shadow-xl border border-black/40 py-1.5 z-20">
+        <div className="absolute bottom-full left-2 mb-2 w-52 bg-discord-darker rounded-md shadow-xl border border-black/40 py-1.5 z-20">
           <p className="px-3 pt-1 pb-1.5 text-xs font-bold uppercase text-discord-text-muted">Definir status</p>
           {STATUS_OPTIONS.map((opt) => (
             <button

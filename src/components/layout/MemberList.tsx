@@ -63,7 +63,10 @@ export function MemberList({
         <button onClick={() => onViewProfile(member.profile)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
           <Avatar name={member.profile.username} avatarUrl={member.profile.avatar_url} status={member.profile.status} size={32} />
           <div className="min-w-0">
-            <span className="text-sm truncate block" style={topRole ? { color: topRole.color } : { color: '#dcddde' }}>
+            <span
+              className={`text-sm truncate block ${topRole ? '' : 'text-discord-text'}`}
+              style={topRole ? { color: topRole.color } : undefined}
+            >
               {member.profile.display_name || member.profile.username}
             </span>
             {member.profile.playing && (

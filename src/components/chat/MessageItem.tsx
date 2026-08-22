@@ -191,7 +191,7 @@ export function MessageItem({
       </div>
 
       {showReactionPicker && (
-        <div className="absolute -top-11 right-4 bg-[#111214] border border-black/40 rounded-lg shadow-xl px-2 py-1.5 flex gap-1 z-20 max-w-xs flex-wrap">
+        <div className="absolute -top-11 right-4 bg-discord-darker border border-black/40 rounded-lg shadow-xl px-2 py-1.5 flex gap-1 z-20 max-w-xs flex-wrap">
           {QUICK_REACTIONS.map((emoji) => (
             <button
               key={emoji}

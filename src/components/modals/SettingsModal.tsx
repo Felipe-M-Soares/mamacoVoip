@@ -37,7 +37,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }, [onClose])
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] bg-discord-darker flex">
+    // Mesmo z-[500] do Modal.tsx — ver comentário lá. Configurações é uma
+    // tela cheia que também deve ficar acima de qualquer painel lateral
+    // (thread, mensagens fixadas) aberto antes dela.
+    <div className="fixed inset-0 z-[500] bg-discord-darker flex">
       {/* Navegação — só do lado esquerdo, igual ao Discord de verdade */}
       <div className="w-56 shrink-0 bg-discord-sidebar flex flex-col py-8 px-3 overflow-y-auto">
         <p className="px-2.5 text-xs font-bold uppercase text-discord-text-muted tracking-wide mb-1.5">

@@ -55,7 +55,7 @@ export function ContextMenu({
     <div
       ref={ref}
       style={{ position: 'fixed', top: position.top, left: position.left, visibility: position.visibility }}
-      className="z-[200] min-w-[190px] bg-[#111214] rounded-md shadow-xl border border-black/40 py-1.5"
+      className="z-[200] min-w-[190px] bg-discord-darker rounded-md shadow-xl border border-black/40 py-1.5"
     >
       {items.map((item, i) => (
         <div key={i}>

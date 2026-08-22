@@ -473,7 +473,7 @@ export function ChannelSidebar({
         </button>
 
         {menuOpen && (
-          <div className="absolute top-full left-2 right-2 mt-1 bg-[#111214] rounded-md shadow-xl border border-black/40 py-1.5 z-20">
+          <div className="absolute top-full left-2 right-2 mt-1 bg-discord-darker rounded-md shadow-xl border border-black/40 py-1.5 z-20">
             <button
               onClick={() => {
                 setShowInvite(true)

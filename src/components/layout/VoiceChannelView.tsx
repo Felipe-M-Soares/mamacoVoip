@@ -11,35 +11,34 @@ import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { VoiceParticipant } from '../../context/VoiceContext'
 import type { Channel, Profile, Role } from '../../types/database'
 
-const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sinkId?: string | null }>(function VideoTile(
-  { stream, sinkId },
-  forwardedRef
-) {
-  const localRef = useRef<HTMLVideoElement>(null)
-  useEffect(() => {
-    if (localRef.current) localRef.current.srcObject = stream
-  }, [stream])
-  useEffect(() => {
-    const el = localRef.current as (HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }) | null
-    if (el && sinkId && el.setSinkId) el.setSinkId(sinkId).catch(() => {})
-  }, [sinkId])
-  // Sempre mudo — o áudio de participantes remotos toca via <RemoteAudio>,
-  // que aplica o volume individual. Tocar os dois ao mesmo tempo dava
-  // áudio duplicado sempre que alguém ligava a câmera.
-  return (
-    <video
-      ref={(node) => {
-        localRef.current = node
-        if (typeof forwardedRef === 'function') forwardedRef(node)
-        else if (forwardedRef) forwardedRef.current = node
-      }}
-      autoPlay
-      playsInline
-      muted
-      className="w-full h-full object-cover rounded-lg bg-black"
-    />
-  )
-})
+const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sinkId?: string | null; fit?: 'cover' | 'contain' }>(
+  function VideoTile({ stream, sinkId, fit = 'cover' }, forwardedRef) {
+    const localRef = useRef<HTMLVideoElement>(null)
+    useEffect(() => {
+      if (localRef.current) localRef.current.srcObject = stream
+    }, [stream])
+    useEffect(() => {
+      const el = localRef.current as (HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }) | null
+      if (el && sinkId && el.setSinkId) el.setSinkId(sinkId).catch(() => {})
+    }, [sinkId])
+    // Sempre mudo — o áudio de participantes remotos toca via <RemoteAudio>,
+    // que aplica o volume individual. Tocar os dois ao mesmo tempo dava
+    // áudio duplicado sempre que alguém ligava a câmera.
+    return (
+      <video
+        ref={(node) => {
+          localRef.current = node
+          if (typeof forwardedRef === 'function') forwardedRef(node)
+          else if (forwardedRef) forwardedRef.current = node
+        }}
+        autoPlay
+        playsInline
+        muted
+        className={`w-full h-full rounded-lg bg-black ${fit === 'contain' ? 'object-contain' : 'object-cover'}`}
+      />
+    )
+  }
+)
 
 function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; sinkId?: string | null; volume: number }) {
   const ref = useRef<HTMLAudioElement>(null)
@@ -123,6 +122,7 @@ function ScreenShareStage({
           >
             <VideoTile
               stream={share.stream}
+              fit="contain"
               ref={(el) => {
                 videoRefs.current[share.key] = el
               }}
@@ -167,7 +167,7 @@ function ScreenShareStage({
                     </svg>
                   </button>
                   {openVolumeFor === share.key && (
-                    <div className="absolute top-7 right-0 bg-[#111214] rounded-lg shadow-xl border border-black/40 p-2.5 w-36 z-10">
+                    <div className="absolute top-7 right-0 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2.5 w-36 z-10">
                       <p className="text-[10px] text-discord-text-muted mb-1.5">Áudio da transmissão: {shareVolume}%</p>
                       <input
                         type="range"
@@ -275,7 +275,7 @@ function ParticipantTile({
         </svg>
       </button>
       {showVolumeSlider && (
-        <div className="absolute bottom-full left-0 mb-1 bg-[#111214] rounded-lg shadow-xl border border-black/40 p-2.5 w-32 z-10">
+        <div className="absolute bottom-full left-0 mb-1 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2.5 w-32 z-10">
           <p className="text-[10px] text-discord-text-muted mb-1.5">{participantVolume}%</p>
           <input
             type="range"

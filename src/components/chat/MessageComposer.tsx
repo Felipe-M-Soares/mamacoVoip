@@ -231,7 +231,7 @@ export function MessageComposer({
         </div>
       )}
       {emojiMatches.length > 0 && (
-        <div className="absolute bottom-full left-4 right-4 mb-1 bg-[#111214] border border-black/40 rounded-lg shadow-xl overflow-hidden">
+        <div className="absolute bottom-full left-4 right-4 mb-1 bg-discord-darker border border-black/40 rounded-lg shadow-xl overflow-hidden">
           {emojiMatches.map((e) => (
             <button
               key={e.id}
@@ -246,7 +246,7 @@ export function MessageComposer({
       )}
 
       {(mentionMatches.length > 0 || specialMentionMatches.length > 0 || roleMatches.length > 0) && (
-        <div className="absolute bottom-full left-4 right-4 mb-1 bg-[#111214] border border-black/40 rounded-lg shadow-xl overflow-hidden">
+        <div className="absolute bottom-full left-4 right-4 mb-1 bg-discord-darker border border-black/40 rounded-lg shadow-xl overflow-hidden">
           {specialMentionMatches.map((s) => (
             <button
               key={s}

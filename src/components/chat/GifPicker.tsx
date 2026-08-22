@@ -46,7 +46,7 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
   }
 
   return (
-    <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#111214] border border-black/40 rounded-lg shadow-xl overflow-hidden z-20">
+    <div className="absolute bottom-full left-0 right-0 mb-1 bg-discord-darker border border-black/40 rounded-lg shadow-xl overflow-hidden z-20">
       <div className="p-2 border-b border-black/20 flex items-center gap-2">
         <input
           ref={inputRef}

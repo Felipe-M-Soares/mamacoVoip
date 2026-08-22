@@ -1,5 +1,6 @@
 import { createContext, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
+import { describeError } from '../lib/errors'
 import type { Category, Channel, ChannelType } from '../types/database'
 
 interface ChannelsContextValue {
@@ -24,29 +25,6 @@ interface ChannelsContextValue {
 }
 
 export const ChannelsContext = createContext<ChannelsContextValue | undefined>(undefined)
-
-// Erros do supabase-js (PostgrestError, AuthError, etc.) são objetos
-// simples — NÃO são `instanceof Error` — então um catch que só checa
-// `instanceof Error` cai sempre no texto genérico de fallback, mesmo
-// quando o erro real tem uma `.message` útil (ex.: "new row violates
-// row-level security policy", "permission denied", etc.). Isso escondia
-// exatamente a informação que precisávamos pra descobrir a causa real.
-// Também aproveita `.code`/`.hint` quando existem (comuns em erros de
-// RLS/Postgres) pra dar um diagnóstico mais completo.
-function describeError(err: unknown, fallback: string): string {
-  if (err && typeof err === 'object') {
-    const e = err as { message?: unknown; code?: unknown; hint?: unknown; details?: unknown }
-    if (typeof e.message === 'string' && e.message) {
-      const parts = [e.message]
-      if (typeof e.code === 'string' && e.code) parts.push(`código: ${e.code}`)
-      if (typeof e.hint === 'string' && e.hint) parts.push(`dica: ${e.hint}`)
-      if (typeof e.details === 'string' && e.details) parts.push(e.details)
-      return parts.join(' — ')
-    }
-  }
-  if (err instanceof Error && err.message) return err.message
-  return fallback
-}
 
 // Um Provider por servidor: o MainLayout monta este componente com
 // key={server.id}, então trocar de servidor naturalmente reinicia o

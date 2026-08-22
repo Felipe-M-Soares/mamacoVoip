@@ -13,8 +13,13 @@ export function Modal({
   maxWidth?: string
 }) {
   return createPortal(
+    // z-[500]: precisa ficar acima de QUALQUER painel fixo já aberto na tela
+    // (ThreadPanel e PinnedMessagesPanel usam z-[300], o ScreenSharePicker e
+    // o ServerWelcomeModal usam z-[400]) — senão um modal aberto por cima
+    // desses painéis (ex.: "Encaminhar mensagem" a partir de uma thread)
+    // renderiza atrás do painel, dando a impressão de estar quebrado.
     <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4"
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-[500] p-4"
       onClick={onClose}
     >
       <div

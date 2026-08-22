@@ -546,31 +546,62 @@ create table if not exists public.channel_role_access (
 
 alter table public.channel_role_access enable row level security;
 
+-- ============================================================
+-- CORREÇÃO (rodando de novo por cima): as duas policies abaixo, do
+-- jeito que estavam, consultavam "channels" direto dentro da policy de
+-- channel_role_access — e a policy de "channels" (mais abaixo) consulta
+-- "channel_role_access" direto de volta. Sem passar por uma função
+-- security definer, o Postgres reavalia RLS dos dois lados: channels
+-- pede channel_role_access, que pede channels nesse mesmo cheque, que
+-- pede channel_role_access de novo... e nunca termina — daí o erro
+-- "infinite recursion detected in policy for relation \"channels\""
+-- (42P17) ao tentar simplesmente listar os canais de um servidor.
+--
+-- A correção é a mesma receita já usada em is_server_member() e
+-- has_permission(): mover a consulta cruzada pra dentro de uma função
+-- security definer, que roda com privilégio elevado e por isso NÃO
+-- reaciona a RLS das tabelas que ela mesma consulta — quebra o ciclo.
+-- ============================================================
+
+-- Helper: server_id de um canal, sem passar pela RLS de "channels"
+create or replace function public.channel_server_id(p_channel_id uuid)
+returns uuid
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select server_id from public.channels where id = p_channel_id;
+$$;
+
+-- Helper: o usuário tem, via algum cargo, acesso liberado a um canal
+-- restrito? Sem passar pela RLS de "channel_role_access".
+create or replace function public.user_has_channel_role_access(p_channel_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.channel_role_access cra
+    join public.server_member_roles smr on smr.role_id = cra.role_id
+    where cra.channel_id = p_channel_id
+      and smr.user_id = p_user_id
+  );
+$$;
+
 drop policy if exists "Quem vê o canal vê os cargos liberados" on public.channel_role_access;
 create policy "Quem vê o canal vê os cargos liberados"
   on public.channel_role_access for select to authenticated
-  using (
-    exists (
-      select 1 from public.channels c
-      where c.id = channel_id and public.is_server_member(c.server_id, auth.uid())
-    )
-  );
+  using (public.is_server_member(public.channel_server_id(channel_id), auth.uid()));
 
 drop policy if exists "Quem gerencia canais define o acesso" on public.channel_role_access;
 create policy "Quem gerencia canais define o acesso"
   on public.channel_role_access for all to authenticated
-  using (
-    exists (
-      select 1 from public.channels c
-      where c.id = channel_id and public.has_permission(c.server_id, auth.uid(), 'manage_channels')
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.channels c
-      where c.id = channel_id and public.has_permission(c.server_id, auth.uid(), 'manage_channels')
-    )
-  );
+  using (public.has_permission(public.channel_server_id(channel_id), auth.uid(), 'manage_channels'))
+  with check (public.has_permission(public.channel_server_id(channel_id), auth.uid(), 'manage_channels'));
 
 -- Substitui a política de visibilidade de canal (criada em
 -- 001_core.sql) pra respeitar canais restritos: dono e quem tem
@@ -584,13 +615,7 @@ create policy "Membros veem canais do servidor"
     and (
       not is_restricted
       or public.has_permission(server_id, auth.uid(), 'manage_channels')
-      or exists (
-        select 1 from public.channel_role_access cra
-        join public.server_member_roles smr on smr.role_id = cra.role_id
-        where cra.channel_id = channels.id
-          and smr.user_id = auth.uid()
-          and smr.server_id = channels.server_id
-      )
+      or public.user_has_channel_role_access(id, auth.uid())
     )
   );
 
@@ -608,13 +633,7 @@ create policy "Membros veem mensagens do servidor"
         and (
           not c.is_restricted
           or public.has_permission(c.server_id, auth.uid(), 'manage_channels')
-          or exists (
-            select 1 from public.channel_role_access cra
-            join public.server_member_roles smr on smr.role_id = cra.role_id
-            where cra.channel_id = c.id
-              and smr.user_id = auth.uid()
-              and smr.server_id = c.server_id
-          )
+          or public.user_has_channel_role_access(c.id, auth.uid())
         )
     )
   );

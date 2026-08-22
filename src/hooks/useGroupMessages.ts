@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import { notify } from '../lib/notifications'
+import { describeError } from '../lib/errors'
 import type { GroupMessage, GroupMessageAttachment } from '../types/database'
 
 export function useGroupMessages(groupId: string | null) {
@@ -98,57 +99,76 @@ export function useGroupMessages(groupId: string | null) {
     }
   }, [groupId, user, refreshAttachments, refresh])
 
+  // Mesmo motivo do useMessages.ts (chat de canal) e useDirectMessages.ts:
+  // sem o try/catch, uma exceção lançada aqui (em vez de resolvida como
+  // { error }) quebrava a promise antes de qualquer erro voltar pra
+  // composer — parecia "escrever e mandar não faz nada" em grupo também.
   async function sendMessage(content: string, replyToId: string | null = null, files: File[] = []) {
     if (!groupId || !user) return { error: 'Não foi possível enviar' }
-    const { data: message, error } = await supabase
-      .from('group_messages')
-      .insert({ group_id: groupId, author_id: user.id, content, reply_to_id: replyToId ?? undefined })
-      .select()
-      .single()
+    try {
+      const { data: message, error } = await supabase
+        .from('group_messages')
+        .insert({ group_id: groupId, author_id: user.id, content, reply_to_id: replyToId ?? undefined })
+        .select()
+        .single()
 
-    if (error || !message) return { error: error?.message ?? 'Erro ao enviar mensagem' }
+      if (error || !message) return { error: describeError(error, 'Erro ao enviar mensagem') }
 
-    setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
+      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
 
-    const attachmentErrors: string[] = []
-    for (const file of files) {
-      const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
-      const path = `${groupId}/${message.id}-${safeName}`
-      const { error: uploadError } = await supabase.storage
-        .from('group-attachments')
-        .upload(path, file, { contentType: file.type || 'application/octet-stream' })
-      if (uploadError) {
-        attachmentErrors.push(uploadError.message)
-        continue
+      const attachmentErrors: string[] = []
+      for (const file of files) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
+        const path = `${groupId}/${message.id}-${safeName}`
+        const { error: uploadError } = await supabase.storage
+          .from('group-attachments')
+          .upload(path, file, { contentType: file.type || 'application/octet-stream' })
+        if (uploadError) {
+          attachmentErrors.push(describeError(uploadError, 'Falha ao subir o anexo'))
+          continue
+        }
+
+        const { data: urlData } = supabase.storage.from('group-attachments').getPublicUrl(path)
+        const { error: attError } = await supabase.from('group_message_attachments').insert({
+          message_id: message.id,
+          file_url: urlData.publicUrl,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type || 'application/octet-stream',
+        })
+        if (attError) attachmentErrors.push(describeError(attError, 'Falha ao registrar o anexo'))
       }
 
-      const { data: urlData } = supabase.storage.from('group-attachments').getPublicUrl(path)
-      await supabase.from('group_message_attachments').insert({
-        message_id: message.id,
-        file_url: urlData.publicUrl,
-        file_name: file.name,
-        file_size: file.size,
-        mime_type: file.type || 'application/octet-stream',
-      })
+      if (files.length > 0) await refreshAttachments([...messagesRef.current.map((m) => m.id), message.id])
+      if (attachmentErrors.length > 0) {
+        return { error: `Mensagem enviada, mas o anexo falhou: ${attachmentErrors[0]}` }
+      }
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Erro ao enviar mensagem') }
     }
-
-    if (files.length > 0) await refreshAttachments([...messagesRef.current.map((m) => m.id), message.id])
-    if (attachmentErrors.length > 0) {
-      return { error: `Mensagem enviada, mas o anexo falhou: ${attachmentErrors[0]}` }
-    }
-    return { error: null }
   }
 
   async function editMessage(messageId: string, content: string) {
-    const { data, error } = await supabase.from('group_messages').update({ content }).eq('id', messageId).select().single()
-    if (!error && data) setMessages((prev) => prev.map((m) => (m.id === messageId ? data : m)))
-    return { error: error?.message ?? null }
+    try {
+      const { data, error } = await supabase.from('group_messages').update({ content }).eq('id', messageId).select().single()
+      if (error) return { error: describeError(error, 'Não foi possível editar a mensagem') }
+      if (data) setMessages((prev) => prev.map((m) => (m.id === messageId ? data : m)))
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Não foi possível editar a mensagem') }
+    }
   }
 
   async function deleteMessage(messageId: string) {
-    const { error } = await supabase.from('group_messages').delete().eq('id', messageId)
-    if (!error) setMessages((prev) => prev.filter((m) => m.id !== messageId))
-    return { error: error?.message ?? null }
+    try {
+      const { error } = await supabase.from('group_messages').delete().eq('id', messageId)
+      if (error) return { error: describeError(error, 'Não foi possível excluir a mensagem') }
+      setMessages((prev) => prev.filter((m) => m.id !== messageId))
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Não foi possível excluir a mensagem') }
+    }
   }
 
   return { messages, attachments, loading, sendMessage, editMessage, deleteMessage }

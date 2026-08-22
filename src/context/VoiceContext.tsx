@@ -106,7 +106,9 @@ interface VoiceContextValue {
   toggleVideo: () => Promise<void>
   toggleScreenShare: () => Promise<void>
   changeMicrophone: (deviceId: string) => Promise<void>
-  refreshAudioConstraints: () => Promise<void>
+  refreshAudioConstraints: (
+    overrides?: Partial<Pick<ReturnType<typeof useAudioSettings>, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl'>>
+  ) => Promise<void>
   audioSettings: ReturnType<typeof useAudioSettings>
   screenShareQuality: ReturnType<typeof useScreenShareQuality>
   maxParticipants: number
@@ -830,7 +832,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }, [connectedChannelId, connectedServerId, leave, join])
 
   async function changeMicrophone(deviceId: string) {
-    audioSettingsRef.current.setMicId(deviceId)
+    // "" representa "Padrão do sistema" no <select> — normaliza pra null
+    // pra bater com o tipo que StoredSettings.micId realmente usa (ver
+    // useAudioSettings.ts). getAudioConstraints já trata os dois como
+    // "sem preferência de dispositivo" na prática, mas persistir null é
+    // mais correto do que uma string vazia.
+    audioSettingsRef.current.setMicId(deviceId || null)
     if (!connectedRef.current) return
     try {
       const newStream = await navigator.mediaDevices.getUserMedia({
@@ -859,13 +866,27 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   // Reaplica as configurações de áudio atuais (cancelamento de eco,
   // redução de ruído, ganho automático) no microfone já conectado —
-  // usado pelo botão de liga/desliga redutor de ruído ao lado do perfil,
-  // pra a mudança valer na call em andamento sem precisar reconectar.
-  async function refreshAudioConstraints() {
+  // usado pelos botões de liga/desliga (ao lado do perfil e em
+  // Configurações → Áudio), pra a mudança valer na call em andamento
+  // sem precisar reconectar.
+  //
+  // `overrides` é opcional e existe só pra evitar uma corrida com o
+  // React: quem chama essa função normalmente acabou de chamar
+  // setNoiseSuppression/setEchoCancellation/setAutoGainControl um
+  // instante antes, mas a atualização de estado é assíncrona — nesse
+  // mesmo clique, `audioSettingsRef.current` ainda reflete o valor
+  // ANTIGO (de antes do clique), porque o React só re-renderiza (e
+  // atualiza o ref) depois. Sem passar o valor novo explicitamente
+  // aqui, o toggle sempre aplicava a configuração de um clique atrás —
+  // dava a impressão de que o redutor de ruído simplesmente não fazia
+  // nada.
+  async function refreshAudioConstraints(
+    overrides?: Partial<Pick<ReturnType<typeof useAudioSettings>, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl'>>
+  ) {
     if (!connectedRef.current) return
     try {
       const newStream = await navigator.mediaDevices.getUserMedia({
-        audio: audioSettingsRef.current.getAudioConstraints(),
+        audio: audioSettingsRef.current.getAudioConstraints(undefined, overrides),
       })
       const newTrack = newStream.getAudioTracks()[0]
       newTrack.enabled = !muted
@@ -985,6 +1006,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         if (audioTrack) pc.addTrack(audioTrack, stream)
       })
       setScreenSharing(true)
+      // No app desktop, capturar uma janela específica faz o Windows
+      // trazer ela pra frente sozinho (comportamento do sistema, não do
+      // nosso código) — a pessoa clica em "compartilhar tela" e se vê
+      // jogada pra fora do app. O processo principal já tenta devolver o
+      // foco uma vez assim que a fonte é escolhida (ver
+      // electron/main.cjs), mas chama de novo aqui, agora que o stream
+      // já está de fato fluindo, cobre o caso do foco mudar de novo nesse
+      // meio-tempo.
+      window.electronAPI?.focusAppWindow?.()
     } catch {
       setError('Não foi possível compartilhar a tela.')
     }

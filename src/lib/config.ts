@@ -16,3 +16,19 @@ export const DESKTOP_DOWNLOAD_URL =
 // produção de verdade, registre a sua (gratuito, alguns minutos):
 // https://tenor.com/gifapi → "Get API Key" → cole aqui embaixo.
 export const TENOR_API_KEY = 'LIVDSRZULELA'
+
+// URL pública do app na web (o deploy na Vercel). Usada só como base
+// pra montar links de convite/compartilhamento QUANDO quem está gerando
+// o link é o app desktop.
+//
+// Por quê: dentro do Electron, window.location.origin não é uma URL de
+// verdade — é o protocolo interno da própria janela (algo como
+// "app://bundle"), porque o app desktop não carrega o site, ele carrega
+// os arquivos empacotados localmente. Um link de convite montado com
+// esse "origin" errado fica com uma URL que não abre em lugar nenhum
+// (nem em navegador, nem reaberto pelo próprio app) — é por isso que
+// convites gerados pelo app desktop não funcionavam. No navegador (site
+// de verdade), window.location.origin já reflete o domínio certo
+// sozinho, então só o Electron precisa desse valor fixo aqui.
+//
+export const PUBLIC_WEB_URL = 'https://mamaco-voip.vercel.app'

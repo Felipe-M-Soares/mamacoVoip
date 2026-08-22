@@ -89,10 +89,19 @@ export function ChatArea({
     .map((id) => profilesById[id]?.display_name || profilesById[id]?.username)
     .filter((name): name is string => Boolean(name))
 
+  // Antes essa função não devolvia nada pra quem chamou (o `await` sem
+  // `return` faz o handleSend sempre resolver como undefined, mesmo
+  // quando sendMessage() retornava um erro de verdade). O MessageComposer
+  // depende exatamente desse retorno pra decidir se mostra o erro ou
+  // limpa a caixa de texto — sem o `return` aqui, ele sempre tratava como
+  // sucesso: limpava o que foi digitado e nunca mostrava nenhum erro,
+  // mesmo quando o envio falhava silenciosamente. É esse o motivo de
+  // "escrevo e mando e não aparece nada".
   async function handleSend(content: string, files: File[]) {
     if (content.length === 0 && files.length === 0) return
-    await sendMessage(content, replyingTo?.id ?? null, files)
+    const result = await sendMessage(content, replyingTo?.id ?? null, files)
     setReplyingTo(null)
+    return result
   }
 
   return (

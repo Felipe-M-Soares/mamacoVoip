@@ -88,24 +88,33 @@ export function UserPanel() {
         )}
       </div>
 
+      {/* Botão de mutar o microfone — antes esse lugar era o atalho pra
+          redutor de ruído, mas junto com o mic da barra de voz
+          (VoiceChannelView) e o que existia na barra "Voz conectada" da
+          sidebar (removido), virava um terceiro controle fazendo a MESMA
+          coisa que o mic principal, só que sem ser um. Confundia mais do
+          que ajudava — aqui do lado do perfil é onde o Discord de
+          verdade coloca o botão de mutar, então virou isso mesmo. O
+          redutor de ruído continua em Configurações → Áudio. Lê/escreve
+          voice.muted/voice.toggleMute, o mesmo estado compartilhado do
+          botão na barra de voz — mutar em um já reflete no outro
+          sozinho, sem nada extra pra sincronizar. */}
       <button
-        title={voice.audioSettings.noiseSuppression ? 'Desativar redutor de ruído' : 'Ativar redutor de ruído'}
-        onClick={async () => {
-          voice.audioSettings.setNoiseSuppression(!voice.audioSettings.noiseSuppression)
-          await voice.refreshAudioConstraints()
-        }}
+        title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
+        onClick={voice.toggleMute}
         className={`w-8 h-8 flex items-center justify-center rounded transition-colors shrink-0 ${
-          voice.audioSettings.noiseSuppression
-            ? 'text-discord-blurple hover:bg-white/10'
-            : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
-        }`}
+          !voice.connectedChannelId ? 'opacity-40' : ''
+        } ${voice.muted ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'}`}
       >
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-          <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM7 11a1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-2.08A7 7 0 0 0 19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0z" />
-          {!voice.audioSettings.noiseSuppression && (
-            <path d="M3.6 3.6a1 1 0 0 0-1.4 1.4l18.8 18.8a1 1 0 0 0 1.4-1.4L3.6 3.6z" />
-          )}
-        </svg>
+        {voice.muted ? (
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-8.6 3.5L18 5A1 1 0 1 0 16.6 3.6L3.6 16.6A1 1 0 1 0 5 18l2-2A7 7 0 0 0 19 11zM12 15a3 3 0 0 0 3-3l-5.7 5.7A3 3 0 0 0 12 15zM9 6a3 3 0 0 1 6 0v3.5l2-2V6a5 5 0 0 0-9.9-1L9 6.6V6z" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
+          </svg>
+        )}
       </button>
 
       <button

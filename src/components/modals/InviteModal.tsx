@@ -1,6 +1,17 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
 import { useServers } from '../../hooks/useServers'
+import { isElectron } from '../../hooks/useGamePresence'
+import { PUBLIC_WEB_URL } from '../../lib/config'
+
+// Dentro do app desktop, window.location.origin não é uma URL de
+// verdade (é o protocolo interno do Electron) — ver o comentário em
+// lib/config.ts. Fora dele (no navegador), window.location.origin já
+// reflete o domínio certo sozinho, inclusive em previews/domínios
+// customizados.
+function inviteBaseUrl(): string {
+  return isElectron() ? PUBLIC_WEB_URL : window.location.origin
+}
 
 export function InviteModal({ serverId, onClose }: { serverId: string; onClose: () => void }) {
   const { createInvite } = useServers()
@@ -19,7 +30,7 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
       setError('Não foi possível gerar o convite.')
       return
     }
-    setLink(`${window.location.origin}/convite/${invite.code}`)
+    setLink(`${inviteBaseUrl()}/convite/${invite.code}`)
   }
 
   async function handleCopy() {

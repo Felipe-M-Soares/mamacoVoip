@@ -110,9 +110,20 @@ export function useAudioSettings() {
     persist({ ...settings, autoGainControl: v })
   }
 
-  function getAudioConstraints(overrideDeviceId?: string): MediaTrackConstraints {
+  // `overrides` existe pro caso de ligar/desligar um desses três (eco,
+  // ruído, ganho) enquanto já se está numa call: o botão precisa
+  // recalcular as constraints com o valor NOVO na hora, sem esperar o
+  // componente re-renderizar — se só ler `settings` (o estado do React),
+  // pega o valor de ANTES do clique, porque a atualização de estado
+  // ainda não foi aplicada nesse mesmo tick (ver refreshAudioConstraints
+  // em VoiceContext.tsx pra mais detalhes de por que isso importava).
+  function getAudioConstraints(
+    overrideDeviceId?: string,
+    overrides?: Partial<Pick<StoredSettings, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl'>>
+  ): MediaTrackConstraints {
     const deviceId = overrideDeviceId ?? settings.micId
-    const extraChromiumConstraints: Record<string, boolean> = settings.noiseSuppression
+    const effective = { ...settings, ...overrides }
+    const extraChromiumConstraints: Record<string, boolean> = effective.noiseSuppression
       ? {
           // Constraints extras do motor Chromium (usado tanto pelo app
           // desktop quanto por navegadores baseados em Chrome/Edge) —
@@ -129,9 +140,9 @@ export function useAudioSettings() {
 
     return {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      echoCancellation: settings.echoCancellation,
-      noiseSuppression: settings.noiseSuppression,
-      autoGainControl: settings.autoGainControl,
+      echoCancellation: effective.echoCancellation,
+      noiseSuppression: effective.noiseSuppression,
+      autoGainControl: effective.autoGainControl,
       // Qualidade de captura mais alta que o padrão do navegador —
       // áudio de voz mais nítido, sem exigir praticamente nada a mais
       // de banda (a diferença é irrelevante frente ao vídeo/tela).

@@ -27,9 +27,13 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
 
+  // Mesmo bug do ChatArea.tsx: sem o `return`, o MessageComposer nunca
+  // recebia o erro de volta e sempre limpava a caixa como se tivesse
+  // dado certo, mesmo quando o envio falhava.
   async function handleSend(content: string, files: File[]) {
-    await sendMessage(content, replyingTo?.id ?? null, files)
+    const result = await sendMessage(content, replyingTo?.id ?? null, files)
     setReplyingTo(null)
+    return result
   }
 
   return (

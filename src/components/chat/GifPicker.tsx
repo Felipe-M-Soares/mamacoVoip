@@ -46,7 +46,16 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
   }
 
   return (
-    <div className="absolute bottom-full left-0 right-0 mb-1 bg-discord-darker border border-black/40 rounded-lg shadow-xl overflow-hidden z-20">
+    // Antes usava `left-0 right-0` pra esticar a largura toda — isso
+    // funciona quando o elemento posicionado (ancestral mais próximo com
+    // position != static) é o composer inteiro, mas quem envolve o
+    // GifPicker é só o `<div className="relative shrink-0">` do próprio
+    // botão de GIF (~32px), então "esticar de ponta a ponta" desse
+    // wrapper deixava o painel inteiro espremido numa fatia minúscula,
+    // cortando todo o texto. Com largura fixa (w-80) ancorada em left-0,
+    // o painel abre pra direita a partir do botão em vez de tentar
+    // preencher a largura do próprio botão.
+    <div className="absolute bottom-full left-0 mb-1 w-80 max-w-[90vw] bg-discord-darker border border-black/40 rounded-lg shadow-xl overflow-hidden z-20">
       <div className="p-2 border-b border-black/20 flex items-center gap-2">
         <input
           ref={inputRef}

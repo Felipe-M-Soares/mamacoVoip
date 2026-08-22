@@ -481,10 +481,36 @@ app.whenReady().then(() => {
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
       const source = sources.find((s) => s.id === sourceId)
       resolve(source ? { video: source, audio: 'loopback' } : {})
+      // Capturar uma JANELA específica (diferente de capturar a tela
+      // inteira) faz o Windows trazer aquela janela pra frente sozinho —
+      // é assim que a API de captura do sistema funciona, nada que o
+      // Electron ou a gente controle diretamente. Resultado: quem clica
+      // em "compartilhar tela" via de repente se vê jogado pra fora do
+      // app, olhando pra janela que ele PEDIU pra compartilhar, em vez de
+      // continuar vendo a call. Não dá pra impedir o Windows de focar a
+      // janela na hora de iniciar a captura, mas dá pra devolver o foco
+      // pro nosso app um instante depois — daí o pequeno atraso.
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show()
+          mainWindow.focus()
+        }
+      }, 250)
     } catch {
       // Engolir aqui de propósito — sem isso, cancelar o compartilhamento
       // de tela derrubava o app inteiro (o erro escapava até o processo
       // renderer via IPC e acionava a tela de "Erro ao iniciar o app").
+    }
+  })
+
+  // Segunda chamada de reforço: o renderer chama isso de novo assim que
+  // o MediaStream do compartilhamento realmente começa a fluir (pode
+  // acontecer um pouco depois do resolve() acima) — cobre o caso do
+  // Windows focar a janela de novo nesse meio-tempo.
+  ipcMain.on('app:focus-window', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
     }
   })
 

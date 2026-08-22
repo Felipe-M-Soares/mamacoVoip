@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
-import { useAudioSettings } from '../../hooks/useAudioSettings'
 import { useVoice } from '../../hooks/useVoice'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
 import { useTheme } from '../../hooks/useTheme'
@@ -335,7 +334,19 @@ function AppearanceTab() {
 }
 
 function AudioTab() {
-  const audio = useAudioSettings()
+  // Antes esse componente chamava useAudioSettings() direto, criando uma
+  // SEGUNDA instância independente do estado — separada da que o
+  // VoiceContext usa de verdade pra call em andamento (voice.audioSettings).
+  // As duas liam o mesmo localStorage só na hora de montar, então
+  // funcionavam bem na primeira vez que a pessoa abria o app, mas
+  // qualquer mudança feita aqui dentro (trocar microfone, ligar/desligar
+  // redutor de ruído, trocar alto-falante) nunca chegava na call já
+  // conectada nem no restante do app (ex.: o ícone de redutor de ruído
+  // ao lado do perfil) — só valia depois de fechar e abrir o app de
+  // novo. Usando a MESMA instância do VoiceContext, qualquer alteração
+  // aqui já é a fonte da verdade em todo lugar.
+  const voice = useVoice()
+  const audio = voice.audioSettings
   const [testing, setTesting] = useState(false)
   const [echoing, setEchoing] = useState(false)
   const [level, setLevel] = useState(0)
@@ -451,7 +462,7 @@ function AudioTab() {
         <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Microfone de entrada</label>
         <select
           value={audio.micId ?? ''}
-          onChange={(e) => audio.setMicId(e.target.value || null)}
+          onChange={(e) => voice.changeMicrophone(e.target.value)}
           className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm"
         >
           <option value="">Padrão do sistema</option>
@@ -488,7 +499,10 @@ function AudioTab() {
           <input
             type="checkbox"
             checked={audio.echoCancellation}
-            onChange={(e) => audio.setEchoCancellation(e.target.checked)}
+            onChange={(e) => {
+              audio.setEchoCancellation(e.target.checked)
+              voice.refreshAudioConstraints({ echoCancellation: e.target.checked })
+            }}
             className="w-4 h-4 accent-discord-blurple"
           />
         </label>
@@ -497,7 +511,10 @@ function AudioTab() {
           <input
             type="checkbox"
             checked={audio.noiseSuppression}
-            onChange={(e) => audio.setNoiseSuppression(e.target.checked)}
+            onChange={(e) => {
+              audio.setNoiseSuppression(e.target.checked)
+              voice.refreshAudioConstraints({ noiseSuppression: e.target.checked })
+            }}
             className="w-4 h-4 accent-discord-blurple"
           />
         </label>
@@ -506,7 +523,10 @@ function AudioTab() {
           <input
             type="checkbox"
             checked={audio.autoGainControl}
-            onChange={(e) => audio.setAutoGainControl(e.target.checked)}
+            onChange={(e) => {
+              audio.setAutoGainControl(e.target.checked)
+              voice.refreshAudioConstraints({ autoGainControl: e.target.checked })
+            }}
             className="w-4 h-4 accent-discord-blurple"
           />
         </label>

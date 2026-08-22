@@ -5,7 +5,7 @@ import { useGroupMessages } from '../../hooks/useGroupMessages'
 import { useGroupConversations, type GroupConversationWithMembers } from '../../context/GroupConversationsContext'
 import { useAuth } from '../../hooks/useAuth'
 import { parseMessageContent } from '../../lib/messageFormatting'
-import { LinkPreviewCard, extractFirstUrl } from '../chat/LinkPreviewCard'
+import { LinkPreviewCard, extractFirstUrl, isPureMediaMessage } from '../chat/LinkPreviewCard'
 import type { GroupMessage } from '../../types/database'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
@@ -112,7 +112,7 @@ export function GroupChatArea({
                         <span className="text-xs text-discord-text-muted">{formatTime(message.created_at)}</span>
                       </div>
                     )}
-                    {message.content && (
+                    {message.content && !isPureMediaMessage(message.content) && (
                       <p className="text-sm text-discord-text whitespace-pre-wrap break-words leading-relaxed">
                         {parseMessageContent(message.content, [])}
                         {message.edited_at && (

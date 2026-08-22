@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { parseMessageContent } from '../../lib/messageFormatting'
-import { LinkPreviewCard, extractFirstUrl } from './LinkPreviewCard'
+import { LinkPreviewCard, extractFirstUrl, isPureMediaMessage } from './LinkPreviewCard'
 import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji, Thread, Role } from '../../types/database'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉']
@@ -322,7 +322,7 @@ export function MessageItem({
                 <button onClick={handleSaveEdit} className="text-discord-blurple hover:underline">salvar</button>
               </p>
             </div>
-          ) : (
+          ) : isPureMediaMessage(message.content) ? null : (
             <p className="text-sm text-discord-text whitespace-pre-wrap break-words leading-relaxed">
               {renderContent(message.content, members, emojis, roles)}
               {message.edited_at && (

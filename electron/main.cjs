@@ -817,7 +817,15 @@ app.whenReady().then(() => {
       sendUpdateStatus('error', { message: raw.slice(0, 400), downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest' })
     })
 
-    ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall())
+    // Sem os dois `true`, o electron-updater roda o instalador no modo
+    // NORMAL (não silencioso) por padrão — é exatamente por isso que
+    // clicar em "Reiniciar" abria a telinha de instalação de novo, como
+    // se fosse a primeira vez, em vez de só trocar a versão e voltar
+    // direto pro app. `true, true` = instala em silêncio (sem nenhuma
+    // janela aparecer) e reabre o app sozinho assim que terminar — junto
+    // com "oneClick: true" no nsis (package.json), fica igual o Discord
+    // de verdade: a pessoa nem percebe que uma instalação aconteceu.
+    ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall(true, true))
     ipcMain.on('app:check-for-updates-now', () => {
       updateRetryCount = 0
       autoUpdater.checkForUpdates().catch(() => {})
@@ -891,7 +899,10 @@ app.on('window-all-closed', () => {
     // clicar em "Reiniciar", só fechar e abrir o app normalmente já
     // basta pra receber a versão nova.
     if (updateReadyToInstall) {
-      autoUpdater.quitAndInstall()
+      // Mesmo motivo do outro quitAndInstall acima: sem os `true, true`,
+      // isso abriria a tela de instalação visível bem na hora de fechar o
+      // app, em vez de trocar a versão em silêncio e já reabrir sozinho.
+      autoUpdater.quitAndInstall(true, true)
     } else {
       app.quit()
     }

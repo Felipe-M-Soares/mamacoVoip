@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { TENOR_API_KEY } from '../../lib/config'
+import { GIPHY_API_KEY } from '../../lib/config'
 
-interface TenorGif {
+interface GifResult {
   id: string
   url: string
   previewUrl: string
@@ -9,7 +9,7 @@ interface TenorGif {
 
 export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) => void; onClose: () => void }) {
   const [query, setQuery] = useState('')
-  const [gifs, setGifs] = useState<TenorGif[]>([])
+  const [gifs, setGifs] = useState<GifResult[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -30,29 +30,35 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
     setLoading(true)
     setLoadError(false)
     try {
+      // GIPHY (não é mais o Tenor — veja o comentário em lib/config.ts
+      // sobre o Google ter desligado o Tenor API de vez em 2026).
+      // "trending" quando o campo de busca está vazio (equivalente ao
+      // "em alta" que o Tenor tinha), "search" quando a pessoa digitou
+      // algo. `rating=pg-13` filtra conteúdo mais pesado, sem ser
+      // excessivamente restritivo.
       const endpoint = q.trim()
-        ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=${TENOR_API_KEY}&client_key=mamacos_voip&limit=24&contentfilter=medium&media_filter=tinygif,gif`
-        : `https://tenor.googleapis.com/v2/featured?key=${TENOR_API_KEY}&client_key=mamacos_voip&limit=24&contentfilter=medium&media_filter=tinygif,gif`
+        ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(q)}&limit=24&rating=pg-13&lang=pt`
+        : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=24&rating=pg-13`
       const res = await fetch(endpoint)
       const data = await res.json()
-      // A Tenor devolve HTTP 200 mesmo em alguns casos de erro (chave
-      // inválida/sem cota), só com um campo "error" no corpo em vez de
-      // "results" — sem checar isso, esses casos pareciam silenciosamente
+      // A GIPHY devolve um corpo com "meta.status"/"meta.msg" mesmo em
+      // erro (chave inválida, cota estourada, etc.) em vez de só um HTTP
+      // não-200 — sem checar isso, um erro de API parecia silenciosamente
       // "nenhum GIF encontrado" (igual uma busca sem resultado de
       // verdade), impossível de diferenciar. Agora loga o motivo real no
       // console (F12 no navegador, ou Ctrl+Shift+I no app desktop) e
       // mostra uma mensagem diferente pra quem está usando o app.
-      if (!res.ok || data.error) {
-        console.error('[GifPicker] Tenor respondeu com erro:', res.status, data.error ?? data)
+      if (!res.ok || data.meta?.status !== 200) {
+        console.error('[GifPicker] GIPHY respondeu com erro:', res.status, data.meta ?? data)
         setLoadError(true)
         setGifs([])
         setLoading(false)
         return
       }
-      const results: TenorGif[] = (data.results ?? []).map((r: any) => ({
+      const results: GifResult[] = (data.data ?? []).map((r: any) => ({
         id: r.id,
-        url: r.media_formats?.gif?.url ?? r.media_formats?.tinygif?.url,
-        previewUrl: r.media_formats?.tinygif?.url ?? r.media_formats?.gif?.url,
+        url: r.images?.fixed_height?.url ?? r.images?.downsized?.url ?? r.images?.original?.url,
+        previewUrl: r.images?.fixed_height_small?.url ?? r.images?.fixed_height?.url ?? r.images?.downsized?.url,
       }))
       setGifs(results.filter((g) => g.url))
     } catch (err) {
@@ -112,7 +118,7 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
         )}
       </div>
       <p className="text-[10px] text-discord-text-muted text-center py-1 border-t border-black/20">
-        GIFs via Tenor
+        GIFs via GIPHY
       </p>
     </div>
   )

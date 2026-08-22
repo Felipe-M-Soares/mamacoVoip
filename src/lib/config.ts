@@ -9,13 +9,20 @@
 export const DESKTOP_DOWNLOAD_URL =
   'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/MamacosVoip-Setup.exe'
 
-// Busca de GIFs no chat (API do Tenor, gratuita). Essa é a chave
-// PÚBLICA de teste que o próprio Tenor disponibiliza pra qualquer
-// desenvolvedor experimentar — funciona, mas tem limite de uso
-// compartilhado com todo mundo que também estiver usando ela. Pra
-// produção de verdade, registre a sua (gratuito, alguns minutos):
-// https://tenor.com/gifapi → "Get API Key" → cole aqui embaixo.
-export const TENOR_API_KEY = 'LIVDSRZULELA'
+// Busca de GIFs no chat. Até aqui usava a API do Tenor — mas o Google
+// DESLIGOU o Tenor API de vez pra qualquer desenvolvedor de fora (parou
+// de aceitar cliente novo em janeiro de 2026, e desligou todo mundo que
+// já usava, inclusive quem já tinha chave, em 30/06/2026 — foi o mesmo
+// motivo do GIF picker do Discord/WhatsApp/X/Bluesky terem quebrado na
+// mesma época). Não existe mais chave de Tenor que funcione, nem nova
+// nem antiga — por isso migrado pra API do GIPHY, que continua aceitando
+// cadastro novo normalmente.
+//
+// Pra usar de verdade, cadastre a SUA chave (gratuito, poucos minutos):
+// https://developers.giphy.com → criar conta → "Create an API Key" no
+// Developer Dashboard → cole o valor aqui embaixo. A chave abaixo é só
+// um placeholder e não funciona.
+export const GIPHY_API_KEY = 'EU6ktp2I3dARvfow8NgQm0qEAkuAZaEn'
 
 // URL pública do app na web (o deploy na Vercel). Usada só como base
 // pra montar links de convite/compartilhamento QUANDO quem está gerando

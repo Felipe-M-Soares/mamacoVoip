@@ -278,6 +278,35 @@ function createOverlayWindow() {
   return overlay
 }
 
+// Reconquista o foco da janela principal depois que o Windows rouba ele
+// sozinho ao iniciar a captura de uma janela específica pro
+// compartilhamento de tela. Um simples `.focus()` costuma ser IGNORADO
+// pelo Windows nesse cenário: por padrão, o sistema tem uma proteção
+// contra "roubo de foco" (foreground lock) que impede um processo em
+// segundo plano de se colocar em primeiro plano à força — exatamente o
+// caso aqui, já que quem tecnicamente trouxe a outra janela pra frente
+// foi o próprio Windows, não um clique da pessoa dentro do nosso app.
+// `setAlwaysOnTop(true)` contorna essa proteção (fica temporariamente
+// "sempre visível", o que o Windows permite mesmo em segundo plano) e
+// depois desliga de novo pra não travar a janela por cima de tudo pro
+// resto da sessão.
+function forceFocusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.show()
+  mainWindow.setAlwaysOnTop(true)
+  mainWindow.focus()
+  mainWindow.setAlwaysOnTop(false)
+}
+
+// Dispara a reconquista de foco em alguns momentos diferentes — não dá
+// pra saber com certeza QUANDO o Windows vai focar a outra janela (pode
+// ser na hora de resolver o pedido de captura, ou só um instante depois,
+// quando o primeiro frame de vídeo realmente começa a fluir), então
+// tenta de novo em alguns intervalos curtos pra cobrir os dois casos.
+function scheduleFocusReclaim() {
+  ;[150, 500, 1000].forEach((delay) => setTimeout(forceFocusMainWindow, delay))
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -487,15 +516,12 @@ app.whenReady().then(() => {
       // Electron ou a gente controle diretamente. Resultado: quem clica
       // em "compartilhar tela" via de repente se vê jogado pra fora do
       // app, olhando pra janela que ele PEDIU pra compartilhar, em vez de
-      // continuar vendo a call. Não dá pra impedir o Windows de focar a
-      // janela na hora de iniciar a captura, mas dá pra devolver o foco
-      // pro nosso app um instante depois — daí o pequeno atraso.
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.show()
-          mainWindow.focus()
-        }
-      }, 250)
+      // continuar vendo a call. Dispara várias tentativas de recuperar o
+      // foco em momentos diferentes, porque não dá pra saber de antemão
+      // exatamente QUANDO o Windows vai roubar o foco (pode ser na hora
+      // de resolver o pedido, ou só quando o primeiro frame do vídeo
+      // começa a fluir de verdade um pouco depois).
+      scheduleFocusReclaim()
     } catch {
       // Engolir aqui de propósito — sem isso, cancelar o compartilhamento
       // de tela derrubava o app inteiro (o erro escapava até o processo
@@ -508,10 +534,7 @@ app.whenReady().then(() => {
   // acontecer um pouco depois do resolve() acima) — cobre o caso do
   // Windows focar a janela de novo nesse meio-tempo.
   ipcMain.on('app:focus-window', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show()
-      mainWindow.focus()
-    }
+    scheduleFocusReclaim()
   })
 
   Menu.setApplicationMenu(null)

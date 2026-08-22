@@ -594,3 +594,15 @@ alter table public.profiles add constraint profiles_profile_visibility_check che
 alter table public.channels add column if not exists is_spoiler boolean not null default false;
 alter table public.channels add column if not exists user_limit integer not null default 0;
 alter table public.channels add column if not exists is_restricted boolean not null default false;
+-- Essas três aqui embaixo estavam faltando: o comentário lá em cima já
+-- dizia "channels.topic/is_stage/slowmode_seconds" como colunas
+-- adicionadas com o tempo, mas só is_spoiler/user_limit/is_restricted
+-- tinham o ALTER TABLE correspondente. Bancos criados antes dessas três
+-- existirem no CREATE TABLE (lá em cima) ficavam sem elas de vez —
+-- gerando erros tipo `column "slowmode_seconds" does not exist` (código
+-- 42703) bem na hora de enviar mensagem, porque o gatilho de modo lento
+-- (002_messaging.sql) lê essa coluna em TODO envio de mensagem, mesmo em
+-- canais sem modo lento nenhum.
+alter table public.channels add column if not exists topic text;
+alter table public.channels add column if not exists is_stage boolean not null default false;
+alter table public.channels add column if not exists slowmode_seconds integer not null default 0;

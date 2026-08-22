@@ -333,6 +333,30 @@ function AppearanceTab() {
   )
 }
 
+// Switch em formato de pílula, igual o que o Discord usa em
+// Configurações — o checkbox quadrado padrão do navegador não tem nada a
+// ver com a cara do resto do app. Usado nos três controles de
+// processamento de voz abaixo.
+function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative w-10 h-6 rounded-full shrink-0 transition-colors ${
+        checked ? 'bg-discord-green' : 'bg-discord-lighter'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-4' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  )
+}
+
 function AudioTab() {
   // Antes esse componente chamava useAudioSettings() direto, criando uma
   // SEGUNDA instância independente do estado — separada da que o
@@ -441,6 +465,22 @@ function AudioTab() {
     []
   )
 
+  // Igual o próprio Discord faz na tela de configurações: se o teste de
+  // microfone já está rodando, ligar/desligar redução de ruído (ou eco,
+  // ou ganho automático) reinicia o teste na hora com a config nova —
+  // assim dá pra OUVIR/VER a diferença na barra de nível imediatamente,
+  // em vez de ter que parar e começar o teste nas mãos toda vez. Não
+  // depende de `testing` de propósito: só deve disparar quando uma
+  // dessas configs muda enquanto o teste já está ativo, não quando o
+  // teste começa (senão dispararia duas vezes ao clicar em "Testar
+  // microfone").
+  useEffect(() => {
+    if (!testing) return
+    stopTest()
+    startTest()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audio.echoCancellation, audio.noiseSuppression, audio.autoGainControl, audio.micId])
+
   return (
     <div className="space-y-5">
       <audio ref={echoAudioRef} className="hidden" />
@@ -493,43 +533,57 @@ function AudioTab() {
         </select>
       </div>
 
-      <div className="space-y-2">
-        <label className="flex items-center justify-between text-sm text-discord-text cursor-pointer">
-          Cancelamento de eco
-          <input
-            type="checkbox"
-            checked={audio.echoCancellation}
-            onChange={(e) => {
-              audio.setEchoCancellation(e.target.checked)
-              voice.refreshAudioConstraints({ echoCancellation: e.target.checked })
-            }}
-            className="w-4 h-4 accent-discord-blurple"
-          />
-        </label>
-        <label className="flex items-center justify-between text-sm text-discord-text cursor-pointer">
-          Redução de ruído
-          <input
-            type="checkbox"
-            checked={audio.noiseSuppression}
-            onChange={(e) => {
-              audio.setNoiseSuppression(e.target.checked)
-              voice.refreshAudioConstraints({ noiseSuppression: e.target.checked })
-            }}
-            className="w-4 h-4 accent-discord-blurple"
-          />
-        </label>
-        <label className="flex items-center justify-between text-sm text-discord-text cursor-pointer">
-          Controle automático de ganho
-          <input
-            type="checkbox"
-            checked={audio.autoGainControl}
-            onChange={(e) => {
-              audio.setAutoGainControl(e.target.checked)
-              voice.refreshAudioConstraints({ autoGainControl: e.target.checked })
-            }}
-            className="w-4 h-4 accent-discord-blurple"
-          />
-        </label>
+      <div>
+        <p className="text-xs font-bold uppercase text-discord-text-muted tracking-wide mb-2">
+          Processamento de voz
+        </p>
+        <div className="bg-discord-darker rounded-lg divide-y divide-white/5">
+          <div className="flex items-center justify-between gap-4 p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white">Redução de ruído</p>
+              <p className="text-xs text-discord-text-muted mt-0.5">
+                Reduz ruído de fundo constante (ventoinha, teclado, ar-condicionado) enquanto você fala.
+              </p>
+            </div>
+            <ToggleSwitch
+              checked={audio.noiseSuppression}
+              onChange={(checked) => {
+                audio.setNoiseSuppression(checked)
+                voice.refreshAudioConstraints({ noiseSuppression: checked })
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white">Cancelamento de eco</p>
+              <p className="text-xs text-discord-text-muted mt-0.5">
+                Evita que o som que sai do seu alto-falante volte pelo microfone.
+              </p>
+            </div>
+            <ToggleSwitch
+              checked={audio.echoCancellation}
+              onChange={(checked) => {
+                audio.setEchoCancellation(checked)
+                voice.refreshAudioConstraints({ echoCancellation: checked })
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white">Controle automático de ganho</p>
+              <p className="text-xs text-discord-text-muted mt-0.5">
+                Ajusta o volume de captura sozinho, pra sua voz não ficar baixa nem estourar.
+              </p>
+            </div>
+            <ToggleSwitch
+              checked={audio.autoGainControl}
+              onChange={(checked) => {
+                audio.setAutoGainControl(checked)
+                voice.refreshAudioConstraints({ autoGainControl: checked })
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       <div>
@@ -540,12 +594,18 @@ function AudioTab() {
           {testing ? 'Parar teste' : 'Testar microfone'}
         </button>
         {testing && (
-          <div className="mt-3 h-2.5 bg-discord-darker rounded-full overflow-hidden">
-            <div
-              className="h-full bg-discord-green transition-all duration-75"
-              style={{ width: `${level}%` }}
-            />
-          </div>
+          <>
+            <p className="text-xs text-discord-text-muted mt-2">
+              Fala alguma coisa — a barra reage ao volume captado. Dá pra ligar/desligar os controles acima com o
+              teste rodando pra ouvir a diferença na hora.
+            </p>
+            <div className="mt-2 h-2.5 bg-discord-darker rounded-full overflow-hidden">
+              <div
+                className="h-full bg-discord-green transition-all duration-75"
+                style={{ width: `${level}%` }}
+              />
+            </div>
+          </>
         )}
       </div>
 

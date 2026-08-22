@@ -479,6 +479,21 @@ create policy "dm_attachments_insert"
     )
   );
 
+-- Faltava: sem estar na publicação, a assinatura de tempo real que o
+-- app já faz pra "dm_message_attachments" nunca recebia evento nenhum
+-- (tabela com RLS não é suficiente pro Realtime — precisa estar
+-- explicitamente na publicação). Só dava pra ver um anexo de DM depois
+-- de reabrir a conversa.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'dm_message_attachments'
+  ) then
+    alter publication supabase_realtime add table public.dm_message_attachments;
+  end if;
+end $$;
+
 -- ==== originalmente: 021_group_dms.sql ====
 -- ============================================================
 -- Grupos de conversa (DM em grupo) — rode isto no SQL Editor do
@@ -658,3 +673,26 @@ create policy "group_attachments_insert"
     bucket_id = 'group-attachments'
     and public.is_group_member((storage.foldername(name))[1]::uuid, auth.uid())
   );
+
+-- Faltavam as duas: "group_messages" nunca tinha sido adicionada à
+-- publicação de Realtime — ou seja, o chat em grupo não recebia NENHUMA
+-- mensagem em tempo real (só reaparecia ao trocar de conversa/recarregar
+-- a página), e o mesmo valia pros anexos de grupo.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'group_messages'
+  ) then
+    alter publication supabase_realtime add table public.group_messages;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'group_message_attachments'
+  ) then
+    alter publication supabase_realtime add table public.group_message_attachments;
+  end if;
+end $$;

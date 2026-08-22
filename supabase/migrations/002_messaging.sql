@@ -274,6 +274,21 @@ begin
     alter publication supabase_realtime add table public.message_reactions;
   end if;
 end $$;
+-- Faltava esta: sem a tabela na publicação, a assinatura de tempo real
+-- que o app já fazia pra "message_attachments" nunca recebia nenhum
+-- evento (a tabela existir com RLS não é suficiente — precisa estar na
+-- publicação pro Realtime replicar as mudanças). Na prática, quem já
+-- estava com o canal aberto só via um anexo (imagem, áudio, arquivo)
+-- depois de trocar de canal ou recarregar a página.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'message_attachments'
+  ) then
+    alter publication supabase_realtime add table public.message_attachments;
+  end if;
+end $$;
 
 -- ============================================================
 -- Storage: bucket de anexos

@@ -123,6 +123,19 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           }
         }
       )
+      // Sem isso, um anexo (imagem, áudio, arquivo) só aparecia pra
+      // quem enviou (o próprio sendMessage já força um refreshExtras
+      // depois do upload) — quem já estava com o canal aberto só via o
+      // anexo depois de trocar de canal ou recarregar a página, porque
+      // a mensagem em si chegava por tempo real mas o anexo, não. As
+      // outras duas versões desse hook (DMs e grupos) já faziam essa
+      // assinatura; faltava só aqui.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_attachments' }, (payload) => {
+        const att = payload.new as MessageAttachment
+        if (messagesRef.current.some((m) => m.id === att.message_id)) {
+          refreshExtras(messagesRef.current.map((m) => m.id))
+        }
+      })
       .subscribe((status) => {
         // Se a conexão em tempo real cair (rede instável, Wi-Fi
         // oscilando, etc.), sem isso o chat ficava "travado" —

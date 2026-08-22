@@ -6,6 +6,7 @@ interface ChannelsContextValue {
   categories: Category[]
   channels: Channel[]
   loading: boolean
+  loadError: string | null
   refresh: () => Promise<void>
   createChannel: (name: string, type: ChannelType, categoryId: string | null, isStage?: boolean) => Promise<{ error: string | null }>
   updateChannel: (channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean; user_limit?: number; is_restricted?: boolean }) => Promise<{ error: string | null }>
@@ -33,48 +34,91 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   const [categories, setCategories] = useState<Category[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
+  // Antes, uma falha de rede/RLS aqui (uma exceção lançada pelo fetch,
+  // por exemplo — diferente de um { error } retornado normalmente pelo
+  // supabase-js) derrubava a promise sem passar pelo resto da função:
+  // "loading" nunca voltava pra false e nada de erro era mostrado. Na
+  // prática isso trava a sidebar no skeleton pra sempre — parece "não
+  // aparece nenhum canal", sem nenhuma pista do motivo. Envolver em
+  // try/catch garante que loading sempre termina e que, se algo falhar
+  // de verdade, o motivo aparece pra quem está usando (e pra quem for
+  // depurar depois) em vez de falhar em silêncio.
   const refresh = useCallback(async () => {
     setLoading(true)
-    const [{ data: cats }, { data: chans }] = await Promise.all([
-      supabase.from('categories').select('*').eq('server_id', serverId).order('position'),
-      supabase.from('channels').select('*').eq('server_id', serverId).order('position'),
-    ])
-    setCategories(cats ?? [])
-    setChannels(chans ?? [])
-    setLoading(false)
+    try {
+      const [catsRes, chansRes] = await Promise.all([
+        supabase.from('categories').select('*').eq('server_id', serverId).order('position'),
+        supabase.from('channels').select('*').eq('server_id', serverId).order('position'),
+      ])
+      if (catsRes.error) throw catsRes.error
+      if (chansRes.error) throw chansRes.error
+      setCategories(catsRes.data ?? [])
+      setChannels(chansRes.data ?? [])
+      setLoadError(null)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os canais.')
+    } finally {
+      setLoading(false)
+    }
   }, [serverId])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
+  // Ponto central: se o insert falhar de um jeito que o supabase-js não
+  // resolve como { error } (rejeição de rede, por exemplo), esse
+  // try/catch garante que quem chamou SEMPRE recebe uma mensagem de
+  // erro de volta em vez de uma exceção não tratada — que no modal de
+  // criar canal virava "sem erro, mas o canal nunca aparece".
   async function createChannel(name: string, type: ChannelType, categoryId: string | null, isStage = false) {
-    const position = channels.filter((c) => c.category_id === categoryId).length
-    const { error } = await supabase
-      .from('channels')
-      .insert({ server_id: serverId, name, type, category_id: categoryId, position, is_stage: isStage })
-    if (!error) await refresh()
-    return { error: error?.message ?? null }
+    try {
+      const position = channels.filter((c) => c.category_id === categoryId).length
+      const { error } = await supabase
+        .from('channels')
+        .insert({ server_id: serverId, name, type, category_id: categoryId, position, is_stage: isStage })
+      if (error) return { error: error.message }
+      await refresh()
+      return { error: null }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Não foi possível criar o canal.' }
+    }
   }
 
   async function updateChannel(channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean; user_limit?: number; is_restricted?: boolean }) {
-    const { error } = await supabase.from('channels').update(updates).eq('id', channelId)
-    if (!error) await refresh()
-    return { error: error?.message ?? null }
+    try {
+      const { error } = await supabase.from('channels').update(updates).eq('id', channelId)
+      if (error) return { error: error.message }
+      await refresh()
+      return { error: null }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Não foi possível atualizar o canal.' }
+    }
   }
 
   async function deleteChannel(channelId: string) {
-    const { error } = await supabase.from('channels').delete().eq('id', channelId)
-    if (!error) await refresh()
-    return { error: error?.message ?? null }
+    try {
+      const { error } = await supabase.from('channels').delete().eq('id', channelId)
+      if (error) return { error: error.message }
+      await refresh()
+      return { error: null }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Não foi possível excluir o canal.' }
+    }
   }
 
   async function createCategory(name: string) {
-    const position = categories.length
-    const { error } = await supabase.from('categories').insert({ server_id: serverId, name, position })
-    if (!error) await refresh()
-    return { error: error?.message ?? null }
+    try {
+      const position = categories.length
+      const { error } = await supabase.from('categories').insert({ server_id: serverId, name, position })
+      if (error) return { error: error.message }
+      await refresh()
+      return { error: null }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Não foi possível criar a categoria.' }
+    }
   }
 
   async function updateCategory(categoryId: string, name: string) {
@@ -162,6 +206,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
         categories,
         channels,
         loading,
+        loadError,
         refresh,
         createChannel,
         updateChannel,

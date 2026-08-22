@@ -86,7 +86,14 @@ const KNOWN_GAMES = {
   'csgo.exe': 'Counter-Strike',
   'cs2.exe': 'Counter-Strike 2',
   'rainbowsix.exe': 'Rainbow Six Siege',
-  'rainbowsix_be.exe': 'Rainbow Six Siege',
+  // NÃO incluir 'rainbowsix_be.exe' aqui: é o serviço do BattlEye
+  // (anti-cheat) do jogo, que fica residente em segundo plano — muitas
+  // vezes iniciado com o Windows — mesmo depois que você fecha o jogo.
+  // Era por isso que o status ficava travado em "Jogando Rainbow Six
+  // Siege" pra sempre: esse processo nunca some da lista do tasklist,
+  // então a detecção nunca voltava a null. O processo do jogo em si
+  // ('rainbowsix.exe' / variantes _vulkan/_dx11 abaixo) é o sinal
+  // confiável de que o jogo está de fato aberto.
   'rainbowsix_vulkan.exe': 'Rainbow Six Siege',
   'rainbowsix_dx11.exe': 'Rainbow Six Siege',
   'r5apex.exe': 'Apex Legends',

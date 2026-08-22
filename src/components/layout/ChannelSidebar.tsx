@@ -373,6 +373,8 @@ export function ChannelSidebar({
     categories,
     channels,
     loading: loadingChannels,
+    loadError: channelsLoadError,
+    refresh,
     moveChannel,
     moveChannelToCategory,
     moveCategory,
@@ -562,6 +564,17 @@ export function ChannelSidebar({
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
         {loadingChannels ? (
           <ChannelSidebarSkeleton />
+        ) : channelsLoadError ? (
+          <div className="px-2 py-3 space-y-2">
+            <p className="text-sm text-red-400">Não foi possível carregar os canais.</p>
+            <p className="text-xs text-discord-text-muted break-words">{channelsLoadError}</p>
+            <button
+              onClick={() => refresh()}
+              className="text-xs font-medium text-discord-blurple hover:underline"
+            >
+              Tentar de novo
+            </button>
+          </div>
         ) : (
           <>
         <button

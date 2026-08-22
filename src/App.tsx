@@ -1,5 +1,6 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { PresenceProvider } from './context/PresenceContext'
 import { FriendsProvider } from './context/FriendsContext'
 import { GroupConversationsProvider } from './context/GroupConversationsContext'
 import { ThemeProvider } from './context/ThemeContext'
@@ -32,6 +33,7 @@ function App() {
     <ThemeProvider>
       <Router>
         <AuthProvider>
+          <PresenceProvider>
           <FriendsProvider>
           <GroupConversationsProvider>
           <ConnectionBanner />
@@ -65,6 +67,7 @@ function App() {
           </Routes>
         </GroupConversationsProvider>
         </FriendsProvider>
+        </PresenceProvider>
         </AuthProvider>
       </Router>
     </ThemeProvider>

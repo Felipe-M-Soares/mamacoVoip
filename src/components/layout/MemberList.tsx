@@ -6,6 +6,7 @@ import { useServerMembers } from '../../hooks/useServerMembers'
 import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
 import { useFriends } from '../../context/FriendsContext'
+import { useOnlineIds } from '../../hooks/usePresence'
 import { ManageMemberModal } from '../modals/ManageMemberModal'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import type { Profile, Role } from '../../types/database'
@@ -35,9 +36,15 @@ export function MemberList({
 
   const canModerate = permissions.kick_members || permissions.ban_members || permissions.timeout_members || permissions.manage_roles
 
+  const onlineIds = useOnlineIds()
+  // "Online" de verdade exige as duas coisas: a pessoa não escolheu
+  // aparecer offline/invisível E o socket dela está mesmo conectado agora
+  // (ver usePresence.ts) — sem isso, quem fechou o app de qualquer jeito
+  // continuava listado aqui em cima pra sempre.
+  const isEffectivelyOnline = (p: Profile) => p.status !== 'offline' && onlineIds.has(p.id)
   const others = members.filter((m) => m.profile.id !== profile?.id)
-  const online = others.filter((m) => m.profile.status !== 'offline')
-  const offline = others.filter((m) => m.profile.status === 'offline')
+  const online = others.filter((m) => isEffectivelyOnline(m.profile))
+  const offline = others.filter((m) => !isEffectivelyOnline(m.profile))
 
   // Agrupa quem está online pelo cargo mais alto de cada um — igual
   // ao Discord, com o nome e a cor do cargo como título do grupo.
@@ -61,7 +68,7 @@ export function MemberList({
         }}
       >
         <button onClick={() => onViewProfile(member.profile)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
-          <Avatar name={member.profile.username} avatarUrl={member.profile.avatar_url} status={member.profile.status} size={32} />
+          <Avatar name={member.profile.username} avatarUrl={member.profile.avatar_url} status={member.profile.status} userId={member.profile.id} size={32} />
           <div className="min-w-0">
             <span
               className={`text-sm truncate block ${topRole ? '' : 'text-discord-text'}`}
@@ -121,7 +128,7 @@ export function MemberList({
                 onClick={() => onViewProfile(profile)}
                 className="w-full flex items-center gap-3 px-2 py-1.5 rounded hover:bg-white/5 text-left"
               >
-                <Avatar name={profile.username} avatarUrl={profile.avatar_url} status={profile.status} size={32} />
+                <Avatar name={profile.username} avatarUrl={profile.avatar_url} status={profile.status} userId={profile.id} size={32} />
                 <span className="text-sm text-discord-text truncate">
                   {profile.display_name || profile.username}
                 </span>

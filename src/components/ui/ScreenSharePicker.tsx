@@ -1,13 +1,47 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ScreenShareSource } from '../../hooks/useGamePresence'
+
+// Discord tem um atalho de "compartilhar seu jogo" assim que detecta que
+// você está com um jogo aberto — em vez de forçar a pessoa a procurar a
+// janela certa na lista. A gente já sabe o nome bonito do jogo (mesmo
+// dado que aparece em "Jogando X" no perfil, vindo da detecção de
+// processo em electron/main.cjs), então só falta achar, entre as janelas
+// que o Electron listou, qual delas provavelmente é a do próprio jogo.
+// Não existe uma API que ligue "processo detectado" a "janela do
+// desktopCapturer" diretamente (são sistemas diferentes), então usamos
+// uma heurística: a maioria dos jogos usa o próprio nome como título da
+// janela, então comparamos (ignorando maiúsculas/pontuação) se um nome
+// contém o outro.
+function findGameSource(sources: ScreenShareSource[], gameName: string | null): ScreenShareSource | null {
+  if (!gameName) return null
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const target = normalize(gameName)
+  if (!target) return null
+  return sources.find((s) => {
+    const name = normalize(s.name)
+    return name.length > 0 && (name.includes(target) || target.includes(name))
+  }) ?? null
+}
 
 export function ScreenSharePicker() {
   const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
+  const [currentGame, setCurrentGame] = useState<string | null>(null)
 
   useEffect(() => {
     if (!window.electronAPI) return
     return window.electronAPI.onScreenShareSources(setSources)
   }, [])
+
+  // Mesma fonte que já alimenta o "Jogando X" do perfil (useGamePresence) —
+  // só pra saber qual jogo sugerir no atalho abaixo, sem duplicar a
+  // detecção em si.
+  useEffect(() => {
+    if (!window.electronAPI) return
+    window.electronAPI.getCurrentGame().then(setCurrentGame)
+    return window.electronAPI.onGameStatusChanged(setCurrentGame)
+  }, [])
+
+  const gameSource = useMemo(() => (sources ? findGameSource(sources, currentGame) : null), [sources, currentGame])
 
   if (!sources) return null
 
@@ -31,6 +65,25 @@ export function ScreenSharePicker() {
           Escolha o que compartilhar
         </h2>
         <p className="text-xs text-discord-text-muted mb-4">Uma tela inteira ou só uma janela específica</p>
+
+        {gameSource && currentGame && (
+          <button
+            onClick={() => choose(gameSource.id)}
+            className="w-full flex items-center gap-3 mb-4 p-2.5 rounded-lg border-2 border-discord-blurple bg-discord-blurple/10 hover:bg-discord-blurple/20 transition-colors text-left"
+          >
+            <img
+              src={gameSource.thumbnail}
+              alt={gameSource.name}
+              className="w-24 aspect-video object-cover rounded shrink-0 bg-black"
+            />
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase text-discord-blurple tracking-wide">
+                Compartilhar seu jogo
+              </p>
+              <p className="text-sm font-semibold text-white truncate">🎮 {currentGame}</p>
+            </div>
+          </button>
+        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[55vh] overflow-y-auto pr-1">
           {sources.map((s) => (

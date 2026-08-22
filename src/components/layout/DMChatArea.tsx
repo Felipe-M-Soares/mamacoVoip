@@ -35,7 +35,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   return (
     <section className="flex-1 flex flex-col min-w-0 bg-discord-channels">
       <header className="h-12 px-4 flex items-center gap-2 border-b border-black/20 shadow-sm shrink-0">
-        <Avatar name={otherProfile.username} avatarUrl={otherProfile.avatar_url} status={otherProfile.status} size={24} />
+        <Avatar name={otherProfile.username} avatarUrl={otherProfile.avatar_url} status={otherProfile.status} userId={otherProfile.id} size={24} />
         <h2 className="font-semibold text-white">{otherProfile.display_name || otherProfile.username}</h2>
         <div className="flex-1" />
         {isBlocked ? (

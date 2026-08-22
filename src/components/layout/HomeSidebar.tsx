@@ -72,7 +72,7 @@ export function HomeSidebar({
                         : 'text-discord-text-muted hover:bg-white/5 hover:text-discord-text'
                     }`}
                   >
-                    <Avatar name={c.otherProfile.username} avatarUrl={c.otherProfile.avatar_url} status={c.otherProfile.status} size={28} />
+                    <Avatar name={c.otherProfile.username} avatarUrl={c.otherProfile.avatar_url} status={c.otherProfile.status} userId={c.otherProfile.id} size={28} />
                     <span className="truncate font-medium flex-1 text-left">
                       {c.otherProfile.display_name || c.otherProfile.username}
                     </span>
@@ -151,6 +151,7 @@ export function HomeSidebar({
                   name={c.otherProfile.username}
                   avatarUrl={c.otherProfile.avatar_url}
                   status={c.otherProfile.status}
+                  userId={c.otherProfile.id}
                   size={32}
                 />
                 <div className="min-w-0 text-left flex-1">

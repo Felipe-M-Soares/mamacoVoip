@@ -97,7 +97,7 @@ export function InviteFriendsModal({
                   onChange={() => toggle(f.profile.id)}
                   className="w-4 h-4 accent-discord-blurple"
                 />
-                <Avatar name={f.profile.username} avatarUrl={f.profile.avatar_url} status={f.profile.status} size={32} />
+                <Avatar name={f.profile.username} avatarUrl={f.profile.avatar_url} status={f.profile.status} userId={f.profile.id} size={32} />
                 <span className="text-sm text-white flex-1 truncate">
                   {f.profile.display_name || f.profile.username}
                 </span>

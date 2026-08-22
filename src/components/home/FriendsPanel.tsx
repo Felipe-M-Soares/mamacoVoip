@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { useFriends } from '../../context/FriendsContext'
 import { useConversations } from '../../hooks/useConversations'
+import { useOnlineIds } from '../../hooks/usePresence'
 import type { ProfileStatus } from '../../types/database'
 
 type Tab = 'online' | 'all' | 'pending' | 'blocked'
@@ -16,7 +17,12 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
   const [addError, setAddError] = useState<string | null>(null)
   const [addSuccess, setAddSuccess] = useState<string | null>(null)
 
-  const onlineFriends = friends.filter((f) => f.profile.status !== 'offline')
+  const onlineIds = useOnlineIds()
+  // Mesmo cruzamento de MemberList.tsx: só conta como "online" quem não
+  // escolheu ficar invisível E está de fato conectado agora (ver
+  // usePresence.ts) — evita amigo desconectado ficando preso na aba
+  // "Online" pra sempre.
+  const onlineFriends = friends.filter((f) => f.profile.status !== 'offline' && onlineIds.has(f.profile.id))
   const pendingCount = incoming.length + outgoing.length
 
   async function handleSendRequest() {
@@ -213,7 +219,7 @@ function FriendGrid({
     <div className="space-y-1">
       {friends.map((f) => (
         <div key={f.profile.id} className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5 group">
-          <Avatar name={f.profile.username} avatarUrl={f.profile.avatar_url} status={f.profile.status} size={36} />
+          <Avatar name={f.profile.username} avatarUrl={f.profile.avatar_url} status={f.profile.status} userId={f.profile.id} size={36} />
           <div className="flex-1 min-w-0">
             <p className="text-sm text-white truncate">{f.profile.display_name || f.profile.username}</p>
             <p className="text-xs text-discord-text-muted truncate">

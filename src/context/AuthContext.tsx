@@ -132,11 +132,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Marca online ao logar / abrir o app. Só muda se o usuário estava
   // "offline" — não sobrescreve um status manual (ausente/não perturbe).
   //
-  // Limitação conhecida: não há um sistema de presence (heartbeat) real
-  // aqui, então fechar a aba abruptamente não marca o usuário como
-  // offline automaticamente — ele continua "online" até abrir o app de
-  // novo ou fazer logout explicitamente. Um heartbeat via Supabase
-  // Realtime Presence resolveria isso, mas fica fora do escopo desta fase.
+  // Fechar o app abruptamente (crash, sem internet, sem logout) ainda
+  // deixa essa coluna travada em "online" no banco — mas isso não é mais
+  // um problema pra quem VÊ o status de outra pessoa: o PresenceContext
+  // (src/context/PresenceContext.tsx) cruza esse valor com um canal de
+  // Realtime Presence, que reflete se o socket da pessoa está mesmo
+  // aberto agora, e o Avatar usa esse cruzamento pra decidir a bolinha —
+  // então mesmo com o banco desatualizado, ninguém mais vê alguém
+  // desconectado como "online".
   useEffect(() => {
     if (!session?.user) return
 

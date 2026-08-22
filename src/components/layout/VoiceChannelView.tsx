@@ -330,7 +330,11 @@ function ParticipantTile({
         onMouseLeave={() => setShowVolumeSlider(false)}
         onContextMenu={!isLocal ? openMenu : undefined}
       >
-        <div className={`relative rounded-full ${speaking ? 'ring-2 ring-discord-blurple' : ''}`}>
+        <div
+          className={`relative rounded-full transition-shadow ${
+            speaking ? 'ring-2 ring-discord-blurple shadow-[0_0_8px_0] shadow-discord-blurple/60 animate-pulse' : ''
+          }`}
+        >
           <Avatar name={name} avatarUrl={avatarUrl} size={48} />
           {audioEl}
         </div>
@@ -352,7 +356,19 @@ function ParticipantTile({
       {hasCameraVideo && data?.cameraStream && !videoHiddenLocally ? (
         <VideoTile stream={data.cameraStream} sinkId={sinkId} />
       ) : (
-        <Avatar name={name} avatarUrl={avatarUrl} size={64} />
+        // Sem câmera, o ícone/avatar no centro é a única coisa "visível"
+        // pra indicar quem está falando — sem esse anel pulsando, só a
+        // borda fina do card mudava de cor, o que é fácil de não notar. O
+        // mesmo tratamento (ring + sombra + animate-pulse) já existe na
+        // listinha de participantes da sidebar (ChannelSidebar.tsx); aqui
+        // só reaplica o mesmo padrão no avatar grande.
+        <div
+          className={`relative rounded-full transition-shadow ${
+            speaking ? 'ring-4 ring-discord-blurple shadow-[0_0_16px_0] shadow-discord-blurple/60 animate-pulse' : ''
+          }`}
+        >
+          <Avatar name={name} avatarUrl={avatarUrl} size={64} />
+        </div>
       )}
       {audioEl}
       <span className="absolute bottom-1.5 left-2 text-sm font-medium text-white bg-black/50 px-1.5 py-0.5 rounded flex items-center gap-1.5">

@@ -42,7 +42,7 @@ export function UserPanel() {
         onClick={() => setMenuOpen((v) => !v)}
         className="flex items-center gap-2 flex-1 min-w-0 px-1 py-1 rounded hover:bg-white/5 transition-colors"
       >
-        <Avatar name={profile.username} avatarUrl={profile.avatar_url} status={profile.status} size={32} />
+        <Avatar name={profile.username} avatarUrl={profile.avatar_url} status={profile.status} userId={profile.id} size={32} />
         <div className="min-w-0 text-left">
           <p className="text-sm font-medium text-white truncate">{profile.display_name || profile.username}</p>
           <p className="text-xs text-discord-text-muted truncate">

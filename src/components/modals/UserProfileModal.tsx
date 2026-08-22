@@ -58,6 +58,7 @@ export function UserProfileModal({
           name={targetProfile.username}
           avatarUrl={targetProfile.avatar_url}
           status={targetProfile.status}
+          userId={targetProfile.id}
           size={72}
         />
         <h3 className="text-lg font-bold text-white mt-3">

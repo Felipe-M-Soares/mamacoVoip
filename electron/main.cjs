@@ -4,6 +4,25 @@ const { pathToFileURL } = require('node:url')
 const { exec } = require('node:child_process')
 const { autoUpdater } = require('electron-updater')
 
+// Só pode existir UMA instância do app rodando ao mesmo tempo. Sem isso,
+// cada clique no atalho (ou ícone da área de trabalho/menu iniciar)
+// enquanto o app já está aberto — mesmo minimizado ou só na bandeja —
+// simplesmente abre uma janela NOVA do zero, em vez de trazer a que já
+// existe pra frente. É exatamente o bug relatado: "abre outro em vez de
+// puxar o que está minimizado". app.requestSingleInstanceLock() garante
+// que só a PRIMEIRA instância continua de verdade; qualquer tentativa
+// seguinte dispara o evento 'second-instance' nessa primeira instância
+// (handler registrado mais abaixo, perto da criação da janela) e se
+// encerra na hora — sem isso o `return` aqui embaixo, o resto do arquivo
+// (registro de protocolo, criação de janela, etc.) nunca chega a rodar
+// pra essa segunda tentativa. É assim que apps como o Discord conseguem
+// "puxar" a janela já aberta em vez de duplicar.
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+  return
+}
+
 // Push-to-talk GLOBAL (funciona mesmo com o app fora de foco, tipo
 // com um jogo em tela cheia). Isso depende de um módulo nativo
 // (uiohook-napi) que só existe pra certas combinações de sistema
@@ -439,6 +458,21 @@ function createTray(win) {
     }
   })
 }
+
+// Alguém tentou abrir o app de novo (atalho, ícone da área de trabalho,
+// menu iniciar) enquanto essa instância já estava rodando — graças ao
+// requestSingleInstanceLock() lá no topo do arquivo, só ESSA instância
+// (a primeira, "de verdade") recebe esse evento; a segunda tentativa já
+// se fechou sozinha. Em vez de deixar abrir outra janela, restaura (se
+// estiver minimizada) e traz a janela existente pra frente — inclusive
+// se ela estiver escondida na bandeja (hide(), não destruída), já que
+// forceFocusMainWindow() já cuida de mostrar + contornar a proteção do
+// Windows contra roubo de foco.
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  forceFocusMainWindow()
+})
 
 app.whenReady().then(() => {
   // Serve os arquivos de dist/ através do protocolo "app://" — é isso

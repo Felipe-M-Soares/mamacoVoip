@@ -13,8 +13,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "electron:start": "electron .",
-    "electron:build": "npm run build:electron && electron-builder",
-    "release": "npm run build:electron && electron-builder --publish always"
+    "electron:build": "npm run build:electron && electron-builder"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

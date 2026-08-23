@@ -8,6 +8,14 @@ import { useIsPresent } from '../../hooks/usePresence'
 import { getUserNote, setUserNote } from '../../lib/pinnedItems'
 import type { Profile } from '../../types/database'
 
+// Mesmo truque de gradiente-por-nome de ProfileSidePanel.tsx/ServerBar.tsx.
+function gradientFor(seed: string) {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash)
+  const hue = Math.abs(hash) % 360
+  return `linear-gradient(135deg, hsl(${hue} 70% 40%), hsl(${(hue + 45) % 360} 65% 22%))`
+}
+
 export function UserProfileModal({
   targetProfile,
   onClose,
@@ -60,10 +68,25 @@ export function UserProfileModal({
 
   return (
     <Modal title="Perfil" onClose={onClose}>
-      <div className="flex flex-col items-center text-center">
+      {/* Mesmo fallback de gradiente-por-nome de ProfileSidePanel.tsx —
+          se a pessoa não enviou um banner de verdade, mostra a mesma cor
+          consistente que aparece em todo canto que o perfil dela é
+          exibido, em vez de um espaço genérico vazio aqui. Sangra só nas
+          laterais (-mx-5) pra ficar rente às bordas do modal — o topo já
+          tem o cabeçalho de título por cima, então não bleeda pra lá. */}
+      <div
+        className="-mx-5 -mt-5 h-20 bg-cover bg-center"
+        style={
+          targetProfile.banner_url
+            ? { backgroundImage: `url(${targetProfile.banner_url})` }
+            : { background: gradientFor(targetProfile.username) }
+        }
+      />
+      <div className="flex flex-col items-center text-center -mt-9">
         <Avatar
           name={targetProfile.username}
           avatarUrl={targetProfile.avatar_url}
+          decorationUrl={targetProfile.avatar_decoration_url}
           status={targetProfile.status}
           userId={targetProfile.id}
           size={72}

@@ -122,6 +122,8 @@ interface VoiceContextValue {
   maxParticipants: number
   masterVolume: number
   setMasterVolume: (volume: number) => void
+  soundboardVolume: number
+  setSoundboardVolume: (volume: number) => void
   getParticipantVolume: (userId: string) => number
   setParticipantVolume: (userId: string, volume: number) => void
   getScreenShareVolume: (userId: string) => number
@@ -328,12 +330,38 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return {}
     }
   })
+  // Volume do soundboard é INDEPENDENTE do volume geral (masterVolume) —
+  // pedido explícito: "cada usuario controlar seu proprio volume para
+  // nao exagerar no audio". Efeitos sonoros costumam ser gravados em
+  // níveis bem diferentes uns dos outros (e de voz normal), então um
+  // controle separado deixa a pessoa abaixar só os sons sem mexer no
+  // volume de quem está falando. Padrão um pouco mais baixo (70%) que o
+  // volume geral, já que "susto" é justamente a reclamação mais comum
+  // desse tipo de recurso.
+  const [soundboardVolume, setSoundboardVolumeState] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('mamacos-soundboard-volume')
+      return raw ? Number(raw) : 70
+    } catch {
+      return 70
+    }
+  })
 
   function setMasterVolume(volume: number) {
     const clamped = Math.max(0, Math.min(100, volume))
     setMasterVolumeState(clamped)
     try {
       localStorage.setItem('mamacos-master-volume', String(clamped))
+    } catch {
+      // best-effort
+    }
+  }
+
+  function setSoundboardVolume(volume: number) {
+    const clamped = Math.max(0, Math.min(100, volume))
+    setSoundboardVolumeState(clamped)
+    try {
+      localStorage.setItem('mamacos-soundboard-volume', String(clamped))
     } catch {
       // best-effort
     }
@@ -436,6 +464,43 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // screenShareGameHint.ts e toggleScreenShare abaixo). Só existe
   // enquanto uma captura desse tipo específico está ativa.
   const gameShareWatchRef = useRef<(() => void) | null>(null)
+  // Vigia de foco do jogo (mitigação do vazamento em "compartilhar tela
+  // cheia" — ver electron/main.cjs). Guarda, por peer, o RTCRtpSender da
+  // track de VÍDEO da tela (não o áudio) — é nele que trocamos a track de
+  // verdade por uma "cortina" preta quando a pessoa alterna pra fora do
+  // jogo, e de volta quando ela volta. Sem guardar por peer, teríamos que
+  // procurar o sender certo em cada pc de novo a cada troca de foco.
+  const screenSendersRef = useRef<Map<string, RTCRtpSender>>(new Map())
+  const foregroundWatchUnsubRef = useRef<(() => void) | null>(null)
+  // Track "cortina" — um frame preto único (via canvas.captureStream),
+  // criada sob demanda e reaproveitada enquanto durar o compartilhamento
+  // atual. Só existe enquanto o vigia de foco estiver ativo.
+  const placeholderTrackRef = useRef<MediaStreamTrack | null>(null)
+  const realScreenVideoTrackRef = useRef<MediaStreamTrack | null>(null)
+
+  // Desenha uma "cortina" simples (fundo escuro + aviso) e devolve uma
+  // track de vídeo estática feita a partir disso — usada como substituta
+  // temporária da tela real enquanto a pessoa está fora do jogo (alt-tab),
+  // pra não vazar o resto da tela pra quem está assistindo.
+  function createPlaceholderVideoTrack(): MediaStreamTrack {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1280
+    canvas.height = 720
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.fillStyle = '#18181b'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = '#8b8b8f'
+      ctx.font = 'bold 36px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('Transmissão pausada', canvas.width / 2, canvas.height / 2 - 20)
+      ctx.font = '22px sans-serif'
+      ctx.fillText('(fora do jogo no momento)', canvas.width / 2, canvas.height / 2 + 24)
+    }
+    // fps 0 = só manda esse frame único, sem ficar redesenhando à toa
+    const [track] = canvas.captureStream(0).getVideoTracks()
+    return track
+  }
 
   function ensureAudioContext() {
     if (!audioContextRef.current) audioContextRef.current = new AudioContext()
@@ -535,12 +600,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   // Toca um efeito do soundboard localmente — igual o Discord, o áudio
   // é reproduzido direto pelo alto-falante de cada um (não é misturado
-  // no microfone/WebRTC), então respeita o volume geral (masterVolume)
-  // do mesmo jeito que a voz dos outros participantes.
+  // no microfone/WebRTC). Usa o volume PRÓPRIO do soundboard
+  // (soundboardVolume), não o volume geral da call — cada pessoa que
+  // ESCUTA controla o quanto os efeitos tocam pra ela, sem depender de
+  // quem enviou o som.
   function playLocalSoundboardAudio(url: string) {
     try {
       const audio = new Audio(url)
-      audio.volume = masterVolume / 100
+      audio.volume = soundboardVolume / 100
       audio.play().catch(() => {
         // navegador pode bloquear play() sem interação recente — sem
         // problema, quem clicou no botão do som É a interação
@@ -637,6 +704,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
           preset.degradationPreference
         sender.setParameters(params).catch(() => {})
+        if (track.kind === 'video') {
+          screenSendersRef.current.set(peerId, sender)
+          // Se a pessoa já entrou no meio de um período "fora do jogo"
+          // (cortina ativa), essa nova conexão já começa recebendo a
+          // cortina, não o vídeo de verdade — senão vazaria justo pra
+          // quem acabou de entrar.
+          if (placeholderTrackRef.current) sender.replaceTrack(placeholderTrackRef.current).catch(() => {})
+        }
       })
     }
 
@@ -726,6 +801,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     analysersRef.current.delete(peerId)
     rawStreamsRef.current.delete(peerId)
     screenStreamIdsRef.current.delete(peerId)
+    screenSendersRef.current.delete(peerId)
     setParticipants((prev) => {
       if (!(peerId in prev)) return prev
       const next = { ...prev }
@@ -1204,6 +1280,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setLocalScreenStream(null)
     setScreenSharing(false)
     broadcastScreenMeta(null)
+
+    // Desliga o vigia de foco do jogo (se estava ativo) e limpa tudo que
+    // ele usava — senão o processo do PowerShell continuaria rodando à
+    // toa até a próxima call, e o Map de senders ficaria com entradas de
+    // uma transmissão que já acabou.
+    foregroundWatchUnsubRef.current?.()
+    foregroundWatchUnsubRef.current = null
+    window.electronAPI?.stopForegroundWatch?.().catch(() => {})
+    screenSendersRef.current.clear()
+    realScreenVideoTrackRef.current = null
+    if (placeholderTrackRef.current) {
+      placeholderTrackRef.current.stop()
+      placeholderTrackRef.current = null
+    }
   }
 
   async function toggleScreenShare() {
@@ -1272,8 +1362,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         })
       }
 
-      peersRef.current.forEach(({ pc }) => {
+      realScreenVideoTrackRef.current = videoTrack
+      peersRef.current.forEach(({ pc }, peerId) => {
         const sender = pc.addTrack(videoTrack, stream)
+        screenSendersRef.current.set(peerId, sender)
         const params = sender.getParameters()
         params.encodings = params.encodings?.length ? params.encodings : [{}]
         params.encodings[0].maxBitrate = preset.maxBitrate
@@ -1285,6 +1377,53 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         if (audioTrack) pc.addTrack(audioTrack, stream)
       })
       setScreenSharing(true)
+
+      // Mitigação de vazamento pro caso "compartilhar seu jogo" em tela
+      // cheia (sem janela própria — ver comentário grande acima e em
+      // ScreenSharePicker.tsx): enquanto isso estiver ativo, o processo
+      // principal (só Windows, best-effort — ver electron/main.cjs)
+      // avisa quando a pessoa alterna pra fora do jogo, e a gente troca
+      // o vídeo enviado pelos peers por uma "cortina" preta até ela
+      // voltar. Em Mac/Linux, ou se o vigia não conseguir iniciar (volta
+      // `false`), simplesmente não faz nada — o compartilhamento
+      // continua igual ao de antes (sempre visível), sem quebrar nada.
+      if (gameShareHint && window.electronAPI?.startForegroundWatch) {
+        window.electronAPI
+          .startForegroundWatch(gameShareHint)
+          .then((started) => {
+            if (!started || !window.electronAPI) return
+            foregroundWatchUnsubRef.current = window.electronAPI.onGameForegroundChanged((focused) => {
+              const realTrack = realScreenVideoTrackRef.current
+              if (!realTrack) return
+              if (focused) {
+                // Voltou pro jogo — restaura o vídeo de verdade em todo
+                // mundo e descarta a cortina (não precisa mais dela até
+                // a próxima vez que a pessoa alternar pra fora).
+                screenSendersRef.current.forEach((sender) => {
+                  sender.replaceTrack(realTrack).catch(() => {})
+                })
+                if (placeholderTrackRef.current) {
+                  placeholderTrackRef.current.stop()
+                  placeholderTrackRef.current = null
+                }
+              } else {
+                // Saiu do jogo (alt-tab) — troca pela cortina em todo
+                // mundo antes que qualquer frame do resto da tela chegue
+                // a ser enviado.
+                if (!placeholderTrackRef.current) placeholderTrackRef.current = createPlaceholderVideoTrack()
+                const placeholder = placeholderTrackRef.current
+                screenSendersRef.current.forEach((sender) => {
+                  sender.replaceTrack(placeholder).catch(() => {})
+                })
+              }
+            })
+          })
+          .catch(() => {
+            // Sem sorte iniciando o vigia (PowerShell bloqueado por
+            // política do sistema, por exemplo) — segue sem essa camada
+            // extra de proteção, sem interromper o compartilhamento.
+          })
+      }
       // No app desktop, capturar uma janela específica faz o Windows
       // trazer ela pra frente sozinho (comportamento do sistema, não do
       // nosso código) — a pessoa clica em "compartilhar tela" e se vê
@@ -1358,6 +1497,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         maxParticipants: MAX_PARTICIPANTS,
         masterVolume,
         setMasterVolume,
+        soundboardVolume,
+        setSoundboardVolume,
         getParticipantVolume,
         setParticipantVolume,
         getScreenShareVolume,

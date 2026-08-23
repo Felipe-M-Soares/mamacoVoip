@@ -68,7 +68,14 @@ export function MemberList({
         }}
       >
         <button onClick={() => onViewProfile(member.profile)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
-          <Avatar name={member.profile.username} avatarUrl={member.profile.avatar_url} status={member.profile.status} userId={member.profile.id} size={32} />
+          <Avatar
+            name={member.profile.username}
+            avatarUrl={member.profile.avatar_url}
+            decorationUrl={member.profile.avatar_decoration_url}
+            status={member.profile.status}
+            userId={member.profile.id}
+            size={32}
+          />
           <div className="min-w-0">
             <span
               className={`text-sm truncate block ${topRole ? '' : 'text-discord-text'}`}
@@ -128,7 +135,14 @@ export function MemberList({
                 onClick={() => onViewProfile(profile)}
                 className="w-full flex items-center gap-3 px-2 py-1.5 rounded hover:bg-white/5 text-left"
               >
-                <Avatar name={profile.username} avatarUrl={profile.avatar_url} status={profile.status} userId={profile.id} size={32} />
+                <Avatar
+                  name={profile.username}
+                  avatarUrl={profile.avatar_url}
+                  decorationUrl={profile.avatar_decoration_url}
+                  status={profile.status}
+                  userId={profile.id}
+                  size={32}
+                />
                 <span className="text-sm text-discord-text truncate">
                   {profile.display_name || profile.username}
                 </span>

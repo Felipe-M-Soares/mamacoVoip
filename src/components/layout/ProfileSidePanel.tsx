@@ -54,11 +54,19 @@ export function ProfileSidePanel({
 
   return (
     <aside className="hidden xl:flex w-72 shrink-0 bg-discord-sidebar flex-col overflow-y-auto">
-      <div className="h-20 shrink-0" style={{ background: gradientFor(profile.username) }} />
+      <div
+        className="h-20 shrink-0 bg-cover bg-center"
+        style={
+          profile.banner_url
+            ? { backgroundImage: `url(${profile.banner_url})` }
+            : { background: gradientFor(profile.username) }
+        }
+      />
       <div className="px-4 pb-4 -mt-10">
         <Avatar
           name={profile.username}
           avatarUrl={profile.avatar_url}
+          decorationUrl={profile.avatar_decoration_url}
           status={profile.status}
           userId={profile.id}
           size={80}

@@ -61,7 +61,12 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
 
       {messages.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
-          <Avatar name={otherProfile.username} avatarUrl={otherProfile.avatar_url} size={64} />
+          <Avatar
+            name={otherProfile.username}
+            avatarUrl={otherProfile.avatar_url}
+            decorationUrl={otherProfile.avatar_decoration_url}
+            size={64}
+          />
           <h3 className="text-xl font-bold text-white mt-3">
             {otherProfile.display_name || otherProfile.username}
           </h3>

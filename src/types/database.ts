@@ -7,6 +7,14 @@ export type Profile = {
   username: string
   display_name: string | null
   avatar_url: string | null
+  // Banner mostrado no topo do card de perfil (ProfileSidePanel) — imagem
+  // (inclusive GIF animado), null quando a pessoa não enviou nenhum (cai
+  // de volta pro gradiente automático por nome).
+  banner_url: string | null
+  // Moldura/anel decorativo desenhado por cima do avatar em todo canto
+  // que ele aparece grande o bastante (ver Avatar.tsx) — também pode ser
+  // um GIF animado. null = sem decoração.
+  avatar_decoration_url: string | null
   status: ProfileStatus
   custom_status: string | null
   playing: string | null
@@ -312,7 +320,20 @@ export type Database = {
       profiles: {
         Row: Profile
         Insert: Pick<Profile, 'id' | 'username'> & Partial<Omit<Profile, 'id' | 'username'>>
-        Update: Partial<Pick<Profile, 'username' | 'display_name' | 'avatar_url' | 'status' | 'custom_status' | 'playing' | 'profile_visibility'>>
+        Update: Partial<
+          Pick<
+            Profile,
+            | 'username'
+            | 'display_name'
+            | 'avatar_url'
+            | 'banner_url'
+            | 'avatar_decoration_url'
+            | 'status'
+            | 'custom_status'
+            | 'playing'
+            | 'profile_visibility'
+          >
+        >
         Relationships: []
       }
       servers: {

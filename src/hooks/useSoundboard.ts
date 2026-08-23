@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
+import { decodeAudioFile, MAX_SOUND_SECONDS } from '../lib/audioTrim'
 import type { SoundboardSound } from '../types/database'
 
 const MAX_SOUND_BYTES = 2 * 1024 * 1024 // precisa bater com o file_size_limit do bucket 'soundboard' (ver 006_soundboard.sql)
+// Pequena tolerância pra não rejeitar um arquivo de "5.02s" já cortado
+// pela própria ferramenta de recorte (SoundboardPanel.tsx) por causa de
+// arredondamento de amostras — a intenção do limite é "efeito curto",
+// não uma trava cirúrgica no milissegundo.
+const MAX_SOUND_SECONDS_TOLERANCE = MAX_SOUND_SECONDS + 0.2
 
 // Sons do soundboard de UM servidor — busca, envio e remoção. A
 // reprodução em si (tocar pra todo mundo na call) mora em
@@ -41,6 +47,21 @@ export function useSoundboard(serverId: string | null) {
     if (!trimmed) return { error: 'Dê um nome pro som.' }
     if (trimmed.length > 32) return { error: 'Nome muito longo (máximo 32 caracteres).' }
     if (file.size > MAX_SOUND_BYTES) return { error: 'Arquivo muito grande (máximo 2MB — um efeito curto de alguns segundos).' }
+
+    // Segunda trava (além da ferramenta de recorte na tela de envio) —
+    // confere a duração de verdade antes de subir, pra nenhum caminho
+    // (bug na UI, chamada direta ao hook, etc.) acabar deixando passar
+    // um som mais longo que o limite pedido.
+    try {
+      const decoded = await decodeAudioFile(file)
+      if (decoded.duration > MAX_SOUND_SECONDS_TOLERANCE) {
+        return { error: `Esse áudio tem ${decoded.duration.toFixed(1)}s — o soundboard aceita até ${MAX_SOUND_SECONDS}s. Use a ferramenta de recorte.` }
+      }
+    } catch {
+      // Não foi possível decodificar pra checar duração (formato
+      // incomum) — segue sem essa checagem extra em vez de bloquear um
+      // arquivo que talvez seja perfeitamente válido.
+    }
 
     const soundId = crypto.randomUUID()
     const ext = file.name.split('.').pop()?.toLowerCase() || 'mp3'

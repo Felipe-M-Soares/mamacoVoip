@@ -100,7 +100,12 @@ export function DMMessageItem({
       <div className="flex gap-4">
         {showHeader ? (
           <div className="pt-0.5">
-            <Avatar name={author?.username ?? '?'} avatarUrl={author?.avatar_url} size={40} />
+            <Avatar
+              name={author?.username ?? '?'}
+              avatarUrl={author?.avatar_url}
+              decorationUrl={author?.avatar_decoration_url}
+              size={40}
+            />
           </div>
         ) : (
           <div className="w-10 shrink-0 flex items-start justify-center">

@@ -1,7 +1,7 @@
-const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut } = require('electron')
+const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut, screen } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { exec } = require('node:child_process')
+const { exec, spawn } = require('node:child_process')
 const { autoUpdater } = require('electron-updater')
 
 // Só pode existir UMA instância do app rodando ao mesmo tempo. Sem isso,
@@ -234,6 +234,121 @@ function startGameDetection() {
       mainWindow?.webContents.send('game-status-changed', game)
     }
   }, GAME_CHECK_INTERVAL_MS)
+}
+
+// ============================================================
+// "Vigia de foco do jogo" — pra evitar que compartilhar TELA CHEIA
+// (o fallback usado quando um jogo não aparece como janela separada,
+// ver 'screen-share-sources' mais abaixo e ScreenSharePicker.tsx) vaze
+// o que está na tela quando a pessoa alterna pra outro programa
+// (navegador, DMs, etc.) sem parar a transmissão.
+//
+// A ideia: enquanto uma dessas transmissões de tela cheia "sobre um
+// jogo" está ativa, fica de olho em qual é a janela em PRIMEIRO PLANO
+// (não só "o processo está rodando", que é o que detectRunningGame()
+// já verifica) — assim que deixar de ser o próprio jogo, avisa o
+// renderer, que troca o vídeo enviado pelos outros por uma tela de
+// aviso (ver VoiceContext.tsx) até o jogo voltar a ser a janela ativa.
+//
+// Só existe no Windows (via user32.dll GetForegroundWindow, chamado de
+// dentro de um PowerShell) — não tem equivalente simples/portável em
+// Mac/Linux, então nesses sistemas essa proteção extra simplesmente não
+// liga (a transmissão de tela cheia continua funcionando normal, só
+// sem esse aviso automático).
+//
+// Um ÚNICO processo PowerShell fica vivo rodando um laço interno (em
+// vez de abrir um processo novo a cada verificação) — herdando o
+// custo de iniciar o PowerShell e compilar o pedacinho de C# (via
+// Add-Type) só UMA vez, não a cada poucos segundos.
+let foregroundWatcherProc = null
+let foregroundWatcherGames = []
+
+function processNamesForGameLabel(label) {
+  return Object.entries(KNOWN_GAMES)
+    .filter(([, gameLabel]) => gameLabel === label)
+    .map(([processName]) => processName.replace(/\.exe$/i, ''))
+}
+
+function startForegroundWatch(gameLabel) {
+  stopForegroundWatch()
+  if (process.platform !== 'win32') return false
+
+  foregroundWatcherGames = processNamesForGameLabel(gameLabel)
+  if (foregroundWatcherGames.length === 0) return false
+
+  // -EncodedCommand (Base64, UTF-16LE) evita qualquer problema de
+  // aspas/escaping ao passar um script de várias linhas pela linha de
+  // comando — é a forma recomendada pela própria Microsoft pra isso.
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class MamacosFg {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+while ($true) {
+  try {
+    $hwnd = [MamacosFg]::GetForegroundWindow()
+    $procId = 0
+    [MamacosFg]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+    $proc = Get-Process -Id $procId -ErrorAction Stop
+    Write-Output $proc.ProcessName
+  } catch {
+    Write-Output ''
+  }
+  Start-Sleep -Milliseconds 700
+}
+`
+  try {
+    const encoded = Buffer.from(script, 'utf16le').toString('base64')
+    foregroundWatcherProc = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+      { windowsHide: true }
+    )
+    let lineBuffer = ''
+    let lastFocused = null
+    foregroundWatcherProc.stdout?.on('data', (chunk) => {
+      lineBuffer += chunk.toString()
+      let newlineIndex
+      while ((newlineIndex = lineBuffer.indexOf('\n')) >= 0) {
+        const processName = lineBuffer.slice(0, newlineIndex).trim().toLowerCase()
+        lineBuffer = lineBuffer.slice(newlineIndex + 1)
+        const isFocused = foregroundWatcherGames.some((name) => processName === name)
+        if (isFocused !== lastFocused) {
+          lastFocused = isFocused
+          mainWindow?.webContents.send('game-foreground-changed', isFocused)
+        }
+      }
+    })
+    foregroundWatcherProc.on('error', () => {
+      // PowerShell pode não estar disponível/bloqueado por política do
+      // sistema — desiste dessa proteção extra sem quebrar nada mais.
+      foregroundWatcherProc = null
+    })
+    foregroundWatcherProc.on('exit', () => {
+      foregroundWatcherProc = null
+    })
+    return true
+  } catch {
+    foregroundWatcherProc = null
+    return false
+  }
+}
+
+function stopForegroundWatch() {
+  if (foregroundWatcherProc) {
+    try {
+      foregroundWatcherProc.kill()
+    } catch {
+      // já pode ter morrido sozinho — sem problema
+    }
+    foregroundWatcherProc = null
+  }
+  foregroundWatcherGames = []
 }
 
 function createSplashWindow() {
@@ -523,6 +638,21 @@ app.whenReady().then(() => {
         fetchWindowIcons: true,
       })
       pendingDisplayMediaCallback = callback
+      // Em telas múltiplas, precisamos saber qual delas é a PRINCIPAL —
+      // sem isso, o atalho "Compartilhar seu jogo" (quando cai no
+      // fallback de tela cheia — ver ScreenSharePicker.tsx) só pegava a
+      // primeira tela que o Windows devolvesse nessa lista, que nem
+      // sempre é onde o jogo está de fato rodando. Como a maioria de
+      // quem joga com dois monitores usa o principal pro jogo e o
+      // secundário pra navegador/chat/Discord, ir direto na principal é
+      // a aposta mais segura — bem melhor do que arriscar compartilhar
+      // sem querer a tela com as conversas abertas.
+      let primaryDisplayId = null
+      try {
+        primaryDisplayId = String(screen.getPrimaryDisplay().id)
+      } catch {
+        // sem problema, só não vai ter como marcar qual é a principal
+      }
       mainWindow?.webContents.send(
         'screen-share-sources',
         // O id que o desktopCapturer devolve sempre começa com "screen:" ou
@@ -538,6 +668,7 @@ app.whenReady().then(() => {
           name: s.name,
           thumbnail: s.thumbnail.toDataURL(),
           type: s.id.startsWith('screen:') ? 'screen' : 'window',
+          isPrimaryDisplay: Boolean(primaryDisplayId) && s.display_id === primaryDisplayId,
         }))
       )
     } catch {
@@ -645,6 +776,13 @@ app.whenReady().then(() => {
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getCurrentGame', () => currentGame)
 
+  // Ver o bloco grande "Vigia de foco do jogo" (perto de
+  // startGameDetection) pra entender o que isso faz e por quê.
+  ipcMain.handle('game-foreground-watch:start', (_event, gameLabel) => startForegroundWatch(gameLabel))
+  ipcMain.handle('game-foreground-watch:stop', () => {
+    stopForegroundWatch()
+  })
+
   // --- Push-to-talk global -----------------------------------------
   let pttGlobalKeycode = null
   let pttCaptureResolver = null
@@ -723,6 +861,9 @@ app.whenReady().then(() => {
         // já estamos fechando o app mesmo, sem problema
       }
     }
+    // Sem isso o processo do PowerShell (vigia de foco do jogo) ficaria
+    // rodando sozinho em segundo plano depois do app fechar.
+    stopForegroundWatch()
   })
   // -------------------------------------------------------------------
 
@@ -903,6 +1044,7 @@ app.on('web-contents-created', (_event, contents) => {
 
 app.on('window-all-closed', () => {
   if (gameCheckTimer) clearInterval(gameCheckTimer)
+  stopForegroundWatch()
   globalShortcut.unregisterAll()
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()
   if (process.platform !== 'darwin') {

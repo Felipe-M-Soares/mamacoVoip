@@ -165,6 +165,7 @@ export function HomeSidebar({
                 <Avatar
                   name={c.otherProfile.username}
                   avatarUrl={c.otherProfile.avatar_url}
+                  decorationUrl={c.otherProfile.avatar_decoration_url}
                   status={c.otherProfile.status}
                   userId={c.otherProfile.id}
                   size={32}

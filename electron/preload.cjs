@@ -33,4 +33,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   sendVoiceStateToOverlay: (state) => ipcRenderer.send('overlay:update-state', state),
   checkForUpdatesNow: () => ipcRenderer.send('app:check-for-updates-now'),
+  // Vigia de foco do jogo (mitigação de vazamento em compartilhamento de
+  // tela inteira) — ver o bloco grande em electron/main.cjs pra entender
+  // o esquema completo.
+  startForegroundWatch: (gameLabel) => ipcRenderer.invoke('game-foreground-watch:start', gameLabel),
+  stopForegroundWatch: () => ipcRenderer.invoke('game-foreground-watch:stop'),
+  onGameForegroundChanged: (callback) => {
+    const handler = (_event, focused) => callback(focused)
+    ipcRenderer.on('game-foreground-changed', handler)
+    return () => ipcRenderer.removeListener('game-foreground-changed', handler)
+  },
 })

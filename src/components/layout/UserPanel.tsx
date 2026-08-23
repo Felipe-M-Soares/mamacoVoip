@@ -14,12 +14,15 @@ const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
   { value: 'offline', label: 'Invisível', dot: 'bg-gray-500' },
 ]
 
-// Ícone de barrinhas de sinal (tipo wifi/celular) no lugar da antiga
-// barra de texto "123ms" que ficava sozinha em cima do painel — mesmos
-// limiares de cor de antes (verde <100ms, amarelo <250ms, vermelho
-// acima disso), só que como um ícone compacto e discreto, igual o
-// indicador de conexão que o Discord mostra perto do nome do usuário.
-function WifiSignalIcon({ pingMs }: { pingMs: number | null }) {
+// Ícone de barrinhas de sinal (tipo wifi/celular) — mesmos limiares de
+// cor de antes (verde <100ms, amarelo <250ms, vermelho acima disso).
+// Antes ocupava um botão de 32x32 inteiro na barra de baixo, junto com
+// volume/mutar/configurações — deixava tudo espremido (era exatamente o
+// "apertado sem espaço" reclamado). Agora vira um selo bem pequeno colado
+// no nome do usuário — só aparece durante uma call (é o único momento em
+// que o número realmente importa), do jeito que o próprio Discord mostra
+// a qualidade da conexão perto do nome, sem tomar um espaço de botão.
+function WifiSignalIcon({ pingMs, isCallRtt }: { pingMs: number | null; isCallRtt: boolean }) {
   const tier = pingMs === null ? 'none' : pingMs < 100 ? 'good' : pingMs < 250 ? 'ok' : 'bad'
   const color =
     tier === 'good'
@@ -32,26 +35,43 @@ function WifiSignalIcon({ pingMs }: { pingMs: number | null }) {
   // Quantas barrinhas acendem, de baixo pra cima — 3 = ótima conexão, 1 = ruim.
   const litBars = tier === 'good' ? 3 : tier === 'ok' ? 2 : tier === 'bad' ? 1 : 0
 
+  // Enquanto conectado numa call, mostra a latência REAL da chamada
+  // (ida-e-volta até quem está falando com você, medida pela própria
+  // conexão WebRTC) em vez da latência até o banco de dados — é essa
+  // primeira que afeta o atraso da voz de verdade. Fora de uma call,
+  // não tem esse número ainda, então volta a mostrar a latência até o
+  // servidor só como um indicador geral de "sua internet está ok".
+  const label = pingMs === null ? 'Medindo sua conexão...' : isCallRtt ? `${pingMs}ms de latência na chamada` : `${pingMs}ms até o servidor`
+
   return (
-    <div
-      title={pingMs !== null ? `${pingMs}ms de latência` : 'Medindo sua conexão...'}
-      className={`w-8 h-8 flex items-end justify-center gap-[2px] shrink-0 ${color}`}
-    >
+    <span title={label} className={`inline-flex items-end justify-center gap-[1.5px] shrink-0 ${color}`}>
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className={`w-1 rounded-sm bg-current ${i < litBars ? '' : 'opacity-25'}`}
-          style={{ height: 4 + i * 4 }}
+          className={`w-[3px] rounded-sm bg-current ${i < litBars ? '' : 'opacity-25'}`}
+          style={{ height: 3 + i * 3 }}
         />
       ))}
-    </div>
+    </span>
   )
 }
 
 export function UserPanel() {
   const { profile, signOut, updateStatus } = useAuth()
   const voice = useVoice()
-  const pingMs = useConnectionPing()
+  const apiPingMs = useConnectionPing()
+  // Enquanto estiver numa call com pelo menos uma outra pessoa, prefere
+  // a latência REAL medida pela própria conexão de voz (voice.connectionQuality
+  // — round-trip de verdade até quem está na call, via WebRTC getStats(),
+  // já existia mas não tinha lugar nenhum na UI) em vez da latência até
+  // o servidor do banco de dados, que não tem relação com o atraso que
+  // você ouve na voz dos outros.
+  const callRttValues = Object.values(voice.connectionQuality)
+  const callRttMs =
+    voice.connectedChannelId && callRttValues.length > 0
+      ? Math.round(callRttValues.reduce((a, b) => a + b, 0) / callRttValues.length)
+      : null
+  const pingMs = callRttMs ?? apiPingMs
   const [menuOpen, setMenuOpen] = useState(false)
   const [volumeOpen, setVolumeOpen] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
@@ -74,21 +94,29 @@ export function UserPanel() {
           </div>
         </div>
       )}
-      <div className="relative h-[52px] bg-discord-darker/60 px-2 flex items-center gap-1">
+      <div className="relative h-[52px] bg-discord-darker/60 px-2.5 flex items-center gap-1.5">
       <button
         onClick={() => setMenuOpen((v) => !v)}
         className="flex items-center gap-2 flex-1 min-w-0 px-1 py-1 rounded hover:bg-white/5 transition-colors"
       >
-        <Avatar name={profile.username} avatarUrl={profile.avatar_url} status={profile.status} userId={profile.id} size={32} />
+        <Avatar
+          name={profile.username}
+          avatarUrl={profile.avatar_url}
+          decorationUrl={profile.avatar_decoration_url}
+          status={profile.status}
+          userId={profile.id}
+          size={32}
+        />
         <div className="min-w-0 text-left">
-          <p className="text-sm font-medium text-white truncate">{profile.display_name || profile.username}</p>
+          <p className="text-sm font-medium text-white truncate flex items-center gap-1.5">
+            <span className="truncate">{profile.display_name || profile.username}</span>
+            {voice.connectedChannelId && <WifiSignalIcon pingMs={pingMs} isCallRtt={callRttMs !== null} />}
+          </p>
           <p className="text-xs text-discord-text-muted truncate">
             {profile.custom_status || `@${profile.username}`}
           </p>
         </div>
       </button>
-
-      <WifiSignalIcon pingMs={pingMs} />
 
       <div className="relative shrink-0">
         <button

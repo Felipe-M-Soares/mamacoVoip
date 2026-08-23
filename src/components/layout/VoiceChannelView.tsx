@@ -214,6 +214,7 @@ function ParticipantTile({
   userId,
   name,
   avatarUrl,
+  decorationUrl,
   data,
   isLocal,
   localVideoEnabled,
@@ -235,6 +236,7 @@ function ParticipantTile({
   name: string
   username?: string
   avatarUrl?: string | null
+  decorationUrl?: string | null
   data: VoiceParticipant | undefined
   isLocal: boolean
   localVideoEnabled?: boolean
@@ -336,7 +338,7 @@ function ParticipantTile({
             speaking ? 'ring-2 ring-discord-blurple shadow-[0_0_8px_0] shadow-discord-blurple/60 animate-pulse' : ''
           }`}
         >
-          <Avatar name={name} avatarUrl={avatarUrl} size={48} />
+          <Avatar name={name} avatarUrl={avatarUrl} decorationUrl={decorationUrl} size={48} />
           {audioEl}
         </div>
         <span className="text-[10px] text-discord-text truncate max-w-full">{isLocal ? 'Você' : name}</span>
@@ -368,7 +370,7 @@ function ParticipantTile({
             speaking ? 'ring-4 ring-discord-blurple shadow-[0_0_16px_0] shadow-discord-blurple/60 animate-pulse' : ''
           }`}
         >
-          <Avatar name={name} avatarUrl={avatarUrl} size={64} />
+          <Avatar name={name} avatarUrl={avatarUrl} decorationUrl={decorationUrl} size={64} />
         </div>
       )}
       {audioEl}
@@ -538,6 +540,7 @@ export function VoiceChannelView({
                     userId={profile.id}
                     name={profile.display_name || profile.username}
                     avatarUrl={profile.avatar_url}
+                    decorationUrl={profile.avatar_decoration_url}
                     data={undefined}
                     isLocal
                     localVideoEnabled={voice.videoEnabled}
@@ -553,6 +556,7 @@ export function VoiceChannelView({
                       name={p?.display_name || p?.username || 'Usuário'}
                       username={p?.username}
                       avatarUrl={p?.avatar_url}
+                      decorationUrl={p?.avatar_decoration_url}
                       data={data}
                       isLocal={false}
                       sinkId={voice.audioSettings.speakerId}
@@ -593,6 +597,7 @@ export function VoiceChannelView({
                     userId={profile.id}
                     name={profile.display_name || profile.username}
                     avatarUrl={profile.avatar_url}
+                    decorationUrl={profile.avatar_decoration_url}
                     data={undefined}
                     isLocal
                     localVideoEnabled={voice.videoEnabled}
@@ -607,6 +612,7 @@ export function VoiceChannelView({
                       name={p?.display_name || p?.username || 'Usuário'}
                       username={p?.username}
                       avatarUrl={p?.avatar_url}
+                      decorationUrl={p?.avatar_decoration_url}
                       data={data}
                       isLocal={false}
                       sinkId={voice.audioSettings.speakerId}

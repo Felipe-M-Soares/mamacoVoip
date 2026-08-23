@@ -15,8 +15,21 @@ interface AuthContextValue {
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
   updateProfile: (
-    updates: { display_name?: string; custom_status?: string | null; playing?: string | null; profile_visibility?: 'everyone' | 'friends_only' },
-    avatarFile?: File | null
+    updates: {
+      display_name?: string
+      custom_status?: string | null
+      playing?: string | null
+      profile_visibility?: 'everyone' | 'friends_only'
+      // Só aceitam `null` explícito aqui (não uma URL de verdade) — a URL
+      // de verdade só é setada internamente, depois de um upload bem
+      // sucedido logo abaixo. `null` é como a tela de edição pede pra
+      // REMOVER um banner/decoração já enviado, sem trocar por outro.
+      banner_url?: null
+      avatar_decoration_url?: null
+    },
+    avatarFile?: File | null,
+    bannerFile?: File | null,
+    decorationFile?: File | null
   ) => Promise<{ error: string | null }>
   updateStatus: (status: ProfileStatus) => Promise<void>
 }
@@ -181,8 +194,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function updateProfile(
-    updates: { display_name?: string; custom_status?: string | null; playing?: string | null; profile_visibility?: 'everyone' | 'friends_only' },
-    avatarFile?: File | null
+    updates: {
+      display_name?: string
+      custom_status?: string | null
+      playing?: string | null
+      profile_visibility?: 'everyone' | 'friends_only'
+      banner_url?: null
+      avatar_decoration_url?: null
+    },
+    avatarFile?: File | null,
+    bannerFile?: File | null,
+    decorationFile?: File | null
   ) {
     if (!session?.user) return { error: 'Não autenticado' }
 
@@ -192,6 +214,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       playing?: string | null
       profile_visibility?: 'everyone' | 'friends_only'
       avatar_url?: string
+      banner_url?: string | null
+      avatar_decoration_url?: string | null
     } = { ...updates }
 
     if (avatarFile) {
@@ -203,6 +227,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (uploadError) return { error: uploadError.message }
       const { data } = supabase.storage.from('avatars').getPublicUrl(path)
       patch.avatar_url = data.publicUrl
+    }
+
+    // Banner e decoração seguem o MESMO esquema do avatar (upload pro
+    // bucket próprio, path {user_id}/{tipo}-{timestamp}.ext — ver
+    // 007_profile_customization.sql) — só a URL enviada por último é que
+    // fica valendo, arquivos antigos não são apagados do Storage (mesmo
+    // comportamento que o avatar já tinha, por simplicidade).
+    if (bannerFile) {
+      const ext = bannerFile.name.split('.').pop()
+      const path = `${session.user.id}/banner-${Date.now()}.${ext}`
+      const { error: uploadError } = await supabase.storage.from('profile-banners').upload(path, bannerFile, {
+        upsert: true,
+      })
+      if (uploadError) return { error: uploadError.message }
+      const { data } = supabase.storage.from('profile-banners').getPublicUrl(path)
+      patch.banner_url = data.publicUrl
+    }
+
+    if (decorationFile) {
+      const ext = decorationFile.name.split('.').pop()
+      const path = `${session.user.id}/decoration-${Date.now()}.${ext}`
+      const { error: uploadError } = await supabase.storage
+        .from('avatar-decorations')
+        .upload(path, decorationFile, { upsert: true })
+      if (uploadError) return { error: uploadError.message }
+      const { data } = supabase.storage.from('avatar-decorations').getPublicUrl(path)
+      patch.avatar_decoration_url = data.publicUrl
     }
 
     const { error } = await supabase.from('profiles').update(patch).eq('id', session.user.id)

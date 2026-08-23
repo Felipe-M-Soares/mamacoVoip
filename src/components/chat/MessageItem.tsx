@@ -262,7 +262,12 @@ export function MessageItem({
               onContextMenu={openUserMenu}
               className="block"
             >
-              <Avatar name={author?.username ?? '?'} avatarUrl={author?.avatar_url} size={40} />
+              <Avatar
+                name={author?.username ?? '?'}
+                avatarUrl={author?.avatar_url}
+                decorationUrl={author?.avatar_decoration_url}
+                size={40}
+              />
             </button>
           </div>
         ) : (

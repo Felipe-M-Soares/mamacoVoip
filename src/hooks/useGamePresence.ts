@@ -18,6 +18,13 @@ export interface ScreenShareSource {
   // parte da tela inteira — por isso o picker precisa saber diferenciar
   // (ver ScreenSharePicker.tsx).
   type: 'screen' | 'window'
+  // Só faz sentido quando type === 'screen': é a tela PRINCIPAL do
+  // Windows? Usado pra escolher qual tela sugerir automaticamente no
+  // atalho "Compartilhar seu jogo" quando a pessoa tem mais de um
+  // monitor (ver findGameSource/fallbackScreen em ScreenSharePicker.tsx)
+  // — sem isso, o fallback podia acabar pegando o monitor ERRADO (o do
+  // navegador/chat, por exemplo) em vez do que o jogo está de fato.
+  isPrimaryDisplay?: boolean
 }
 
 declare global {
@@ -39,6 +46,15 @@ declare global {
       onPTTState: (callback: (active: boolean) => void) => () => void
       sendVoiceStateToOverlay: (state: unknown) => void
       checkForUpdatesNow: () => void
+      // Vigia de foco do jogo — enquanto um compartilhamento de tela
+      // cheia "atalho de jogo" está ativo, o processo principal observa
+      // (via PowerShell, só Windows) se o jogo é a janela em foco no
+      // momento, e avisa aqui quando isso muda. A VoiceContext usa isso
+      // pra trocar o vídeo enviado por um placeholder quando a pessoa
+      // alterna pra outro programa, evitando vazar o resto da tela.
+      startForegroundWatch: (gameLabel: string) => Promise<boolean>
+      stopForegroundWatch: () => Promise<void>
+      onGameForegroundChanged: (callback: (focused: boolean) => void) => () => void
     }
   }
 }

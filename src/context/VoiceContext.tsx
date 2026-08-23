@@ -6,6 +6,7 @@ import { useAudioSettings } from '../hooks/useAudioSettings'
 import { useScreenShareQuality } from '../hooks/useScreenShareQuality'
 import { createNoiseSuppressor, type NoiseSuppressor } from '../lib/noiseSuppression'
 import { takePendingGameShareHint } from '../lib/screenShareGameHint'
+import { preferStereoOpusForTrack } from '../lib/sdpStereo'
 import {
   playConnectSound,
   playDisconnectSound,
@@ -38,6 +39,29 @@ const ICE_SERVERS: RTCIceServer[] = [
 ]
 
 const MAX_PARTICIPANTS = 8
+
+// Bitrate do MICROFONE (voz). O Opus pra voz mono já fica praticamente
+// transparente (indistinguível do original) por volta de 96-128kbps —
+// subir além disso não traz nada a mais pra ouvido nenhum, só gasta
+// banda à toa. 128kbps é o teto real de "não dá pra melhorar mais só
+// com bitrate" pra uma voz — o resto da qualidade (o quão limpo o SINAL
+// que chega até aqui está) já é function do RNNoise + gate + AEC/AGC
+// nativos (ver lib/noiseSuppression.ts e useAudioSettings.ts), não de
+// bitrate.
+const MIC_MAX_BITRATE = 128_000
+
+// Bitrate do áudio da TRANSMISSÃO DE TELA (som do jogo/sistema) —
+// diferente do preset de vídeo (que é sobre nitidez de imagem, em
+// Mbps), e diferente do bitrate do microfone acima (voz mono precisa de
+// bem menos que música/som de jogo estéreo). Antes esse áudio não
+// recebia NENHUM ajuste, então ficava só no padrão baixo que o
+// navegador usa pra Opus (~32kbps) — péssimo pra música ou som de jogo,
+// que tem muito mais variação de frequência do que uma voz. 256kbps é
+// próximo do que serviços de streaming de música chamam de "qualidade
+// muito alta" (Opus estéreo satura a qualidade audível bem antes de
+// 256kbps) — dá pra considerar isso o teto prático de "o máximo que
+// vale a pena".
+const SCREEN_SHARE_AUDIO_MAX_BITRATE = 256_000
 
 // No Windows, a PRIMEIRA chamada de getUserMedia às vezes esbarra numa
 // corrida com a permissão de microfone do próprio sistema operacional
@@ -469,6 +493,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const peersRef = useRef<Map<string, PeerState>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
+  // ID da track de ÁUDIO da transmissão de tela (som de jogo/sistema)
+  // enquanto uma transmissão COM áudio estiver rolando — `null` fora
+  // disso (sem transmissão, ou transmissão só de vídeo). Usado só pra
+  // saber qual seção do SDP forçar estéreo (ver sdpStereo.ts e
+  // setLocalDescriptionPreferringStereo abaixo) — o microfone continua
+  // de fora de propósito, então precisa desse ID pra saber ONDE mexer
+  // sem afetar a voz.
+  const screenAudioTrackIdRef = useRef<string | null>(null)
   // A track de áudio dentro de `localStreamRef` passa a ser a track JÁ
   // TRATADA pelo RNNoise (quando ativo), não mais a track crua do
   // dispositivo — então precisamos guardar a crua separadamente aqui só
@@ -693,6 +725,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }))
   }
 
+  // Gera a oferta/resposta (offer/answer) igual o `pc.setLocalDescription()`
+  // "implícito" (sem argumento) fazia antes — só que passando pelo meio
+  // do caminho pra poder editar o SDP primeiro (forçar estéreo no áudio
+  // da transmissão de tela, se houver uma rolando — ver sdpStereo.ts).
+  // `kind` diz qual dos dois criar: 'offer' quando SOMOS quem está
+  // iniciando a renegociação (onnegotiationneeded), 'answer' quando
+  // estamos respondendo a uma oferta que acabamos de receber
+  // (handleSignal). O `pc.setLocalDescription()` sem argumento decide
+  // isso sozinho só olhando o estado atual — aqui precisamos decidir na
+  // mão porque geramos a descrição explicitamente ANTES de aplicar.
+  async function setLocalDescriptionPreferringStereo(pc: RTCPeerConnection, kind: 'offer' | 'answer') {
+    const description = kind === 'offer' ? await pc.createOffer() : await pc.createAnswer()
+    if (description.sdp && screenAudioTrackIdRef.current) {
+      description.sdp = preferStereoOpusForTrack(description.sdp, screenAudioTrackIdRef.current)
+    }
+    await pc.setLocalDescription(description)
+  }
+
   function createPeerConnection(peerId: string, polite: boolean): RTCPeerConnection {
     const pc = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
@@ -711,10 +761,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       if (track.kind === 'audio') {
         const params = sender.getParameters()
         params.encodings = params.encodings?.length ? params.encodings : [{}]
-        // O padrão do Opus fica bem baixo (~32kbps) — subindo pra
-        // 64kbps a voz fica bem mais nítida, por um custo de banda
-        // irrelevante (poucos KB/s a mais).
-        params.encodings[0].maxBitrate = 64_000
+        // O padrão do Opus fica bem baixo (~32kbps) — subindo pro teto
+        // real de voz mono (ver MIC_MAX_BITRATE acima), a voz fica bem
+        // mais nítida, por um custo de banda irrelevante (poucos KB/s a
+        // mais).
+        params.encodings[0].maxBitrate = MIC_MAX_BITRATE
         // Marca o áudio como prioridade alta — quando a rede está
         // congestionada (upload cheio, por exemplo), isso pede pro
         // navegador tratar os pacotes de voz como mais urgentes do
@@ -733,6 +784,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const sender = pc.addTrack(track, screenStreamRef.current!)
         const params = sender.getParameters()
         params.encodings = params.encodings?.length ? params.encodings : [{}]
+        if (track.kind === 'audio') {
+          // Áudio da transmissão (som do jogo/sistema) usa seu PRÓPRIO
+          // teto de bitrate — o preset de vídeo (maxBitrate em Mbps,
+          // pensado pra nitidez de imagem) não faz sentido aqui. Antes
+          // esse valor era aplicado nos dois tracks (vídeo E áudio) sem
+          // distinção, deixando o áudio sem nenhum ajuste de verdade.
+          params.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
+          sender.setParameters(params).catch(() => {})
+          return
+        }
         // Antes isso usava um valor fixo (4Mbps) sem olhar a preferência
         // de qualidade escolhida — então quem entrava na call DEPOIS que
         // a transmissão já tinha começado recebia uma versão bem pior
@@ -744,21 +805,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
           preset.degradationPreference
         sender.setParameters(params).catch(() => {})
-        if (track.kind === 'video') {
-          screenSendersRef.current.set(peerId, sender)
-          // Se a pessoa já entrou no meio de um período "fora do jogo"
-          // (cortina ativa), essa nova conexão já começa recebendo a
-          // cortina, não o vídeo de verdade — senão vazaria justo pra
-          // quem acabou de entrar.
-          if (placeholderTrackRef.current) sender.replaceTrack(placeholderTrackRef.current).catch(() => {})
-        }
+        screenSendersRef.current.set(peerId, sender)
+        // Se a pessoa já entrou no meio de um período "fora do jogo"
+        // (cortina ativa), essa nova conexão já começa recebendo a
+        // cortina, não o vídeo de verdade — senão vazaria justo pra
+        // quem acabou de entrar.
+        if (placeholderTrackRef.current) sender.replaceTrack(placeholderTrackRef.current).catch(() => {})
       })
     }
 
     pc.onnegotiationneeded = async () => {
       try {
         peerState.makingOffer = true
-        await pc.setLocalDescription()
+        await setLocalDescriptionPreferringStereo(pc, 'offer')
         if (pc.localDescription) sendSignal(peerId, { description: pc.localDescription })
       } catch (err) {
         console.error('Erro ao negociar conexão de voz:', err)
@@ -820,7 +879,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
         await pc.setRemoteDescription(payload.description)
         if (payload.description.type === 'offer') {
-          await pc.setLocalDescription()
+          await setLocalDescriptionPreferringStereo(pc, 'answer')
           if (pc.localDescription) sendSignal(peerId, { description: pc.localDescription })
         }
       } else if (payload.candidate) {
@@ -1324,6 +1383,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     gameShareWatchRef.current?.()
     gameShareWatchRef.current = null
     screenStreamRef.current = null
+    screenAudioTrackIdRef.current = null
     setLocalScreenStream(null)
     setScreenSharing(false)
     broadcastScreenMeta(null)
@@ -1385,6 +1445,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       broadcastScreenMeta(stream.id)
       const videoTrack = stream.getVideoTracks()[0]
       const audioTrack = stream.getAudioTracks()[0]
+      // Guarda o ID pra próxima renegociação (seja a de agora mesmo, logo
+      // abaixo, seja uma futura — por exemplo quando outra pessoa entra
+      // na call no meio da transmissão) saber que ESSA é a track que
+      // precisa forçar estéreo no SDP (ver setLocalDescriptionPreferringStereo).
+      screenAudioTrackIdRef.current = audioTrack?.id ?? null
       // "motion" prioriza fluidez de movimento em vez de nitidez de
       // texto estático — melhor pra compartilhar jogo/vídeo do que a
       // opção padrão, que otimiza pra tela parada (documento, planilha)
@@ -1421,7 +1486,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         sender.setParameters(params).catch(() => {
           // alguns navegadores/drivers não suportam todos os campos — sem problema, segue com o padrão
         })
-        if (audioTrack) pc.addTrack(audioTrack, stream)
+        if (audioTrack) {
+          // Mesmo ajuste do bloco de quem entra depois (createPeerConnection
+          // acima) — o áudio da transmissão precisa do PRÓPRIO teto de
+          // bitrate (128kbps, pensado pra som de jogo/música), não o
+          // preset de vídeo nem o padrão baixo do navegador.
+          const audioSender = pc.addTrack(audioTrack, stream)
+          const audioParams = audioSender.getParameters()
+          audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
+          audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
+          audioSender.setParameters(audioParams).catch(() => {})
+        }
       })
       setScreenSharing(true)
 

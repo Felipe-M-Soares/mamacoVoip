@@ -29,7 +29,8 @@ export function HomeSidebar({
   async function handleDeleteConversation(e: React.MouseEvent, conversationId: string, otherName: string) {
     e.stopPropagation()
     if (!confirm(`Apagar a conversa com ${otherName}? Ela some da sua lista — se ${otherName} mandar uma mensagem nova, a conversa volta a aparecer.`)) return
-    await hideConversation(conversationId)
+    const { error } = await hideConversation(conversationId)
+    if (error) alert(`Não deu pra apagar a conversa: ${error}`)
   }
   const { groups } = useGroupConversations()
   const { pinnedIds, toggle: togglePin } = usePinnedItems()

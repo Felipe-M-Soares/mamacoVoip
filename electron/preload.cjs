@@ -21,7 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('screen-share-sources', handler)
     return () => ipcRenderer.removeListener('screen-share-sources', handler)
   },
-  selectScreenShareSource: (sourceId) => ipcRenderer.invoke('screen-share:select', sourceId),
+  selectScreenShareSource: (sourceId, includeSystemAudio) =>
+    ipcRenderer.invoke('screen-share:select', sourceId, includeSystemAudio),
   focusAppWindow: () => ipcRenderer.send('app:focus-window'),
   isGlobalPTTAvailable: () => ipcRenderer.invoke('ptt:is-global-available'),
   startPTTCapture: () => ipcRenderer.invoke('ptt:start-capture'),

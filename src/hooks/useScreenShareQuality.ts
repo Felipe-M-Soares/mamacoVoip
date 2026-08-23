@@ -39,15 +39,27 @@ export const QUALITY_PRESETS: Record<ScreenShareQuality, QualityPreset> = {
     width: 7680,
     height: 4320,
     frameRate: 60,
-    maxBitrate: 20_000_000,
+    // 20Mbps começava a comprimir visivelmente em 4K/60fps (referência
+    // comum pra 4K60 de qualidade é algo entre 35-45Mbps) — subindo pra
+    // 35Mbps, mesmo transmissões em resolução bem alta saem nítidas.
+    // Isso é só um TETO: numa tela 1080p normal o encoder nem chega
+    // perto de usar tudo isso, então não pesa nada a mais pra quem tem
+    // tela menor — só importa (e ajuda de verdade) pra quem tem monitor
+    // 1440p/4K.
+    maxBitrate: 35_000_000,
     degradationPreference: 'maintain-resolution',
     capResolution: false,
     label: 'Qualidade máxima (resolução nativa da sua tela, até 60fps)',
-    description: 'Transmite do mesmo jeito que sua tela está — exige mais do seu PC e da internet de quem assiste.',
+    description: 'Transmite do mesmo jeito que sua tela está, no bitrate mais alto que dá — exige bem mais do seu PC e da internet de quem assiste (recomendado só com internet rápida dos dois lados).',
   },
 }
 
-function loadQuality(): ScreenShareQuality {
+// Exportada (não só interna ao hook) pra permitir uma LEITURA somente-
+// exibição do valor atual em lugares fora do VoiceProvider — ver
+// ScreenSharePicker.tsx, que mostra "qualidade selecionada" antes de
+// compartilhar mas não pode chamar useVoice() (ele existe fora do
+// VoiceProvider, que só monta dentro do MainLayout).
+export function loadQuality(): ScreenShareQuality {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     return raw === 'quality' ? 'quality' : 'performance'

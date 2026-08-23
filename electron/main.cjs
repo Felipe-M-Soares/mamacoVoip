@@ -269,6 +269,109 @@ function processNamesForGameLabel(label) {
     .map(([processName]) => processName.replace(/\.exe$/i, ''))
 }
 
+// ============================================================
+// "Compartilhar seu jogo" (fallback de tela cheia): antes disso, quando
+// o jogo não aparecia como uma JANELA separada pro desktopCapturer (caso
+// clássico de jogo em modo tela cheia exclusiva), o atalho simplesmente
+// chutava a tela PRINCIPAL — o que está errado pra qualquer pessoa que
+// joga com o jogo no monitor SECUNDÁRIO (setup comum: jogo numa tela,
+// chat/Discord/navegador na outra). Essa função pergunta pro Windows,
+// de verdade, em qual monitor a JANELA do próprio processo do jogo está
+// (e qual é o TÍTULO exato dessa janela) — mesmo que a janela esteja em
+// modo tela cheia exclusiva, ela quase sempre ainda tem um
+// "MainWindowHandle" válido por baixo (é assim que a maioria dos jogos
+// DirectX/OpenGL implementa tela cheia, por cima de uma janela normal já
+// existente) — daí só usa a própria API do .NET (Screen.FromHandle, que
+// já embute toda a conta de "qual monitor" sem precisar declarar
+// chamada nenhuma ao Win32 na mão) pra pegar os limites (bounds) desse
+// monitor, e MainWindowTitle pra pegar o nome exato da janela — esse
+// título é usado em dois lugares (ver setDisplayMediaRequestHandler
+// abaixo e ScreenSharePicker.tsx): (1) quando o jogo TEM uma janela
+// capturável na lista do desktopCapturer, casar pelo título EXATO em
+// vez de um chute por nome parecido é bem mais confiável; (2) quando
+// não tem (tela cheia exclusiva), os `bounds` dizem qual monitor
+// oferecer no fallback.
+//
+// Só Windows, best-effort — se o PowerShell não estiver disponível, ou
+// nenhum processo do jogo tiver janela (raro, mas possível logo no
+// instante de abrir o jogo), simplesmente devolve null e quem chama cai
+// de volta nos chutes de antes (nome parecido / tela principal).
+function getGameWindowInfo(gameLabel) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve(null)
+      return
+    }
+    const processNames = processNamesForGameLabel(gameLabel)
+    if (processNames.length === 0) {
+      resolve(null)
+      return
+    }
+    const namesList = processNames.map((n) => `'${n.replace(/'/g, "''")}'`).join(',')
+    const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Windows.Forms
+$names = @(${namesList})
+foreach ($name in $names) {
+  $proc = Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+  if ($proc) {
+    $s = [System.Windows.Forms.Screen]::FromHandle($proc.MainWindowHandle)
+    $b = $s.Bounds
+    Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
+    Write-Output $proc.MainWindowTitle
+    exit
+  }
+}
+Write-Output ''
+`
+    try {
+      const encoded = Buffer.from(script, 'utf16le').toString('base64')
+      exec(
+        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
+        { windowsHide: true, timeout: 2500 },
+        (err, stdout) => {
+          if (err || !stdout) {
+            resolve(null)
+            return
+          }
+          const outLines = stdout.split(/\r?\n/).filter((l) => l.length > 0)
+          if (outLines.length === 0) {
+            resolve(null)
+            return
+          }
+          const parts = outLines[0].trim().split(',').map(Number)
+          if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
+            resolve(null)
+            return
+          }
+          resolve({
+            bounds: { x: parts[0], y: parts[1], width: parts[2], height: parts[3] },
+            windowTitle: outLines[1]?.trim() || null,
+          })
+        }
+      )
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+// Casa os limites (bounds) devolvidos acima com um dos monitores que o
+// Electron enxerga (screen.getAllDisplays()) — comparando o CENTRO da
+// janela do jogo em vez das bordas exatas, porque bounds vindos de
+// fontes diferentes (WinForms vs. Electron) às vezes têm 1-2px de
+// diferença de arredondamento entre telas com escalas diferentes (DPI).
+function matchDisplayIdForBounds(bounds) {
+  if (!bounds) return null
+  const centerX = bounds.x + bounds.width / 2
+  const centerY = bounds.y + bounds.height / 2
+  const match = screen.getAllDisplays().find((d) => {
+    const b = d.bounds
+    return centerX >= b.x && centerX < b.x + b.width && centerY >= b.y && centerY < b.y + b.height
+  })
+  return match ? String(match.id) : null
+}
+
 function startForegroundWatch(gameLabel) {
   stopForegroundWatch()
   if (process.platform !== 'win32') return false
@@ -667,6 +770,17 @@ app.whenReady().then(() => {
       } catch {
         // sem problema, só não vai ter como marcar qual é a principal
       }
+      // Pergunta em qual monitor E qual é o título exato da JANELA DO
+      // PRÓPRIO JOGO (ver getGameWindowInfo acima) — só quando tem um
+      // jogo detectado rodando, pra não gastar tempo/CPU abrindo
+      // PowerShell à toa toda vez que alguém for compartilhar tela sem
+      // estar jogando nada. Se não conseguir descobrir (Mac/Linux, jogo
+      // sem janela ainda, PowerShell bloqueado etc.), fica tudo null e o
+      // renderer cai de volta nos chutes de antes — nome parecido
+      // (findGameSource) e tela principal (ver ScreenSharePicker.tsx).
+      const gameWindowInfo = currentGame ? await getGameWindowInfo(currentGame) : null
+      const gameDisplayId = matchDisplayIdForBounds(gameWindowInfo?.bounds ?? null)
+      const gameWindowTitle = gameWindowInfo?.windowTitle ?? null
       mainWindow?.webContents.send(
         'screen-share-sources',
         // O id que o desktopCapturer devolve sempre começa com "screen:" ou
@@ -683,6 +797,11 @@ app.whenReady().then(() => {
           thumbnail: s.thumbnail.toDataURL(),
           type: s.id.startsWith('screen:') ? 'screen' : 'window',
           isPrimaryDisplay: Boolean(primaryDisplayId) && s.display_id === primaryDisplayId,
+          // Título EXATO bate com o da janela do processo do jogo (bem
+          // mais confiável que o "nome parecido" que findGameSource usa
+          // como fallback em ScreenSharePicker.tsx).
+          isExactGameWindow: Boolean(gameWindowTitle) && s.name === gameWindowTitle,
+          isGameDisplay: Boolean(gameDisplayId) && s.display_id === gameDisplayId,
         }))
       )
     } catch {
@@ -698,7 +817,7 @@ app.whenReady().then(() => {
     useSystemPicker: true,
   })
 
-  ipcMain.handle('screen-share:select', async (_event, sourceId) => {
+  ipcMain.handle('screen-share:select', async (_event, sourceId, includeSystemAudio) => {
     if (!pendingDisplayMediaCallback) return
     const resolve = pendingDisplayMediaCallback
     pendingDisplayMediaCallback = null
@@ -713,7 +832,19 @@ app.whenReady().then(() => {
       }
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
       const source = sources.find((s) => s.id === sourceId)
-      resolve(source ? { video: source, audio: 'loopback' } : {})
+      // 'loopback' captura o áudio de TODO o sistema (é a única opção
+      // que o Windows/Linux oferecem — não existe uma API que isole o
+      // som de só uma janela/app específico). Antes isso era ligado
+      // sempre, mesmo quando a pessoa escolhia compartilhar só uma
+      // janela — resultado: quem assistia ouvia áudio de QUALQUER outro
+      // app aberto, e o pior, ouvia de volta a própria call (que sai
+      // pelo alto-falante de quem está compartilhando), causando eco.
+      // Agora só liga quando (a) é uma tela inteira mesmo (não dá pra
+      // isolar áudio de janela de qualquer forma) E (b) a pessoa marcou
+      // a opção explicitamente no seletor (ver ScreenSharePicker.tsx) —
+      // o padrão é desligado.
+      const isFullScreen = Boolean(source?.id.startsWith('screen:'))
+      resolve(source ? { video: source, ...(isFullScreen && includeSystemAudio ? { audio: 'loopback' } : {}) } : {})
       // Capturar uma JANELA específica (diferente de capturar a tela
       // inteira) faz o Windows trazer aquela janela pra frente sozinho —
       // é assim que a API de captura do sistema funciona, nada que o

@@ -914,16 +914,30 @@ export function VoiceChannelView({
               </svg>
             </button>
 
+            {/* Precisa ser escolhido ANTES de clicar em "compartilhar tela"
+                — a resolução/fps viram uma constraint que já vai junto no
+                próprio pedido de captura (getDisplayMedia), então depois
+                que a captura começa não dá mais pra trocar (por isso some
+                enquanto voice.screenSharing for true). Por isso mora aqui,
+                do lado do botão de compartilhar, com um texto visível de
+                verdade (não só um tooltip escondido) — antes era só um
+                <select> sem legenda nenhuma, fácil de nem notar que dava
+                pra escolher qualidade/fps. */}
             {!voice.screenSharing && (
-              <select
-                value={voice.screenShareQuality.quality}
-                onChange={(e) => voice.screenShareQuality.setQuality(e.target.value as 'performance' | 'quality')}
-                title="Qualidade do compartilhamento de tela"
-                className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none max-w-[160px] truncate"
-              >
-                <option value="performance">Desempenho (reduz p/ 1080p/30fps)</option>
-                <option value="quality">Qualidade máxima (resolução da sua tela)</option>
-              </select>
+              <div className="flex flex-col items-start gap-0.5">
+                <span className="text-[9px] font-bold uppercase text-discord-text-muted px-1">
+                  Qualidade da transmissão
+                </span>
+                <select
+                  value={voice.screenShareQuality.quality}
+                  onChange={(e) => voice.screenShareQuality.setQuality(e.target.value as 'performance' | 'quality')}
+                  title="Qualidade e fps do compartilhamento de tela"
+                  className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none max-w-[190px] truncate"
+                >
+                  <option value="performance">Desempenho — 1080p, 30fps</option>
+                  <option value="quality">Qualidade máxima — resolução da sua tela, até 60fps</option>
+                </select>
+              </div>
             )}
 
             <button

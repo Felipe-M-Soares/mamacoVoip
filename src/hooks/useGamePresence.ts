@@ -19,12 +19,27 @@ export interface ScreenShareSource {
   // (ver ScreenSharePicker.tsx).
   type: 'screen' | 'window'
   // Só faz sentido quando type === 'screen': é a tela PRINCIPAL do
-  // Windows? Usado pra escolher qual tela sugerir automaticamente no
-  // atalho "Compartilhar seu jogo" quando a pessoa tem mais de um
-  // monitor (ver findGameSource/fallbackScreen em ScreenSharePicker.tsx)
-  // — sem isso, o fallback podia acabar pegando o monitor ERRADO (o do
-  // navegador/chat, por exemplo) em vez do que o jogo está de fato.
+  // Windows? Usado como ÚLTIMO fallback (ver isGameDisplay abaixo, que é
+  // preferido quando disponível) pra escolher qual tela sugerir
+  // automaticamente no atalho "Compartilhar seu jogo" quando a pessoa
+  // tem mais de um monitor (ver findGameSource/fallbackScreen em
+  // ScreenSharePicker.tsx) — sem isso, o fallback podia acabar pegando
+  // o monitor ERRADO (o do navegador/chat, por exemplo) em vez do que o
+  // jogo está de fato.
   isPrimaryDisplay?: boolean
+  // Só faz sentido quando type === 'screen': o Windows confirmou que a
+  // JANELA DO PRÓPRIO JOGO detectado está de fato neste monitor (ver
+  // getGameWindowDisplayBounds em electron/main.cjs) — muito mais
+  // confiável que assumir "tela principal", já que muita gente joga com
+  // o jogo no monitor SECUNDÁRIO. `false`/ausente quando não deu pra
+  // descobrir (Mac/Linux, ou o Windows não conseguiu achar a janela).
+  isGameDisplay?: boolean
+  // Só faz sentido quando type === 'window': o TÍTULO desta janela bate
+  // EXATO com o título da janela do processo do jogo detectado (ver
+  // getGameWindowInfo em electron/main.cjs) — muito mais confiável que
+  // o "nome parecido" (findGameSource em ScreenSharePicker.tsx), que
+  // era só uma aposta por não ter como saber o título real de antes.
+  isExactGameWindow?: boolean
 }
 
 declare global {
@@ -38,7 +53,7 @@ declare global {
       onUpdateStatus: (callback: (payload: UpdateStatusPayload) => void) => () => void
       restartToUpdate: () => Promise<void>
       onScreenShareSources: (callback: (sources: ScreenShareSource[]) => void) => () => void
-      selectScreenShareSource: (sourceId: string | null) => Promise<void>
+      selectScreenShareSource: (sourceId: string | null, includeSystemAudio?: boolean) => Promise<void>
       focusAppWindow: () => void
       isGlobalPTTAvailable: () => Promise<boolean>
       startPTTCapture: () => Promise<{ keycode: number; name: string } | null>

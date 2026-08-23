@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ScreenShareSource } from '../../hooks/useGamePresence'
 import { setPendingGameShareHint } from '../../lib/screenShareGameHint'
+import { QUALITY_PRESETS, loadQuality } from '../../hooks/useScreenShareQuality'
 
 // Discord tem um atalho de "compartilhar seu jogo" assim que detecta que
 // você está com um jogo aberto — em vez de forçar a pessoa a procurar a
 // janela certa na lista. A gente já sabe o nome bonito do jogo (mesmo
 // dado que aparece em "Jogando X" no perfil, vindo da detecção de
 // processo em electron/main.cjs), então só falta achar, entre as janelas
-// que o Electron listou, qual delas provavelmente é a do próprio jogo.
-// Não existe uma API que ligue "processo detectado" a "janela do
-// desktopCapturer" diretamente (são sistemas diferentes), então usamos
-// uma heurística: a maioria dos jogos usa o próprio nome como título da
-// janela, então comparamos (ignorando maiúsculas/pontuação) se um nome
-// contém o outro.
+// que o Electron listou, qual delas é a do próprio jogo.
+//
+// Duas formas de achar, em ordem de confiança: (1) `isExactGameWindow`
+// — o próprio Windows já confirmou que o TÍTULO dessa janela bate exato
+// com o da janela do processo do jogo (electron/main.cjs consulta isso
+// via PowerShell/.NET); bem mais confiável, usa isso quando disponível.
+// (2) Fallback: uma heurística por nome PARECIDO (a maioria dos jogos
+// usa o próprio nome como título de janela, então compara ignorando
+// maiúsculas/pontuação se um nome contém o outro) — só entra quando (1)
+// não deu (Mac/Linux, ou o Windows não conseguiu descobrir o título).
 function findGameSource(sources: ScreenShareSource[], gameName: string | null): ScreenShareSource | null {
   if (!gameName) return null
+  const exact = sources.find((s) => s.type === 'window' && s.isExactGameWindow)
+  if (exact) return exact
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
   const target = normalize(gameName)
   if (!target) return null
@@ -27,6 +34,14 @@ function findGameSource(sources: ScreenShareSource[], gameName: string | null): 
 export function ScreenSharePicker() {
   const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
   const [currentGame, setCurrentGame] = useState<string | null>(null)
+  // Áudio do sistema junto com a tela: desligado por padrão. O Windows
+  // só sabe capturar o som de TODO o sistema (nunca de uma janela
+  // específica sozinha) — então essa opção só faz efeito quando a
+  // pessoa escolhe compartilhar uma TELA INTEIRA. Antes isso ficava
+  // ligado sempre sem escolha nenhuma, e além de vazar áudio de outros
+  // apps, também recapturava a própria call saindo pelo alto-falante —
+  // um eco de verdade. Ver electron/main.cjs (screen-share:select).
+  const [includeSystemAudio, setIncludeSystemAudio] = useState(false)
 
   useEffect(() => {
     if (!window.electronAPI) return
@@ -54,13 +69,13 @@ export function ScreenSharePicker() {
   const fallbackScreen = useMemo(() => {
     if (!sources || !currentGame || windowMatch) return null
     const screens = sources.filter((s) => s.type === 'screen')
-    // Com mais de um monitor, prioriza a tela PRINCIPAL — quem joga com
-    // dois monitores normalmente tem o jogo no principal e outras coisas
-    // (navegador, chat) no secundário, então essa é a aposta mais segura
-    // pra não compartilhar sem querer a tela errada. Sem essa marcação
-    // (app desktop mais antigo, por exemplo), cai de volta pro
-    // comportamento de antes: só pega a primeira da lista.
-    return screens.find((s) => s.isPrimaryDisplay) ?? screens[0] ?? null
+    // Prioridade: (1) o monitor que o Windows CONFIRMOU ser onde a
+    // janela do próprio jogo está (isGameDisplay — bem mais confiável,
+    // funciona certo mesmo com o jogo no monitor secundário); (2) se não
+    // deu pra descobrir isso, cai pro chute de "tela principal" de
+    // antes (a maioria de quem tem um monitor só, ou não conseguiu essa
+    // detecção por algum motivo); (3) por fim, a primeira da lista.
+    return screens.find((s) => s.isGameDisplay) ?? screens.find((s) => s.isPrimaryDisplay) ?? screens[0] ?? null
   }, [sources, currentGame, windowMatch])
 
   const gameSource = windowMatch ?? fallbackScreen
@@ -68,8 +83,17 @@ export function ScreenSharePicker() {
 
   if (!sources) return null
 
+  // Só pra EXIBIR o preset atual aqui (não dá pra mudar daqui — ver o
+  // comentário grande em VoiceChannelView.tsx sobre por que a escolha
+  // de qualidade/fps precisa acontecer ANTES de abrir esse seletor).
+  // Lida direto do localStorage a cada abertura em vez de guardar em
+  // state, porque esse componente fica montado o tempo todo (só
+  // aparece/some trocando `sources` entre null/preenchido) — se lesse
+  // só uma vez no mount, nunca acompanharia uma troca feita depois.
+  const currentQualityPreset = QUALITY_PRESETS[loadQuality()]
+
   function choose(id: string | null) {
-    window.electronAPI?.selectScreenShareSource(id).catch(() => {
+    window.electronAPI?.selectScreenShareSource(id, includeSystemAudio).catch(() => {
       // best-effort — cancelar o compartilhamento não deve nunca quebrar a tela
     })
     setSources(null)
@@ -97,7 +121,33 @@ export function ScreenSharePicker() {
         <h2 className="font-display text-lg font-bold text-white tracking-wide mb-1">
           Escolha o que compartilhar
         </h2>
-        <p className="text-xs text-discord-text-muted mb-4">Uma tela inteira ou só uma janela específica</p>
+        <p className="text-xs text-discord-text-muted mb-1">Uma tela inteira ou só uma janela específica</p>
+        <p className="text-[11px] text-discord-text-muted mb-4">
+          Qualidade selecionada: <span className="text-discord-text font-medium">{currentQualityPreset.label}</span>
+          {' — '}pra mudar, feche aqui e ajuste no seletor do lado do botão de compartilhar tela, antes de tentar de novo.
+        </p>
+
+        {/* Vale só pra "tela inteira" — pra janela específica o Windows
+            não tem como isolar o som de só ela, então nem oferece a
+            opção. Padrão desligado: ligar isso reduz a chance de eco,
+            mas ainda assim recomenda fone quando estiver ativo, porque
+            o som da própria call sai pelo alto-falante de quem
+            compartilha e pode ser recapturado pelo microfone/loopback. */}
+        <label className="flex items-start gap-2.5 mb-4 p-2.5 rounded-lg bg-discord-darker/60 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={includeSystemAudio}
+            onChange={(e) => setIncludeSystemAudio(e.target.checked)}
+            className="mt-0.5 accent-discord-blurple"
+          />
+          <span className="text-xs text-discord-text">
+            Compartilhar áudio do sistema
+            <span className="block text-[11px] text-discord-text-muted mt-0.5">
+              Só funciona ao escolher uma tela inteira (o Windows não isola o som de uma janela específica). Use fone
+              de ouvido ao ativar — sem fone, o som da própria call pode ser recapturado e causar eco.
+            </span>
+          </span>
+        </label>
 
         {gameSource && currentGame && (
           <button

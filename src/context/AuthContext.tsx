@@ -299,5 +299,25 @@ function traduzErro(message: string): string {
     'Email not confirmed': 'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.',
     'Unable to validate email address: invalid format': 'Formato de e-mail inválido.',
   }
-  return mapa[message] ?? message
+  if (mapa[message]) return mapa[message]
+
+  // Esses dois vêm com texto variável (número de segundos, etc.), então
+  // não dá pra bater exato no mapa acima — o Supabase limita quantos
+  // e-mails o PROJETO TODO pode enviar por hora quando não tem um
+  // provedor de e-mail próprio configurado (SMTP customizado), não é
+  // algo que dependa de código do app. Só quem administra o projeto no
+  // Supabase consegue aumentar isso de verdade (Authentication → Emails
+  // → SMTP Settings, configurando Resend/SendGrid/etc.) — aqui só dá
+  // pra deixar a mensagem clara em vez do texto em inglês.
+  if (/email rate limit exceeded/i.test(message)) {
+    return 'Muitas contas foram criadas em pouco tempo e o envio de e-mails atingiu o limite temporário do servidor. Aguarde um pouco e tente de novo — se continuar acontecendo, o administrador precisa configurar um provedor de e-mail próprio no Supabase.'
+  }
+  if (/for security purposes.*after \d+ seconds/i.test(message)) {
+    const segundos = message.match(/after (\d+) seconds/i)?.[1]
+    return segundos
+      ? `Por segurança, espere ${segundos} segundos antes de tentar de novo.`
+      : 'Por segurança, espere um pouco antes de tentar de novo.'
+  }
+
+  return message
 }

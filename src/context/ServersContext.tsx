@@ -81,6 +81,31 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     refresh()
   }, [refresh])
 
+  // Sem isso, a lista de servidores só era carregada UMA VEZ (no
+  // primeiro carregamento do app) e nunca mais — então entrar num
+  // servidor novo (aceitar convite por link, aceitar convite mandado no
+  // chat, ou até ser adicionado por outra pessoa) não aparecia em lugar
+  // nenhum até fechar e abrir o app de novo (o que forçava esse
+  // primeiro carregamento a rodar de novo). Mesmo padrão já usado em
+  // GroupConversationsContext.tsx: escuta mudanças na MINHA linha de
+  // `server_members` e recarrega a lista assim que algo mudar.
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel(`server_membership:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'server_members', filter: `user_id=eq.${user.id}` },
+        () => refresh()
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') refresh()
+      })
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user, refresh])
+
   async function createServer(
     name: string,
     iconFile?: File | null,

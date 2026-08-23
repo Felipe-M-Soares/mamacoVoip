@@ -183,6 +183,20 @@ function MainLayoutInner() {
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  // O drawer "mobile" (ServerBar virando um overlay fixed por cima de
+  // tudo, escondido/mostrado com um botão de hambúrguer) usa o
+  // breakpoint `lg:` do Tailwind (1024px) pra saber quando NÃO é mais
+  // "mobile". Mas a janela do app desktop pode ficar bem mais estreita
+  // que isso (minWidth: 900 no electron/main.cjs) — nesse meio-termo
+  // (900px–1023px), o Tailwind ainda achava que era "mobile" e deixava
+  // o ServerBar com `position: fixed` flutuando por cima (z-40) do
+  // resto do layout, inclusive cobrindo a PARTE DE BAIXO da barra
+  // lateral de canais (ping, card de jogo, "Voz conectada", UserPanel)
+  // que fica logo depois dele no fluxo normal. Dentro do Electron a
+  // janela nunca é "mobile" de verdade (sempre tem pelo menos 900px de
+  // largura) — então aqui o app desktop sempre usa o layout estático
+  // normal, e o comportamento de gaveta/hambúrguer fica só pro site.
+  const isElectronApp = Boolean(window.electronAPI?.isElectron)
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
 
@@ -302,26 +316,33 @@ function MainLayoutInner() {
 
   return (
     <div className="h-full w-full flex overflow-hidden bg-discord-dark relative">
-      {/* Botão de menu — só aparece em telas pequenas */}
-      <button
-        onClick={() => setMobileSidebarOpen(true)}
-        className="lg:hidden fixed top-2 left-2 z-30 w-9 h-9 rounded-md bg-discord-darker/90 backdrop-blur text-white flex items-center justify-center shadow-lg"
-        aria-label="Abrir menu"
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-          <path d="M4 6h16a1 1 0 1 0 0-2H4a1 1 0 1 0 0 2zm16 5H4a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2zm0 7H4a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2z" />
-        </svg>
-      </button>
+      {/* Botão de menu — só aparece em telas pequenas (nunca no app
+          desktop, que não tem esse "modo mobile" — ver isElectronApp). */}
+      {!isElectronApp && (
+        <button
+          onClick={() => setMobileSidebarOpen(true)}
+          className="lg:hidden fixed top-2 left-2 z-30 w-9 h-9 rounded-md bg-discord-darker/90 backdrop-blur text-white flex items-center justify-center shadow-lg"
+          aria-label="Abrir menu"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M4 6h16a1 1 0 1 0 0-2H4a1 1 0 1 0 0 2zm16 5H4a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2zm0 7H4a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2z" />
+          </svg>
+        </button>
+      )}
 
       {/* Overlay escuro atrás do drawer, só em mobile */}
-      {mobileSidebarOpen && (
+      {!isElectronApp && mobileSidebarOpen && (
         <div className="lg:hidden fixed inset-0 bg-black/60 z-30" onClick={() => setMobileSidebarOpen(false)} />
       )}
 
       <div
-        className={`fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto ${
-          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={
+          isElectronApp
+            ? 'static flex'
+            : `fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto ${
+                mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+              }`
+        }
       >
         <ServerBar
           activeServerId={activeServer?.id ?? null}

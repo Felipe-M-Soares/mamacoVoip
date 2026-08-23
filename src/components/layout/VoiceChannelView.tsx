@@ -472,27 +472,12 @@ export function VoiceChannelView({
   const [showMicMenu, setShowMicMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showSettingsFromVoice, setShowSettingsFromVoice] = useState(false)
-  // "Desativar áudio" (deafen) — igual o Discord: para de ouvir todo
-  // mundo de uma vez (some junto com o mic, se ele já não estivesse
-  // mutado) sem precisar abaixar o volume geral manualmente toda vez.
-  // Guarda o volume/estado de mic de ANTES pra devolver exatamente como
-  // estava ao desativar de novo.
-  const [deafened, setDeafened] = useState(false)
-  const preDeafenVolumeRef = useRef(100)
-  const preDeafenWasMutedRef = useRef(false)
-  function toggleDeafen() {
-    if (deafened) {
-      voice.setMasterVolume(preDeafenVolumeRef.current)
-      if (!preDeafenWasMutedRef.current && voice.muted) voice.toggleMute()
-      setDeafened(false)
-    } else {
-      preDeafenVolumeRef.current = voice.masterVolume
-      preDeafenWasMutedRef.current = voice.muted
-      voice.setMasterVolume(0)
-      if (!voice.muted) voice.toggleMute()
-      setDeafened(true)
-    }
-  }
+  // "Desativar áudio" (deafen) agora mora no VoiceContext (voice.deafened
+  // / voice.toggleDeafen) — assim o UserPanel (sempre visível) e esta
+  // barra de controles enxergam e alternam o MESMO estado, em vez de
+  // cada um ter sua própria cópia desincronizada.
+  const deafened = voice.deafened
+  const toggleDeafen = voice.toggleDeafen
   // Preferências só desta sessão de call (não persistem — reinicia toda
   // vez que entra de novo, igual um "modo de exibição" temporário).
   const [showOwnTile, setShowOwnTile] = useState(true)

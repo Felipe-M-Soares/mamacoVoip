@@ -80,6 +80,7 @@ interface SignalPayload {
 
 interface VoiceContextValue {
   connectedChannelId: string | null
+  connectedChannelName: string | null
   joiningChannelId: string | null
   connectedAt: number | null
   // Latência REAL da chamada de voz (peer a peer) — diferente do ping
@@ -90,6 +91,8 @@ interface VoiceContextValue {
   error: string | null
   participants: Record<string, VoiceParticipant>
   muted: boolean
+  deafened: boolean
+  toggleDeafen: () => void
   videoEnabled: boolean
   screenSharing: boolean
   localScreenStream: MediaStream | null
@@ -145,6 +148,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   audioSettingsRef.current = audioSettings
 
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null)
+  // Nome do canal conectado, guardado AQUI (em vez de a UI ter que buscar
+  // na lista de canais do servidor atual) — é o que permite mostrar "Voz
+  // conectada: nome-do-canal" em QUALQUER tela (Início/DMs, um servidor
+  // diferente, etc.), não só quando a pessoa está olhando o servidor
+  // onde a call está rolando. ChannelsContext só existe dentro de um
+  // servidor específico, então depender dele quebraria fora desse caso.
+  const [connectedChannelName, setConnectedChannelName] = useState<string | null>(null)
   const [joiningChannelId, setJoiningChannelId] = useState<string | null>(null)
   const [connectedServerId, setConnectedServerId] = useState<string | null>(null)
   const [connectedAt, setConnectedAt] = useState<number | null>(null)
@@ -354,6 +364,36 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('mamacos-master-volume', String(clamped))
     } catch {
       // best-effort
+    }
+  }
+
+  // "Desativar áudio" (deafen) — igual o Discord: para de ouvir todo
+  // mundo de uma vez (e muta o mic junto, se ele já não estivesse
+  // mutado) sem precisar abaixar o volume geral manualmente toda vez.
+  // Vive AQUI no contexto (não como estado local de um componente)
+  // porque tanto o UserPanel (sempre visível) quanto a barra de controles
+  // de dentro da chamada (VoiceChannelView) precisam ler/alternar o
+  // MESMO estado — antes de mover pra cá, cada um tinha sua própria
+  // cópia e ficavam dessincronizados.
+  const [deafened, setDeafenedState] = useState(false)
+  const deafenedRef = useRef(false)
+  function setDeafened(value: boolean) {
+    deafenedRef.current = value
+    setDeafenedState(value)
+  }
+  const preDeafenVolumeRef = useRef(100)
+  const preDeafenWasMutedRef = useRef(false)
+  function toggleDeafen() {
+    if (deafenedRef.current) {
+      setMasterVolume(preDeafenVolumeRef.current)
+      if (!preDeafenWasMutedRef.current && mutedRef.current) toggleMute()
+      setDeafened(false)
+    } else {
+      preDeafenVolumeRef.current = masterVolume
+      preDeafenWasMutedRef.current = mutedRef.current
+      setMasterVolume(0)
+      if (!mutedRef.current) toggleMute()
+      setDeafened(true)
     }
   }
 
@@ -826,8 +866,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     channelUserLimitRef.current = 0
     joinedAtRef.current = Date.now()
 
-    const { data: channelRow } = await supabase.from('channels').select('user_limit').eq('id', channelId).single()
+    const { data: channelRow } = await supabase.from('channels').select('user_limit, name').eq('id', channelId).single()
     channelUserLimitRef.current = channelRow?.user_limit ?? 0
+    setConnectedChannelName(channelRow?.name ?? null)
 
     try {
       const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
@@ -992,10 +1033,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setParticipants({})
     connectedRef.current = false
     setConnectedChannelId(null)
+    setConnectedChannelName(null)
     setConnectedServerId(null)
     setConnectedAt(null)
     setConnecting(false)
     setMuted(false)
+    // Se a pessoa saiu da call já "desativada" (deafened), o volume geral
+    // ficou em 0 — sem isso aqui, a próxima call começaria sem áudio
+    // nenhum sem nenhuma pista visual do porquê.
+    if (deafenedRef.current) setMasterVolume(preDeafenVolumeRef.current)
+    setDeafened(false)
     setVideoEnabled(false)
     setScreenSharing(false)
     setSpeaking(false)
@@ -1464,6 +1511,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     <VoiceContext.Provider
       value={{
         connectedChannelId,
+        connectedChannelName,
         joiningChannelId,
         connectedAt,
         connectionQuality,
@@ -1472,6 +1520,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         error,
         participants,
         muted,
+        deafened,
+        toggleDeafen,
         videoEnabled,
         screenSharing,
         localScreenStream,

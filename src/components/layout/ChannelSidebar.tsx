@@ -106,40 +106,6 @@ function VoiceChannelPresence({
   )
 }
 
-function VoiceStatusBar({ serverId }: { serverId: string }) {
-  const voice = useVoice()
-  const { channels } = useChannels()
-
-  if (voice.connectedServerId !== serverId || !voice.connectedChannelId) return null
-  const channel = channels.find((c) => c.id === voice.connectedChannelId)
-
-  return (
-    <div className="px-3 py-2.5 bg-discord-darker/70 border-t border-black/20 flex items-center gap-2.5 shrink-0">
-      <span className="w-2.5 h-2.5 rounded-full bg-discord-green shrink-0 animate-pulse" />
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-discord-green truncate">Voz conectada</p>
-        <p className="text-sm text-discord-text-muted truncate">{channel?.name ?? '...'}</p>
-      </div>
-      {/* O botão de mutar que ficava aqui foi removido de propósito: virou
-          um terceiro controle fazendo a mesma coisa que o ícone de mic ao
-          lado do perfil (UserPanel) e o da barra da própria call
-          (VoiceChannelView) — três jeitos diferentes de mutar confundiam
-          mais do que ajudavam. Os dois que sobraram já leem/escrevem o
-          mesmo voice.muted/voice.toggleMute compartilhado, então clicar
-          num já atualiza o ícone do outro sozinho. */}
-      <button
-        onClick={voice.leave}
-        title="Desconectar"
-        className="w-7 h-7 flex items-center justify-center rounded text-discord-text-muted hover:text-red-400 transition-colors shrink-0"
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-          <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
-        </svg>
-      </button>
-    </div>
-  )
-}
-
 function ChannelIcon({ type, isStage }: { type: 'text' | 'voice'; isStage?: boolean }) {
   if (type === 'voice' && isStage) {
     return (
@@ -740,7 +706,6 @@ export function ChannelSidebar({
         )}
       </div>
 
-      <VoiceStatusBar serverId={server.id} />
       <UserPanel />
 
       {showInvite && <InviteModal serverId={server.id} onClose={() => setShowInvite(false)} />}

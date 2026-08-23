@@ -17,9 +17,9 @@ const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
 
 // Ícone de barrinhas de sinal (tipo wifi/celular) — mesmos limiares de
 // cor de antes (verde <100ms, amarelo <250ms, vermelho acima disso).
-// Volta a ficar numa FAIXA PRÓPRIA acima do painel principal (pedido
-// explícito: "o ping tem que ser acima") em vez de espremida ao lado do
-// nome — com texto "Xms" do lado, não só as barrinhas sozinhas.
+// Fica numa FAIXA PRÓPRIA acima do resto do painel (pedido explícito:
+// "o ping tem que ser acima") em vez de espremida ao lado do nome — com
+// texto "Xms" do lado, não só as barrinhas sozinhas.
 function WifiSignalIcon({ pingMs, size = 12 }: { pingMs: number | null; size?: number }) {
   const tier = pingMs === null ? 'none' : pingMs < 100 ? 'good' : pingMs < 250 ? 'ok' : 'bad'
   const color =
@@ -46,6 +46,242 @@ function WifiSignalIcon({ pingMs, size = 12 }: { pingMs: number | null; size?: n
   )
 }
 
+// Ícone de "transmissão"/sinal em arcos — usado na fileira "Voz
+// conectada", mesma ideia visual de referência que o Discord usa ali
+// (um ícone de conexão, não só uma bolinha).
+function BroadcastIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className}>
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M8.5 8.5a5 5 0 0 0 0 7" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M5.8 5.8a9 9 0 0 0 0 12.4" strokeOpacity="0.55" />
+      <path d="M18.2 5.8a9 9 0 0 1 0 12.4" strokeOpacity="0.55" />
+    </svg>
+  )
+}
+
+function PhoneHangupIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 8.5c-2.9 0-5.6.7-8 2v3.2c0 .6.4 1.1.9 1.3 1.2.4 2.4.7 3.6.9.5.1.9-.1 1.2-.5l1-1.5c.2-.3.6-.5 1-.4 1.5.4 2.9.4 4.4 0 .4-.1.8.1 1 .4l1 1.5c.3.4.7.6 1.2.5 1.2-.2 2.4-.5 3.6-.9.5-.2.9-.7.9-1.3v-3.2c-2.4-1.3-5.1-2-8-2H12z" />
+    </svg>
+  )
+}
+
+function CameraIcon({ off, className }: { off?: boolean; className?: string }) {
+  if (off) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={className}>
+        <path
+          d="M17 10.5V7a1 1 0 0 0-1-1H6.4M4 6.4A1 1 0 0 0 3 7v10a1 1 0 0 0 1 1h9.6M17 13.5v3a1 1 0 0 1-1 1H8m9-4v-.5l4-4v11l-4-4"
+          fill="currentColor"
+          fillOpacity="0"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M2.5 2.5l19 19" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z" />
+    </svg>
+  )
+}
+
+function ScreenShareIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
+    </svg>
+  )
+}
+
+function GridIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+    </svg>
+  )
+}
+
+function SparkleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M11 2a1 1 0 0 1 1 1c0 4.4 2.6 7 7 7a1 1 0 1 1 0 2c-4.4 0-7 2.6-7 7a1 1 0 1 1-2 0c0-4.4-2.6-7-7-7a1 1 0 1 1 0-2c4.4 0 7-2.6 7-7a1 1 0 0 1 1-1z" />
+    </svg>
+  )
+}
+
+function MicIcon({ muted, className }: { muted?: boolean; className?: string }) {
+  if (muted) {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-8.6 3.5L18 5A1 1 0 1 0 16.6 3.6L3.6 16.6A1 1 0 1 0 5 18l2-2A7 7 0 0 0 19 11zM12 15a3 3 0 0 0 3-3l-5.7 5.7A3 3 0 0 0 12 15zM9 6a3 3 0 0 1 6 0v3.5l2-2V6a5 5 0 0 0-9.9-1L9 6.6V6z" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
+    </svg>
+  )
+}
+
+function HeadphoneIcon({ off, className }: { off?: boolean; className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 3a9 9 0 0 0-9 9v6a2 2 0 0 0 2 2h2v-8H5v-1a7 7 0 0 1 14 0v1h-2v8h2a2 2 0 0 0 2-2v-6a9 9 0 0 0-9-9z" />
+      {off && <path d="M2.5 2.5l19 19" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}
+    </svg>
+  )
+}
+
+function GearIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M19.4 13a7.4 7.4 0 0 0 .1-1 7.4 7.4 0 0 0-.1-1l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1a.5.5 0 0 0-.6.2L2.6 8.8a.5.5 0 0 0 .1.6l2 1.6a7.4 7.4 0 0 0 0 2l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1c.5.4 1.1.8 1.7 1l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6l-2-1.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" />
+    </svg>
+  )
+}
+
+function ChevronIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M7 10l5 5 5-5z" />
+    </svg>
+  )
+}
+
+// Um dos 4 botões quadrados da fileira de atalhos da call (câmera,
+// compartilhar tela, soundboard, redução de ruído) — mesmo visual pra
+// todos, só muda o ícone/estado "ativo".
+function HudSquareButton({
+  active,
+  title,
+  onClick,
+  children,
+}: {
+  active?: boolean
+  title: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`aspect-square rounded-md flex items-center justify-center transition-colors ${
+        active
+          ? 'bg-discord-blurple/20 text-discord-blurple hover:bg-discord-blurple/30'
+          : 'bg-discord-lighter/70 text-discord-text-muted hover:bg-discord-lighter hover:text-white'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+// Card de "jogando agora" — mostrado sempre que há um jogo detectado
+// (useGamePresence.ts), em qualquer tela (servidor ou Início/DMs). Quando
+// a pessoa também está numa chamada de voz, a legenda de baixo passa a
+// indicar se aquele jogo está sendo compartilhado com a call ou não —
+// mesma ideia da referência do Discord ("Não Compartilhando").
+export function PlayingActivityCard() {
+  const { profile } = useAuth()
+  const voice = useVoice()
+  if (!profile?.playing) return null
+
+  const subtitle = voice.connectedChannelId
+    ? voice.screenSharing
+      ? 'Compartilhando tela'
+      : 'Não compartilhando'
+    : 'Jogando agora'
+
+  return (
+    <div className="mx-2 mt-2 px-3 py-2 rounded-lg bg-discord-darker/60 flex items-center gap-2.5 shrink-0">
+      <span className="text-base shrink-0">🎮</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-white truncate leading-tight">{profile.playing}</p>
+        <p className="text-[11px] text-discord-text-muted truncate leading-tight">{subtitle}</p>
+      </div>
+    </div>
+  )
+}
+
+// Card "Voz conectada" + fileira de atalhos da call — igual a referência
+// que a pessoa mandou (nome do canal + botão de desligar em cima,
+// câmera/tela/soundboard/redução de ruído embaixo). Vive AQUI (dentro do
+// UserPanel, que é universal) em vez de ficar preso à barra lateral de
+// um servidor específico — assim continua aparecendo mesmo navegando
+// pelo Início/DMs ou por outro servidor enquanto a call de outro
+// servidor continua rolando, igual o Discord de verdade faz.
+function VoiceHud() {
+  const voice = useVoice()
+  const [showSoundboard, setShowSoundboard] = useState(false)
+
+  if (!voice.connectedChannelId) return null
+
+  function toggleNoiseSuppression() {
+    const next = !voice.audioSettings.noiseSuppression
+    voice.audioSettings.setNoiseSuppression(next)
+    voice.refreshAudioConstraints({ noiseSuppression: next })
+  }
+
+  return (
+    <div className="mx-2 mt-2 rounded-lg bg-discord-darker/60 overflow-hidden shrink-0">
+      <div className="px-3 py-2.5 flex items-center gap-2.5">
+        <BroadcastIcon className="w-4 h-4 text-discord-green shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-discord-green truncate leading-tight">Voz conectada</p>
+          <p className="text-sm text-discord-text-muted truncate leading-tight">{voice.connectedChannelName ?? '...'}</p>
+        </div>
+        <button
+          onClick={voice.leave}
+          title="Desconectar"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-discord-text-muted hover:bg-red-500/10 hover:text-red-400 transition-colors shrink-0"
+        >
+          <PhoneHangupIcon className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="px-2 pb-2 grid grid-cols-4 gap-1.5">
+        <HudSquareButton active={voice.videoEnabled} title={voice.videoEnabled ? 'Desativar câmera' : 'Ativar câmera'} onClick={voice.toggleVideo}>
+          <CameraIcon off={!voice.videoEnabled} className="w-4 h-4" />
+        </HudSquareButton>
+        <HudSquareButton
+          active={voice.screenSharing}
+          title={voice.screenSharing ? 'Parar compartilhamento' : 'Compartilhar tela'}
+          onClick={voice.toggleScreenShare}
+        >
+          <ScreenShareIcon className="w-4 h-4" />
+        </HudSquareButton>
+        <HudSquareButton title="Soundboard" onClick={() => setShowSoundboard(true)}>
+          <GridIcon className="w-4 h-4" />
+        </HudSquareButton>
+        <HudSquareButton
+          active={voice.audioSettings.noiseSuppression}
+          title={voice.audioSettings.noiseSuppression ? 'Desativar redução de ruído' : 'Ativar redução de ruído'}
+          onClick={toggleNoiseSuppression}
+        >
+          <SparkleIcon className="w-4 h-4" />
+        </HudSquareButton>
+      </div>
+
+      {showSoundboard && voice.connectedServerId && (
+        <SoundboardPanel serverId={voice.connectedServerId} onClose={() => setShowSoundboard(false)} />
+      )}
+    </div>
+  )
+}
+
 export function UserPanel() {
   const { profile, signOut, updateStatus } = useAuth()
   const voice = useVoice()
@@ -65,10 +301,10 @@ export function UserPanel() {
   const pingLabel =
     pingMs === null ? 'Medindo sua conexão...' : callRttMs !== null ? `${pingMs}ms de latência na chamada` : `${pingMs}ms até o servidor`
   const [menuOpen, setMenuOpen] = useState(false)
-  const [volumeOpen, setVolumeOpen] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [showSoundboard, setShowSoundboard] = useState(false)
+  const [micMenuOpen, setMicMenuOpen] = useState(false)
+  const [headphoneMenuOpen, setHeadphoneMenuOpen] = useState(false)
 
   if (!profile) return null
 
@@ -87,21 +323,10 @@ export function UserPanel() {
         </span>
       </div>
 
-      {/* Card de "jogando agora" — igual o Discord mostra a atividade em
-          destaque numa faixa própria em vez de espremida junto com o
-          status. Some sozinho quando `profile.playing` volta a null (ver
-          useGamePresence.ts). */}
-      {profile.playing && (
-        <div className="h-10 px-3 flex items-center gap-2 bg-discord-darker/60 border-t border-black/10">
-          <span className="text-base shrink-0">🎮</span>
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-discord-text-muted leading-tight">Jogando</p>
-            <p className="text-xs text-white truncate leading-tight">{profile.playing}</p>
-          </div>
-        </div>
-      )}
+      <PlayingActivityCard />
+      <VoiceHud />
 
-      <div className="relative h-16 bg-discord-darker/60 px-3 flex items-center gap-2 border-t border-black/10">
+      <div className="relative h-16 bg-discord-darker/60 px-3 flex items-center gap-2 border-t border-black/10 mt-2">
       <button
         onClick={() => setMenuOpen((v) => !v)}
         className="flex items-center gap-2.5 flex-1 min-w-0 px-1.5 py-1.5 rounded hover:bg-white/5 transition-colors"
@@ -116,104 +341,142 @@ export function UserPanel() {
         />
         <div className="min-w-0 text-left">
           <p className="text-sm font-medium text-white truncate">{profile.display_name || profile.username}</p>
-          <p className="text-xs text-discord-text-muted truncate">
-            {profile.custom_status || `@${profile.username}`}
-          </p>
+          {voice.connectedChannelId ? (
+            <p className="flex items-center gap-1 text-xs text-discord-green truncate">
+              <BroadcastIcon className="w-3 h-3 shrink-0" />
+              Em voz
+            </p>
+          ) : (
+            <p className="text-xs text-discord-text-muted truncate">{profile.custom_status || `@${profile.username}`}</p>
+          )}
         </div>
       </button>
 
-      {/* Atalho pro soundboard — antes só dava pra abrir de dentro de uma
-          chamada de voz (barra de controles do VoiceChannelView); pedido
-          explícito por um jeito de chegar nos sons do app também por
-          aqui. Só aparece enquanto conectado numa call de verdade (tocar
-          um som transmite pra quem está na call — sem estar em uma, não
-          tem pra quem tocar). */}
-      {voice.connectedChannelId && voice.connectedServerId && (
-        <button
-          title="Soundboard"
-          onClick={() => setShowSoundboard(true)}
-          className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors shrink-0"
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M9 3a1 1 0 0 1 1 1v16a1 1 0 1 1-2 0v-3.09A5.5 5.5 0 0 1 3 11.5 5.5 5.5 0 0 1 8 6.05V4a1 1 0 0 1 1-1zm6 3a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0v-.05A5.5 5.5 0 0 1 9.5 12 5.5 5.5 0 0 1 14 6.55V7a1 1 0 0 1 1-1zm4-2a1 1 0 0 1 1 1v14a1 1 0 1 1-2 0V5a1 1 0 0 1 1-1z" />
-          </svg>
-        </button>
-      )}
-
-      <div className="relative shrink-0">
-        <button
-          title="Volume geral"
-          onClick={() => setVolumeOpen((v) => !v)}
-          className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors"
-        >
-          {voice.masterVolume === 0 ? (
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-              <path d="M3 10v4h4l5 5V5L7 10H3zm12.3-1.7a1 1 0 0 1 1.4 0L18 9.6l1.3-1.3a1 1 0 1 1 1.4 1.4L19.4 11l1.3 1.3a1 1 0 0 1-1.4 1.4L18 12.4l-1.3 1.3a1 1 0 0 1-1.4-1.4l1.3-1.3-1.3-1.3a1 1 0 0 1 0-1.4z" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-              <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8zM15 3.2v2.1c2.9.9 5 3.6 5 6.7s-2.1 5.8-5 6.7v2.1c4-.9 7-4.5 7-8.8s-3-7.9-7-8.8z" />
-            </svg>
-          )}
-        </button>
-        {volumeOpen && (
-          <div className="absolute bottom-full right-0 mb-2 w-40 bg-discord-darker rounded-md shadow-xl border border-black/40 p-3 z-20">
-            <div className="flex items-center justify-between mb-1.5">
-              <p className="text-xs font-bold uppercase text-discord-text-muted">Volume geral</p>
-              <span className="text-xs text-discord-text-muted">{voice.masterVolume}%</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={voice.masterVolume}
-              onChange={(e) => voice.setMasterVolume(Number(e.target.value))}
-              className="w-full accent-discord-blurple"
-            />
-            <p className="text-[10px] text-discord-text-muted mt-1.5">
-              Afeta o volume de todos que você ouve em canais de voz.
-            </p>
+      {/* Mic + seta: clique muta/desmuta na hora; a seta abre um painel
+          com escolha de microfone e um atalho pras configurações — mesma
+          ideia do botão anexado que o Discord usa aqui. */}
+      <div className="relative shrink-0" onMouseLeave={() => setMicMenuOpen(false)}>
+        <div className="flex items-stretch rounded overflow-hidden">
+          <button
+            title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
+            onClick={voice.toggleMute}
+            className={`w-8 h-9 flex items-center justify-center transition-colors ${
+              voice.deafened || voice.muted ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <MicIcon muted={voice.deafened || voice.muted} className="w-5 h-5" />
+          </button>
+          <button
+            title="Configurações de microfone"
+            onClick={() => setMicMenuOpen((v) => !v)}
+            className="w-4 h-9 flex items-center justify-center text-discord-text-muted/70 hover:text-white transition-colors"
+          >
+            <ChevronIcon className="w-3 h-3" />
+          </button>
+        </div>
+        {micMenuOpen && (
+          <div className="absolute bottom-full right-0 mb-2 w-56 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2 z-20">
+            {voice.audioSettings.microphones.length > 0 && (
+              <div className="mb-1.5">
+                <p className="text-[10px] font-bold uppercase text-discord-text-muted px-1 mb-1">Microfone</p>
+                <select
+                  value={voice.audioSettings.micId ?? ''}
+                  onChange={(e) => voice.changeMicrophone(e.target.value)}
+                  className="w-full bg-discord-lighter text-discord-text text-xs rounded px-2 py-1.5 outline-none"
+                >
+                  {voice.audioSettings.microphones.map((m) => (
+                    <option key={m.deviceId} value={m.deviceId}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                setMicMenuOpen(false)
+                setShowSettings(true)
+              }}
+              className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-discord-lighter text-discord-text-muted"
+            >
+              <GearIcon className="w-3.5 h-3.5 shrink-0" />
+              Configurações de voz
+            </button>
           </div>
         )}
       </div>
 
-      {/* Botão de mutar o microfone — antes esse lugar era o atalho pra
-          redutor de ruído, mas junto com o mic da barra de voz
-          (VoiceChannelView) e o que existia na barra "Voz conectada" da
-          sidebar (removido), virava um terceiro controle fazendo a MESMA
-          coisa que o mic principal, só que sem ser um. Confundia mais do
-          que ajudava — aqui do lado do perfil é onde o Discord de
-          verdade coloca o botão de mutar, então virou isso mesmo. O
-          redutor de ruído continua em Configurações → Áudio. Lê/escreve
-          voice.muted/voice.toggleMute, o mesmo estado compartilhado do
-          botão na barra de voz — mutar em um já reflete no outro
-          sozinho, sem nada extra pra sincronizar. */}
-      <button
-        title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
-        onClick={voice.toggleMute}
-        className={`w-9 h-9 flex items-center justify-center rounded transition-colors shrink-0 ${
-          !voice.connectedChannelId ? 'opacity-40' : ''
-        } ${voice.muted ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'}`}
-      >
-        {voice.muted ? (
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-8.6 3.5L18 5A1 1 0 1 0 16.6 3.6L3.6 16.6A1 1 0 1 0 5 18l2-2A7 7 0 0 0 19 11zM12 15a3 3 0 0 0 3-3l-5.7 5.7A3 3 0 0 0 12 15zM9 6a3 3 0 0 1 6 0v3.5l2-2V6a5 5 0 0 0-9.9-1L9 6.6V6z" />
-          </svg>
-        ) : (
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
-          </svg>
+      {/* Headphone + seta: clique liga/desliga "Desativar áudio" (deafen
+          — para de ouvir todo mundo e muta o mic junto); a seta abre o
+          volume geral e a escolha de saída de áudio. */}
+      <div className="relative shrink-0" onMouseLeave={() => setHeadphoneMenuOpen(false)}>
+        <div className="flex items-stretch rounded overflow-hidden">
+          <button
+            title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
+            onClick={voice.toggleDeafen}
+            className={`w-8 h-9 flex items-center justify-center transition-colors ${
+              voice.deafened ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <HeadphoneIcon off={voice.deafened} className="w-5 h-5" />
+          </button>
+          <button
+            title="Configurações de áudio"
+            onClick={() => setHeadphoneMenuOpen((v) => !v)}
+            className="w-4 h-9 flex items-center justify-center text-discord-text-muted/70 hover:text-white transition-colors"
+          >
+            <ChevronIcon className="w-3 h-3" />
+          </button>
+        </div>
+        {headphoneMenuOpen && (
+          <div className="absolute bottom-full right-0 mb-2 w-56 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2 z-20">
+            {voice.audioSettings.supportsOutputSelection && voice.audioSettings.speakers.length > 0 && (
+              <div className="mb-1.5">
+                <p className="text-[10px] font-bold uppercase text-discord-text-muted px-1 mb-1">Saída de áudio</p>
+                <select
+                  value={voice.audioSettings.speakerId ?? ''}
+                  onChange={(e) => voice.audioSettings.setSpeakerId(e.target.value || null)}
+                  className="w-full bg-discord-lighter text-discord-text text-xs rounded px-2 py-1.5 outline-none"
+                >
+                  {voice.audioSettings.speakers.map((s) => (
+                    <option key={s.deviceId} value={s.deviceId}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="mb-1">
+              <p className="text-[10px] text-discord-text-muted px-1 mb-1.5">Volume geral: {voice.masterVolume}%</p>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={voice.masterVolume}
+                onChange={(e) => voice.setMasterVolume(Number(e.target.value))}
+                className="w-full accent-discord-blurple px-1"
+              />
+            </div>
+            <button
+              onClick={() => {
+                setHeadphoneMenuOpen(false)
+                setShowSettings(true)
+              }}
+              className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-discord-lighter text-discord-text-muted"
+            >
+              <GearIcon className="w-3.5 h-3.5 shrink-0" />
+              Configurações de áudio
+            </button>
+          </div>
         )}
-      </button>
+      </div>
 
       <button
         title="Configurações"
         onClick={() => setShowSettings(true)}
         className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors shrink-0"
       >
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-          <path d="M19.4 13a7.4 7.4 0 0 0 .1-1 7.4 7.4 0 0 0-.1-1l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1a.5.5 0 0 0-.6.2L2.6 8.8a.5.5 0 0 0 .1.6l2 1.6a7.4 7.4 0 0 0 0 2l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1c.5.4 1.1.8 1.7 1l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6l-2-1.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" />
-        </svg>
+        <GearIcon className="w-5 h-5" />
       </button>
 
       {menuOpen && (
@@ -258,9 +521,6 @@ export function UserPanel() {
 
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {showSoundboard && voice.connectedServerId && (
-        <SoundboardPanel serverId={voice.connectedServerId} onClose={() => setShowSoundboard(false)} />
-      )}
       </div>
     </div>
   )

@@ -11,7 +11,12 @@ import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sou
 import { SecurityTab } from './SecurityTab'
 import { exportUserData } from '../../lib/exportUserData'
 import { NetworkDiagnosticsPanel } from './NetworkDiagnosticsPanel'
-import { createNoiseSuppressor, type NoiseSuppressor } from '../../lib/noiseSuppression'
+import {
+  createNoiseSuppressor,
+  type NoiseSuppressor,
+  MIN_MIC_SENSITIVITY,
+  MAX_MIC_SENSITIVITY,
+} from '../../lib/noiseSuppression'
 
 type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'notifications' | 'privacy'
 
@@ -383,6 +388,21 @@ function AudioTab() {
   // mesma lógica de VoiceContext.tsx, pra o que a pessoa OUVE/VÊ aqui
   // bater com o que realmente sai na call de verdade.
   const noiseSuppressorTestRef = useRef<NoiseSuppressor | null>(null)
+  // Arrastar o slider de sensibilidade dispara um onChange por PIXEL —
+  // chamar voice.refreshAudioConstraints (que recaptura o microfone e
+  // reconstrói o gráfico do RNNoise) a cada um desses seria pesado
+  // demais numa call em andamento. Espera 400ms sem nenhuma mudança nova
+  // antes de aplicar de verdade na call — a pessoa só ouve/vê o efeito
+  // quando solta o slider (ou para de arrastar por um instante).
+  const sensitivityDebounceRef = useRef<number | null>(null)
+
+  function handleSensitivityChange(value: number) {
+    audio.setMicSensitivity(value)
+    if (sensitivityDebounceRef.current) window.clearTimeout(sensitivityDebounceRef.current)
+    sensitivityDebounceRef.current = window.setTimeout(() => {
+      voice.refreshAudioConstraints({ micSensitivity: value })
+    }, 400)
+  }
 
   // Aplica o RNNoise na track crua, se a redução de ruído estiver ligada
   // — devolve a stream já tratada (ou a crua sem alteração, se estiver
@@ -392,7 +412,7 @@ function AudioTab() {
     try {
       const suppressor = await createNoiseSuppressor()
       noiseSuppressorTestRef.current = suppressor
-      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0])
+      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0], audio.micSensitivity)
       return new MediaStream([processedTrack])
     } catch {
       // segue só com o cancelamento nativo do navegador
@@ -457,9 +477,16 @@ function AudioTab() {
       const source = ctx.createMediaStreamSource(echoStream)
       const delay = ctx.createDelay(1)
       delay.delayTime.value = 0.15
+      // Duplica explicitamente pros dois canais (ver o mesmo truque em
+      // noiseSuppression.ts) — sem isso, o eco às vezes só saía pelo
+      // lado esquerdo do fone quando a captura do microfone é mono
+      // (praticamente sempre é, ver getAudioConstraints).
+      const merger = ctx.createChannelMerger(2)
       const dest = ctx.createMediaStreamDestination()
       source.connect(delay)
-      delay.connect(dest)
+      delay.connect(merger, 0, 0)
+      delay.connect(merger, 0, 1)
+      merger.connect(dest)
 
       if (echoAudioRef.current) {
         echoAudioRef.current.srcObject = dest.stream
@@ -488,6 +515,7 @@ function AudioTab() {
     () => () => {
       stopTest()
       stopEcho()
+      if (sensitivityDebounceRef.current) window.clearTimeout(sensitivityDebounceRef.current)
     },
     []
   )
@@ -506,7 +534,7 @@ function AudioTab() {
     stopTest()
     startTest()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audio.echoCancellation, audio.noiseSuppression, audio.autoGainControl, audio.micId])
+  }, [audio.echoCancellation, audio.noiseSuppression, audio.autoGainControl, audio.micId, audio.micSensitivity])
 
   return (
     <div className="space-y-5">
@@ -609,6 +637,28 @@ function AudioTab() {
                 voice.refreshAudioConstraints({ autoGainControl: checked })
               }}
             />
+          </div>
+          <div className="p-3">
+            <div className="min-w-0 mb-2">
+              <p className="text-sm font-medium text-white">Sensibilidade do microfone</p>
+              <p className="text-xs text-discord-text-muted mt-0.5">
+                Corta o microfone quando o volume está abaixo desse nível — bom pra parar de captar o teclado ou
+                sons baixos da mesa entre uma fala e outra. Mais pra direita = pega até som baixinho; mais pra
+                esquerda = só passa quando você fala mais alto.
+              </p>
+            </div>
+            <input
+              type="range"
+              min={MIN_MIC_SENSITIVITY}
+              max={MAX_MIC_SENSITIVITY}
+              value={audio.micSensitivity}
+              onChange={(e) => handleSensitivityChange(Number(e.target.value))}
+              className="w-full accent-discord-blurple"
+            />
+            <div className="flex justify-between text-[10px] text-discord-text-muted mt-1">
+              <span>Menos sensível</span>
+              <span>Mais sensível</span>
+            </div>
           </div>
         </div>
       </div>

@@ -25,7 +25,13 @@ export function HomeSidebar({
   onSelectGroup: (groupId: string) => void
 }) {
   const { user } = useAuth()
-  const { conversations, loading } = useConversations()
+  const { conversations, loading, hideConversation } = useConversations()
+
+  async function handleDeleteConversation(e: React.MouseEvent, conversationId: string, otherName: string) {
+    e.stopPropagation()
+    if (!confirm(`Apagar a conversa com ${otherName}? Ela some da sua lista — se ${otherName} mandar uma mensagem nova, a conversa volta a aparecer.`)) return
+    await hideConversation(conversationId)
+  }
   const { groups } = useGroupConversations()
   const { pinnedIds, toggle: togglePin } = usePinnedItems()
   const [showCreateGroup, setShowCreateGroup] = useState(false)
@@ -86,6 +92,15 @@ export function HomeSidebar({
                     >
                       <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
                         <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
+                      </svg>
+                    </span>
+                    <span
+                      onClick={(e) => handleDeleteConversation(e, c.id, c.otherProfile.display_name || c.otherProfile.username)}
+                      title="Apagar conversa"
+                      className="opacity-0 group-hover:opacity-100 text-discord-text-muted hover:text-red-400 shrink-0"
+                    >
+                      <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                        <path d="M9 3a1 1 0 0 0-1 1v1H4a1 1 0 1 0 0 2h1v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7h1a1 1 0 1 0 0-2h-4V4a1 1 0 0 0-1-1H9zm1 2h4v1h-4V5zM7 7h10v13H7V7zm2 2v9h2V9H9zm4 0v9h2V9h-2z" />
                       </svg>
                     </span>
                   </button>
@@ -170,6 +185,15 @@ export function HomeSidebar({
                 >
                   <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
                     <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
+                  </svg>
+                </span>
+                <span
+                  onClick={(e) => handleDeleteConversation(e, c.id, c.otherProfile.display_name || c.otherProfile.username)}
+                  title="Apagar conversa"
+                  className="shrink-0 opacity-0 group-hover:opacity-100 text-discord-text-muted hover:text-red-400"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                    <path d="M9 3a1 1 0 0 0-1 1v1H4a1 1 0 1 0 0 2h1v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7h1a1 1 0 1 0 0-2h-4V4a1 1 0 0 0-1-1H9zm1 2h4v1h-4V5zM7 7h10v13H7V7zm2 2v9h2V9H9zm4 0v9h2V9h-2z" />
                   </svg>
                 </span>
                 {unreadConversationIds.has(c.id) && <span className="w-2 h-2 rounded-full bg-white shrink-0" />}

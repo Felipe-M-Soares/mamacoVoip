@@ -21,10 +21,14 @@ export function useConversations() {
     }
     setLoading(true)
 
+    // Só traz conversas que a pessoa NÃO apagou do próprio lado (ver
+    // hideConversation abaixo e 003_social_FIX_dm_delete.sql) — apagar
+    // uma conversa só esconde ela pra quem apagou, então o filtro
+    // precisa considerar de que lado (user_a ou user_b) essa pessoa está.
     const { data: convos } = await supabase
       .from('dm_conversations')
       .select('*')
-      .or(`user_a.eq.${user.id},user_b.eq.${user.id}`)
+      .or(`and(user_a.eq.${user.id},hidden_for_a.eq.false),and(user_b.eq.${user.id},hidden_for_b.eq.false)`)
 
     if (!convos || convos.length === 0) {
       setConversations([])
@@ -102,6 +106,20 @@ export function useConversations() {
         { event: 'INSERT', schema: 'public', table: 'dm_conversations', filter: `user_b=eq.${user.id}` },
         () => refresh()
       )
+      // UPDATE também importa aqui: é assim que uma conversa apagada
+      // "reaparece" quando a outra pessoa manda uma mensagem nova (ver
+      // o gatilho on_dm_message_unhide_conversation) — sem isso, a
+      // pessoa só via a conversa de volta depois de reabrir o app.
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'dm_conversations', filter: `user_a=eq.${user.id}` },
+        () => refresh()
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'dm_conversations', filter: `user_b=eq.${user.id}` },
+        () => refresh()
+      )
       .subscribe((status, err) => {
         if (status !== 'SUBSCRIBED') {
           console.error('[useConversations] Status da inscrição em tempo real:', status, err ?? '')
@@ -118,5 +136,16 @@ export function useConversations() {
     return { error: error?.message ?? null, conversation: data ?? undefined }
   }
 
-  return { conversations, loading, refresh, openConversationWith }
+  // "Apaga" a conversa só da SUA lista (a outra pessoa continua vendo
+  // normalmente) — ver o comentário grande em
+  // 003_social_FIX_dm_delete.sql pro porquê de não ser um delete de
+  // verdade. Se a outra pessoa mandar mensagem de novo depois, a
+  // conversa reaparece sozinha.
+  async function hideConversation(conversationId: string) {
+    const { error } = await supabase.rpc('hide_dm_conversation', { p_conversation_id: conversationId })
+    if (!error) await refresh()
+    return { error: error?.message ?? null }
+  }
+
+  return { conversations, loading, refresh, openConversationWith, hideConversation }
 }

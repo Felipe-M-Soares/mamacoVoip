@@ -76,7 +76,7 @@ export function MemberList({
             >
               {member.profile.display_name || member.profile.username}
             </span>
-            {member.profile.playing && (
+            {member.profile.playing && isEffectivelyOnline(member.profile) && (
               <span className="text-[10px] text-discord-text-muted truncate block">
                 🎮 {member.profile.playing}
               </span>

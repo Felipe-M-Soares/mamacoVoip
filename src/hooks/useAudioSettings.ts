@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { DEFAULT_MIC_SENSITIVITY } from '../lib/noiseSuppression'
 
 export interface AudioDeviceOption {
   deviceId: string
@@ -13,6 +14,11 @@ interface StoredSettings {
   echoCancellation: boolean
   noiseSuppression: boolean
   autoGainControl: boolean
+  // 0-100 — ver MIN/MAX/DEFAULT_MIC_SENSITIVITY em lib/noiseSuppression.ts.
+  // Controla o "gate" de ruído: abaixo desse volume, o microfone é
+  // cortado por completo (resolve o caso de som de teclado/mesa
+  // vazando, que o RNNoise sozinho não filtra bem).
+  micSensitivity: number
 }
 
 const DEFAULTS: StoredSettings = {
@@ -21,6 +27,7 @@ const DEFAULTS: StoredSettings = {
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true,
+  micSensitivity: DEFAULT_MIC_SENSITIVITY,
 }
 
 function loadSettings(): StoredSettings {
@@ -109,6 +116,9 @@ export function useAudioSettings() {
   function setAutoGainControl(v: boolean) {
     persist({ ...settings, autoGainControl: v })
   }
+  function setMicSensitivity(v: number) {
+    persist({ ...settings, micSensitivity: v })
+  }
 
   // `overrides` existe pro caso de ligar/desligar um desses três (eco,
   // ruído, ganho) enquanto já se está numa call: o botão precisa
@@ -162,6 +172,7 @@ export function useAudioSettings() {
     echoCancellation: settings.echoCancellation,
     noiseSuppression: settings.noiseSuppression,
     autoGainControl: settings.autoGainControl,
+    micSensitivity: settings.micSensitivity,
     microphones,
     speakers,
     permissionGranted,
@@ -173,6 +184,7 @@ export function useAudioSettings() {
     setEchoCancellation,
     setNoiseSuppression,
     setAutoGainControl,
+    setMicSensitivity,
     getAudioConstraints,
   }
 }

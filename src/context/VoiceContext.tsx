@@ -108,7 +108,9 @@ interface VoiceContextValue {
   toggleScreenShare: () => Promise<void>
   changeMicrophone: (deviceId: string) => Promise<void>
   refreshAudioConstraints: (
-    overrides?: Partial<Pick<ReturnType<typeof useAudioSettings>, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl'>>
+    overrides?: Partial<
+      Pick<ReturnType<typeof useAudioSettings>, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl' | 'micSensitivity'>
+    >
   ) => Promise<void>
   audioSettings: ReturnType<typeof useAudioSettings>
   screenShareQuality: ReturnType<typeof useScreenShareQuality>
@@ -384,6 +386,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const connectedRef = useRef(false)
   const hasSyncedRef = useRef(false)
   const channelUserLimitRef = useRef(0)
+  // Horário (relativo, só usado pra ORDENAR) em que essa pessoa mandou o
+  // próprio `track()` de presença ao entrar no canal — ver o comentário
+  // grande no handler de 'sync' logo abaixo pra entender por que isso
+  // resolve a corrida de "duas pessoas entram ao mesmo tempo quando só
+  // sobra 1 vaga".
+  const joinedAtRef = useRef(0)
   const realtimeRef = useRef<RealtimeChannel | null>(null)
   const peersRef = useRef<Map<string, PeerState>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -436,31 +444,36 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // suportar AudioWorklet/o WASM falhar ao carregar por algum motivo,
   // devolve a própria track bruta sem processamento extra — a call
   // nunca deve quebrar por causa disso, só perde o reforço.
-  // `noiseSuppressionOverride` existe pelo mesmo motivo do `overrides` em
+  // `overrides` existe pelo mesmo motivo do `overrides` em
   // getAudioConstraints (ver comentário em refreshAudioConstraints logo
   // abaixo): quando essa função é chamada bem na hora de ligar/desligar
-  // o toggle, `audioSettingsRef.current.noiseSuppression` ainda pode
-  // estar com o valor de ANTES do clique (o React ainda não terminou de
-  // atualizar o ref nesse mesmo tick) — sem passar o valor novo
-  // explicitamente, ligar o redutor de ruído no meio de uma call não
-  // fazia efeito nenhum até a próxima troca de microfone.
-  async function applyNoiseSuppression(rawTrack: MediaStreamTrack, noiseSuppressionOverride?: boolean): Promise<MediaStreamTrack> {
+  // o toggle (ou arrastar o slider de sensibilidade), os valores em
+  // `audioSettingsRef.current` ainda podem estar com o valor de ANTES do
+  // clique (o React ainda não terminou de atualizar o ref nesse mesmo
+  // tick) — sem passar o valor novo explicitamente, a mudança no meio de
+  // uma call não fazia efeito nenhum até a próxima troca de microfone.
+  async function applyNoiseSuppression(
+    rawTrack: MediaStreamTrack,
+    overrides?: { noiseSuppression?: boolean; micSensitivity?: number }
+  ): Promise<MediaStreamTrack> {
     const oldRaw = rawMicTrackRef.current
     if (oldRaw && oldRaw !== rawTrack) oldRaw.stop()
     rawMicTrackRef.current = rawTrack
 
-    const noiseSuppressionEnabled = noiseSuppressionOverride ?? audioSettingsRef.current.noiseSuppression
+    const noiseSuppressionEnabled = overrides?.noiseSuppression ?? audioSettingsRef.current.noiseSuppression
     if (!noiseSuppressionEnabled) {
       noiseSuppressorRef.current?.destroy()
       noiseSuppressorRef.current = null
       return rawTrack
     }
 
+    const sensitivity = overrides?.micSensitivity ?? audioSettingsRef.current.micSensitivity
+
     try {
       if (!noiseSuppressorRef.current) {
         noiseSuppressorRef.current = await createNoiseSuppressor()
       }
-      return noiseSuppressorRef.current.setInputTrack(rawTrack)
+      return noiseSuppressorRef.current.setInputTrack(rawTrack, sensitivity)
     } catch (err) {
       console.error('[VoiceContext] Redutor de ruído (RNNoise) indisponível, seguindo sem ele:', err)
       noiseSuppressorRef.current = null
@@ -670,6 +683,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setError(null)
     hasSyncedRef.current = false
     channelUserLimitRef.current = 0
+    joinedAtRef.current = Date.now()
 
     const { data: channelRow } = await supabase.from('channels').select('user_limit').eq('id', channelId).single()
     channelUserLimitRef.current = channelRow?.user_limit ?? 0
@@ -702,17 +716,36 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       })
 
       rt.on('presence', { event: 'sync' }, () => {
-        const state = rt.presenceState()
+        const state = rt.presenceState() as Record<string, Array<{ user_id?: string; joined_at?: number }>>
         const ids = Object.keys(state).filter((id) => id !== user.id)
         const isFirstSync = !hasSyncedRef.current
 
         // Limite de pessoas no canal — só checa na primeira sincronização
         // (a entrada em si), pra não expulsar quem já está dentro se o
         // limite for reduzido depois por um moderador.
-        if (isFirstSync && channelUserLimitRef.current > 0 && ids.length >= channelUserLimitRef.current) {
-          setError('Esse canal de voz já está cheio.')
-          leave()
-          return
+        //
+        // A contagem sozinha (`ids.length >= limite`) tinha uma corrida:
+        // se só sobra 1 vaga e DUAS pessoas clicam "entrar" quase ao
+        // mesmo tempo, as duas podem ver a mesma contagem (ainda sem o
+        // presence uma da outra) e as duas entram, estourando o limite.
+        // Em vez disso, cada cliente ordena TODO MUNDO (incluindo a si
+        // mesmo) pelo horário que cada um mandou seu próprio `track()`
+        // (`joined_at`) — como esse estado de presença é o mesmo pra
+        // todo mundo na sala, todo cliente calcula a MESMA ordem e chega
+        // na MESMA conclusão sobre quem ficou de fora, mesmo sem um
+        // servidor "árbitro" pra decidir.
+        if (isFirstSync && channelUserLimitRef.current > 0) {
+          const everyone = [{ id: user.id, joinedAt: joinedAtRef.current }, ...ids.map((id) => {
+            const entry = state[id]?.[0]
+            return { id, joinedAt: entry?.joined_at ?? 0 }
+          })]
+          everyone.sort((a, b) => a.joinedAt - b.joinedAt || a.id.localeCompare(b.id))
+          const myPosition = everyone.findIndex((e) => e.id === user.id)
+          if (myPosition >= channelUserLimitRef.current) {
+            setError('Esse canal de voz já está cheio.')
+            leave()
+            return
+          }
         }
 
         let hasNewPeer = false
@@ -743,7 +776,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       await new Promise<void>((resolve, reject) => {
         rt.subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
-            await rt.track({ user_id: user.id })
+            await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
             resolve()
           }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -952,7 +985,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // dava a impressão de que o redutor de ruído simplesmente não fazia
   // nada.
   async function refreshAudioConstraints(
-    overrides?: Partial<Pick<ReturnType<typeof useAudioSettings>, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl'>>
+    overrides?: Partial<
+      Pick<ReturnType<typeof useAudioSettings>, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl' | 'micSensitivity'>
+    >
   ) {
     if (!connectedRef.current) return
     try {
@@ -960,7 +995,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         audio: audioSettingsRef.current.getAudioConstraints(undefined, overrides),
       })
       const rawTrack = newStream.getAudioTracks()[0]
-      const newTrack = await applyNoiseSuppression(rawTrack, overrides?.noiseSuppression)
+      const newTrack = await applyNoiseSuppression(rawTrack, {
+        noiseSuppression: overrides?.noiseSuppression,
+        micSensitivity: overrides?.micSensitivity,
+      })
       newTrack.enabled = !muted
 
       const oldTrack = localStreamRef.current?.getAudioTracks()[0]
@@ -1039,8 +1077,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // Usa o preset de qualidade escolhido pela pessoa (Desempenho
           // ou Qualidade máxima) — em vez de um valor fixo, ela decide
           // o equilíbrio entre nitidez e não travar o jogo.
-          width: { ideal: preset.width, max: preset.width },
-          height: { ideal: preset.height, max: preset.height },
+          //
+          // O "max" só entra quando o preset realmente quer um TETO
+          // (Desempenho, de propósito, pra não pesar) — em "Qualidade
+          // máxima" não passamos "max" nenhum, só um "ideal" bem alto,
+          // pra a captura sair na resolução NATIVA da tela da pessoa em
+          // vez de ser reduzida pra um valor fixo (era isso que fazia a
+          // transmissão sair pior que a tela de verdade da pessoa).
+          width: preset.capResolution ? { ideal: preset.width, max: preset.width } : { ideal: preset.width },
+          height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
           frameRate: { ideal: preset.frameRate, max: preset.frameRate },
         },
         // Inclui o áudio do sistema/jogo na transmissão, não só a

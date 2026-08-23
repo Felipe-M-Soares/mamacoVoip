@@ -725,8 +725,8 @@ export function VoiceChannelView({
                 title="Qualidade do compartilhamento de tela"
                 className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none max-w-[160px] truncate"
               >
-                <option value="performance">Desempenho (1080p/30fps)</option>
-                <option value="quality">Qualidade máxima (4K/60fps)</option>
+                <option value="performance">Desempenho (reduz p/ 1080p/30fps)</option>
+                <option value="quality">Qualidade máxima (resolução da sua tela)</option>
               </select>
             )}
 

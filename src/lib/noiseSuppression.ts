@@ -1,7 +1,14 @@
-import { loadRnnoise, RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor'
+import { loadRnnoise, RnnoiseWorkletNode, NoiseGateWorkletNode } from '@sapphi-red/web-noise-suppressor'
 import rnnoiseWorkletPath from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url'
 import rnnoiseWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url'
 import rnnoiseWasmSimdPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url'
+// NÃO importar de '@sapphi-red/web-noise-suppressor/noiseGateWorklet.js?url'
+// aqui — esse arquivo, dentro do pacote, tem o MESMO nome
+// ("workletProcessor.js") que o do RNNoise (em subpastas diferentes), e
+// o Vite estava confundindo os dois no build, fazendo o worklet do gate
+// carregar o código errado (o do RNNoise) e quebrar. Ver o comentário
+// grande em vendor/noiseGateWorkletProcessor.js.
+import noiseGateWorkletPath from './vendor/noiseGateWorkletProcessor.js?url'
 
 // RNNoise (biblioteca da Xiph/Mozilla — mesma família usada dentro do
 // Firefox) é uma rede neural pequena, treinada especificamente pra
@@ -14,6 +21,14 @@ import rnnoiseWasmSimdPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.w
 // Isso é usado COMO REFORÇO, além das constraints nativas do
 // getUserMedia (echoCancellation/noiseSuppression/autoGainControl
 // continuam ativas) — não no lugar delas.
+//
+// Depois do RNNoise, passa por um "gate" (porteiro) de ruído: uma
+// segunda etapa, bem mais simples, que corta o áudio de vez quando o
+// volume fica abaixo de um limite (a "sensibilidade" configurável pela
+// pessoa). O RNNoise sozinho reduz ruído CONTÍNUO (chiado, zumbido,
+// ventoinha) mas não é bom com sons de impacto (tecla de teclado, mesa
+// batendo) — o gate resolve exatamente esse caso: se não tem volume de
+// voz suficiente, corta tudo.
 
 // O binário WASM (só os bytes, baixados uma vez via fetch) é seguro de
 // compartilhar entre vários AudioContext diferentes — por isso fica
@@ -27,16 +42,38 @@ function getWasmBinary(): Promise<ArrayBuffer> {
   return wasmBinaryPromise
 }
 
+// Sensibilidade do microfone: 0 (menos sensível — só sons bem altos
+// "abrem" o microfone) a 100 (mais sensível — quase tudo passa, gate
+// praticamente nunca fecha). Convertida pra um limiar em dBFS, a escala
+// que o gate realmente entende.
+export const MIN_MIC_SENSITIVITY = 0
+export const MAX_MIC_SENSITIVITY = 100
+export const DEFAULT_MIC_SENSITIVITY = 50
+
+const SENSITIVITY_MIN_DB = -80 // sensibilidade 100 — gate quase sempre aberto
+const SENSITIVITY_MAX_DB = -20 // sensibilidade 0 — só som bem alto abre
+
+export function sensitivityToOpenThresholdDb(sensitivity: number): number {
+  const clamped = Math.max(MIN_MIC_SENSITIVITY, Math.min(MAX_MIC_SENSITIVITY, sensitivity))
+  const t = clamped / 100
+  return SENSITIVITY_MAX_DB + t * (SENSITIVITY_MIN_DB - SENSITIVITY_MAX_DB)
+}
+
 export interface NoiseSuppressor {
   // Troca qual track BRUTA (do microfone, sem processamento) está sendo
   // filtrada agora — chame de novo sempre que o microfone mudar (troca
-  // de dispositivo, reconexão). Devolve uma track NOVA, já tratada, pra
-  // usar no lugar da bruta em todo o resto do app (medidor de nível,
-  // envio pros outros participantes da call, etc.). A track bruta
-  // continua sendo dona do dispositivo físico — quem chama ainda precisa
-  // parar ela manualmente quando não for mais usar (essa função só
-  // conecta um nó de processamento nela, não assume posse).
-  setInputTrack: (rawTrack: MediaStreamTrack) => MediaStreamTrack
+  // de dispositivo, reconexão) OU a sensibilidade mudar. Devolve uma
+  // track NOVA, já tratada, pra usar no lugar da bruta em todo o resto
+  // do app (medidor de nível, envio pros outros participantes da call,
+  // etc.). A track bruta continua sendo dona do dispositivo físico —
+  // quem chama ainda precisa parar ela manualmente quando não for mais
+  // usar (essa função só conecta um nó de processamento nela, não
+  // assume posse).
+  //
+  // `sensitivity` é 0-100 (ver MIN/MAX/DEFAULT_MIC_SENSITIVITY acima).
+  // `null` desliga o gate por completo (só RNNoise, sem cortar nada por
+  // volume).
+  setInputTrack: (rawTrack: MediaStreamTrack, sensitivity?: number | null) => MediaStreamTrack
   // Libera tudo (nós de áudio + o AudioContext dedicado). Chame ao sair
   // da call ou quando a pessoa desativar a redução de ruído.
   destroy: () => void
@@ -56,14 +93,17 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
   // de menos.
   const audioContext = new AudioContext({ sampleRate: 48000 })
   const wasmBinary = await getWasmBinary()
-  // O módulo do worklet precisa ser registrado em CADA AudioContext
-  // (não é compartilhado entre contextos diferentes) — como esse
-  // contexto acabou de ser criado agora mesmo, isso só roda uma vez por
-  // chamada de createNoiseSuppressor.
+  // Os módulos dos worklets precisam ser registrados em CADA
+  // AudioContext (não são compartilhados entre contextos diferentes) —
+  // como esse contexto acabou de ser criado agora mesmo, isso só roda
+  // uma vez por chamada de createNoiseSuppressor.
   await audioContext.audioWorklet.addModule(rnnoiseWorkletPath)
+  await audioContext.audioWorklet.addModule(noiseGateWorkletPath)
 
   let source: MediaStreamAudioSourceNode | null = null
-  let node: RnnoiseWorkletNode | null = null
+  let rnnoiseNode: RnnoiseWorkletNode | null = null
+  let gateNode: NoiseGateWorkletNode | null = null
+  let merger: ChannelMergerNode | null = null
 
   function teardownGraph() {
     try {
@@ -72,22 +112,66 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
       // já desconectado — sem problema
     }
     try {
-      node?.disconnect()
-      node?.destroy()
+      rnnoiseNode?.disconnect()
+      rnnoiseNode?.destroy()
     } catch {
       // já destruído — sem problema
     }
+    try {
+      gateNode?.disconnect()
+    } catch {
+      // já desconectado — sem problema (NoiseGateWorkletNode não tem destroy() próprio)
+    }
+    try {
+      merger?.disconnect()
+    } catch {
+      // já desconectado — sem problema
+    }
     source = null
-    node = null
+    rnnoiseNode = null
+    gateNode = null
+    merger = null
   }
 
-  function setInputTrack(rawTrack: MediaStreamTrack): MediaStreamTrack {
+  function setInputTrack(rawTrack: MediaStreamTrack, sensitivity: number | null = DEFAULT_MIC_SENSITIVITY): MediaStreamTrack {
     teardownGraph()
     source = audioContext.createMediaStreamSource(new MediaStream([rawTrack]))
-    node = new RnnoiseWorkletNode(audioContext, { wasmBinary, maxChannels: 1 })
+    // Força o sinal que entra no RNNoise a ser mono de verdade,
+    // independente de quantos canais o hardware do microfone realmente
+    // capturou — o RNNoise só processa 1 canal (maxChannels: 1 abaixo),
+    // e alimentar ele com uma fonte que o navegador ainda considera
+    // "estéreo" gerava processamento inconsistente.
+    source.channelCount = 1
+    source.channelCountMode = 'explicit'
+    source.channelInterpretation = 'speakers'
+
+    rnnoiseNode = new RnnoiseWorkletNode(audioContext, { wasmBinary, maxChannels: 1 })
+    source.connect(rnnoiseNode)
+
+    let tail: AudioNode = rnnoiseNode
+    if (sensitivity !== null) {
+      const openThreshold = sensitivityToOpenThresholdDb(sensitivity)
+      gateNode = new NoiseGateWorkletNode(audioContext, {
+        openThreshold,
+        closeThreshold: openThreshold - 6, // um pouco mais baixo que o de abrir, pra não "tremer" (flutuar) perto do limiar
+        holdMs: 200, // segura o gate aberto por 200ms depois que o volume cai, pra não cortar o fim de cada palavra
+        maxChannels: 1,
+      })
+      tail.connect(gateNode)
+      tail = gateNode
+    }
+
+    // Duplica o canal mono explicitamente pros dois lados (esquerdo e
+    // direito) via um ChannelMergerNode, em vez de confiar no upmix
+    // automático do navegador — em alguns casos o Chromium tocava uma
+    // MediaStream de 1 canal só no alto-falante ESQUERDO em vez de nos
+    // dois, e essa duplicação manual evita esse problema de vez.
+    merger = audioContext.createChannelMerger(2)
+    tail.connect(merger, 0, 0)
+    tail.connect(merger, 0, 1)
+
     const destination = audioContext.createMediaStreamDestination()
-    source.connect(node)
-    node.connect(destination)
+    merger.connect(destination)
     return destination.stream.getAudioTracks()[0]
   }
 

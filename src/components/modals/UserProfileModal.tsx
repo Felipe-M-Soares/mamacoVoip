@@ -4,6 +4,7 @@ import { Avatar } from '../ui/Avatar'
 import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../context/FriendsContext'
 import { useConversations } from '../../hooks/useConversations'
+import { useIsPresent } from '../../hooks/usePresence'
 import { getUserNote, setUserNote } from '../../lib/pinnedItems'
 import type { Profile } from '../../types/database'
 
@@ -23,6 +24,12 @@ export function UserProfileModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // "Jogando X" fica desatualizado assim que a pessoa fecha o app (o
+  // campo playing no perfil só é limpo na próxima vez que ela abrir um
+  // jogo, não quando ela sai) — por isso só mostra enquanto ela está
+  // efetivamente online agora (o mesmo critério usado em MemberList.tsx).
+  const isPresent = useIsPresent(targetProfile.id)
+  const isEffectivelyOnline = targetProfile.status !== 'offline' && isPresent
   const isSelf = targetProfile.id === user?.id
   const friendship = friends.find((f) => f.profile.id === targetProfile.id)
   const incomingRequest = incoming.find((f) => f.profile.id === targetProfile.id)
@@ -74,7 +81,7 @@ export function UserProfileModal({
           </p>
         ) : (
           <>
-            {targetProfile.playing && (
+            {targetProfile.playing && isEffectivelyOnline && (
               <p className="text-sm text-discord-text-muted mt-2">🎮 Jogando {targetProfile.playing}</p>
             )}
             {targetProfile.custom_status && (

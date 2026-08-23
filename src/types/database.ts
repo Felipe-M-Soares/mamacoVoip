@@ -231,6 +231,8 @@ export type DMConversation = {
   user_a: string
   user_b: string
   created_at: string
+  hidden_for_a: boolean
+  hidden_for_b: boolean
 }
 
 export type GroupConversation = {
@@ -523,6 +525,10 @@ export type Database = {
       get_or_create_dm: {
         Args: { p_other_user_id: string }
         Returns: DMConversation
+      }
+      hide_dm_conversation: {
+        Args: { p_conversation_id: string }
+        Returns: void
       }
       create_role: {
         Args: { p_server_id: string; p_name: string; p_color: string; p_permissions: string[] }

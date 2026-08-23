@@ -9,7 +9,13 @@ interface ChannelsContextValue {
   loading: boolean
   loadError: string | null
   refresh: () => Promise<void>
-  createChannel: (name: string, type: ChannelType, categoryId: string | null, isStage?: boolean) => Promise<{ error: string | null }>
+  createChannel: (
+    name: string,
+    type: ChannelType,
+    categoryId: string | null,
+    isStage?: boolean,
+    userLimit?: number
+  ) => Promise<{ error: string | null }>
   updateChannel: (channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean; user_limit?: number; is_restricted?: boolean }) => Promise<{ error: string | null }>
   deleteChannel: (channelId: string) => Promise<{ error: string | null }>
   createCategory: (name: string) => Promise<{ error: string | null }>
@@ -74,12 +80,12 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   // try/catch garante que quem chamou SEMPRE recebe uma mensagem de
   // erro de volta em vez de uma exceção não tratada — que no modal de
   // criar canal virava "sem erro, mas o canal nunca aparece".
-  async function createChannel(name: string, type: ChannelType, categoryId: string | null, isStage = false) {
+  async function createChannel(name: string, type: ChannelType, categoryId: string | null, isStage = false, userLimit = 0) {
     try {
       const position = channels.filter((c) => c.category_id === categoryId).length
       const { error } = await supabase
         .from('channels')
-        .insert({ server_id: serverId, name, type, category_id: categoryId, position, is_stage: isStage })
+        .insert({ server_id: serverId, name, type, category_id: categoryId, position, is_stage: isStage, user_limit: userLimit })
       if (error) return { error: describeError(error, 'Não foi possível criar o canal.') }
       await refresh()
       return { error: null }

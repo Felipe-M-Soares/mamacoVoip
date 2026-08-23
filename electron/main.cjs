@@ -501,7 +501,11 @@ app.whenReady().then(() => {
   // permissão fora dessa lista (geolocalização, sensores, etc.) é
   // negada por padrão, mesmo que algum código tente pedir.
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    const allowed = ['media', 'display-capture', 'notifications']
+    // "fullscreen" precisa estar aqui pro botão de tela cheia da
+    // transmissão funcionar — sem ela, o navegador nega o pedido de
+    // element.requestFullscreen() em silêncio (sem erro nenhum no
+    // console), e o botão simplesmente não fazia nada.
+    const allowed = ['media', 'display-capture', 'notifications', 'fullscreen']
     callback(allowed.includes(permission))
   })
 
@@ -539,6 +543,14 @@ app.whenReady().then(() => {
     } catch {
       callback({})
     }
+  }, {
+    // No Mac, isso troca nosso seletor customizado (a lista com
+    // miniaturas acima) pelo seletor NATIVO do próprio macOS — a mesma
+    // janela do sistema que aparece em apps como o Zoom/Teams. No
+    // Windows essa opção ainda não existe na versão do Electron usada
+    // aqui (é exclusiva do Mac por enquanto), então lá continua usando
+    // o seletor customizado normalmente — não atrapalha em nada.
+    useSystemPicker: true,
   })
 
   ipcMain.handle('screen-share:select', async (_event, sourceId) => {

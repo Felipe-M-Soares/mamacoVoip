@@ -10,6 +10,13 @@ export interface QualityPreset {
   frameRate: number
   maxBitrate: number
   degradationPreference: 'maintain-framerate' | 'maintain-resolution'
+  // Se `true`, `width`/`height` são um TETO de verdade (constraint
+  // "max" no getDisplayMedia) — a tela é reduzida pra caber nesse
+  // limite mesmo que a resolução nativa seja maior. Se `false`,
+  // `width`/`height` são só um teto bem folgado (maior que qualquer
+  // monitor real hoje em dia) pra deixar a captura sair na resolução
+  // NATIVA da tela da pessoa, sem reduzir nada.
+  capResolution: boolean
   label: string
   description: string
 }
@@ -21,17 +28,22 @@ export const QUALITY_PRESETS: Record<ScreenShareQuality, QualityPreset> = {
     frameRate: 30,
     maxBitrate: 4_000_000,
     degradationPreference: 'maintain-framerate',
+    capResolution: true,
     label: 'Desempenho (1080p/30fps)',
     description: 'Mais leve pra rodar junto com o jogo — recomendado se notar travamentos.',
   },
   quality: {
-    width: 3840,
-    height: 2160,
+    // Bem acima de qualquer monitor comum (inclusive 4K/8K) — na
+    // prática funciona como "sem limite", então a captura sai na
+    // resolução NATIVA da tela da pessoa em vez de ser reduzida.
+    width: 7680,
+    height: 4320,
     frameRate: 60,
     maxBitrate: 20_000_000,
     degradationPreference: 'maintain-resolution',
-    label: 'Qualidade máxima (4K/60fps)',
-    description: 'Imagem mais nítida e fluida — exige mais do seu PC e da internet de quem assiste.',
+    capResolution: false,
+    label: 'Qualidade máxima (resolução nativa da sua tela, até 60fps)',
+    description: 'Transmite do mesmo jeito que sua tela está — exige mais do seu PC e da internet de quem assiste.',
   },
 }
 

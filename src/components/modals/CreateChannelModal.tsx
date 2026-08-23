@@ -16,6 +16,7 @@ export function CreateChannelModal({
   const [name, setName] = useState('')
   const [type, setType] = useState<ChannelType>('text')
   const [isStage, setIsStage] = useState(false)
+  const [userLimit, setUserLimit] = useState(0)
   const [categoryId, setCategoryId] = useState<string>(defaultCategoryId ?? '')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -28,7 +29,7 @@ export function CreateChannelModal({
       return
     }
     setLoading(true)
-    const { error } = await createChannel(cleanName, type, categoryId || null, type === 'voice' && isStage)
+    const { error } = await createChannel(cleanName, type, categoryId || null, type === 'voice' && isStage, type === 'voice' ? userLimit : 0)
     setLoading(false)
     if (error) {
       setError(error)
@@ -107,6 +108,26 @@ export function CreateChannelModal({
               falar, o resto só escuta (bom pra anúncios, palestras, eventos)
             </span>
           </label>
+        )}
+
+        {type === 'voice' && (
+          <div>
+            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+              Limite de pessoas
+            </label>
+            <select
+              value={userLimit}
+              onChange={(e) => setUserLimit(Number(e.target.value))}
+              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+            >
+              <option value={0}>Sem limite</option>
+              {[2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 50].map((n) => (
+                <option key={n} value={n}>
+                  {n} pessoas
+                </option>
+              ))}
+            </select>
+          </div>
         )}
 
         {categories.length > 0 && (

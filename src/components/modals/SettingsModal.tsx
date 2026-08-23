@@ -29,9 +29,9 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'privacy', label: 'Privacidade' },
 ]
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+export function SettingsModal({ onClose, initialTab }: { onClose: () => void; initialTab?: Tab }) {
   const { user, signOut } = useAuth()
-  const [tab, setTab] = useState<Tab>('account')
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'account')
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {

@@ -235,7 +235,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
         <div className="space-y-3">
           <button
             onClick={() => bannerInputRef.current?.click()}
-            className="w-full h-28 rounded-lg overflow-hidden border-2 border-dashed border-discord-text-muted hover:border-discord-blurple transition-colors relative group"
+            className="w-full h-40 rounded-lg overflow-hidden border-2 border-dashed border-discord-text-muted hover:border-discord-blurple transition-colors relative group"
             style={!bannerPreview ? { background: gradientFor(profile.username) } : undefined}
           >
             {bannerPreview && (

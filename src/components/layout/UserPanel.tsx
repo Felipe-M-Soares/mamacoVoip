@@ -5,6 +5,7 @@ import { useConnectionPing } from '../../hooks/useConnectionPing'
 import { Avatar } from '../ui/Avatar'
 import { EditProfileModal } from '../modals/EditProfileModal'
 import { SettingsModal } from '../modals/SettingsModal'
+import { SoundboardPanel } from '../ui/SoundboardPanel'
 import type { ProfileStatus } from '../../types/database'
 
 const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
@@ -16,13 +17,10 @@ const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
 
 // Ícone de barrinhas de sinal (tipo wifi/celular) — mesmos limiares de
 // cor de antes (verde <100ms, amarelo <250ms, vermelho acima disso).
-// Antes ocupava um botão de 32x32 inteiro na barra de baixo, junto com
-// volume/mutar/configurações — deixava tudo espremido (era exatamente o
-// "apertado sem espaço" reclamado). Agora vira um selo bem pequeno colado
-// no nome do usuário — só aparece durante uma call (é o único momento em
-// que o número realmente importa), do jeito que o próprio Discord mostra
-// a qualidade da conexão perto do nome, sem tomar um espaço de botão.
-function WifiSignalIcon({ pingMs, isCallRtt }: { pingMs: number | null; isCallRtt: boolean }) {
+// Volta a ficar numa FAIXA PRÓPRIA acima do painel principal (pedido
+// explícito: "o ping tem que ser acima") em vez de espremida ao lado do
+// nome — com texto "Xms" do lado, não só as barrinhas sozinhas.
+function WifiSignalIcon({ pingMs, size = 12 }: { pingMs: number | null; size?: number }) {
   const tier = pingMs === null ? 'none' : pingMs < 100 ? 'good' : pingMs < 250 ? 'ok' : 'bad'
   const color =
     tier === 'good'
@@ -32,24 +30,16 @@ function WifiSignalIcon({ pingMs, isCallRtt }: { pingMs: number | null; isCallRt
         : tier === 'bad'
           ? 'text-red-500'
           : 'text-discord-text-muted/40'
-  // Quantas barrinhas acendem, de baixo pra cima — 3 = ótima conexão, 1 = ruim.
   const litBars = tier === 'good' ? 3 : tier === 'ok' ? 2 : tier === 'bad' ? 1 : 0
-
-  // Enquanto conectado numa call, mostra a latência REAL da chamada
-  // (ida-e-volta até quem está falando com você, medida pela própria
-  // conexão WebRTC) em vez da latência até o banco de dados — é essa
-  // primeira que afeta o atraso da voz de verdade. Fora de uma call,
-  // não tem esse número ainda, então volta a mostrar a latência até o
-  // servidor só como um indicador geral de "sua internet está ok".
-  const label = pingMs === null ? 'Medindo sua conexão...' : isCallRtt ? `${pingMs}ms de latência na chamada` : `${pingMs}ms até o servidor`
+  const unit = size / 3
 
   return (
-    <span title={label} className={`inline-flex items-end justify-center gap-[1.5px] shrink-0 ${color}`}>
+    <span className={`inline-flex items-end justify-center gap-[2px] shrink-0 ${color}`}>
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className={`w-[3px] rounded-sm bg-current ${i < litBars ? '' : 'opacity-25'}`}
-          style={{ height: 3 + i * 3 }}
+          className={`rounded-sm bg-current ${i < litBars ? '' : 'opacity-25'}`}
+          style={{ width: Math.max(2, unit * 0.4), height: unit + i * unit }}
         />
       ))}
     </span>
@@ -72,21 +62,37 @@ export function UserPanel() {
       ? Math.round(callRttValues.reduce((a, b) => a + b, 0) / callRttValues.length)
       : null
   const pingMs = callRttMs ?? apiPingMs
+  const pingLabel =
+    pingMs === null ? 'Medindo sua conexão...' : callRttMs !== null ? `${pingMs}ms de latência na chamada` : `${pingMs}ms até o servidor`
   const [menuOpen, setMenuOpen] = useState(false)
   const [volumeOpen, setVolumeOpen] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showSoundboard, setShowSoundboard] = useState(false)
 
   if (!profile) return null
 
   return (
     <div className="shrink-0">
-      {/* Card de "jogando agora" acima do painel do usuário — igual o
-          Discord mostra a atividade em destaque numa faixa própria em
-          vez de espremida junto com o status. Some sozinho quando
-          `profile.playing` volta a null (ver useGamePresence.ts). */}
+      {/* Faixa de ping — ACIMA do painel principal (pedido explícito),
+          igual uma barra de status permanente. Sempre visível, não só
+          durante uma call, pra sempre dar uma noção de conexão. */}
+      <div
+        title={pingLabel}
+        className="h-6 px-3 flex items-center gap-1.5 bg-discord-darker/40 border-t border-black/10"
+      >
+        <WifiSignalIcon pingMs={pingMs} size={12} />
+        <span className="text-[10px] text-discord-text-muted truncate">
+          {pingMs === null ? 'Medindo conexão...' : `${pingMs}ms`}
+        </span>
+      </div>
+
+      {/* Card de "jogando agora" — igual o Discord mostra a atividade em
+          destaque numa faixa própria em vez de espremida junto com o
+          status. Some sozinho quando `profile.playing` volta a null (ver
+          useGamePresence.ts). */}
       {profile.playing && (
-        <div className="h-10 px-3 flex items-center gap-2 bg-discord-darker/60 border-t border-black/20">
+        <div className="h-10 px-3 flex items-center gap-2 bg-discord-darker/60 border-t border-black/10">
           <span className="text-base shrink-0">🎮</span>
           <div className="min-w-0">
             <p className="text-[11px] font-semibold text-discord-text-muted leading-tight">Jogando</p>
@@ -94,10 +100,11 @@ export function UserPanel() {
           </div>
         </div>
       )}
-      <div className="relative h-[52px] bg-discord-darker/60 px-2.5 flex items-center gap-1.5">
+
+      <div className="relative h-16 bg-discord-darker/60 px-3 flex items-center gap-2 border-t border-black/10">
       <button
         onClick={() => setMenuOpen((v) => !v)}
-        className="flex items-center gap-2 flex-1 min-w-0 px-1 py-1 rounded hover:bg-white/5 transition-colors"
+        className="flex items-center gap-2.5 flex-1 min-w-0 px-1.5 py-1.5 rounded hover:bg-white/5 transition-colors"
       >
         <Avatar
           name={profile.username}
@@ -105,24 +112,39 @@ export function UserPanel() {
           decorationUrl={profile.avatar_decoration_url}
           status={profile.status}
           userId={profile.id}
-          size={32}
+          size={36}
         />
         <div className="min-w-0 text-left">
-          <p className="text-sm font-medium text-white truncate flex items-center gap-1.5">
-            <span className="truncate">{profile.display_name || profile.username}</span>
-            {voice.connectedChannelId && <WifiSignalIcon pingMs={pingMs} isCallRtt={callRttMs !== null} />}
-          </p>
+          <p className="text-sm font-medium text-white truncate">{profile.display_name || profile.username}</p>
           <p className="text-xs text-discord-text-muted truncate">
             {profile.custom_status || `@${profile.username}`}
           </p>
         </div>
       </button>
 
+      {/* Atalho pro soundboard — antes só dava pra abrir de dentro de uma
+          chamada de voz (barra de controles do VoiceChannelView); pedido
+          explícito por um jeito de chegar nos sons do app também por
+          aqui. Só aparece enquanto conectado numa call de verdade (tocar
+          um som transmite pra quem está na call — sem estar em uma, não
+          tem pra quem tocar). */}
+      {voice.connectedChannelId && voice.connectedServerId && (
+        <button
+          title="Soundboard"
+          onClick={() => setShowSoundboard(true)}
+          className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors shrink-0"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M9 3a1 1 0 0 1 1 1v16a1 1 0 1 1-2 0v-3.09A5.5 5.5 0 0 1 3 11.5 5.5 5.5 0 0 1 8 6.05V4a1 1 0 0 1 1-1zm6 3a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0v-.05A5.5 5.5 0 0 1 9.5 12 5.5 5.5 0 0 1 14 6.55V7a1 1 0 0 1 1-1zm4-2a1 1 0 0 1 1 1v14a1 1 0 1 1-2 0V5a1 1 0 0 1 1-1z" />
+          </svg>
+        </button>
+      )}
+
       <div className="relative shrink-0">
         <button
           title="Volume geral"
           onClick={() => setVolumeOpen((v) => !v)}
-          className="w-8 h-8 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors"
         >
           {voice.masterVolume === 0 ? (
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -169,7 +191,7 @@ export function UserPanel() {
       <button
         title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
         onClick={voice.toggleMute}
-        className={`w-8 h-8 flex items-center justify-center rounded transition-colors shrink-0 ${
+        className={`w-9 h-9 flex items-center justify-center rounded transition-colors shrink-0 ${
           !voice.connectedChannelId ? 'opacity-40' : ''
         } ${voice.muted ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'}`}
       >
@@ -187,7 +209,7 @@ export function UserPanel() {
       <button
         title="Configurações"
         onClick={() => setShowSettings(true)}
-        className="w-8 h-8 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors shrink-0"
+        className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors shrink-0"
       >
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
           <path d="M19.4 13a7.4 7.4 0 0 0 .1-1 7.4 7.4 0 0 0-.1-1l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1a.5.5 0 0 0-.6.2L2.6 8.8a.5.5 0 0 0 .1.6l2 1.6a7.4 7.4 0 0 0 0 2l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1c.5.4 1.1.8 1.7 1l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6l-2-1.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" />
@@ -236,6 +258,9 @@ export function UserPanel() {
 
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showSoundboard && voice.connectedServerId && (
+        <SoundboardPanel serverId={voice.connectedServerId} onClose={() => setShowSoundboard(false)} />
+      )}
       </div>
     </div>
   )

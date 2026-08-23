@@ -7,7 +7,11 @@ interface ServersContextValue {
   servers: Server[]
   loading: boolean
   refresh: () => Promise<void>
-  createServer: (name: string, iconFile?: File | null) => Promise<{ error: string | null; server?: Server }>
+  createServer: (
+    name: string,
+    iconFile?: File | null,
+    description?: string | null
+  ) => Promise<{ error: string | null; server?: Server }>
   updateServer: (
     serverId: string,
     updates: {
@@ -77,12 +81,16 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     refresh()
   }, [refresh])
 
-  async function createServer(name: string, iconFile?: File | null): Promise<{ error: string | null; server?: Server }> {
+  async function createServer(
+    name: string,
+    iconFile?: File | null,
+    description?: string | null
+  ): Promise<{ error: string | null; server?: Server }> {
     if (!user) return { error: 'Não autenticado' }
 
     const { data: server, error } = await supabase
       .from('servers')
-      .insert({ name, owner_id: user.id })
+      .insert({ name, owner_id: user.id, ...(description ? { description } : {}) })
       .select()
       .single()
 

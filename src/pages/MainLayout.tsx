@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ServerBar } from '../components/layout/ServerBar'
 import { ChannelSidebar } from '../components/layout/ChannelSidebar'
@@ -18,6 +18,7 @@ import { ServersProvider } from '../context/ServersContext'
 import { ChannelsProvider } from '../context/ChannelsContext'
 import { VoiceProvider } from '../context/VoiceContext'
 import { useAuth } from '../hooks/useAuth'
+import { useVoice } from '../hooks/useVoice'
 import { useServers } from '../hooks/useServers'
 import { useChannels } from '../hooks/useChannels'
 import { useConversations } from '../hooks/useConversations'
@@ -164,12 +165,21 @@ function ActiveServerContent({
 function MainLayoutInner() {
   useGamePresence()
   const { profile: ownProfile } = useAuth()
+  const voice = useVoice()
   const { servers, loading: loadingServers } = useServers()
   const location = useLocation()
   const navigate = useNavigate()
   const [activeServer, setActiveServer] = useState<Server | null>(null)
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null)
   const [pendingChannelId, setPendingChannelId] = useState<string | null>(null)
+  // Marca "assim que o canal-alvo do convite for selecionado, entra na
+  // call sozinho" — só quando o convite trouxe um canal (ver
+  // InviteMessageCard.tsx/InviteRedirect.tsx). Ref (não state) porque é
+  // só um flag de "ainda não consumido", não precisa re-renderizar nada
+  // sozinho, e não pode disparar de novo depois de usado uma vez (por
+  // isso não reaproveita pendingChannelId, que fica setado no state
+  // "pra sempre" depois de um convite).
+  const pendingAutoJoinVoiceRef = useRef(false)
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -196,16 +206,36 @@ function MainLayoutInner() {
   // state da navegação — a gente seleciona automaticamente assim que a
   // lista de servidores carregar esse novo servidor.
   useEffect(() => {
-    const state = location.state as { joinedServerId?: string; joinedChannelId?: string | null } | null
+    const state = location.state as
+      | { joinedServerId?: string; joinedChannelId?: string | null; autoJoinVoice?: boolean }
+      | null
     if (!state?.joinedServerId || loadingServers) return
     const server = servers.find((s) => s.id === state.joinedServerId)
     if (!server) return
 
     setActiveServer(server)
     setPendingChannelId(state.joinedChannelId ?? null)
+    pendingAutoJoinVoiceRef.current = Boolean(state.autoJoinVoice && state.joinedChannelId)
     navigate(location.pathname, { replace: true, state: null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, servers, loadingServers])
+
+  // Assim que o canal-alvo do convite (pendingChannelId) vira de fato o
+  // canal ativo — o que acontece em ActiveServerBody, mais abaixo, ao
+  // carregar a lista de canais do servidor — entra na call sozinho, SE
+  // for mesmo um canal de voz (convite de canal de TEXTO só navega até
+  // lá, nunca tenta conectar nada — daí o `activeChannel.type ===
+  // 'voice'`). Dispara só uma vez por convite: a ref vira `false` assim
+  // que usada, então trocar de canal manualmente depois não entra em
+  // call de novo sozinho.
+  useEffect(() => {
+    if (!pendingAutoJoinVoiceRef.current) return
+    if (!activeChannel || !activeServer) return
+    if (activeChannel.id !== pendingChannelId || activeChannel.type !== 'voice') return
+    pendingAutoJoinVoiceRef.current = false
+    voice.join(activeChannel.id, activeServer.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChannel?.id])
 
   // estado da "home" (quando nenhum servidor está selecionado)
   const [homeView, setHomeView] = useState<'friends' | 'conversation' | 'group'>('friends')

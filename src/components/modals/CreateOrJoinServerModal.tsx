@@ -2,14 +2,18 @@ import { useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { useServers } from '../../hooks/useServers'
 
+const ICON_MAX_BYTES = 5 * 1024 * 1024 // precisa bater com o file_size_limit do bucket 'server-icons'
+
 export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
   const { createServer, joinServerByInvite } = useServers()
   const [tab, setTab] = useState<'create' | 'join'>('create')
 
   // criar servidor
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [iconFile, setIconFile] = useState<File | null>(null)
   const [iconPreview, setIconPreview] = useState<string | null>(null)
+  const [iconError, setIconError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // entrar por convite
@@ -21,6 +25,11 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
   function handleIconChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    if (file.size > ICON_MAX_BYTES) {
+      setIconError('Imagem muito grande — o máximo é 5MB.')
+      return
+    }
+    setIconError(null)
     setIconFile(file)
     setIconPreview(URL.createObjectURL(file))
   }
@@ -32,7 +41,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
       return
     }
     setLoading(true)
-    const { error } = await createServer(name.trim(), iconFile)
+    const { error } = await createServer(name.trim(), iconFile, description.trim() || null)
     setLoading(false)
     if (error) {
       setError(error)
@@ -61,8 +70,8 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title={tab === 'create' ? 'Personalize seu servidor' : 'Entrar em um servidor'} onClose={onClose}>
-      <div className="flex gap-2 mb-4 bg-discord-darker rounded-lg p-1">
+    <Modal title={tab === 'create' ? 'Personalize seu servidor' : 'Entrar em um servidor'} onClose={onClose} maxWidth="max-w-lg">
+      <div className="flex gap-2 mb-5 bg-discord-darker rounded-lg p-1">
         <button
           onClick={() => setTab('create')}
           className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -82,23 +91,40 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
       </div>
 
       {tab === 'create' ? (
-        <div className="space-y-4">
-          <p className="text-sm text-discord-text-muted">
-            Seu servidor é onde você e seus amigos se encontram. Crie o seu e comece a conversar.
+        <div className="space-y-5">
+          <p className="text-sm text-discord-text-muted leading-relaxed">
+            Seu servidor é onde você e seus amigos se encontram. Dê um nome, escolha um ícone e comece a conversar —
+            dá pra ajustar tudo de novo depois, nas configurações do servidor.
           </p>
 
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-2">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-20 h-20 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors"
+              className="relative w-24 h-24 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors group"
             >
               {iconPreview ? (
                 <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover" />
               ) : (
-                <span className="text-xs text-discord-text-muted text-center px-2">Enviar ícone</span>
+                <span className="text-[11px] text-discord-text-muted text-center px-3 leading-snug">
+                  Enviar
+                  <br />
+                  ícone
+                </span>
               )}
+              {/* Selo de "editar" no canto — mesma linguagem visual que a
+                  troca de avatar/banner usa em EditProfileModal, deixa
+                  claro que dá pra clicar de novo pra trocar. */}
+              <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-discord-blurple flex items-center justify-center border-2 border-discord-dark group-hover:brightness-110 transition-all">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 text-white">
+                  <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
             </button>
-            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleIconChange} />
+            <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleIconChange} />
+            <p className="text-[11px] text-discord-text-muted text-center">
+              PNG, JPG, WEBP ou GIF animado — até 5MB. Recomendado: imagem quadrada.
+            </p>
+            {iconError && <p className="text-xs text-red-400">{iconError}</p>}
           </div>
 
           <div>
@@ -110,7 +136,22 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Servidor do João"
+              maxLength={60}
               className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+              Sobre o servidor <span className="normal-case font-normal text-discord-text-muted/70">(opcional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Do que é esse servidor? (aparece pra quem vê o servidor antes de entrar)"
+              maxLength={200}
+              rows={2}
+              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple resize-none"
             />
           </div>
 
@@ -121,7 +162,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
             disabled={loading}
             className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
           >
-            {loading ? 'Criando...' : 'Criar'}
+            {loading ? 'Criando...' : 'Criar servidor'}
           </button>
         </div>
       ) : (

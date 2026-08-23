@@ -19,7 +19,12 @@ export function InviteRedirect() {
           return
         }
         const channelId = searchParams.get('canal')
-        navigate('/', { replace: true, state: { joinedServerId: server.id, joinedChannelId: channelId } })
+        // Mesma lógica do InviteMessageCard.tsx — o MainLayout confere se
+        // o canal é de voz antes de entrar de verdade.
+        navigate('/', {
+          replace: true,
+          state: { joinedServerId: server.id, joinedChannelId: channelId, autoJoinVoice: Boolean(channelId) },
+        })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code])

@@ -15,7 +15,7 @@ export const BANNER_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif'
 export const DECORATION_ACCEPT = 'image/png,image/webp,image/gif'
 
 export const AVATAR_HELP = 'PNG, JPG, WEBP ou GIF animado — até 5MB. Recomendado: imagem quadrada, pelo menos 128×128px (fica melhor a partir de 512×512px).'
-export const BANNER_HELP = 'PNG, JPG, WEBP ou GIF animado — até 8MB. Recomendado: 960×360px (proporção larga, tipo capa).'
+export const BANNER_HELP = 'PNG, JPG, WEBP ou GIF animado — até 8MB. Recomendado: 1200×600px (a área de banner é bem maior agora, cobre boa parte do card de perfil).'
 export const DECORATION_HELP = 'PNG, WEBP ou GIF animado, com fundo transparente — até 2MB. Recomendado: 512×512px, com o miolo vazado onde o avatar vai aparecer.'
 
 function formatMB(bytes: number): string {

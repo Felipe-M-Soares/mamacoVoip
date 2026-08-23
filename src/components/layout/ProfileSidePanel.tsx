@@ -55,7 +55,7 @@ export function ProfileSidePanel({
   return (
     <aside className="hidden xl:flex w-72 shrink-0 bg-discord-sidebar flex-col overflow-y-auto">
       <div
-        className="h-20 shrink-0 bg-cover bg-center"
+        className="h-40 shrink-0 bg-cover bg-center"
         style={
           profile.banner_url
             ? { backgroundImage: `url(${profile.banner_url})` }

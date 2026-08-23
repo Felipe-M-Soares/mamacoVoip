@@ -8,6 +8,7 @@ import { useRoles } from '../../hooks/useRoles'
 import { useFriends } from '../../context/FriendsContext'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { SoundboardPanel } from '../ui/SoundboardPanel'
+import { SettingsModal } from '../modals/SettingsModal'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { VoiceParticipant } from '../../context/VoiceContext'
 import type { Channel, Profile, Role } from '../../types/database'
@@ -72,8 +73,10 @@ function ScreenShareAudio({ stream, volume }: { stream: MediaStream; volume: num
 
 function ScreenShareStage({
   shares,
+  onHide,
 }: {
   shares: { key: string; name: string; stream: MediaStream; isLocal: boolean }[]
+  onHide: (key: string) => void
 }) {
   const voice = useVoice()
   const [openVolumeFor, setOpenVolumeFor] = useState<string | null>(null)
@@ -121,13 +124,34 @@ function ScreenShareStage({
             className="relative aspect-video rounded-lg overflow-hidden border border-black/30 bg-black group/share w-full h-full"
             onMouseLeave={() => setOpenVolumeFor((v) => (v === share.key ? null : v))}
           >
-            <VideoTile
-              stream={share.stream}
-              fit="contain"
-              ref={(el) => {
-                videoRefs.current[share.key] = el
-              }}
-            />
+            {share.isLocal ? (
+              // A SUA PRÓPRIA transmissão nunca ganha uma prévia de vídeo
+              // ao vivo aqui de propósito — se a captura for de TELA
+              // CHEIA (não só uma janela), ela inclui esta própria janela
+              // do app, que por sua vez estaria mostrando esse vídeo ao
+              // vivo... que a captura pegaria de novo no frame seguinte,
+              // e de novo, e de novo: um espelho infinito recursivo (é
+              // exatamente esse "efeito caleidoscópio" que apareceu
+              // quando isso não existia). Como é a SUA tela, você já sabe
+              // o que está mostrando — não faz falta uma prévia.
+              <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-discord-text-muted">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 opacity-60">
+                  <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
+                </svg>
+                <p className="text-xs text-center px-4">Você está compartilhando sua tela</p>
+                <p className="text-[10px] text-center px-6 opacity-70">
+                  Sem prévia aqui de propósito — evita o efeito de espelho infinito se a captura pegar esta janela
+                </p>
+              </div>
+            ) : (
+              <VideoTile
+                stream={share.stream}
+                fit="contain"
+                ref={(el) => {
+                  videoRefs.current[share.key] = el
+                }}
+              />
+            )}
             {!share.isLocal && <ScreenShareAudio stream={share.stream} volume={effectiveVolume} />}
             <span className="absolute bottom-1.5 left-2 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded flex items-center gap-1">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
@@ -137,7 +161,7 @@ function ScreenShareStage({
               {share.isLocal && ' (você)'}
             </span>
 
-            <div className="absolute top-1.5 right-2 flex items-center gap-1.5 opacity-0 group-hover/share:opacity-100 transition-opacity">
+            <div className="absolute top-1.5 right-2 flex items-center gap-1.5 opacity-0 scale-90 group-hover/share:opacity-100 group-hover/share:scale-100 transition-all duration-150">
               {!share.isLocal && hasAudio && (
                 <button
                   onClick={() => voice.setScreenShareVolume(share.key, isMuted ? 100 : 0)}
@@ -183,23 +207,45 @@ function ScreenShareStage({
                 </div>
               )}
 
-              <button
-                onClick={() => goFullscreen(share.key)}
-                title="Tela cheia"
-                className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
-              >
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm16 0h-2v4h-4v2h6v-6z" />
-                </svg>
-              </button>
+              {/* Tela cheia / janela flutuante agem sobre o elemento de
+                  vídeo — a sua própria transmissão não tem um (ver
+                  comentário acima), então esses botões só fazem sentido
+                  pras transmissões dos OUTROS. */}
+              {!share.isLocal && (
+                <>
+                  <button
+                    onClick={() => goFullscreen(share.key)}
+                    title="Tela cheia"
+                    className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                      <path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm16 0h-2v4h-4v2h6v-6z" />
+                    </svg>
+                  </button>
 
+                  <button
+                    onClick={() => goFloating(share.key)}
+                    title="Janela flutuante (pode arrastar pra fora do app)"
+                    className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                      <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V5h14v14zm-2-7h-6v5h6v-5z" />
+                    </svg>
+                  </button>
+                </>
+              )}
+
+              {/* Fecha só a VISUALIZAÇÃO desta transmissão pra você — não
+                  para o compartilhamento (se for sua) nem tira ninguém da
+                  sala. É só um "esconder da minha tela", reversível pelo
+                  aviso "N ocultas" que aparece embaixo. */}
               <button
-                onClick={() => goFloating(share.key)}
-                title="Janela flutuante (pode arrastar pra fora do app)"
-                className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                onClick={() => onHide(share.key)}
+                title="Fechar esta transmissão (continua no ar, só não aparece mais aqui)"
+                className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-red-600"
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V5h14v14zm-2-7h-6v5h6v-5z" />
+                  <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
                 </svg>
               </button>
             </div>
@@ -263,7 +309,13 @@ function ParticipantTile({
   const effectiveVolume = (voice.masterVolume / 100) * (participantVolume / 100)
 
   const volumeButton = !isLocal && (
-    <div className={compact ? 'relative' : 'absolute top-1.5 left-1.5 opacity-0 group-hover/tile:opacity-100 transition-opacity'}>
+    <div
+      className={
+        compact
+          ? 'relative'
+          : 'absolute top-1.5 left-1.5 opacity-0 scale-90 group-hover/tile:opacity-100 group-hover/tile:scale-100 transition-all duration-150'
+      }
+    >
       <button
         onClick={() => setShowVolumeSlider((v) => !v)}
         title="Ajustar volume deste participante"
@@ -417,6 +469,39 @@ export function VoiceChannelView({
   const { sendRequest } = useFriends()
   const [showInvite, setShowInvite] = useState(false)
   const [showSoundboard, setShowSoundboard] = useState(false)
+  const [showMicMenu, setShowMicMenu] = useState(false)
+  const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [showSettingsFromVoice, setShowSettingsFromVoice] = useState(false)
+  // "Desativar áudio" (deafen) — igual o Discord: para de ouvir todo
+  // mundo de uma vez (some junto com o mic, se ele já não estivesse
+  // mutado) sem precisar abaixar o volume geral manualmente toda vez.
+  // Guarda o volume/estado de mic de ANTES pra devolver exatamente como
+  // estava ao desativar de novo.
+  const [deafened, setDeafened] = useState(false)
+  const preDeafenVolumeRef = useRef(100)
+  const preDeafenWasMutedRef = useRef(false)
+  function toggleDeafen() {
+    if (deafened) {
+      voice.setMasterVolume(preDeafenVolumeRef.current)
+      if (!preDeafenWasMutedRef.current && voice.muted) voice.toggleMute()
+      setDeafened(false)
+    } else {
+      preDeafenVolumeRef.current = voice.masterVolume
+      preDeafenWasMutedRef.current = voice.muted
+      voice.setMasterVolume(0)
+      if (!voice.muted) voice.toggleMute()
+      setDeafened(true)
+    }
+  }
+  // Preferências só desta sessão de call (não persistem — reinicia toda
+  // vez que entra de novo, igual um "modo de exibição" temporário).
+  const [showOwnTile, setShowOwnTile] = useState(true)
+  const [hideNoVideoParticipants, setHideNoVideoParticipants] = useState(false)
+  // Transmissões que a própria pessoa fechou LOCALMENTE (ver
+  // ScreenShareStage) — só tira da SUA tela, não afeta quem está
+  // compartilhando nem quem mais está assistindo. Fica de fora da sala
+  // de voz o tempo todo, só não aparece mais o vídeo em si.
+  const [hiddenShareKeys, setHiddenShareKeys] = useState<Set<string>>(new Set())
 
   function handleViewParticipantProfile(userId: string) {
     const p = members.find((m) => m.user_id === userId)?.profile
@@ -458,7 +543,9 @@ export function VoiceChannelView({
       })
     }
   })
-  const hasScreenShares = screenShares.length > 0
+  const visibleScreenShares = screenShares.filter((s) => !hiddenShareKeys.has(s.key))
+  const hasScreenShares = visibleScreenShares.length > 0
+  const hiddenCount = screenShares.length - visibleScreenShares.length
 
   return (
     <section className="flex-1 flex flex-col min-w-0 bg-discord-channels">
@@ -529,13 +616,29 @@ export function VoiceChannelView({
       ) : (
         <>
           <div className="flex-1 overflow-y-auto p-4 flex flex-col">
-            {hasScreenShares && <ScreenShareStage shares={screenShares} />}
+            {hiddenCount > 0 && (
+              <button
+                onClick={() => setHiddenShareKeys(new Set())}
+                className="mb-3 self-center text-xs text-discord-text-muted hover:text-white bg-discord-lighter hover:bg-discord-darker px-3 py-1.5 rounded-full transition-colors flex items-center gap-1.5"
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+                </svg>
+                {hiddenCount === 1 ? '1 transmissão oculta' : `${hiddenCount} transmissões ocultas`} — mostrar
+              </button>
+            )}
+            {hasScreenShares && (
+              <ScreenShareStage
+                shares={visibleScreenShares}
+                onHide={(key) => setHiddenShareKeys((prev) => new Set(prev).add(key))}
+              />
+            )}
 
             {hasScreenShares ? (
               // Com tela(s) compartilhada(s) em foco, os participantes viram
               // uma tira compacta embaixo do palco em vez do grid grande.
               <div className="flex flex-wrap gap-3 justify-center pt-1">
-                {profile && (
+                {profile && showOwnTile && (
                   <ParticipantTile
                     userId={profile.id}
                     name={profile.display_name || profile.username}
@@ -547,7 +650,9 @@ export function VoiceChannelView({
                     compact
                   />
                 )}
-                {Object.entries(voice.participants).map(([userId, data]) => {
+                {Object.entries(voice.participants)
+                  .filter(([, data]) => !hideNoVideoParticipants || Boolean(data.cameraStream?.getVideoTracks().length))
+                  .map(([userId, data]) => {
                   const p = profileById[userId]
                   return (
                     <ParticipantTile
@@ -592,7 +697,7 @@ export function VoiceChannelView({
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {profile && (
+                {profile && showOwnTile && (
                   <ParticipantTile
                     userId={profile.id}
                     name={profile.display_name || profile.username}
@@ -603,7 +708,9 @@ export function VoiceChannelView({
                     localVideoEnabled={voice.videoEnabled}
                   />
                 )}
-                {Object.entries(voice.participants).map(([userId, data]) => {
+                {Object.entries(voice.participants)
+                  .filter(([, data]) => !hideNoVideoParticipants || Boolean(data.cameraStream?.getVideoTracks().length))
+                  .map(([userId, data]) => {
                   const p = profileById[userId]
                   return (
                     <ParticipantTile
@@ -649,58 +756,149 @@ export function VoiceChannelView({
           </div>
 
           <div className="px-4 pb-6 shrink-0 flex flex-wrap items-center justify-center gap-3">
-            {voice.pushToTalkEnabled ? (
-              <div
-                title={`Push-to-talk: segure ${voice.pushToTalkKey} pra falar`}
-                className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
-                  voice.pushToTalkActive ? 'bg-discord-green text-white' : 'bg-discord-lighter text-discord-text-muted'
-                }`}
-              >
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                  <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
-                </svg>
+            {/* Mic + seta: clicar no mic muta/desmuta na hora igual antes;
+                a setinha ao lado abre um painel com escolha de
+                microfone/saída de áudio, "Desativar áudio" (deafen) e um
+                atalho pras configurações — mesma ideia do Discord de
+                anexar as opções extras no botão em vez de espalhar em
+                selects soltos pela barra. */}
+            <div className="relative" onMouseLeave={() => setShowMicMenu(false)}>
+              <div className="flex items-stretch rounded-full overflow-hidden">
+                {voice.pushToTalkEnabled ? (
+                  <div
+                    title={`Push-to-talk: segure ${voice.pushToTalkKey} pra falar`}
+                    className={`w-11 h-11 flex items-center justify-center transition-colors ${
+                      deafened
+                        ? 'bg-red-600 text-white'
+                        : voice.pushToTalkActive
+                          ? 'bg-discord-green text-white'
+                          : 'bg-discord-lighter text-discord-text-muted'
+                    }`}
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                      <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
+                    </svg>
+                  </div>
+                ) : (
+                  <button
+                    onClick={voice.toggleMute}
+                    disabled={!isSpeaker}
+                    title={
+                      !isSpeaker
+                        ? 'Só donos/moderadores podem falar neste canal Palco'
+                        : voice.muted
+                          ? 'Ativar microfone'
+                          : 'Mutar microfone'
+                    }
+                    className={`w-11 h-11 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      deafened || voice.muted
+                        ? 'bg-red-600 text-white'
+                        : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'
+                    }`}
+                  >
+                    {deafened || voice.muted ? (
+                      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                        <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-8.6 3.5L18 5A1 1 0 1 0 16.6 3.6L3.6 16.6A1 1 0 1 0 5 18l2-2A7 7 0 0 0 19 11zM12 15a3 3 0 0 0 3-3l-5.7 5.7A3 3 0 0 0 12 15zM9 6a3 3 0 0 1 6 0v3.5l2-2V6a5 5 0 0 0-9.9-1L9 6.6V6z" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                        <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowMicMenu((v) => !v)}
+                  title="Configurações de voz"
+                  className={`w-5 h-11 flex items-center justify-center transition-colors ${
+                    deafened || voice.muted
+                      ? 'bg-red-600/80 text-white/80 hover:text-white'
+                      : 'bg-discord-lighter text-discord-text-muted hover:text-white'
+                  }`}
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+                    <path d="M7 10l5 5 5-5z" />
+                  </svg>
+                </button>
               </div>
-            ) : (
-            <button
-              onClick={voice.toggleMute}
-              disabled={!isSpeaker}
-              title={
-                !isSpeaker
-                  ? 'Só donos/moderadores podem falar neste canal Palco'
-                  : voice.muted
-                    ? 'Ativar microfone'
-                    : 'Mutar microfone'
-              }
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                voice.muted ? 'bg-red-600 text-white' : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'
-              }`}
-            >
-              {voice.muted ? (
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                  <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-8.6 3.5L18 5A1 1 0 1 0 16.6 3.6L3.6 16.6A1 1 0 1 0 5 18l2-2A7 7 0 0 0 19 11zM12 15a3 3 0 0 0 3-3l-5.7 5.7A3 3 0 0 0 12 15zM9 6a3 3 0 0 1 6 0v3.5l2-2V6a5 5 0 0 0-9.9-1L9 6.6V6z" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                  <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
-                </svg>
-              )}
-            </button>
-            )}
 
-            {voice.audioSettings.microphones.length > 1 && (
-              <select
-                value={voice.audioSettings.micId ?? ''}
-                onChange={(e) => voice.changeMicrophone(e.target.value)}
-                title="Escolher microfone"
-                className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none max-w-[140px] truncate"
-              >
-                {voice.audioSettings.microphones.map((m) => (
-                  <option key={m.deviceId} value={m.deviceId}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            )}
+              {showMicMenu && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2 w-64 z-20">
+                  {voice.audioSettings.microphones.length > 0 && (
+                    <div className="mb-2">
+                      <p className="text-[10px] font-bold uppercase text-discord-text-muted px-1 mb-1">Microfone</p>
+                      <select
+                        value={voice.audioSettings.micId ?? ''}
+                        onChange={(e) => voice.changeMicrophone(e.target.value)}
+                        className="w-full bg-discord-lighter text-discord-text text-xs rounded px-2 py-1.5 outline-none"
+                      >
+                        {voice.audioSettings.microphones.map((m) => (
+                          <option key={m.deviceId} value={m.deviceId}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {voice.audioSettings.supportsOutputSelection && voice.audioSettings.speakers.length > 0 && (
+                    <div className="mb-2">
+                      <p className="text-[10px] font-bold uppercase text-discord-text-muted px-1 mb-1">Saída de áudio</p>
+                      <select
+                        value={voice.audioSettings.speakerId ?? ''}
+                        onChange={(e) => voice.audioSettings.setSpeakerId(e.target.value || null)}
+                        className="w-full bg-discord-lighter text-discord-text text-xs rounded px-2 py-1.5 outline-none"
+                      >
+                        {voice.audioSettings.speakers.map((s) => (
+                          <option key={s.deviceId} value={s.deviceId}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="mb-1">
+                    <p className="text-[10px] text-discord-text-muted px-1 mb-1.5">Volume geral: {voice.masterVolume}%</p>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={voice.masterVolume}
+                      onChange={(e) => voice.setMasterVolume(Number(e.target.value))}
+                      className="w-full accent-discord-blurple px-1"
+                    />
+                  </div>
+
+                  <button
+                    onClick={toggleDeafen}
+                    className={`w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-discord-lighter ${
+                      deafened ? 'text-red-400' : 'text-discord-text'
+                    }`}
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 shrink-0">
+                      <path d="M12 3a9 9 0 0 0-9 9v6a2 2 0 0 0 2 2h2v-8H5v-1a7 7 0 0 1 14 0v1h-2v8h2a2 2 0 0 0 2-2v-6a9 9 0 0 0-9-9z" />
+                    </svg>
+                    {deafened ? 'Reativar áudio' : 'Desativar áudio'}
+                  </button>
+
+                  <div className="h-px bg-black/30 my-1" />
+
+                  <button
+                    onClick={() => {
+                      setShowMicMenu(false)
+                      setShowSettingsFromVoice(true)
+                    }}
+                    className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-discord-lighter text-discord-text-muted"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 shrink-0">
+                      <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.9 3a7.6 7.6 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7.9 7.9 0 0 0-1.8-1L16 2h-4l-.6 2.9a7.9 7.9 0 0 0-1.8 1l-2.4-1-2 3.4L7 10a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.9 7.9 0 0 0 1.8 1L12 22h4l.6-2.9a7.9 7.9 0 0 0 1.8-1l2.4 1 2-3.4-2-1.6c.05-.3.1-.6.1-1z" />
+                    </svg>
+                    Configurações de voz
+                  </button>
+                </div>
+              )}
+            </div>
 
             <button
               onClick={voice.toggleVideo}
@@ -748,6 +946,81 @@ export function VoiceChannelView({
               </svg>
             </button>
 
+            {/* "..." — o resto das opções que não precisam de um botão
+                dedicado o tempo todo, mesma ideia do menu de "mais opções"
+                do Discord na barra de chamada. */}
+            <div className="relative" onMouseLeave={() => setShowMoreMenu(false)}>
+              <button
+                onClick={() => setShowMoreMenu((v) => !v)}
+                title="Mais opções"
+                className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
+                  showMoreMenu ? 'bg-discord-darker text-white' : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'
+                }`}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                  <path d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />
+                </svg>
+              </button>
+
+              {showMoreMenu && (
+                <div className="absolute bottom-full right-0 mb-2 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2 w-60 z-20">
+                  <button
+                    onClick={() => {
+                      setShowMoreMenu(false)
+                      setShowInvite(true)
+                    }}
+                    className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-discord-lighter text-discord-text"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 shrink-0">
+                      <path d="M15 12a5 5 0 1 0-4.9-6H9a1 1 0 1 0 0 2h1.1c.1.4.2.7.4 1H9a1 1 0 1 0 0 2h2.5c.9.6 2 1 3.2 1zM3 20a6 6 0 0 1 6-6h1a6 6 0 0 1 6 6 1 1 0 1 1-2 0 4 4 0 0 0-4-4H9a4 4 0 0 0-4 4 1 1 0 1 1-2 0zm16-2v-2h-2v-2h2v-2h2v2h2v2h-2v2h-2z" />
+                    </svg>
+                    Convidar para a chamada
+                  </button>
+
+                  <div className="h-px bg-black/30 my-1" />
+
+                  <label className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-discord-lighter text-discord-text cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showOwnTile}
+                      onChange={(e) => setShowOwnTile(e.target.checked)}
+                      className="accent-discord-blurple"
+                    />
+                    Mostrar minha própria câmera
+                  </label>
+
+                  <label className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-discord-lighter text-discord-text cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hideNoVideoParticipants}
+                      onChange={(e) => setHideNoVideoParticipants(e.target.checked)}
+                      className="accent-discord-blurple"
+                    />
+                    Ocultar quem está sem câmera
+                  </label>
+
+                  <p className="text-[10px] text-discord-text-muted px-2 pt-1 pb-0.5">
+                    Essas duas preferências valem só enquanto você estiver nesta chamada.
+                  </p>
+
+                  <div className="h-px bg-black/30 my-1" />
+
+                  <button
+                    onClick={() => {
+                      setShowMoreMenu(false)
+                      setShowSettingsFromVoice(true)
+                    }}
+                    className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-discord-lighter text-discord-text-muted"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 shrink-0">
+                      <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.9 3a7.6 7.6 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7.9 7.9 0 0 0-1.8-1L16 2h-4l-.6 2.9a7.9 7.9 0 0 0-1.8 1l-2.4-1-2 3.4L7 10a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.9 7.9 0 0 0 1.8 1L12 22h4l.6-2.9a7.9 7.9 0 0 0 1.8-1l2.4 1 2-3.4-2-1.6c.05-.3.1-.6.1-1z" />
+                    </svg>
+                    Configurações de voz e vídeo
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={voice.leave}
               title="Desconectar"
@@ -770,6 +1043,9 @@ export function VoiceChannelView({
         />
       )}
       {showSoundboard && <SoundboardPanel serverId={serverId} onClose={() => setShowSoundboard(false)} />}
+      {showSettingsFromVoice && (
+        <SettingsModal initialTab="audio" onClose={() => setShowSettingsFromVoice(false)} />
+      )}
     </section>
   )
 }

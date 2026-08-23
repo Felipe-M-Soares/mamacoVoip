@@ -5,6 +5,7 @@ import { useFriends } from '../../context/FriendsContext'
 import { useConversations } from '../../hooks/useConversations'
 import { useOnlineIds } from '../../hooks/usePresence'
 import { useAuth } from '../../hooks/useAuth'
+import { useVoice } from '../../hooks/useVoice'
 import { useServers } from '../../hooks/useServers'
 import { supabase } from '../../lib/supabase'
 import { buildInviteMessage } from '../../lib/inviteMessage'
@@ -217,6 +218,7 @@ function FriendGrid({
   onRemove: (userId: string) => void
 }) {
   const { user } = useAuth()
+  const voice = useVoice()
   const { servers, createInvite } = useServers()
   const { openConversationWith } = useConversations()
   const { menuState, openMenu, closeMenu } = useContextMenuState()
@@ -237,7 +239,24 @@ function FriendGrid({
     if (inviteError || !invite) {
       setInviteFeedback('Não foi possível gerar o convite.')
     } else {
-      const message = buildInviteMessage({ code: invite.code, serverId, serverName })
+      // Se eu já estou numa call DE VOZ nesse mesmo servidor no momento
+      // de chamar, o convite carrega o canal — quem aceitar cai direto
+      // na chamada (ver MainLayout.tsx/InviteMessageCard.tsx), em vez de
+      // só entrar no servidor e ter que procurar a sala sozinho. Fora de
+      // uma call (ou numa call de OUTRO servidor), continua sendo um
+      // convite normal, sem canal nenhum.
+      let channelId: string | undefined
+      let channelName: string | undefined
+      if (voice.connectedServerId === serverId && voice.connectedChannelId) {
+        channelId = voice.connectedChannelId
+        const { data: channelRow } = await supabase
+          .from('channels')
+          .select('name')
+          .eq('id', channelId)
+          .single()
+        channelName = channelRow?.name
+      }
+      const message = buildInviteMessage({ code: invite.code, serverId, serverName, channelId, channelName })
       const { conversation } = await openConversationWith(friendId)
       if (conversation) {
         await supabase

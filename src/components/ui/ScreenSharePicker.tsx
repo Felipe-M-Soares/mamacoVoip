@@ -124,43 +124,13 @@ export function ScreenSharePicker() {
               <p className="text-sm font-semibold text-white truncate">🎮 {currentGame}</p>
               {isFullscreenFallback && (
                 <p className="text-[11px] text-discord-text-muted mt-0.5">
-                  Vai compartilhar a TELA INTEIRA — jogos em tela cheia não aparecem como janela separada pro
-                  sistema capturar sozinha
+                  Tela inteira — pausa sozinha (Windows) se você alternar pra fora do jogo
                 </p>
               )}
             </div>
           </button>
         )}
 
-        {/* Aviso mais visível (não só o textinho pequeno acima) — a
-            pessoa pode não perceber a diferença entre "compartilhar uma
-            janela" (só aquilo aparece pra quem assiste, mesmo se você
-            alternar pra outro app) e "compartilhar a tela inteira" (tudo
-            que aparecer na tela, incluindo outros apps/DMs se você
-            alternar) até reclamar que "vazou informação".
-            IMPORTANTE: não promete que trocar pra "Janela sem Borda"
-            resolve — confirmado com um usuário que mesmo em Janela sem
-            Borda alguns jogos (R6 Siege incluso, provavelmente por causa
-            do anticheat BattlEye escondendo a janela de propósito) ainda
-            não aparecem separados na lista de janelas. Então a única
-            coisa 100% confiável aqui é avisar bem e sugerir fechar o que
-            for sensível antes. */}
-        {isFullscreenFallback && (
-          <div className="mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-xs text-yellow-200/90 leading-relaxed">
-            <p className="font-semibold text-yellow-200">Isso compartilha tudo que está na tela, não só o jogo</p>
-            <p className="mt-1">
-              Se você alternar pra outro programa (navegador, chat, etc.) durante a call, quem estiver assistindo
-              também vê. O {currentGame} não está sendo oferecido pelo sistema como uma janela separada pra
-              recortar só ele — em alguns jogos isso melhora trocando o modo de vídeo pra "Janela sem Borda", mas em
-              outros (alguns com anticheat, por exemplo) o sistema esconde a janela de qualquer jeito, mesmo nesse
-              modo.
-            </p>
-            <p className="mt-1.5">
-              <strong>Mais seguro:</strong> feche DMs, navegador e outras conversas antes de compartilhar (ou
-              simplesmente evite alternar de tela enquanto a transmissão estiver ativa).
-            </p>
-          </div>
-        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[55vh] overflow-y-auto pr-1">
           {sources.map((s) => (

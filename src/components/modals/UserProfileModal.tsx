@@ -75,7 +75,7 @@ export function UserProfileModal({
           laterais (-mx-5) pra ficar rente às bordas do modal — o topo já
           tem o cabeçalho de título por cima, então não bleeda pra lá. */}
       <div
-        className="-mx-5 -mt-5 h-20 bg-cover bg-center"
+        className="-mx-5 -mt-5 h-32 bg-cover bg-center"
         style={
           targetProfile.banner_url
             ? { backgroundImage: `url(${targetProfile.banner_url})` }

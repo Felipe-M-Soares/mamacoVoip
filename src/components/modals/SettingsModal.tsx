@@ -404,6 +404,51 @@ function AudioTab() {
     }, 400)
   }
 
+  function handleSensitivityModeChange(mode: 'auto' | 'manual') {
+    audio.setMicSensitivityMode(mode)
+    voice.refreshAudioConstraints({ micSensitivityMode: mode })
+  }
+
+  // Réplica, só pro teste/eco daqui do modal (que usa seu próprio
+  // NoiseSuppressor local em vez do da call de verdade), do mesmo loop
+  // de auto-ajuste de sensibilidade que roda em VoiceContext.tsx — ver o
+  // comentário grande no useEffect "Sensibilidade automática do
+  // microfone" lá pra entender a lógica da média móvel assimétrica.
+  // Mantido em sincronia de propósito: assim o que a pessoa vê/ouve
+  // testando aqui bate com o que acontece numa call de verdade.
+  const testNoiseFloorDbRef = useRef<number | null>(null)
+  const testLastAppliedThresholdDbRef = useRef<number | null>(null)
+  const testAutoIntervalRef = useRef<number | null>(null)
+
+  function stopTestAutoSensitivity() {
+    if (testAutoIntervalRef.current) {
+      window.clearInterval(testAutoIntervalRef.current)
+      testAutoIntervalRef.current = null
+    }
+    testNoiseFloorDbRef.current = null
+    testLastAppliedThresholdDbRef.current = null
+  }
+
+  function startTestAutoSensitivity(suppressor: NoiseSuppressor) {
+    stopTestAutoSensitivity()
+    testAutoIntervalRef.current = window.setInterval(() => {
+      const level = suppressor.sampleLevelDb()
+      if (level === null) return
+      const floor = testNoiseFloorDbRef.current
+      if (floor === null) {
+        testNoiseFloorDbRef.current = level
+        return
+      }
+      testNoiseFloorDbRef.current = level < floor ? floor * 0.7 + level * 0.3 : floor * 0.98 + level * 0.02
+      const threshold = Math.max(-80, Math.min(-20, testNoiseFloorDbRef.current + 12))
+      const last = testLastAppliedThresholdDbRef.current
+      if (last === null || Math.abs(threshold - last) >= 1.5) {
+        testLastAppliedThresholdDbRef.current = threshold
+        suppressor.setSensitivityDb(threshold)
+      }
+    }, 1000)
+  }
+
   // Aplica o RNNoise na track crua, se a redução de ruído estiver ligada
   // — devolve a stream já tratada (ou a crua sem alteração, se estiver
   // desligada ou o WASM falhar ao carregar).
@@ -412,7 +457,9 @@ function AudioTab() {
     try {
       const suppressor = await createNoiseSuppressor()
       noiseSuppressorTestRef.current = suppressor
-      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0], audio.micSensitivity)
+      const isAuto = audio.micSensitivityMode === 'auto'
+      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0], isAuto ? null : audio.micSensitivity)
+      if (isAuto) startTestAutoSensitivity(suppressor)
       return new MediaStream([processedTrack])
     } catch {
       // segue só com o cancelamento nativo do navegador
@@ -458,6 +505,7 @@ function AudioTab() {
     audioCtxRef.current = null
     noiseSuppressorTestRef.current?.destroy()
     noiseSuppressorTestRef.current = null
+    stopTestAutoSensitivity()
     setTesting(false)
     setLevel(0)
   }
@@ -507,6 +555,7 @@ function AudioTab() {
     audioCtxRef.current = null
     noiseSuppressorTestRef.current?.destroy()
     noiseSuppressorTestRef.current = null
+    stopTestAutoSensitivity()
     if (echoAudioRef.current) echoAudioRef.current.srcObject = null
     setEchoing(false)
   }
@@ -515,6 +564,7 @@ function AudioTab() {
     () => () => {
       stopTest()
       stopEcho()
+      stopTestAutoSensitivity()
       if (sensitivityDebounceRef.current) window.clearTimeout(sensitivityDebounceRef.current)
     },
     []
@@ -534,7 +584,14 @@ function AudioTab() {
     stopTest()
     startTest()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audio.echoCancellation, audio.noiseSuppression, audio.autoGainControl, audio.micId, audio.micSensitivity])
+  }, [
+    audio.echoCancellation,
+    audio.noiseSuppression,
+    audio.autoGainControl,
+    audio.micId,
+    audio.micSensitivity,
+    audio.micSensitivityMode,
+  ])
 
   return (
     <div className="space-y-5">
@@ -643,22 +700,52 @@ function AudioTab() {
               <p className="text-sm font-medium text-white">Sensibilidade do microfone</p>
               <p className="text-xs text-discord-text-muted mt-0.5">
                 Corta o microfone quando o volume está abaixo desse nível — bom pra parar de captar o teclado ou
-                sons baixos da mesa entre uma fala e outra. Mais pra direita = pega até som baixinho; mais pra
-                esquerda = só passa quando você fala mais alto.
+                sons baixos da mesa entre uma fala e outra.
               </p>
             </div>
-            <input
-              type="range"
-              min={MIN_MIC_SENSITIVITY}
-              max={MAX_MIC_SENSITIVITY}
-              value={audio.micSensitivity}
-              onChange={(e) => handleSensitivityChange(Number(e.target.value))}
-              className="w-full accent-discord-blurple"
-            />
-            <div className="flex justify-between text-[10px] text-discord-text-muted mt-1">
-              <span>Menos sensível</span>
-              <span>Mais sensível</span>
+            <div className="flex gap-1 mb-3 bg-discord-dark rounded-md p-0.5">
+              <button
+                onClick={() => handleSensitivityModeChange('auto')}
+                className={`flex-1 text-xs font-medium py-1.5 rounded transition-colors ${
+                  audio.micSensitivityMode === 'auto'
+                    ? 'bg-discord-blurple text-white'
+                    : 'text-discord-text-muted hover:text-white'
+                }`}
+              >
+                Automática
+              </button>
+              <button
+                onClick={() => handleSensitivityModeChange('manual')}
+                className={`flex-1 text-xs font-medium py-1.5 rounded transition-colors ${
+                  audio.micSensitivityMode === 'manual'
+                    ? 'bg-discord-blurple text-white'
+                    : 'text-discord-text-muted hover:text-white'
+                }`}
+              >
+                Manual
+              </button>
             </div>
+            {audio.micSensitivityMode === 'auto' ? (
+              <p className="text-xs text-discord-text-muted">
+                O app mede o ruído do seu ambiente sozinho e ajusta o corte automaticamente enquanto você está numa
+                chamada — não precisa mexer em nada.
+              </p>
+            ) : (
+              <>
+                <input
+                  type="range"
+                  min={MIN_MIC_SENSITIVITY}
+                  max={MAX_MIC_SENSITIVITY}
+                  value={audio.micSensitivity}
+                  onChange={(e) => handleSensitivityChange(Number(e.target.value))}
+                  className="w-full accent-discord-blurple"
+                />
+                <div className="flex justify-between text-[10px] text-discord-text-muted mt-1">
+                  <span>Menos sensível</span>
+                  <span>Mais sensível</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

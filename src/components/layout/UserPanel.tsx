@@ -14,6 +14,40 @@ const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
   { value: 'offline', label: 'Invisível', dot: 'bg-gray-500' },
 ]
 
+// Ícone de barrinhas de sinal (tipo wifi/celular) no lugar da antiga
+// barra de texto "123ms" que ficava sozinha em cima do painel — mesmos
+// limiares de cor de antes (verde <100ms, amarelo <250ms, vermelho
+// acima disso), só que como um ícone compacto e discreto, igual o
+// indicador de conexão que o Discord mostra perto do nome do usuário.
+function WifiSignalIcon({ pingMs }: { pingMs: number | null }) {
+  const tier = pingMs === null ? 'none' : pingMs < 100 ? 'good' : pingMs < 250 ? 'ok' : 'bad'
+  const color =
+    tier === 'good'
+      ? 'text-discord-green'
+      : tier === 'ok'
+        ? 'text-yellow-500'
+        : tier === 'bad'
+          ? 'text-red-500'
+          : 'text-discord-text-muted/40'
+  // Quantas barrinhas acendem, de baixo pra cima — 3 = ótima conexão, 1 = ruim.
+  const litBars = tier === 'good' ? 3 : tier === 'ok' ? 2 : tier === 'bad' ? 1 : 0
+
+  return (
+    <div
+      title={pingMs !== null ? `${pingMs}ms de latência` : 'Medindo sua conexão...'}
+      className={`w-8 h-8 flex items-end justify-center gap-[2px] shrink-0 ${color}`}
+    >
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className={`w-1 rounded-sm bg-current ${i < litBars ? '' : 'opacity-25'}`}
+          style={{ height: 4 + i * 4 }}
+        />
+      ))}
+    </div>
+  )
+}
+
 export function UserPanel() {
   const { profile, signOut, updateStatus } = useAuth()
   const voice = useVoice()
@@ -27,14 +61,17 @@ export function UserPanel() {
 
   return (
     <div className="shrink-0">
-      {pingMs !== null && (
-        <div className="h-5 px-3 flex items-center gap-1.5 bg-discord-darker/60 border-t border-black/20">
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              pingMs < 100 ? 'bg-discord-green' : pingMs < 250 ? 'bg-yellow-500' : 'bg-red-500'
-            }`}
-          />
-          <span className="text-[10px] text-discord-text-muted font-mono">{pingMs}ms</span>
+      {/* Card de "jogando agora" acima do painel do usuário — igual o
+          Discord mostra a atividade em destaque numa faixa própria em
+          vez de espremida junto com o status. Some sozinho quando
+          `profile.playing` volta a null (ver useGamePresence.ts). */}
+      {profile.playing && (
+        <div className="h-10 px-3 flex items-center gap-2 bg-discord-darker/60 border-t border-black/20">
+          <span className="text-base shrink-0">🎮</span>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold text-discord-text-muted leading-tight">Jogando</p>
+            <p className="text-xs text-white truncate leading-tight">{profile.playing}</p>
+          </div>
         </div>
       )}
       <div className="relative h-[52px] bg-discord-darker/60 px-2 flex items-center gap-1">
@@ -46,10 +83,12 @@ export function UserPanel() {
         <div className="min-w-0 text-left">
           <p className="text-sm font-medium text-white truncate">{profile.display_name || profile.username}</p>
           <p className="text-xs text-discord-text-muted truncate">
-            {profile.playing ? `🎮 Jogando ${profile.playing}` : profile.custom_status || `@${profile.username}`}
+            {profile.custom_status || `@${profile.username}`}
           </p>
         </div>
       </button>
+
+      <WifiSignalIcon pingMs={pingMs} />
 
       <div className="relative shrink-0">
         <button

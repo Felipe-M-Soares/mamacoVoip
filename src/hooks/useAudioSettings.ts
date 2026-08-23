@@ -17,8 +17,15 @@ interface StoredSettings {
   // 0-100 — ver MIN/MAX/DEFAULT_MIC_SENSITIVITY em lib/noiseSuppression.ts.
   // Controla o "gate" de ruído: abaixo desse volume, o microfone é
   // cortado por completo (resolve o caso de som de teclado/mesa
-  // vazando, que o RNNoise sozinho não filtra bem).
+  // vazando, que o RNNoise sozinho não filtra bem). Só é usado
+  // diretamente quando `micSensitivityMode` é 'manual' — no modo
+  // 'auto' o limiar é recalculado sozinho a partir do ruído ambiente
+  // (ver o loop de auto-ajuste em VoiceContext.tsx).
   micSensitivity: number
+  // 'manual' (padrão, comportamento de antes): usa o slider acima.
+  // 'auto': o app mede o ruído de fundo continuamente e ajusta o
+  // limiar sozinho, sem precisar que a pessoa mexa em nada.
+  micSensitivityMode: 'auto' | 'manual'
 }
 
 const DEFAULTS: StoredSettings = {
@@ -28,6 +35,7 @@ const DEFAULTS: StoredSettings = {
   noiseSuppression: true,
   autoGainControl: true,
   micSensitivity: DEFAULT_MIC_SENSITIVITY,
+  micSensitivityMode: 'manual',
 }
 
 function loadSettings(): StoredSettings {
@@ -119,6 +127,9 @@ export function useAudioSettings() {
   function setMicSensitivity(v: number) {
     persist({ ...settings, micSensitivity: v })
   }
+  function setMicSensitivityMode(v: 'auto' | 'manual') {
+    persist({ ...settings, micSensitivityMode: v })
+  }
 
   // `overrides` existe pro caso de ligar/desligar um desses três (eco,
   // ruído, ganho) enquanto já se está numa call: o botão precisa
@@ -173,6 +184,7 @@ export function useAudioSettings() {
     noiseSuppression: settings.noiseSuppression,
     autoGainControl: settings.autoGainControl,
     micSensitivity: settings.micSensitivity,
+    micSensitivityMode: settings.micSensitivityMode,
     microphones,
     speakers,
     permissionGranted,
@@ -185,6 +197,7 @@ export function useAudioSettings() {
     setNoiseSuppression,
     setAutoGainControl,
     setMicSensitivity,
+    setMicSensitivityMode,
     getAudioConstraints,
   }
 }

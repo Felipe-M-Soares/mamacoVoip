@@ -10,11 +10,14 @@ import { GroupChatArea } from '../components/layout/GroupChatArea'
 import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
+import { EditProfileModal } from '../components/modals/EditProfileModal'
 import { QuickSwitcher } from '../components/modals/QuickSwitcher'
 import { KeyboardShortcutsModal } from '../components/modals/KeyboardShortcutsModal'
+import { ProfileSidePanel } from '../components/layout/ProfileSidePanel'
 import { ServersProvider } from '../context/ServersContext'
 import { ChannelsProvider } from '../context/ChannelsContext'
 import { VoiceProvider } from '../context/VoiceContext'
+import { useAuth } from '../hooks/useAuth'
 import { useServers } from '../hooks/useServers'
 import { useChannels } from '../hooks/useChannels'
 import { useConversations } from '../hooks/useConversations'
@@ -160,6 +163,7 @@ function ActiveServerContent({
 
 function MainLayoutInner() {
   useGamePresence()
+  const { profile: ownProfile } = useAuth()
   const { servers, loading: loadingServers } = useServers()
   const location = useLocation()
   const navigate = useNavigate()
@@ -167,6 +171,7 @@ function MainLayoutInner() {
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null)
   const [pendingChannelId, setPendingChannelId] = useState<string | null>(null)
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
+  const [showEditProfile, setShowEditProfile] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
@@ -339,6 +344,22 @@ function MainLayoutInner() {
         <FriendsPanel onOpenConversation={handleOpenConversation} />
       )}
 
+      {/* Card de perfil fixo do lado direito da tela inicial — mostra o
+          perfil de quem faz sentido pra visão atual: a própria pessoa
+          nas telas de Amigos/Grupo, ou quem está do outro lado numa
+          conversa direta. Só aparece fora de um servidor (lá quem cumpre
+          esse papel já é o MemberList). */}
+      {!activeServer && !loadingServers && ownProfile && (
+        <ProfileSidePanel
+          profile={homeView === 'conversation' && activeConversation ? activeConversation.otherProfile : ownProfile}
+          isSelf={!(homeView === 'conversation' && activeConversation)}
+          onViewFullProfile={() => {
+            if (homeView === 'conversation' && activeConversation) setViewingProfile(activeConversation.otherProfile)
+            else setShowEditProfile(true)
+          }}
+        />
+      )}
+
       {viewingProfile && (
         <UserProfileModal
           targetProfile={viewingProfile}
@@ -346,6 +367,7 @@ function MainLayoutInner() {
           onOpenConversation={handleOpenConversation}
         />
       )}
+      {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
 
       <GameDetectedToast />
       <OverlayStateSync />

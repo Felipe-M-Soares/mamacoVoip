@@ -25,10 +25,10 @@ import noiseGateWorkletPath from './vendor/noiseGateWorkletProcessor.js?url'
 // Depois do RNNoise, passa por um "gate" (porteiro) de ruído: uma
 // segunda etapa, bem mais simples, que corta o áudio de vez quando o
 // volume fica abaixo de um limite (a "sensibilidade" configurável pela
-// pessoa). O RNNoise sozinho reduz ruído CONTÍNUO (chiado, zumbido,
-// ventoinha) mas não é bom com sons de impacto (tecla de teclado, mesa
-// batendo) — o gate resolve exatamente esse caso: se não tem volume de
-// voz suficiente, corta tudo.
+// pessoa, manual ou automática). O RNNoise sozinho reduz ruído
+// CONTÍNUO (chiado, zumbido, ventoinha) mas não é bom com sons de
+// impacto (tecla de teclado, mesa batendo) — o gate resolve exatamente
+// esse caso: se não tem volume de voz suficiente, corta tudo.
 
 // O binário WASM (só os bytes, baixados uma vez via fetch) é seguro de
 // compartilhar entre vários AudioContext diferentes — por isso fica
@@ -42,10 +42,10 @@ function getWasmBinary(): Promise<ArrayBuffer> {
   return wasmBinaryPromise
 }
 
-// Sensibilidade do microfone: 0 (menos sensível — só sons bem altos
-// "abrem" o microfone) a 100 (mais sensível — quase tudo passa, gate
-// praticamente nunca fecha). Convertida pra um limiar em dBFS, a escala
-// que o gate realmente entende.
+// Sensibilidade do microfone (modo MANUAL): 0 (menos sensível — só sons
+// bem altos "abrem" o microfone) a 100 (mais sensível — quase tudo
+// passa, gate praticamente nunca fecha). Convertida pra um limiar em
+// dBFS, a escala que o gate realmente entende.
 export const MIN_MIC_SENSITIVITY = 0
 export const MAX_MIC_SENSITIVITY = 100
 export const DEFAULT_MIC_SENSITIVITY = 50
@@ -62,18 +62,35 @@ export function sensitivityToOpenThresholdDb(sensitivity: number): number {
 export interface NoiseSuppressor {
   // Troca qual track BRUTA (do microfone, sem processamento) está sendo
   // filtrada agora — chame de novo sempre que o microfone mudar (troca
-  // de dispositivo, reconexão) OU a sensibilidade mudar. Devolve uma
-  // track NOVA, já tratada, pra usar no lugar da bruta em todo o resto
-  // do app (medidor de nível, envio pros outros participantes da call,
-  // etc.). A track bruta continua sendo dona do dispositivo físico —
-  // quem chama ainda precisa parar ela manualmente quando não for mais
-  // usar (essa função só conecta um nó de processamento nela, não
-  // assume posse).
+  // de dispositivo, reconexão). Devolve uma track NOVA, já tratada, pra
+  // usar no lugar da bruta em todo o resto do app (medidor de nível,
+  // envio pros outros participantes da call, etc.). A track bruta
+  // continua sendo dona do dispositivo físico — quem chama ainda
+  // precisa parar ela manualmente quando não for mais usar (essa
+  // função só conecta um nó de processamento nela, não assume posse).
   //
   // `sensitivity` é 0-100 (ver MIN/MAX/DEFAULT_MIC_SENSITIVITY acima).
   // `null` desliga o gate por completo (só RNNoise, sem cortar nada por
   // volume).
   setInputTrack: (rawTrack: MediaStreamTrack, sensitivity?: number | null) => MediaStreamTrack
+  // Troca só o limiar do gate (0-100, igual setInputTrack) SEM
+  // reconstruir o resto do gráfico de áudio (RNNoise, destino) — a
+  // track de SAÍDA continua sendo exatamente o mesmo objeto de antes.
+  // Importante pro modo automático, que reajusta isso a cada poucos
+  // segundos: se cada ajuste trocasse a track de saída, seria preciso
+  // trocar de track no envio pra call inteira toda vez, causando uma
+  // engasgadinha no áudio.
+  setSensitivity: (sensitivity: number | null) => void
+  // Mesma ideia que `setSensitivity`, mas recebe o limiar já em dBFS
+  // direto (em vez de 0-100) — usado pelo modo automático, que calcula
+  // o limiar sozinho a partir do ruído de fundo medido.
+  setSensitivityDb: (thresholdDb: number | null) => void
+  // Nível atual do sinal (dBFS aproximado, RMS), medido DEPOIS do
+  // RNNoise e ANTES do gate. Usado pelo modo automático pra estimar o
+  // "piso" de ruído ambiente — medir DEPOIS do gate criaria um ciclo
+  // vicioso (gate fecha → parece silêncio total → piso estimado cai →
+  // limiar cai → gate abre fácil demais → repete pra sempre).
+  sampleLevelDb: () => number | null
   // Libera tudo (nós de áudio + o AudioContext dedicado). Chame ao sair
   // da call ou quando a pessoa desativar a redução de ruído.
   destroy: () => void
@@ -104,6 +121,9 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
   let rnnoiseNode: RnnoiseWorkletNode | null = null
   let gateNode: NoiseGateWorkletNode | null = null
   let merger: ChannelMergerNode | null = null
+  let destination: MediaStreamAudioDestinationNode | null = null
+  let levelAnalyser: AnalyserNode | null = null
+  let levelBuffer: Uint8Array<ArrayBuffer> | null = null
 
   function teardownGraph() {
     try {
@@ -127,10 +147,59 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     } catch {
       // já desconectado — sem problema
     }
+    try {
+      levelAnalyser?.disconnect()
+    } catch {
+      // já desconectado — sem problema
+    }
     source = null
     rnnoiseNode = null
     gateNode = null
     merger = null
+    levelAnalyser = null
+    levelBuffer = null
+  }
+
+  // Refaz só o trecho "depois do RNNoise" do gráfico (gate + ligação
+  // com o merger) — rnnoiseNode/source/levelAnalyser/destination
+  // continuam exatamente os mesmos objetos. Usa desconexões
+  // DIRECIONADAS (rnnoiseNode.disconnect(alvo)) em vez de um
+  // `.disconnect()` genérico, pra não derrubar por engano a ligação
+  // rnnoiseNode → levelAnalyser (essa precisa ficar viva o tempo todo).
+  function rewireGate(thresholdDb: number | null) {
+    if (!rnnoiseNode || !merger) return
+    try {
+      rnnoiseNode.disconnect(merger)
+    } catch {
+      // não estava conectado direto (havia um gate no meio) — sem problema
+    }
+    if (gateNode) {
+      try {
+        rnnoiseNode.disconnect(gateNode)
+      } catch {
+        // sem problema
+      }
+      try {
+        gateNode.disconnect(merger)
+      } catch {
+        // sem problema
+      }
+      gateNode = null
+    }
+
+    let tail: AudioNode = rnnoiseNode
+    if (thresholdDb !== null) {
+      gateNode = new NoiseGateWorkletNode(audioContext, {
+        openThreshold: thresholdDb,
+        closeThreshold: thresholdDb - 6, // um pouco mais baixo que o de abrir, pra não "tremer" (flutuar) perto do limiar
+        holdMs: 200, // segura o gate aberto por 200ms depois que o volume cai, pra não cortar o fim de cada palavra
+        maxChannels: 1,
+      })
+      tail.connect(gateNode)
+      tail = gateNode
+    }
+    tail.connect(merger, 0, 0)
+    tail.connect(merger, 0, 1)
   }
 
   function setInputTrack(rawTrack: MediaStreamTrack, sensitivity: number | null = DEFAULT_MIC_SENSITIVITY): MediaStreamTrack {
@@ -148,18 +217,13 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     rnnoiseNode = new RnnoiseWorkletNode(audioContext, { wasmBinary, maxChannels: 1 })
     source.connect(rnnoiseNode)
 
-    let tail: AudioNode = rnnoiseNode
-    if (sensitivity !== null) {
-      const openThreshold = sensitivityToOpenThresholdDb(sensitivity)
-      gateNode = new NoiseGateWorkletNode(audioContext, {
-        openThreshold,
-        closeThreshold: openThreshold - 6, // um pouco mais baixo que o de abrir, pra não "tremer" (flutuar) perto do limiar
-        holdMs: 200, // segura o gate aberto por 200ms depois que o volume cai, pra não cortar o fim de cada palavra
-        maxChannels: 1,
-      })
-      tail.connect(gateNode)
-      tail = gateNode
-    }
+    // "Escuta" o sinal já limpo pelo RNNoise, sem se conectar em mais
+    // nada além do analisador (é só uma leitura passiva, não faz parte
+    // do caminho até o destino).
+    levelAnalyser = audioContext.createAnalyser()
+    levelAnalyser.fftSize = 512
+    levelBuffer = new Uint8Array(levelAnalyser.fftSize)
+    rnnoiseNode.connect(levelAnalyser)
 
     // Duplica o canal mono explicitamente pros dois lados (esquerdo e
     // direito) via um ChannelMergerNode, em vez de confiar no upmix
@@ -167,12 +231,32 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     // MediaStream de 1 canal só no alto-falante ESQUERDO em vez de nos
     // dois, e essa duplicação manual evita esse problema de vez.
     merger = audioContext.createChannelMerger(2)
-    tail.connect(merger, 0, 0)
-    tail.connect(merger, 0, 1)
+    rewireGate(sensitivity === null ? null : sensitivityToOpenThresholdDb(sensitivity))
 
-    const destination = audioContext.createMediaStreamDestination()
+    destination = audioContext.createMediaStreamDestination()
     merger.connect(destination)
     return destination.stream.getAudioTracks()[0]
+  }
+
+  function setSensitivity(sensitivity: number | null) {
+    rewireGate(sensitivity === null ? null : sensitivityToOpenThresholdDb(sensitivity))
+  }
+
+  function setSensitivityDb(thresholdDb: number | null) {
+    rewireGate(thresholdDb)
+  }
+
+  function sampleLevelDb(): number | null {
+    if (!levelAnalyser || !levelBuffer) return null
+    levelAnalyser.getByteTimeDomainData(levelBuffer)
+    let sumSquares = 0
+    for (let i = 0; i < levelBuffer.length; i++) {
+      const v = (levelBuffer[i] - 128) / 128
+      sumSquares += v * v
+    }
+    const rms = Math.sqrt(sumSquares / levelBuffer.length)
+    if (rms <= 0.0001) return -80
+    return 20 * Math.log10(rms)
   }
 
   function destroy() {
@@ -182,5 +266,5 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     })
   }
 
-  return { setInputTrack, destroy }
+  return { setInputTrack, setSensitivity, setSensitivityDb, sampleLevelDb, destroy }
 }

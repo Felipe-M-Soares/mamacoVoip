@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ScreenShareSource } from '../../hooks/useGamePresence'
+import { setPendingGameShareHint } from '../../lib/screenShareGameHint'
 
 // Discord tem um atalho de "compartilhar seu jogo" assim que detecta que
 // você está com um jogo aberto — em vez de forçar a pessoa a procurar a
@@ -67,6 +68,16 @@ export function ScreenSharePicker() {
     setSources(null)
   }
 
+  // Escolher qualquer coisa que NÃO seja o atalho "compartilhar seu
+  // jogo" (uma janela ou tela específica da grade abaixo) precisa limpar
+  // um recado de jogo que porventura tenha ficado setado — defensivo,
+  // não deveria acontecer no fluxo normal, mas evita um auto-stop
+  // errado "vazando" pra uma captura sem relação nenhuma com jogo.
+  function chooseFromGrid(id: string) {
+    setPendingGameShareHint(null)
+    choose(id)
+  }
+
   return (
     <div
       className="fixed inset-0 z-[400] bg-black/70 flex items-center justify-center p-4"
@@ -83,7 +94,15 @@ export function ScreenSharePicker() {
 
         {gameSource && currentGame && (
           <button
-            onClick={() => choose(gameSource.id)}
+            onClick={() => {
+              // Só precisa do "recado" no caso de tela cheia (sem janela
+              // própria pra detectar o fechamento sozinha) — ver o
+              // comentário grande em screenShareGameHint.ts. Compartilhar
+              // a JANELA do jogo já para sozinho quando ela fecha, sem
+              // precisar de nada extra aqui.
+              setPendingGameShareHint(isFullscreenFallback ? currentGame : null)
+              choose(gameSource.id)
+            }}
             className="w-full flex items-center gap-3 mb-4 p-2.5 rounded-lg border-2 border-discord-blurple bg-discord-blurple/10 hover:bg-discord-blurple/20 transition-colors text-left"
           >
             <img
@@ -109,7 +128,7 @@ export function ScreenSharePicker() {
           {sources.map((s) => (
             <button
               key={s.id}
-              onClick={() => choose(s.id)}
+              onClick={() => chooseFromGrid(s.id)}
               className="text-left rounded-lg overflow-hidden border-2 border-transparent hover:border-discord-blurple transition-colors bg-discord-darker"
             >
               <img src={s.thumbnail} alt={s.name} className="w-full aspect-video object-cover bg-black" />

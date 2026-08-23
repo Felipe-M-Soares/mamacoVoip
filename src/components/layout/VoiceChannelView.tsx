@@ -7,6 +7,7 @@ import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
 import { useFriends } from '../../context/FriendsContext'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
+import { SoundboardPanel } from '../ui/SoundboardPanel'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { VoiceParticipant } from '../../context/VoiceContext'
 import type { Channel, Profile, Role } from '../../types/database'
@@ -413,6 +414,7 @@ export function VoiceChannelView({
   const { roles, rolesForUser, assignRole, removeRole } = useRoles(serverId)
   const { sendRequest } = useFriends()
   const [showInvite, setShowInvite] = useState(false)
+  const [showSoundboard, setShowSoundboard] = useState(false)
 
   function handleViewParticipantProfile(userId: string) {
     const p = members.find((m) => m.user_id === userId)?.profile
@@ -731,6 +733,16 @@ export function VoiceChannelView({
             )}
 
             <button
+              onClick={() => setShowSoundboard(true)}
+              title="Soundboard"
+              className="w-11 h-11 rounded-full flex items-center justify-center bg-discord-lighter text-discord-text hover:bg-discord-darker transition-colors"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                <path d="M9 3a1 1 0 0 1 1 1v16a1 1 0 1 1-2 0v-3.09A5.5 5.5 0 0 1 3 11.5 5.5 5.5 0 0 1 8 6.05V4a1 1 0 0 1 1-1zm6 3a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0v-.05A5.5 5.5 0 0 1 9.5 12 5.5 5.5 0 0 1 14 6.55V7a1 1 0 0 1 1-1zm4-2a1 1 0 0 1 1 1v14a1 1 0 1 1-2 0V5a1 1 0 0 1 1-1z" />
+              </svg>
+            </button>
+
+            <button
               onClick={voice.leave}
               title="Desconectar"
               className="w-11 h-11 rounded-full flex items-center justify-center bg-red-600 text-white hover:bg-red-700 transition-colors"
@@ -751,6 +763,7 @@ export function VoiceChannelView({
           onClose={() => setShowInvite(false)}
         />
       )}
+      {showSoundboard && <SoundboardPanel serverId={serverId} onClose={() => setShowSoundboard(false)} />}
     </section>
   )
 }

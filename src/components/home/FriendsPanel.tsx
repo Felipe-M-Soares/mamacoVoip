@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
+import { ContextMenu, useContextMenuState, type ContextMenuItem } from '../ui/ContextMenu'
 import { useFriends } from '../../context/FriendsContext'
 import { useConversations } from '../../hooks/useConversations'
 import { useOnlineIds } from '../../hooks/usePresence'
+import { useAuth } from '../../hooks/useAuth'
+import { useServers } from '../../hooks/useServers'
+import { supabase } from '../../lib/supabase'
+import { buildInviteMessage } from '../../lib/inviteMessage'
 import type { ProfileStatus } from '../../types/database'
 
 type Tab = 'online' | 'all' | 'pending' | 'blocked'
@@ -212,13 +217,75 @@ function FriendGrid({
   onMessage: (userId: string) => void
   onRemove: (userId: string) => void
 }) {
+  const { user } = useAuth()
+  const { servers, createInvite } = useServers()
+  const { openConversationWith } = useConversations()
+  const { menuState, openMenu, closeMenu } = useContextMenuState()
+  const [contextFriendId, setContextFriendId] = useState<string | null>(null)
+  const [inviteFeedback, setInviteFeedback] = useState<string | null>(null)
+  const feedbackTimeoutRef = useRef<number | null>(null)
+
+  // Clicar com o botão direito num amigo online e chamá-lo direto pra um
+  // dos MEUS servidores — igual o "Chamar para" que o Discord tem no
+  // menu de contexto de um amigo. Reusa exatamente a mesma lógica de
+  // convite (gerar código + mandar por DM) que InviteFriendsModal.tsx já
+  // usa, só que direcionada a UM amigo e UM servidor escolhidos aqui, em
+  // vez do fluxo em modal com checkboxes.
+  async function handleInviteToServer(friendId: string, serverId: string, serverName: string) {
+    if (!user) return
+    if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current)
+    const { error: inviteError, invite } = await createInvite(serverId, undefined, 24 * 7)
+    if (inviteError || !invite) {
+      setInviteFeedback('Não foi possível gerar o convite.')
+    } else {
+      const message = buildInviteMessage({ code: invite.code, serverId, serverName })
+      const { conversation } = await openConversationWith(friendId)
+      if (conversation) {
+        await supabase
+          .from('dm_messages')
+          .insert({ conversation_id: conversation.id, author_id: user.id, content: message })
+        setInviteFeedback(`Convite pra "${serverName}" enviado!`)
+      } else {
+        setInviteFeedback('Não foi possível enviar o convite.')
+      }
+    }
+    feedbackTimeoutRef.current = window.setTimeout(() => setInviteFeedback(null), 3000)
+  }
+
   if (friends.length === 0) {
     return <p className="text-discord-text-muted text-sm">{emptyText}</p>
   }
+
+  const contextTarget = friends.find((f) => f.profile.id === contextFriendId) ?? null
+  const menuItems: ContextMenuItem[] = contextTarget
+    ? [
+        { label: 'Enviar mensagem', onClick: () => onMessage(contextTarget.profile.id) },
+        ...(servers.length > 0
+          ? servers.map((s) => ({
+              label: `Chamar para "${s.name}"`,
+              onClick: () => handleInviteToServer(contextTarget.profile.id, s.id, s.name),
+            }))
+          : [{ label: 'Você ainda não tem servidores', onClick: () => {}, disabled: true }]),
+        {
+          label: 'Remover amigo',
+          danger: true,
+          divider: true,
+          onClick: () => onRemove(contextTarget.profile.id),
+        },
+      ]
+    : []
+
   return (
     <div className="space-y-1">
       {friends.map((f) => (
-        <div key={f.profile.id} className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5 group">
+        <div
+          key={f.profile.id}
+          className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5 group"
+          onContextMenu={(e) => {
+            setContextFriendId(f.profile.id)
+            openMenu(e)
+          }}
+        >
           <Avatar name={f.profile.username} avatarUrl={f.profile.avatar_url} status={f.profile.status} userId={f.profile.id} size={36} />
           <div className="flex-1 min-w-0">
             <p className="text-sm text-white truncate">{f.profile.display_name || f.profile.username}</p>
@@ -246,6 +313,14 @@ function FriendGrid({
           </button>
         </div>
       ))}
+
+      {menuState && contextTarget && <ContextMenu x={menuState.x} y={menuState.y} items={menuItems} onClose={closeMenu} />}
+
+      {inviteFeedback && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[210] bg-discord-dark border border-black/40 text-white text-sm px-4 py-2 rounded-lg shadow-xl">
+          {inviteFeedback}
+        </div>
+      )}
     </div>
   )
 }

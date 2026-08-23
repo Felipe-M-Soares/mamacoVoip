@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useServers } from '../../hooks/useServers'
 import { useServerOrder } from '../../hooks/useLocalOrganization'
@@ -7,6 +7,7 @@ import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { LeaveServerModal } from '../modals/LeaveServerModal'
 import { ServerSettingsModal } from '../modals/ServerSettingsModal'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
+import { ServerHoverCard } from './ServerHoverCard'
 import { supabase } from '../../lib/supabase'
 import type { Server, Channel } from '../../types/database'
 
@@ -19,6 +20,8 @@ function ServerIcon({
   isDragOver,
   onClick,
   onContextMenu,
+  onMouseEnter,
+  onMouseLeave,
   onDragStart,
   onDragOver,
   onDragLeave,
@@ -33,6 +36,8 @@ function ServerIcon({
   isDragOver?: boolean
   onClick?: () => void
   onContextMenu?: (e: React.MouseEvent) => void
+  onMouseEnter?: (e: React.MouseEvent) => void
+  onMouseLeave?: () => void
   onDragStart?: (e: React.DragEvent) => void
   onDragOver?: (e: React.DragEvent) => void
   onDragLeave?: () => void
@@ -65,6 +70,8 @@ function ServerIcon({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onContextMenu={onContextMenu}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       <span
         className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 bg-white rounded-r-full transition-all duration-150 ${
@@ -136,6 +143,30 @@ export function ServerBar({
   }, [showSettingsFor])
   const { menuState, openMenu, closeMenu } = useContextMenuState()
 
+  // Card de "quem está online" ao passar o mouse por cima de um
+  // servidor — ver ServerHoverCard.tsx. Só mostra depois de um pequeno
+  // atraso (300ms) parado em cima do ícone, pra não ficar piscando um
+  // card pra cada servidor enquanto o mouse só está passando por cima
+  // deles a caminho de outro lugar.
+  const [hoverInfo, setHoverInfo] = useState<{ server: Server; rect: DOMRect } | null>(null)
+  const hoverTimerRef = useRef<number | null>(null)
+
+  function handleServerMouseEnter(e: React.MouseEvent, server: Server) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current)
+    hoverTimerRef.current = window.setTimeout(() => setHoverInfo({ server, rect }), 300)
+  }
+  function handleServerMouseLeave() {
+    if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current)
+    hoverTimerRef.current = null
+    setHoverInfo(null)
+  }
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current)
+    }
+  }, [])
+
   const orderedServers = sortByOrder(servers)
 
   function handleDrop(e: React.DragEvent, targetId: string) {
@@ -152,6 +183,7 @@ export function ServerBar({
   }
 
   function handleServerContextMenu(e: React.MouseEvent, server: Server) {
+    handleServerMouseLeave()
     setContextServer(server)
     openMenu(e)
   }
@@ -174,6 +206,8 @@ export function ServerBar({
               isDragOver={dragOverId === server.id && draggedId !== server.id}
               onClick={() => onSelectServer(server)}
               onContextMenu={(e) => handleServerContextMenu(e, server)}
+              onMouseEnter={(e) => handleServerMouseEnter(e, server)}
+              onMouseLeave={handleServerMouseLeave}
               onDragStart={(e) => {
                 e.dataTransfer.setData('text/plain', server.id)
                 e.dataTransfer.effectAllowed = 'move'
@@ -192,6 +226,10 @@ export function ServerBar({
       </nav>
 
       {showCreateModal && <CreateOrJoinServerModal onClose={() => setShowCreateModal(false)} />}
+
+      {hoverInfo && !menuState && !draggedId && (
+        <ServerHoverCard server={hoverInfo.server} anchorRect={hoverInfo.rect} />
+      )}
 
       {menuState && contextServer && (
         <ContextMenu

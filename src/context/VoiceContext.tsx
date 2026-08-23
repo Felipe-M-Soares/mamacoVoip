@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
 import { useScreenShareQuality } from '../hooks/useScreenShareQuality'
 import { createNoiseSuppressor, type NoiseSuppressor } from '../lib/noiseSuppression'
+import { takePendingGameShareHint } from '../lib/screenShareGameHint'
 import {
   playConnectSound,
   playDisconnectSound,
@@ -106,10 +107,14 @@ interface VoiceContextValue {
   captureGlobalPushToTalkKey: () => Promise<string | null>
   toggleVideo: () => Promise<void>
   toggleScreenShare: () => Promise<void>
+  playSoundboardSound: (url: string) => void
   changeMicrophone: (deviceId: string) => Promise<void>
   refreshAudioConstraints: (
     overrides?: Partial<
-      Pick<ReturnType<typeof useAudioSettings>, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl' | 'micSensitivity'>
+      Pick<
+        ReturnType<typeof useAudioSettings>,
+        'echoCancellation' | 'noiseSuppression' | 'autoGainControl' | 'micSensitivity' | 'micSensitivityMode'
+      >
     >
   ) => Promise<void>
   audioSettings: ReturnType<typeof useAudioSettings>
@@ -405,6 +410,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // recurso) mesmo depois de trocar de microfone.
   const rawMicTrackRef = useRef<MediaStreamTrack | null>(null)
   const noiseSuppressorRef = useRef<NoiseSuppressor | null>(null)
+  // Estado do modo automático de sensibilidade do mic (ver useEffect
+  // "Sensibilidade automática do microfone" mais abaixo). `noiseFloorDbRef`
+  // é a estimativa (média móvel) do volume da sala em silêncio;
+  // `lastAppliedThresholdDbRef` guarda o último limiar já mandado pro
+  // worklet, só pra não ficar recriando o gate a cada leitura por causa
+  // de variações de menos de 1.5dB (isso geraria um "crepitar" audível).
+  const noiseFloorDbRef = useRef<number | null>(null)
+  const lastAppliedThresholdDbRef = useRef<number | null>(null)
+  function resetAutoSensitivity() {
+    noiseFloorDbRef.current = null
+    lastAppliedThresholdDbRef.current = null
+  }
   const audioContextRef = useRef<AudioContext | null>(null)
   const analysersRef = useRef<Map<string, AnalyserNode>>(new Map())
   // Cada peer pode mandar mais de uma MediaStream (mic/câmera + tela).
@@ -414,6 +431,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // vindo do broadcast 'screen-meta' pra saber qual stream.id é a tela.
   const rawStreamsRef = useRef<Map<string, Map<string, MediaStream>>>(new Map())
   const screenStreamIdsRef = useRef<Map<string, string>>(new Map())
+  // Cancela a inscrição em onGameStatusChanged usada pra auto-parar o
+  // compartilhamento de TELA CHEIA quando o jogo fecha (ver
+  // screenShareGameHint.ts e toggleScreenShare abaixo). Só existe
+  // enquanto uma captura desse tipo específico está ativa.
+  const gameShareWatchRef = useRef<(() => void) | null>(null)
 
   function ensureAudioContext() {
     if (!audioContextRef.current) audioContextRef.current = new AudioContext()
@@ -454,7 +476,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // uma call não fazia efeito nenhum até a próxima troca de microfone.
   async function applyNoiseSuppression(
     rawTrack: MediaStreamTrack,
-    overrides?: { noiseSuppression?: boolean; micSensitivity?: number }
+    overrides?: { noiseSuppression?: boolean; micSensitivity?: number; micSensitivityMode?: 'auto' | 'manual' }
   ): Promise<MediaStreamTrack> {
     const oldRaw = rawMicTrackRef.current
     if (oldRaw && oldRaw !== rawTrack) oldRaw.stop()
@@ -464,15 +486,29 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (!noiseSuppressionEnabled) {
       noiseSuppressorRef.current?.destroy()
       noiseSuppressorRef.current = null
+      resetAutoSensitivity()
       return rawTrack
     }
 
-    const sensitivity = overrides?.micSensitivity ?? audioSettingsRef.current.micSensitivity
+    const mode = overrides?.micSensitivityMode ?? audioSettingsRef.current.micSensitivityMode
+    // No modo automático começa com o gate totalmente aberto (null) —
+    // o useEffect "Sensibilidade automática do microfone" mede o ruído
+    // ambiente e calcula o limiar certo sozinho poucos instantes depois
+    // (ver esse useEffect mais abaixo). Usar o valor manual como palpite
+    // inicial não faria sentido, já que o objetivo do modo automático é
+    // exatamente não depender desse número.
+    const sensitivity = mode === 'auto' ? null : overrides?.micSensitivity ?? audioSettingsRef.current.micSensitivity
 
     try {
+      const isNewSuppressor = !noiseSuppressorRef.current
       if (!noiseSuppressorRef.current) {
         noiseSuppressorRef.current = await createNoiseSuppressor()
       }
+      // Só reseta a estimativa de piso de ruído quando o worklet é
+      // recriado do zero (troca de mic, por exemplo) — trocar entre
+      // auto/manual ou ajustar constraints não deveria jogar fora um
+      // aprendizado que já estava bom.
+      if (isNewSuppressor) resetAutoSensitivity()
       return noiseSuppressorRef.current.setInputTrack(rawTrack, sensitivity)
     } catch (err) {
       console.error('[VoiceContext] Redutor de ruído (RNNoise) indisponível, seguindo sem ele:', err)
@@ -495,6 +531,35 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const from = userIdRef.current
     if (!realtimeRef.current || !from) return
     realtimeRef.current.send({ type: 'broadcast', event: 'screen-meta', payload: { from, screenStreamId } })
+  }
+
+  // Toca um efeito do soundboard localmente — igual o Discord, o áudio
+  // é reproduzido direto pelo alto-falante de cada um (não é misturado
+  // no microfone/WebRTC), então respeita o volume geral (masterVolume)
+  // do mesmo jeito que a voz dos outros participantes.
+  function playLocalSoundboardAudio(url: string) {
+    try {
+      const audio = new Audio(url)
+      audio.volume = masterVolume / 100
+      audio.play().catch(() => {
+        // navegador pode bloquear play() sem interação recente — sem
+        // problema, quem clicou no botão do som É a interação
+      })
+    } catch {
+      // fonte de áudio inválida/indisponível — não deveria travar a call
+    }
+  }
+
+  // Toca o som pra MIM (na hora) e avisa todo mundo mais no canal de voz
+  // pra tocarem a mesma URL aí também — cada um busca e reproduz
+  // localmente, em vez de misturar no stream de voz (senão quem está
+  // ouvindo o eco do RNNoise/gate ouviria o som distorcido/cortado).
+  function playSoundboardSound(url: string) {
+    playLocalSoundboardAudio(url)
+    const from = userIdRef.current
+    if (realtimeRef.current && from) {
+      realtimeRef.current.send({ type: 'broadcast', event: 'soundboard-play', payload: { from, url } })
+    }
   }
 
   // Recalcula cameraStream/screenStream de um peer a partir de TODAS as
@@ -715,6 +780,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         recomputeParticipant(from)
       })
 
+      // Alguém tocou um som do soundboard — toca a mesma URL aqui
+      // também. `broadcast: { self: false }` (config do canal, logo
+      // acima) já garante que quem tocou o som não recebe o próprio
+      // broadcast de volta (evitaria tocar duas vezes pra quem clicou).
+      rt.on('broadcast', { event: 'soundboard-play' }, ({ payload }) => {
+        const { url } = payload as { from: string; url: string }
+        playLocalSoundboardAudio(url)
+      })
+
       rt.on('presence', { event: 'sync' }, () => {
         const state = rt.presenceState() as Record<string, Array<{ user_id?: string; joined_at?: number }>>
         const ids = Object.keys(state).filter((id) => id !== user.id)
@@ -827,8 +901,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     rawMicTrackRef.current = null
     noiseSuppressorRef.current?.destroy()
     noiseSuppressorRef.current = null
+    resetAutoSensitivity()
     screenStreamRef.current?.getTracks().forEach((t) => t.stop())
     screenStreamRef.current = null
+    gameShareWatchRef.current?.()
+    gameShareWatchRef.current = null
     setLocalScreenStream(null)
     analysersRef.current.clear()
     if (realtimeRef.current) {
@@ -880,6 +957,52 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
       setConnectionQuality(next)
     }, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // --- Sensibilidade automática do microfone --------------------------
+  // Só faz alguma coisa quando o modo é 'auto' (ver useAudioSettings.ts
+  // e o toggle em SettingsModal.tsx). A cada segundo, lê o nível de
+  // áudio já tratado pelo RNNoise mas ainda ANTES do gate
+  // (`sampleLevelDb()` — ver o comentário sobre esse ponto de leitura em
+  // noiseSuppression.ts, escolhido de propósito pra não entrar num loop
+  // onde um gate fechado faz o nível parecer silêncio total) e mantém
+  // uma estimativa do "piso de ruído" da sala com uma média móvel
+  // assimétrica: quando a leitura é MENOR que o piso atual, o piso desce
+  // rápido (reconhece rápido um ambiente mais silencioso); quando é
+  // MAIOR, o piso sobe bem devagar (fala normal — que é bem mais alta
+  // que o ruído de fundo — não deveria "convencer" o piso de que o
+  // ambiente ficou mais barulhento). O limiar do gate vira sempre
+  // `piso + margem fixa de 12dB`, clampado num intervalo razoável.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!connectedRef.current) return
+      if (audioSettingsRef.current.micSensitivityMode !== 'auto') return
+      const suppressor = noiseSuppressorRef.current
+      if (!suppressor) return
+      const level = suppressor.sampleLevelDb()
+      if (level === null) return
+
+      const floor = noiseFloorDbRef.current
+      if (floor === null) {
+        noiseFloorDbRef.current = level
+        return
+      }
+      noiseFloorDbRef.current = level < floor ? floor * 0.7 + level * 0.3 : floor * 0.98 + level * 0.02
+
+      const AUTO_SENSITIVITY_MARGIN_DB = 12
+      const threshold = Math.max(-80, Math.min(-20, noiseFloorDbRef.current + AUTO_SENSITIVITY_MARGIN_DB))
+
+      // Só reaplica se mudou de verdade (>=1.5dB) — o gate é recriado a
+      // cada chamada de setSensitivityDb, então reaplicar a cada segundo
+      // por causa de flutuações mínimas geraria um "clique" audível toda
+      // hora à toa.
+      const last = lastAppliedThresholdDbRef.current
+      if (last === null || Math.abs(threshold - last) >= 1.5) {
+        lastAppliedThresholdDbRef.current = threshold
+        suppressor.setSensitivityDb(threshold)
+      }
+    }, 1000)
     return () => clearInterval(interval)
   }, [])
 
@@ -986,7 +1109,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // nada.
   async function refreshAudioConstraints(
     overrides?: Partial<
-      Pick<ReturnType<typeof useAudioSettings>, 'echoCancellation' | 'noiseSuppression' | 'autoGainControl' | 'micSensitivity'>
+      Pick<
+        ReturnType<typeof useAudioSettings>,
+        'echoCancellation' | 'noiseSuppression' | 'autoGainControl' | 'micSensitivity' | 'micSensitivityMode'
+      >
     >
   ) {
     if (!connectedRef.current) return
@@ -998,6 +1124,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const newTrack = await applyNoiseSuppression(rawTrack, {
         noiseSuppression: overrides?.noiseSuppression,
         micSensitivity: overrides?.micSensitivity,
+        micSensitivityMode: overrides?.micSensitivityMode,
       })
       newTrack.enabled = !muted
 
@@ -1055,22 +1182,43 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Some sozinho pros dois casos de fim de compartilhamento de tela: a
+  // pessoa clicou pra parar, OU (novo, pro caso de tela cheia) o jogo que
+  // estava sendo compartilhado foi fechado — ver o watch de
+  // onGameStatusChanged logo abaixo em toggleScreenShare. Para as
+  // tracks de verdade (vídeo E áudio) e tira elas dos peers antes de
+  // limpar o estado — sem isso a captura continuaria rodando por baixo
+  // (indicador do sistema aceso, peers ainda recebendo frames) mesmo com
+  // a UI já mostrando "parou".
+  function stopScreenShareState() {
+    screenStreamRef.current?.getTracks().forEach((track) => {
+      track.stop()
+      peersRef.current.forEach(({ pc }) => {
+        const sender = pc.getSenders().find((s) => s.track === track)
+        if (sender) pc.removeTrack(sender)
+      })
+    })
+    gameShareWatchRef.current?.()
+    gameShareWatchRef.current = null
+    screenStreamRef.current = null
+    setLocalScreenStream(null)
+    setScreenSharing(false)
+    broadcastScreenMeta(null)
+  }
+
   async function toggleScreenShare() {
     if (screenSharing) {
-      screenStreamRef.current?.getTracks().forEach((track) => {
-        track.stop()
-        peersRef.current.forEach(({ pc }) => {
-          const sender = pc.getSenders().find((s) => s.track === track)
-          if (sender) pc.removeTrack(sender)
-        })
-      })
-      broadcastScreenMeta(null)
-      screenStreamRef.current = null
-      setLocalScreenStream(null)
-      setScreenSharing(false)
+      stopScreenShareState()
       return
     }
     try {
+      // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
+      // no atalho "Compartilhar seu jogo" E caiu no caso de tela cheia
+      // (sem janela própria pra detectar o fechamento sozinha) — ver
+      // screenShareGameHint.ts. Lido (e já apagado) uma vez aqui; se
+      // tiver algo, ativa o auto-stop mais abaixo, depois que a captura
+      // realmente começar.
+      const gameShareHint = takePendingGameShareHint()
       const preset = screenShareQualityRef.current
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
@@ -1105,11 +1253,25 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // opção padrão, que otimiza pra tela parada (documento, planilha)
       videoTrack.contentHint = 'motion'
       videoTrack.onended = () => {
-        screenStreamRef.current = null
-        setLocalScreenStream(null)
-        setScreenSharing(false)
-        broadcastScreenMeta(null)
+        stopScreenShareState()
       }
+
+      // Caso especial: captura de TELA CHEIA usada como substituto de
+      // "compartilhar o jogo" (jogo em modo exclusivo, sem janela
+      // própria pro sistema capturar separadamente). Diferente de uma
+      // janela — que dispara `onended` sozinha quando é fechada — a
+      // tela em si nunca "fecha", então sem isto aqui a transmissão
+      // continuaria mostrando o desktop vazio mesmo depois do jogo ser
+      // fechado. Escuta a mesma detecção de processo que já alimenta o
+      // "Jogando X" do perfil (electron/main.cjs) e encerra sozinho
+      // assim que o jogo hintado deixar de ser o jogo atual (fechou, ou
+      // a pessoa trocou de jogo).
+      if (gameShareHint && window.electronAPI) {
+        gameShareWatchRef.current = window.electronAPI.onGameStatusChanged((game) => {
+          if (game !== gameShareHint) stopScreenShareState()
+        })
+      }
+
       peersRef.current.forEach(({ pc }) => {
         const sender = pc.addTrack(videoTrack, stream)
         const params = sender.getParameters()
@@ -1188,6 +1350,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         captureGlobalPushToTalkKey,
         toggleVideo,
         toggleScreenShare,
+        playSoundboardSound,
         changeMicrophone,
         refreshAudioConstraints,
         audioSettings,

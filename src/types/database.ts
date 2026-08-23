@@ -24,6 +24,16 @@ export type ServerEmoji = {
   created_at: string
 }
 
+export type SoundboardSound = {
+  id: string
+  server_id: string
+  name: string
+  storage_path: string
+  uploaded_by: string | null
+  play_count: number
+  created_at: string
+}
+
 export type ServerEvent = {
   id: string
   server_id: string
@@ -483,6 +493,12 @@ export type Database = {
         Update: Partial<Pick<DMReadState, 'last_read_at'>>
         Relationships: []
       }
+      soundboard_sounds: {
+        Row: SoundboardSound
+        Insert: Pick<SoundboardSound, 'id' | 'server_id' | 'name' | 'storage_path' | 'uploaded_by'>
+        Update: Record<string, never>
+        Relationships: []
+      }
     }
     Views: Record<string, never>
     Functions: {
@@ -580,6 +596,14 @@ export type Database = {
       }
       delete_own_account: {
         Args: Record<string, never>
+        Returns: void
+      }
+      delete_soundboard_sound: {
+        Args: { p_sound_id: string }
+        Returns: void
+      }
+      bump_soundboard_play_count: {
+        Args: { p_sound_id: string }
         Returns: void
       }
     }

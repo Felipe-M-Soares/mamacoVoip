@@ -352,28 +352,34 @@ export function UserPanel() {
         </div>
       </button>
 
-      {/* Mic + seta: clique muta/desmuta na hora; a seta abre um painel
-          com escolha de microfone e um atalho pras configurações — mesma
-          ideia do botão anexado que o Discord usa aqui. */}
+      {/* Mic: clique muta/desmuta na hora. A setinha fica ENCOSTADA no
+          canto do próprio botão (não como um botão separado do lado) —
+          isso é o que faltava de espaço em telas mais estreitas: dois
+          botões lado a lado (ícone + seta) exigiam quase o dobro da
+          largura, e com avatar+nome+mic+fone+engrenagem tudo na mesma
+          fileira, não cabia numa sidebar de 240px — o layout quebrava e
+          empurrava tudo pra baixo torto. Como um selinho no canto, a
+          seta some do espaço da fileira mas continua clicável. */}
       <div className="relative shrink-0" onMouseLeave={() => setMicMenuOpen(false)}>
-        <div className="flex items-stretch rounded overflow-hidden">
-          <button
-            title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
-            onClick={voice.toggleMute}
-            className={`w-8 h-9 flex items-center justify-center transition-colors ${
-              voice.deafened || voice.muted ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
-            }`}
-          >
-            <MicIcon muted={voice.deafened || voice.muted} className="w-5 h-5" />
-          </button>
-          <button
-            title="Configurações de microfone"
-            onClick={() => setMicMenuOpen((v) => !v)}
-            className="w-4 h-9 flex items-center justify-center text-discord-text-muted/70 hover:text-white transition-colors"
-          >
-            <ChevronIcon className="w-3 h-3" />
-          </button>
-        </div>
+        <button
+          title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
+          onClick={voice.toggleMute}
+          className={`w-9 h-9 rounded flex items-center justify-center transition-colors ${
+            voice.deafened || voice.muted ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
+          }`}
+        >
+          <MicIcon muted={voice.deafened || voice.muted} className="w-5 h-5" />
+        </button>
+        <button
+          title="Configurações de microfone"
+          onClick={(e) => {
+            e.stopPropagation()
+            setMicMenuOpen((v) => !v)
+          }}
+          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-discord-darker text-discord-text-muted hover:text-white flex items-center justify-center ring-2 ring-discord-darker"
+        >
+          <ChevronIcon className="w-2.5 h-2.5" />
+        </button>
         {micMenuOpen && (
           <div className="absolute bottom-full right-0 mb-2 w-56 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2 z-20">
             {voice.audioSettings.microphones.length > 0 && (
@@ -406,28 +412,28 @@ export function UserPanel() {
         )}
       </div>
 
-      {/* Headphone + seta: clique liga/desliga "Desativar áudio" (deafen
-          — para de ouvir todo mundo e muta o mic junto); a seta abre o
-          volume geral e a escolha de saída de áudio. */}
+      {/* Fone: mesma ideia do mic acima — botão único, seta em selinho no
+          canto em vez de um segundo botão do lado. */}
       <div className="relative shrink-0" onMouseLeave={() => setHeadphoneMenuOpen(false)}>
-        <div className="flex items-stretch rounded overflow-hidden">
-          <button
-            title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
-            onClick={voice.toggleDeafen}
-            className={`w-8 h-9 flex items-center justify-center transition-colors ${
-              voice.deafened ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
-            }`}
-          >
-            <HeadphoneIcon off={voice.deafened} className="w-5 h-5" />
-          </button>
-          <button
-            title="Configurações de áudio"
-            onClick={() => setHeadphoneMenuOpen((v) => !v)}
-            className="w-4 h-9 flex items-center justify-center text-discord-text-muted/70 hover:text-white transition-colors"
-          >
-            <ChevronIcon className="w-3 h-3" />
-          </button>
-        </div>
+        <button
+          title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
+          onClick={voice.toggleDeafen}
+          className={`w-9 h-9 rounded flex items-center justify-center transition-colors ${
+            voice.deafened ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
+          }`}
+        >
+          <HeadphoneIcon off={voice.deafened} className="w-5 h-5" />
+        </button>
+        <button
+          title="Configurações de áudio"
+          onClick={(e) => {
+            e.stopPropagation()
+            setHeadphoneMenuOpen((v) => !v)
+          }}
+          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-discord-darker text-discord-text-muted hover:text-white flex items-center justify-center ring-2 ring-discord-darker"
+        >
+          <ChevronIcon className="w-2.5 h-2.5" />
+        </button>
         {headphoneMenuOpen && (
           <div className="absolute bottom-full right-0 mb-2 w-56 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2 z-20">
             {voice.audioSettings.supportsOutputSelection && voice.audioSettings.speakers.length > 0 && (

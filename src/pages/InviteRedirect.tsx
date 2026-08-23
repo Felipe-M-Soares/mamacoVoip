@@ -30,7 +30,7 @@ export function InviteRedirect() {
   }, [code])
 
   return (
-    <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4">
+    <div className="min-h-full bg-discord-darker flex items-center justify-center p-4">
       <div className="bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 text-center border border-white/5">
         {error ? (
           <>

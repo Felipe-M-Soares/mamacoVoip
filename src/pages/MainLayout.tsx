@@ -301,7 +301,7 @@ function MainLayoutInner() {
   const activeGroup = groups.find((g) => g.id === activeGroupId)
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-discord-dark relative">
+    <div className="h-full w-full flex overflow-hidden bg-discord-dark relative">
       {/* Botão de menu — só aparece em telas pequenas */}
       <button
         onClick={() => setMobileSidebarOpen(true)}

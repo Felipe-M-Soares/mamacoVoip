@@ -17,7 +17,7 @@ export function MfaChallengeScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4">
+    <div className="min-h-full bg-discord-darker flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-discord-dark rounded-2xl shadow-2xl border border-discord-blurple/10 p-6 text-center">
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-discord-blurple mx-auto mb-3">
           <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3z" />

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 
 export function LegalPageLayout({ title, updatedAt, children }: { title: string; updatedAt: string; children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-discord-darker">
+    <div className="min-h-full bg-discord-darker">
       <div className="max-w-3xl mx-auto px-4 py-10 sm:py-16">
         <Link to="/login" className="text-sm text-discord-blurple hover:underline">
           ← Voltar

@@ -65,7 +65,7 @@ export function Register() {
 
   if (confirmationSent) {
     return (
-      <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="min-h-full bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
         <GlowBackdrop />
         <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 text-center border border-white/5">
           <img src="/logo.png" alt="Mamacos Voip" className="w-16 h-16 rounded-full object-cover mx-auto mb-4 brand-glow-sm" />
@@ -83,7 +83,7 @@ export function Register() {
   }
 
   return (
-    <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-full bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
       <GlowBackdrop />
       <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 border border-white/5">
         <div className="flex justify-center mb-5">

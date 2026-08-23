@@ -450,6 +450,20 @@ function createWindow() {
     backgroundColor: '#0a0a0a',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     show: false, // só aparece quando o conteúdo estiver pronto (troca suave com a splash)
+    // Barra de título nativa do Windows era fina, cinza/neutra e não
+    // tinha nada a ver com a cara do app (nem dava pra deixar maior ou
+    // com a cor do tema). Escondendo ela e usando titleBarOverlay, os
+    // botões de minimizar/maximizar/fechar continuam nativos (sem
+    // precisar reimplementar isso na mão com IPC), mas sobra uma faixa
+    // arrastável em cima que o React preenche com o ícone + nome do app
+    // (ver TitleBar.tsx) do tamanho e cor que a gente quiser — é o que
+    // corrige o "barra tem que ser maior e ficar em cima" do pedido.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#171516',
+      symbolColor: '#f3efee',
+      height: 40,
+    },
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       // --- Checklist de segurança do Electron (electronjs.org/docs/latest/tutorial/security) ---

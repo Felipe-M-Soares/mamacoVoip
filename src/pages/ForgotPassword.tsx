@@ -28,7 +28,7 @@ export function ForgotPassword() {
   }
 
   return (
-    <div className="min-h-screen bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-full bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
       <div
         className="absolute inset-0 pointer-events-none"
         style={{

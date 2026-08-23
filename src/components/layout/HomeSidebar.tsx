@@ -37,7 +37,7 @@ export function HomeSidebar({
   const [showCreateGroup, setShowCreateGroup] = useState(false)
 
   return (
-    <aside className="w-60 bg-discord-sidebar flex flex-col shrink-0">
+    <aside className="w-64 bg-discord-sidebar flex flex-col shrink-0">
       <div className="h-12 px-4 flex items-center gap-2 border-b border-black/20 shadow-sm shrink-0">
         <img src="/logo-192.png" alt="Mamacos Voip" className="w-6 h-6 rounded-full object-cover shrink-0" />
         <span className="font-display text-white font-bold tracking-wide truncate">Mamacos Voip</span>

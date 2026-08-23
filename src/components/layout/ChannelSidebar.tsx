@@ -416,7 +416,7 @@ export function ChannelSidebar({
   const sortedCategories = [...categories].sort((a, b) => a.position - b.position)
 
   return (
-    <aside className="w-60 bg-discord-sidebar flex flex-col shrink-0">
+    <aside className="w-64 bg-discord-sidebar flex flex-col shrink-0">
       {server.banner_url && (
         <div className="h-20 w-full overflow-hidden shrink-0 border-b border-discord-blurple/30">
           <img src={server.banner_url} alt="" className="w-full h-full object-cover" />

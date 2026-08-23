@@ -1,6 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
-import { UserPanel } from './UserPanel'
 import { InviteModal } from '../modals/InviteModal'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { ServerSettingsModal } from '../modals/ServerSettingsModal'
@@ -705,8 +704,6 @@ export function ChannelSidebar({
         </>
         )}
       </div>
-
-      <UserPanel />
 
       {showInvite && <InviteModal serverId={server.id} onClose={() => setShowInvite(false)} />}
       {showInviteFriends && (

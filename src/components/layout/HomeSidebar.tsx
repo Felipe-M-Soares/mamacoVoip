@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Avatar } from '../ui/Avatar'
-import { UserPanel } from './UserPanel'
 import { useConversations } from '../../hooks/useConversations'
 import { useGroupConversations } from '../../context/GroupConversationsContext'
 import { usePinnedItems } from '../../hooks/usePinnedItems'
@@ -267,8 +266,6 @@ export function HomeSidebar({
           }}
         />
       )}
-
-      <UserPanel />
     </aside>
   )
 }

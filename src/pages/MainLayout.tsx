@@ -5,6 +5,7 @@ import { ChannelSidebar } from '../components/layout/ChannelSidebar'
 import { ChatArea } from '../components/layout/ChatArea'
 import { MemberList } from '../components/layout/MemberList'
 import { HomeSidebar } from '../components/layout/HomeSidebar'
+import { UserPanel } from '../components/layout/UserPanel'
 import { useGroupConversations } from '../context/GroupConversationsContext'
 import { GroupChatArea } from '../components/layout/GroupChatArea'
 import { FriendsPanel } from '../components/home/FriendsPanel'
@@ -107,6 +108,10 @@ function ActiveServerContent({
   pendingChannelId,
   unreadChannelIds,
   drawerOpen,
+  isElectronApp,
+  unreadServerIds,
+  onSelectServer,
+  onSelectHome,
   onSelectChannel,
   onServerGone,
   onViewProfile,
@@ -117,6 +122,10 @@ function ActiveServerContent({
   pendingChannelId?: string | null
   unreadChannelIds: Set<string>
   drawerOpen: boolean
+  isElectronApp: boolean
+  unreadServerIds: Set<string>
+  onSelectServer: (server: Server) => void
+  onSelectHome: () => void
   onSelectChannel: (channel: Channel) => void
   onServerGone: () => void
   onViewProfile: (profile: Profile) => void
@@ -126,19 +135,41 @@ function ActiveServerContent({
 
   return (
     <ChannelsProvider serverId={server.id} key={server.id}>
+      {/* Coluna esquerda inteira (barra de servidores + lista de canais)
+          empilhada em cima do rodapé compartilhado (UserPanel) — igual o
+          Discord de verdade: aquele rodapé (ping, "jogando agora", "voz
+          conectada", microfone/fone/config) cobre a LARGURA TOTAL dessa
+          coluna, por baixo da barra de servidores E da lista de canais
+          juntas, não só embaixo da lista de canais sozinha. Por isso o
+          ServerBar mora AQUI dentro (não mais lá fora, ao lado) — só
+          assim o rodapé consegue ficar largo o bastante pra cobrir os
+          dois ao mesmo tempo. */}
       <div
-        className={`fixed inset-y-0 left-[72px] z-40 flex transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto lg:left-0 ${
-          drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-        }`}
+        className={
+          isElectronApp
+            ? 'static flex flex-col'
+            : `fixed inset-y-0 left-0 z-40 flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto ${
+                drawerOpen ? 'translate-x-0' : '-translate-x-full'
+              }`
+        }
       >
-        <ChannelSidebar
-          server={server}
-          activeChannelId={activeChannel?.id ?? null}
-          unreadChannelIds={unreadChannelIds}
-          onSelectChannel={onSelectChannel}
-          onServerDeleted={onServerGone}
-          onServerLeft={onServerGone}
-        />
+        <div className="flex flex-1 min-h-0">
+          <ServerBar
+            activeServerId={server.id}
+            unreadServerIds={unreadServerIds}
+            onSelectServer={onSelectServer}
+            onSelectHome={onSelectHome}
+          />
+          <ChannelSidebar
+            server={server}
+            activeChannelId={activeChannel?.id ?? null}
+            unreadChannelIds={unreadChannelIds}
+            onSelectChannel={onSelectChannel}
+            onServerDeleted={onServerGone}
+            onServerLeft={onServerGone}
+          />
+        </div>
+        <UserPanel />
       </div>
 
       <ActiveServerBody
@@ -335,42 +366,6 @@ function MainLayoutInner() {
         <div className="lg:hidden fixed inset-0 bg-black/60 z-30" onClick={() => setMobileSidebarOpen(false)} />
       )}
 
-      <div
-        className={
-          isElectronApp
-            ? 'static flex'
-            : `fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto ${
-                mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
-              }`
-        }
-      >
-        <ServerBar
-          activeServerId={activeServer?.id ?? null}
-          unreadServerIds={unread.unreadServerIds}
-          onSelectServer={handleSelectServer}
-          onSelectHome={handleSelectHome}
-        />
-
-        {!activeServer && !loadingServers && (
-          <HomeSidebar
-            view={homeView}
-            activeConversationId={activeConversationId}
-            activeGroupId={activeGroupId}
-            unreadConversationIds={unread.unreadConversationIds}
-            onSelectGroup={handleOpenGroup}
-            onSelectFriends={() => {
-              setHomeView('friends')
-              setMobileSidebarOpen(false)
-            }}
-            onSelectConversation={(id) => {
-              setHomeView('conversation')
-              setActiveConversationId(id)
-              setMobileSidebarOpen(false)
-            }}
-          />
-        )}
-      </div>
-
       {activeServer ? (
         <ActiveServerContent
           server={activeServer}
@@ -378,21 +373,72 @@ function MainLayoutInner() {
           pendingChannelId={pendingChannelId}
           unreadChannelIds={unread.unreadChannelIds}
           drawerOpen={mobileSidebarOpen}
+          isElectronApp={isElectronApp}
+          unreadServerIds={unread.unreadServerIds}
+          onSelectServer={handleSelectServer}
+          onSelectHome={handleSelectHome}
           onSelectChannel={handleSelectChannel}
           onServerGone={handleServerGone}
           onViewProfile={setViewingProfile}
           onMessageUser={handleMessageUser}
         />
-      ) : loadingServers ? (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : homeView === 'conversation' && activeConversation ? (
-        <DMChatArea conversationId={activeConversation.id} otherProfile={activeConversation.otherProfile} />
-      ) : homeView === 'group' && activeGroup ? (
-        <GroupChatArea group={activeGroup} onLeave={handleSelectHome} />
       ) : (
-        <FriendsPanel onOpenConversation={handleOpenConversation} />
+        <>
+          {/* Mesma ideia da coluna esquerda de ActiveServerContent: barra
+              de servidores + lista de conversas empilhada em cima do
+              rodapé (UserPanel) compartilhado, cobrindo a largura total
+              dos dois juntos — não só embaixo da lista de conversas. */}
+          <div
+            className={
+              isElectronApp
+                ? 'static flex flex-col'
+                : `fixed inset-y-0 left-0 z-40 flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto ${
+                    mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                  }`
+            }
+          >
+            <div className="flex flex-1 min-h-0">
+              <ServerBar
+                activeServerId={null}
+                unreadServerIds={unread.unreadServerIds}
+                onSelectServer={handleSelectServer}
+                onSelectHome={handleSelectHome}
+              />
+
+              {!loadingServers && (
+                <HomeSidebar
+                  view={homeView}
+                  activeConversationId={activeConversationId}
+                  activeGroupId={activeGroupId}
+                  unreadConversationIds={unread.unreadConversationIds}
+                  onSelectGroup={handleOpenGroup}
+                  onSelectFriends={() => {
+                    setHomeView('friends')
+                    setMobileSidebarOpen(false)
+                  }}
+                  onSelectConversation={(id) => {
+                    setHomeView('conversation')
+                    setActiveConversationId(id)
+                    setMobileSidebarOpen(false)
+                  }}
+                />
+              )}
+            </div>
+            <UserPanel />
+          </div>
+
+          {loadingServers ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="w-8 h-8 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : homeView === 'conversation' && activeConversation ? (
+            <DMChatArea conversationId={activeConversation.id} otherProfile={activeConversation.otherProfile} />
+          ) : homeView === 'group' && activeGroup ? (
+            <GroupChatArea group={activeGroup} onLeave={handleSelectHome} />
+          ) : (
+            <FriendsPanel onOpenConversation={handleOpenConversation} />
+          )}
+        </>
       )}
 
       {/* Card de perfil fixo do lado direito da tela inicial — mostra o

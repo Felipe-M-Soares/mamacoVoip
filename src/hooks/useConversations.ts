@@ -80,8 +80,18 @@ export function useConversations() {
   // uma só com "ou".
   useEffect(() => {
     if (!user) return
+    // Esse hook é chamado de vários componentes ao mesmo tempo
+    // (MainLayout, HomeSidebar, FriendsPanel, etc.) — cada um monta seu
+    // próprio efeito. Se todos pedissem um canal com o MESMO nome
+    // (`dm_conversations:${user.id}`), o cliente do Supabase devolveria
+    // o canal já existente (e já inscrito) em vez de criar um novo — e
+    // encadear `.on()` num canal que já chamou `.subscribe()` derruba o
+    // app com "cannot add postgres_changes callbacks ... after
+    // subscribe()". Por isso cada montagem usa um nome de canal único
+    // (mesmo filtro, mesma tabela — só o nome muda).
+    const uniqueSuffix = Math.random().toString(36).slice(2)
     const channel = supabase
-      .channel(`dm_conversations:${user.id}`)
+      .channel(`dm_conversations:${user.id}:${uniqueSuffix}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'dm_conversations', filter: `user_a=eq.${user.id}` },

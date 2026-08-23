@@ -68,6 +68,40 @@ export function useConversations() {
     refresh()
   }, [refresh])
 
+  // Sem isso, uma conversa nova (a PRIMEIRA mensagem ou convite que
+  // alguém te manda, sem vocês nunca terem se falado antes por DM) só
+  // aparecia na lista de quem RECEBEU depois de recarregar o app
+  // manualmente — quem manda já via na hora (por causa do refresh()
+  // manual que openConversationWith já chama do lado de quem inicia),
+  // mas o outro lado não tinha nenhum jeito de saber que uma conversa
+  // nova existe sem esse recarregamento. O filtro do Realtime só aceita
+  // uma comparação por vez, e a pessoa pode estar tanto em "user_a"
+  // quanto em "user_b" — por isso duas inscrições separadas em vez de
+  // uma só com "ou".
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel(`dm_conversations:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'dm_conversations', filter: `user_a=eq.${user.id}` },
+        () => refresh()
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'dm_conversations', filter: `user_b=eq.${user.id}` },
+        () => refresh()
+      )
+      .subscribe((status, err) => {
+        if (status !== 'SUBSCRIBED') {
+          console.error('[useConversations] Status da inscrição em tempo real:', status, err ?? '')
+        }
+      })
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user, refresh])
+
   async function openConversationWith(otherUserId: string) {
     const { data, error } = await supabase.rpc('get_or_create_dm', { p_other_user_id: otherUserId })
     if (!error) await refresh()

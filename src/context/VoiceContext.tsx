@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
 import { useScreenShareQuality } from '../hooks/useScreenShareQuality'
+import { createNoiseSuppressor, type NoiseSuppressor } from '../lib/noiseSuppression'
 import {
   playConnectSound,
   playDisconnectSound,
@@ -387,6 +388,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const peersRef = useRef<Map<string, PeerState>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
+  // A track de áudio dentro de `localStreamRef` passa a ser a track JÁ
+  // TRATADA pelo RNNoise (quando ativo), não mais a track crua do
+  // dispositivo — então precisamos guardar a crua separadamente aqui só
+  // pra saber qual track parar de verdade (`.stop()`) quando o
+  // microfone muda ou a call termina. Parar só a tratada deixaria o
+  // dispositivo físico "preso" (luzinha do mic acesa, app segurando o
+  // recurso) mesmo depois de trocar de microfone.
+  const rawMicTrackRef = useRef<MediaStreamTrack | null>(null)
+  const noiseSuppressorRef = useRef<NoiseSuppressor | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analysersRef = useRef<Map<string, AnalyserNode>>(new Map())
   // Cada peer pode mandar mais de uma MediaStream (mic/câmera + tela).
@@ -413,6 +423,48 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       analysersRef.current.set(key, analyser)
     } catch {
       // getUserMedia/AudioContext podem falhar em navegadores sem suporte — degrada graciosamente
+    }
+  }
+
+  // Aplica o RNNoise (se a pessoa tiver a redução de ruído ligada nas
+  // configurações) na track BRUTA recém-capturada, devolvendo a track
+  // tratada pra usar no lugar dela daqui pra frente (nível do medidor,
+  // envio pros outros da call). Guarda a bruta em `rawMicTrackRef` só
+  // pra dar `.stop()` nela depois (ver comentário na declaração do ref).
+  //
+  // Se a pessoa tiver a redução desligada, ou se o navegador não
+  // suportar AudioWorklet/o WASM falhar ao carregar por algum motivo,
+  // devolve a própria track bruta sem processamento extra — a call
+  // nunca deve quebrar por causa disso, só perde o reforço.
+  // `noiseSuppressionOverride` existe pelo mesmo motivo do `overrides` em
+  // getAudioConstraints (ver comentário em refreshAudioConstraints logo
+  // abaixo): quando essa função é chamada bem na hora de ligar/desligar
+  // o toggle, `audioSettingsRef.current.noiseSuppression` ainda pode
+  // estar com o valor de ANTES do clique (o React ainda não terminou de
+  // atualizar o ref nesse mesmo tick) — sem passar o valor novo
+  // explicitamente, ligar o redutor de ruído no meio de uma call não
+  // fazia efeito nenhum até a próxima troca de microfone.
+  async function applyNoiseSuppression(rawTrack: MediaStreamTrack, noiseSuppressionOverride?: boolean): Promise<MediaStreamTrack> {
+    const oldRaw = rawMicTrackRef.current
+    if (oldRaw && oldRaw !== rawTrack) oldRaw.stop()
+    rawMicTrackRef.current = rawTrack
+
+    const noiseSuppressionEnabled = noiseSuppressionOverride ?? audioSettingsRef.current.noiseSuppression
+    if (!noiseSuppressionEnabled) {
+      noiseSuppressorRef.current?.destroy()
+      noiseSuppressorRef.current = null
+      return rawTrack
+    }
+
+    try {
+      if (!noiseSuppressorRef.current) {
+        noiseSuppressorRef.current = await createNoiseSuppressor()
+      }
+      return noiseSuppressorRef.current.setInputTrack(rawTrack)
+    } catch (err) {
+      console.error('[VoiceContext] Redutor de ruído (RNNoise) indisponível, seguindo sem ele:', err)
+      noiseSuppressorRef.current = null
+      return rawTrack
     }
   }
 
@@ -624,6 +676,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
     try {
       const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
+      const rawTrack = stream.getAudioTracks()[0]
+      const processedTrack = await applyNoiseSuppression(rawTrack)
+      if (processedTrack !== rawTrack) {
+        stream.removeTrack(rawTrack)
+        stream.addTrack(processedTrack)
+      }
       localStreamRef.current = stream
       mutedRef.current = false
       applyMicEnabledState(false)
@@ -707,6 +765,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       )
       localStreamRef.current?.getTracks().forEach((t) => t.stop())
       localStreamRef.current = null
+      rawMicTrackRef.current?.stop()
+      rawMicTrackRef.current = null
+      noiseSuppressorRef.current?.destroy()
+      noiseSuppressorRef.current = null
       if (realtimeRef.current) {
         supabase.removeChannel(realtimeRef.current)
         realtimeRef.current = null
@@ -724,6 +786,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     peersRef.current.clear()
     localStreamRef.current?.getTracks().forEach((t) => t.stop())
     localStreamRef.current = null
+    // A track dentro de localStreamRef pode ser a SAÍDA do RNNoise, não
+    // o microfone físico em si — sem parar a track bruta separadamente
+    // aqui, o dispositivo continuaria "preso" (luzinha do mic acesa)
+    // mesmo depois de sair da call.
+    rawMicTrackRef.current?.stop()
+    rawMicTrackRef.current = null
+    noiseSuppressorRef.current?.destroy()
+    noiseSuppressorRef.current = null
     screenStreamRef.current?.getTracks().forEach((t) => t.stop())
     screenStreamRef.current = null
     setLocalScreenStream(null)
@@ -843,7 +913,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const newStream = await navigator.mediaDevices.getUserMedia({
         audio: audioSettingsRef.current.getAudioConstraints(deviceId),
       })
-      const newTrack = newStream.getAudioTracks()[0]
+      const rawTrack = newStream.getAudioTracks()[0]
+      const newTrack = await applyNoiseSuppression(rawTrack)
       newTrack.enabled = !muted
 
       const oldTrack = localStreamRef.current?.getAudioTracks()[0]
@@ -858,7 +929,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         sender?.replaceTrack(newTrack)
       })
 
-      setupAnalyser('local', newStream)
+      setupAnalyser('local', new MediaStream([newTrack]))
     } catch {
       setError('Não foi possível trocar de microfone.')
     }
@@ -888,7 +959,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const newStream = await navigator.mediaDevices.getUserMedia({
         audio: audioSettingsRef.current.getAudioConstraints(undefined, overrides),
       })
-      const newTrack = newStream.getAudioTracks()[0]
+      const rawTrack = newStream.getAudioTracks()[0]
+      const newTrack = await applyNoiseSuppression(rawTrack, overrides?.noiseSuppression)
       newTrack.enabled = !muted
 
       const oldTrack = localStreamRef.current?.getAudioTracks()[0]
@@ -903,7 +975,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         sender?.replaceTrack(newTrack)
       })
 
-      setupAnalyser('local', newStream)
+      setupAnalyser('local', new MediaStream([newTrack]))
     } catch {
       // se falhar, o microfone atual continua funcionando com as configs antigas
     }

@@ -88,7 +88,17 @@ export function useDirectMessages(conversationId: string | null) {
           refreshAttachments(messagesRef.current.map((m) => m.id))
         }
       })
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        // Loga qualquer status que não seja "inscrito com sucesso" — sem
+        // isso, se a inscrição em tempo real falhar silenciosamente (ex:
+        // a tabela não estar na publicação supabase_realtime, ou um erro
+        // de RLS), não tinha nenhum jeito de perceber isso de fora além
+        // de "mensagem não chega pro destinatário", sem pista nenhuma do
+        // motivo. Agora aparece no console (F12 no navegador, ou
+        // Ctrl+Shift+I no app desktop) com o motivo exato.
+        if (status !== 'SUBSCRIBED') {
+          console.error('[useDirectMessages] Status da inscrição em tempo real:', status, err ?? '')
+        }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           refresh()
         }

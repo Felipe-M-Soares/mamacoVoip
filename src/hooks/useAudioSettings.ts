@@ -123,21 +123,25 @@ export function useAudioSettings() {
   ): MediaTrackConstraints {
     const deviceId = overrideDeviceId ?? settings.micId
     const effective = { ...settings, ...overrides }
-    const extraChromiumConstraints: Record<string, boolean> = effective.noiseSuppression
-      ? {
-          // Constraints extras do motor Chromium (usado tanto pelo app
-          // desktop quanto por navegadores baseados em Chrome/Edge) —
-          // reforçam a redução de ruído além do padrão da Web Audio
-          // API, bom pra ambientes barulhentos (teclado mecânico,
-          // ventoinha, ventilador do PC). Em navegadores sem suporte,
-          // essas propriedades são simplesmente ignoradas.
-          googNoiseSuppression: true,
-          googNoiseSuppression2: true,
-          googHighpassFilter: true,
-          googTypingNoiseDetection: true,
-        }
-      : {}
 
+    // Removidas duas coisas que pareciam inofensivas mas provavelmente
+    // pioravam o ruído em vez de ajudar:
+    //
+    // 1. Os `goog*` (googNoiseSuppression, googHighpassFilter, etc.) são
+    //    constraints antigas do Chrome/Hangouts de mais de 10 anos atrás,
+    //    removidas do motor de áudio do Chromium há tempos — hoje são só
+    //    peso morto, o navegador ignora silenciosamente.
+    //
+    // 2. `latency: { ideal: 0 }` pedia pro navegador priorizar latência
+    //    mínima na captura — mas o processamento de ruído/eco do Chromium
+    //    (APM) tem um custo de alguns milissegundos pra funcionar. Ao
+    //    sinalizar "quero o mínimo de atraso possível", existe um risco
+    //    real do navegador entender isso como "prefira um caminho de
+    //    captura mais cru, com menos processamento" — indo exatamente
+    //    contra o cancelamento de ruído que a pessoa também pediu.
+    //    Numa chamada de voz, a diferença de alguns milissegundos de
+    //    latência de captura é imperceptível perto do atraso da própria
+    //    rede — não vale o risco de atrapalhar a redução de ruído.
     return {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
       echoCancellation: effective.echoCancellation,
@@ -149,11 +153,6 @@ export function useAudioSettings() {
       sampleRate: { ideal: 48000 },
       sampleSize: { ideal: 16 },
       channelCount: { ideal: 1 },
-      // Pede pro navegador priorizar baixa latência ao capturar o
-      // microfone, quando o dispositivo permitir — de novo, um ajuste
-      // só do lado do código, sem depender de nenhum servidor.
-      latency: { ideal: 0 },
-      ...extraChromiumConstraints,
     } as MediaTrackConstraints
   }
 

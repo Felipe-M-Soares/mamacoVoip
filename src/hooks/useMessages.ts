@@ -137,13 +137,16 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           refreshExtras(messagesRef.current.map((m) => m.id))
         }
       })
-      .subscribe((status) => {
+      .subscribe((status, err) => {
         // Se a conexão em tempo real cair (rede instável, Wi-Fi
         // oscilando, etc.), sem isso o chat ficava "travado" —
         // parecia que nada de novo tinha chegado, quando na verdade
         // só a conexão morreu silenciosamente. Buscando tudo de novo
         // quando isso acontece, o chat se recupera sozinho sem
         // precisar que a pessoa atualize a página manualmente.
+        if (status !== 'SUBSCRIBED') {
+          console.error('[useMessages] Status da inscrição em tempo real:', status, err ?? '')
+        }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           refresh()
         }

@@ -88,7 +88,10 @@ export function useGroupMessages(groupId: string | null) {
           refreshAttachments(messagesRef.current.map((m) => m.id))
         }
       })
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        if (status !== 'SUBSCRIBED') {
+          console.error('[useGroupMessages] Status da inscrição em tempo real:', status, err ?? '')
+        }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           refresh()
         }

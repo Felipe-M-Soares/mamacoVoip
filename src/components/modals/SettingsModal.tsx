@@ -11,6 +11,7 @@ import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sou
 import { SecurityTab } from './SecurityTab'
 import { exportUserData } from '../../lib/exportUserData'
 import { NetworkDiagnosticsPanel } from './NetworkDiagnosticsPanel'
+import { createNoiseSuppressor, type NoiseSuppressor } from '../../lib/noiseSuppression'
 
 type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'notifications' | 'privacy'
 
@@ -378,6 +379,26 @@ function AudioTab() {
   const audioCtxRef = useRef<AudioContext | null>(null)
   const rafRef = useRef<number | null>(null)
   const echoAudioRef = useRef<HTMLAudioElement>(null)
+  // Reforço de redução de ruído (RNNoise) pro teste de mic/eco — usa a
+  // mesma lógica de VoiceContext.tsx, pra o que a pessoa OUVE/VÊ aqui
+  // bater com o que realmente sai na call de verdade.
+  const noiseSuppressorTestRef = useRef<NoiseSuppressor | null>(null)
+
+  // Aplica o RNNoise na track crua, se a redução de ruído estiver ligada
+  // — devolve a stream já tratada (ou a crua sem alteração, se estiver
+  // desligada ou o WASM falhar ao carregar).
+  async function applyTestNoiseSuppression(rawStream: MediaStream): Promise<MediaStream> {
+    if (!audio.noiseSuppression) return rawStream
+    try {
+      const suppressor = await createNoiseSuppressor()
+      noiseSuppressorTestRef.current = suppressor
+      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0])
+      return new MediaStream([processedTrack])
+    } catch {
+      // segue só com o cancelamento nativo do navegador
+      return rawStream
+    }
+  }
 
   async function handleRequestPermission() {
     await audio.requestPermission()
@@ -387,9 +408,10 @@ function AudioTab() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audio.getAudioConstraints() })
       streamRef.current = stream
+      const testStream = await applyTestNoiseSuppression(stream)
       const ctx = new AudioContext()
       audioCtxRef.current = ctx
-      const source = ctx.createMediaStreamSource(stream)
+      const source = ctx.createMediaStreamSource(testStream)
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       source.connect(analyser)
@@ -414,6 +436,8 @@ function AudioTab() {
     audioCtxRef.current?.close()
     streamRef.current = null
     audioCtxRef.current = null
+    noiseSuppressorTestRef.current?.destroy()
+    noiseSuppressorTestRef.current = null
     setTesting(false)
     setLevel(0)
   }
@@ -427,9 +451,10 @@ function AudioTab() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audio.getAudioConstraints() })
       streamRef.current = stream
+      const echoStream = await applyTestNoiseSuppression(stream)
       const ctx = new AudioContext()
       audioCtxRef.current = ctx
-      const source = ctx.createMediaStreamSource(stream)
+      const source = ctx.createMediaStreamSource(echoStream)
       const delay = ctx.createDelay(1)
       delay.delayTime.value = 0.15
       const dest = ctx.createMediaStreamDestination()
@@ -453,6 +478,8 @@ function AudioTab() {
     audioCtxRef.current?.close()
     streamRef.current = null
     audioCtxRef.current = null
+    noiseSuppressorTestRef.current?.destroy()
+    noiseSuppressorTestRef.current = null
     if (echoAudioRef.current) echoAudioRef.current.srcObject = null
     setEchoing(false)
   }

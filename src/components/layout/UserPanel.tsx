@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useVoice } from '../../hooks/useVoice'
 import { useConnectionPing } from '../../hooks/useConnectionPing'
+import { useClickOutside } from '../../hooks/useClickOutside'
 import { Avatar } from '../ui/Avatar'
 import { EditProfileModal } from '../modals/EditProfileModal'
 import { SettingsModal } from '../modals/SettingsModal'
@@ -306,6 +307,12 @@ export function UserPanel() {
   const [micMenuOpen, setMicMenuOpen] = useState(false)
   const [headphoneMenuOpen, setHeadphoneMenuOpen] = useState(false)
 
+  // Clique fora fecha cada menu — ver comentário em useClickOutside.ts
+  // sobre por que o onMouseLeave antigo fechava o menu cedo demais.
+  const menuRef = useClickOutside<HTMLDivElement>(menuOpen, useCallback(() => setMenuOpen(false), []))
+  const micMenuRef = useClickOutside<HTMLDivElement>(micMenuOpen, useCallback(() => setMicMenuOpen(false), []))
+  const headphoneMenuRef = useClickOutside<HTMLDivElement>(headphoneMenuOpen, useCallback(() => setHeadphoneMenuOpen(false), []))
+
   if (!profile) return null
 
   return (
@@ -326,7 +333,7 @@ export function UserPanel() {
       <PlayingActivityCard />
       <VoiceHud />
 
-      <div className="relative h-16 bg-discord-darker/60 px-3 flex items-center gap-2 border-t border-black/10 mt-2">
+      <div className="relative h-16 bg-discord-darker/60 px-3 flex items-center gap-2 border-t border-black/10 mt-2" ref={menuRef}>
       <button
         onClick={() => setMenuOpen((v) => !v)}
         className="flex items-center gap-2.5 flex-1 min-w-0 px-1.5 py-1.5 rounded hover:bg-white/5 transition-colors"
@@ -360,7 +367,7 @@ export function UserPanel() {
           fileira, não cabia numa sidebar de 240px — o layout quebrava e
           empurrava tudo pra baixo torto. Como um selinho no canto, a
           seta some do espaço da fileira mas continua clicável. */}
-      <div className="relative shrink-0" onMouseLeave={() => setMicMenuOpen(false)}>
+      <div className="relative shrink-0" ref={micMenuRef}>
         <button
           title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
           onClick={voice.toggleMute}
@@ -414,7 +421,7 @@ export function UserPanel() {
 
       {/* Fone: mesma ideia do mic acima — botão único, seta em selinho no
           canto em vez de um segundo botão do lado. */}
-      <div className="relative shrink-0" onMouseLeave={() => setHeadphoneMenuOpen(false)}>
+      <div className="relative shrink-0" ref={headphoneMenuRef}>
         <button
           title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
           onClick={voice.toggleDeafen}

@@ -1,10 +1,11 @@
-import { forwardRef, useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useVoice } from '../../hooks/useVoice'
 import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
+import { useClickOutside } from '../../hooks/useClickOutside'
 import { useFriends } from '../../context/FriendsContext'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { SoundboardPanel } from '../ui/SoundboardPanel'
@@ -472,6 +473,10 @@ export function VoiceChannelView({
   const [showMicMenu, setShowMicMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showSettingsFromVoice, setShowSettingsFromVoice] = useState(false)
+  // Clique fora fecha — ver useClickOutside.ts sobre o bug do onMouseLeave
+  // antigo fechando o menu antes do mouse alcançar as opções.
+  const micMenuRef = useClickOutside<HTMLDivElement>(showMicMenu, useCallback(() => setShowMicMenu(false), []))
+  const moreMenuRef = useClickOutside<HTMLDivElement>(showMoreMenu, useCallback(() => setShowMoreMenu(false), []))
   // "Desativar áudio" (deafen) agora mora no VoiceContext (voice.deafened
   // / voice.toggleDeafen) — assim o UserPanel (sempre visível) e esta
   // barra de controles enxergam e alternam o MESMO estado, em vez de
@@ -747,7 +752,7 @@ export function VoiceChannelView({
                 atalho pras configurações — mesma ideia do Discord de
                 anexar as opções extras no botão em vez de espalhar em
                 selects soltos pela barra. */}
-            <div className="relative" onMouseLeave={() => setShowMicMenu(false)}>
+            <div className="relative" ref={micMenuRef}>
               <div className="flex items-stretch rounded-full overflow-hidden">
                 {voice.pushToTalkEnabled ? (
                   <div
@@ -934,7 +939,7 @@ export function VoiceChannelView({
             {/* "..." — o resto das opções que não precisam de um botão
                 dedicado o tempo todo, mesma ideia do menu de "mais opções"
                 do Discord na barra de chamada. */}
-            <div className="relative" onMouseLeave={() => setShowMoreMenu(false)}>
+            <div className="relative" ref={moreMenuRef}>
               <button
                 onClick={() => setShowMoreMenu((v) => !v)}
                 title="Mais opções"

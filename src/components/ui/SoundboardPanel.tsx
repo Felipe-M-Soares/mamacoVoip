@@ -320,6 +320,11 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
   )
 }
 
+// Antes cada som virava um quadrado grande com ícone + nome (tipo card),
+// gastando MUITO espaço vertical pra pouca informação — com uma lista
+// de sons um pouco maior, o painel virava um scroll infinito. O Discord
+// de verdade mostra só o NOME num botãozinho compacto (só o texto,
+// sem ícone), bem mais denso — é esse o visual que reproduzimos aqui.
 function SoundButton({
   sound,
   onPlay,
@@ -334,16 +339,15 @@ function SoundButton({
       <button
         onClick={onPlay}
         title={sound.name}
-        className="w-full aspect-square flex flex-col items-center justify-center gap-1 rounded-lg bg-discord-darker hover:bg-discord-blurple/20 border border-white/5 hover:border-discord-blurple transition-colors p-2"
+        className="w-full px-2.5 py-2 rounded bg-discord-darker hover:bg-discord-blurple/20 border border-white/5 hover:border-discord-blurple transition-colors text-center"
       >
-        <span className="text-xl">🔊</span>
-        <span className="text-[11px] text-discord-text truncate w-full text-center">{sound.name}</span>
+        <span className="text-xs text-discord-text truncate block">{sound.name}</span>
       </button>
       {onDelete && (
         <button
           onClick={onDelete}
           title="Apagar som"
-          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white text-xs opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+          className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-600 text-white text-[10px] leading-none opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
         >
           ×
         </button>

@@ -54,6 +54,12 @@
     "asarUnpack": [
       "**/node_modules/uiohook-napi/**"
     ],
+    "protocols": [
+      {
+        "name": "Mamacos Voip Auth",
+        "schemes": ["mamacovoip"]
+      }
+    ],
     "win": {
       "target": [
         "nsis"

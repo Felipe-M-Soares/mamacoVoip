@@ -70,6 +70,12 @@ declare global {
       startForegroundWatch: (gameLabel: string) => Promise<boolean>
       stopForegroundWatch: () => Promise<void>
       onGameForegroundChanged: (callback: (focused: boolean) => void) => () => void
+      // Login com Google — recebe a URL de callback (mamacovoip://...)
+      // que o processo principal repassa assim que o sistema
+      // operacional entrega o link de volta do navegador. Ver
+      // AuthContext.tsx (signInWithGoogle) e o bloco grande no topo de
+      // electron/main.cjs.
+      onGoogleAuthCallback: (callback: (url: string) => void) => () => void
     }
   }
 }

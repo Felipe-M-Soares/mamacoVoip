@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { DESKTOP_DOWNLOAD_URL } from '../lib/config'
+import { GoogleSignInButton } from '../components/ui/GoogleSignInButton'
 
 export function Login() {
   const { signIn } = useAuth()
@@ -129,6 +130,16 @@ export function Login() {
             </Link>
           </p>
         </form>
+
+        <div className="flex items-center gap-3 mt-5">
+          <div className="h-px flex-1 bg-white/5" />
+          <span className="text-[11px] uppercase text-discord-text-muted">ou</span>
+          <div className="h-px flex-1 bg-white/5" />
+        </div>
+
+        <div className="mt-4">
+          <GoogleSignInButton label="Entrar com Google" />
+        </div>
 
         <a
           href={DESKTOP_DOWNLOAD_URL}

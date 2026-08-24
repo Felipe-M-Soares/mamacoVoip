@@ -23,6 +23,53 @@ if (!gotSingleInstanceLock) {
   return
 }
 
+// Login com Google — o navegador do sistema não tem como abrir uma
+// janela do Electron diretamente, então o "endereço de volta" pro app
+// depois da pessoa aceitar no Google é um esquema de URL customizado
+// (tipo "mailto:", mas nosso), registrado no sistema operacional. O
+// Windows entrega esse link de duas formas: (1) se o app já está
+// aberto, chega como argumento de linha de comando pra uma segunda
+// tentativa de abrir o app, capturado pelo 'second-instance' já
+// existente mais abaixo; (2) se o app estava fechado, o Windows abre o
+// app JÁ passando o link como argumento inicial (process.argv), então
+// isso aqui embaixo precisa rodar bem cedo, antes até da janela
+// existir — por isso um "recado pendente" que só é entregue depois que
+// a janela principal termina de carregar (ver 'did-finish-load' lá na
+// criação da janela). No macOS o sistema tem um jeito próprio de
+// avisar (evento 'open-url'), registrado logo abaixo.
+//
+// Também precisa estar declarado no instalador (ver "protocols" em
+// package.json) — sem isso, o Windows nunca aprende que é este app
+// quem trata esse esquema de link.
+const AUTH_DEEP_LINK_SCHEME = 'mamacovoip'
+if (!app.isDefaultProtocolClient(AUTH_DEEP_LINK_SCHEME)) {
+  app.setAsDefaultProtocolClient(AUTH_DEEP_LINK_SCHEME)
+}
+
+let pendingAuthDeepLink = null
+// Cobre o caso (2) acima: app fechado, aberto direto pelo link.
+pendingAuthDeepLink =
+  process.argv.find((arg) => arg.startsWith(`${AUTH_DEEP_LINK_SCHEME}://`)) ?? null
+
+function handleAuthDeepLink(url) {
+  if (!url || !url.startsWith(`${AUTH_DEEP_LINK_SCHEME}://`)) return
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingAuthDeepLink = url
+    return
+  }
+  mainWindow.webContents.send('google-auth-callback', url)
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  forceFocusMainWindow()
+}
+
+// macOS entrega o link por esse evento dedicado, em vez de argv — e
+// pode disparar antes até do app estar "pronto" (ready), por isso
+// registrado bem no topo do arquivo.
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  handleAuthDeepLink(url)
+})
+
 // Push-to-talk GLOBAL (funciona mesmo com o app fora de foco, tipo
 // com um jogo em tela cheia). Isso depende de um módulo nativo
 // (uiohook-napi) que só existe pra certas combinações de sistema
@@ -700,10 +747,17 @@ function createTray(win) {
 // se ela estiver escondida na bandeja (hide(), não destruída), já que
 // forceFocusMainWindow() já cuida de mostrar + contornar a proteção do
 // Windows contra roubo de foco.
-app.on('second-instance', () => {
+app.on('second-instance', (_event, argv) => {
   if (!mainWindow || mainWindow.isDestroyed()) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   forceFocusMainWindow()
+
+  // Windows/Linux entregam o link de volta do login do Google assim:
+  // como o app já estava aberto, o clique no link "abre outra
+  // tentativa" que cai aqui em vez de virar janela nova — o link vem
+  // dentro desses argumentos de linha de comando.
+  const deepLink = argv.find((arg) => arg.startsWith(`${AUTH_DEEP_LINK_SCHEME}://`))
+  if (deepLink) handleAuthDeepLink(deepLink)
 })
 
 app.whenReady().then(() => {
@@ -888,6 +942,18 @@ app.whenReady().then(() => {
   })
   win.webContents.once('render-process-gone', () => {
     if (!splash.isDestroyed()) splash.close()
+  })
+
+  // Se o app foi aberto DIRETO por um link de volta do login do Google
+  // (app estava fechado — ver o "recado pendente" lá no topo do
+  // arquivo), só entrega ele depois que a página termina de carregar,
+  // senão a mensagem chegaria antes do React montar e escutar por ela.
+  win.webContents.once('did-finish-load', () => {
+    if (pendingAuthDeepLink) {
+      const link = pendingAuthDeepLink
+      pendingAuthDeepLink = null
+      handleAuthDeepLink(link)
+    }
   })
 
   // --- Overlay dentro de jogos -----------------------------------

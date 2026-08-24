@@ -91,8 +91,15 @@ export function ServersProvider({ children }: { children: ReactNode }) {
   // `server_members` e recarrega a lista assim que algo mudar.
   useEffect(() => {
     if (!user) return
+    // Sufixo aleatório no nome do canal — mesma proteção usada em
+    // useConversations.ts/useServerMembers.ts: se por qualquer motivo esse
+    // efeito rodar mais de uma vez ao mesmo tempo (StrictMode do React em
+    // dev, Fast Refresh, etc.) com o MESMO nome de canal, o Supabase
+    // devolveria o canal já inscrito e o segundo `.on()` derrubaria o app
+    // com "cannot add postgres_changes callbacks ... after subscribe()".
+    const uniqueSuffix = Math.random().toString(36).slice(2)
     const channel = supabase
-      .channel(`server_membership:${user.id}`)
+      .channel(`server_membership:${user.id}:${uniqueSuffix}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'server_members', filter: `user_id=eq.${user.id}` },

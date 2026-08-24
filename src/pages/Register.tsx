@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { GoogleSignInButton } from '../components/ui/GoogleSignInButton'
 
 function GlowBackdrop() {
   return (
@@ -175,6 +176,16 @@ export function Register() {
             </Link>
           </p>
         </form>
+
+        <div className="flex items-center gap-3 mt-5">
+          <div className="h-px flex-1 bg-white/5" />
+          <span className="text-[11px] uppercase text-discord-text-muted">ou</span>
+          <div className="h-px flex-1 bg-white/5" />
+        </div>
+
+        <div className="mt-4">
+          <GoogleSignInButton label="Cadastrar com Google" />
+        </div>
       </div>
     </div>
   )

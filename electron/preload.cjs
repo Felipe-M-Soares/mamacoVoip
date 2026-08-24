@@ -44,4 +44,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('game-foreground-changed', handler)
     return () => ipcRenderer.removeListener('game-foreground-changed', handler)
   },
+  // Login com Google — o processo principal manda pra cá a URL de
+  // volta (mamacovoip://...) assim que o sistema operacional entrega o
+  // link de callback depois da pessoa aceitar no navegador. Ver o
+  // bloco grande no topo de electron/main.cjs pra entender o esquema
+  // completo.
+  onGoogleAuthCallback: (callback) => {
+    const handler = (_event, url) => callback(url)
+    ipcRenderer.on('google-auth-callback', handler)
+    return () => ipcRenderer.removeListener('google-auth-callback', handler)
+  },
 })

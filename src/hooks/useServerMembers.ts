@@ -52,8 +52,18 @@ export function useServerMembers(serverId: string | null) {
   // em `server_members` deste servidor, a lista se atualiza sozinha.
   useEffect(() => {
     if (!serverId) return
+    // useServerMembers() é chamado de vários componentes ao mesmo tempo pro
+    // MESMO servidor (ChatArea, painel de membros, VoiceChannelView, etc.)
+    // — cada um monta seu próprio efeito. Se todos pedissem um canal com o
+    // MESMO nome, o cliente do Supabase devolveria o canal já existente (já
+    // inscrito) em vez de criar um novo, e encadear `.on()` num canal que já
+    // chamou `.subscribe()` derruba o app com "cannot add postgres_changes
+    // callbacks ... after subscribe()". Mesmo problema (e mesma correção) já
+    // resolvido antes em useConversations.ts — por isso o sufixo aleatório
+    // aqui também.
+    const uniqueSuffix = Math.random().toString(36).slice(2)
     const channel = supabase
-      .channel(`server_members:${serverId}`)
+      .channel(`server_members:${serverId}:${uniqueSuffix}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'server_members', filter: `server_id=eq.${serverId}` },

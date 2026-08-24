@@ -1,7 +1,17 @@
 import { createContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { isElectron } from '../hooks/useGamePresence'
 import type { Profile, ProfileStatus } from '../types/database'
+
+// Esquema de URL customizado que o app desktop registra no sistema
+// operacional (ver "protocols" em package.json e o bloco grande no
+// topo de electron/main.cjs) — é o "endereço de volta" que o Google
+// usa pra devolver a pessoa pro app depois de aceitar o login, já que
+// um navegador comum não tem como abrir uma janela do Electron
+// diretamente. Só é usado dentro do app desktop; no navegador (site),
+// o próprio window.location.origin já funciona como redirecionamento.
+const GOOGLE_AUTH_REDIRECT_ELECTRON = 'mamacovoip://auth-callback'
 
 interface AuthContextValue {
   session: Session | null
@@ -12,6 +22,7 @@ interface AuthContextValue {
   verifyMfaChallenge: (code: string) => Promise<{ error: string | null }>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string, username: string) => Promise<{ error: string | null }>
+  signInWithGoogle: () => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
   updateProfile: (
@@ -182,6 +193,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error ? traduzErro(error.message) : null }
   }
 
+  // No app desktop, não dá pra deixar o Supabase redirecionar a própria
+  // janela pro Google — a janela carrega arquivos locais (app://...),
+  // não um site de verdade, então "voltar" pra ela depois do Google não
+  // funcionaria. Em vez disso: pede a URL de autorização SEM navegar
+  // pra ela (skipBrowserRedirect), abre essa URL no navegador padrão do
+  // sistema (window.open aqui é interceptado no processo principal e
+  // redirecionado pro navegador — ver setWindowOpenHandler em
+  // electron/main.cjs), e espera o link de volta chegar pelo esquema
+  // customizado mamacovoip:// (capturado no listener de
+  // onGoogleAuthCallback logo abaixo).
+  //
+  // No navegador (site), o fluxo é o padrão do Supabase: a própria
+  // página é redirecionada pro Google e volta sozinha pro mesmo
+  // endereço, sem precisar de nada especial aqui.
+  async function signInWithGoogle(): Promise<{ error: string | null }> {
+    if (isElectron()) {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: GOOGLE_AUTH_REDIRECT_ELECTRON, skipBrowserRedirect: true },
+      })
+      if (error) return { error: traduzErro(error.message) }
+      if (data?.url) window.open(data.url, '_blank')
+      return { error: null }
+    }
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    })
+    return { error: error ? traduzErro(error.message) : null }
+  }
+
+  // Só existe dentro do app desktop (window.electronAPI) — é o outro
+  // lado do signInWithGoogle() acima: quando o link mamacovoip://
+  // chega de volta (ver electron/main.cjs), extrai o token da URL e
+  // efetiva a sessão. onAuthStateChange (já escutado lá em cima) cuida
+  // do resto (buscar perfil, etc.) automaticamente a partir daqui.
+  useEffect(() => {
+    if (!window.electronAPI?.onGoogleAuthCallback) return
+    return window.electronAPI.onGoogleAuthCallback(async (url) => {
+      try {
+        const hashIndex = url.indexOf('#')
+        const params = new URLSearchParams(hashIndex >= 0 ? url.slice(hashIndex + 1) : '')
+        const access_token = params.get('access_token')
+        const refresh_token = params.get('refresh_token')
+        if (access_token && refresh_token) {
+          await supabase.auth.setSession({ access_token, refresh_token })
+        }
+      } catch {
+        // best-effort — um link malformado não deve derrubar o app
+      }
+    })
+  }, [])
+
   async function signOut() {
     if (session?.user) {
       await supabase.from('profiles').update({ status: 'offline' }).eq('id', session.user.id)
@@ -279,6 +344,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         verifyMfaChallenge,
         signIn,
         signUp,
+        signInWithGoogle,
         signOut,
         refreshProfile,
         updateProfile,

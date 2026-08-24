@@ -4,6 +4,7 @@ import { MessageComposer } from '../chat/MessageComposer'
 import { useGroupMessages } from '../../hooks/useGroupMessages'
 import { useGroupConversations, type GroupConversationWithMembers } from '../../context/GroupConversationsContext'
 import { useAuth } from '../../hooks/useAuth'
+import { useVoice } from '../../hooks/useVoice'
 import { parseMessageContent } from '../../lib/messageFormatting'
 import { LinkPreviewCard, extractFirstUrl, isPureMediaMessage } from '../chat/LinkPreviewCard'
 import type { GroupMessage } from '../../types/database'
@@ -26,10 +27,13 @@ export function GroupChatArea({
   const { leaveGroup } = useGroupConversations()
   const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const voice = useVoice()
 
   const profileById = Object.fromEntries(group.members.map((m) => [m.id, m]))
   const otherMembers = group.members.filter((m) => m.id !== user?.id)
   const title = group.name || otherMembers.map((m) => m.display_name || m.username).join(', ')
+  const isThisCall = voice.connectedChannelId === group.id
+  const isInAnotherCall = Boolean(voice.connectedChannelId) && !isThisCall
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -61,6 +65,29 @@ export function GroupChatArea({
         <h2 className="font-semibold text-white truncate">{title}</h2>
         <span className="text-xs text-discord-text-muted">{group.members.length} membros</span>
         <div className="flex-1" />
+        {isThisCall ? (
+          <button
+            onClick={() => voice.leave()}
+            className="text-xs px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700 transition-colors flex items-center gap-1.5"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+              <path d="M20 15.5c-1.2 0-2.5-.2-3.6-.6-.4-.1-.8 0-1.1.3l-2.2 2.2c-2.8-1.4-5.2-3.8-6.6-6.6l2.2-2.2c.3-.3.4-.7.3-1.1-.4-1.1-.6-2.4-.6-3.6 0-.6-.4-1-1-1H4c-.6 0-1 .4-1 1 0 9.4 7.6 17 17 17 .6 0 1-.4 1-1v-3.5c0-.6-.4-1-1-1z" />
+            </svg>
+            Sair da chamada
+          </button>
+        ) : (
+          <button
+            onClick={() => voice.join(group.id, null, { displayName: title })}
+            disabled={isInAnotherCall || voice.connecting}
+            title={isInAnotherCall ? 'Você já está em outra chamada' : 'Iniciar chamada de voz'}
+            className="text-xs px-3 py-1 rounded bg-discord-green text-white hover:brightness-110 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+              <path d="M12 3a4 4 0 0 1 4 4v5a4 4 0 0 1-8 0V7a4 4 0 0 1 4-4zm-7 9a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.92V21h2a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h2v-2.08A7 7 0 0 1 5 12z" />
+            </svg>
+            Chamada
+          </button>
+        )}
         <button
           onClick={handleLeave}
           className="text-xs px-3 py-1 rounded border border-red-600 text-red-500 hover:bg-red-600/10 transition-colors"

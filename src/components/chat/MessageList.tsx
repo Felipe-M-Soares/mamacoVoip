@@ -56,6 +56,7 @@ export function MessageList({
   selectionMode,
   selectedMessageIds,
   onToggleSelect,
+  onReport,
 }: {
   channelName: string
   messages: Message[]
@@ -86,6 +87,7 @@ export function MessageList({
   selectionMode?: boolean
   selectedMessageIds?: Set<string>
   onToggleSelect?: (messageId: string) => void
+  onReport?: (messageId: string) => void
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesById = Object.fromEntries(messages.map((m) => [m.id, m]))
@@ -174,6 +176,7 @@ export function MessageList({
             onReply={() => onReply(message)}
             onToggleReaction={(emoji) => onToggleReaction(message.id, emoji)}
             onViewProfile={onViewProfile}
+            onReport={onReport ? () => onReport(message.id) : undefined}
             />
           </Fragment>
         )

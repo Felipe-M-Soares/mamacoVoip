@@ -20,9 +20,18 @@ export const DESKTOP_DOWNLOAD_URL =
 //
 // Pra usar de verdade, cadastre a SUA chave (gratuito, poucos minutos):
 // https://developers.giphy.com → criar conta → "Create an API Key" no
-// Developer Dashboard → cole o valor aqui embaixo. A chave abaixo é só
-// um placeholder e não funciona.
-export const GIPHY_API_KEY = 'EU6ktp2I3dARvfow8NgQm0qEAkuAZaEn'
+// Developer Dashboard. Depois, configure ela como variável de ambiente
+// (não editar este arquivo direto — assim a chave real não fica exposta
+// igual código-fonte, e pode trocar sem precisar mexer em código):
+//   - Vercel (site): Settings > Environment Variables > VITE_GIPHY_API_KEY
+//   - GitHub Actions (app desktop): Settings > Secrets and variables >
+//     Actions > New repository secret > VITE_GIPHY_API_KEY (e adicionar
+//     a mesma linha "VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}"
+//     no .github/workflows/release-desktop.yml, junto das outras)
+// Sem essa variável configurada, o valor abaixo é usado como reserva —
+// é só um placeholder e não funciona, então a busca de GIF fica
+// desativada até a chave de verdade ser configurada.
+export const GIPHY_API_KEY = import.meta.env.VITE_GIPHY_API_KEY || 'EU6ktp2I3dARvfow8NgQm0qEAkuAZaEn'
 
 // URL pública do app na web (o deploy na Vercel). Usada só como base
 // pra montar links de convite/compartilhamento QUANDO quem está gerando

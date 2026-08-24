@@ -6,6 +6,7 @@ import { CreateOrJoinServerModal } from '../modals/CreateOrJoinServerModal'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { LeaveServerModal } from '../modals/LeaveServerModal'
 import { ServerSettingsModal } from '../modals/ServerSettingsModal'
+import { ReportsPanel } from '../modals/ReportsPanel'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { ServerHoverCard } from './ServerHoverCard'
 import { supabase } from '../../lib/supabase'
@@ -128,6 +129,7 @@ export function ServerBar({
   const [showInviteFor, setShowInviteFor] = useState<Server | null>(null)
   const [showLeaveFor, setShowLeaveFor] = useState<Server | null>(null)
   const [showSettingsFor, setShowSettingsFor] = useState<Server | null>(null)
+  const [showReportsFor, setShowReportsFor] = useState<Server | null>(null)
   const [settingsChannels, setSettingsChannels] = useState<Channel[]>([])
 
   useEffect(() => {
@@ -249,6 +251,14 @@ export function ServerBar({
               label: 'Configurações do servidor',
               onClick: () => setShowSettingsFor(contextServer),
             },
+            ...(contextServer.owner_id === user?.id
+              ? [
+                  {
+                    label: 'Denúncias',
+                    onClick: () => setShowReportsFor(contextServer),
+                  },
+                ]
+              : []),
             contextServer.owner_id === user?.id
               ? {
                   label: 'Excluir servidor',
@@ -276,6 +286,9 @@ export function ServerBar({
           onClose={() => setShowLeaveFor(null)}
           onLeft={() => setShowLeaveFor(null)}
         />
+      )}
+      {showReportsFor && (
+        <ReportsPanel serverId={showReportsFor.id} onClose={() => setShowReportsFor(null)} />
       )}
       {showSettingsFor && (
         <ServerSettingsModal

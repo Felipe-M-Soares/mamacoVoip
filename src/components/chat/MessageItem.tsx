@@ -59,6 +59,7 @@ export function MessageItem({
   selectionMode,
   selected,
   onToggleSelect,
+  onReport,
 }: {
   message: Message
   author: Profile | undefined
@@ -91,6 +92,7 @@ export function MessageItem({
   selectionMode?: boolean
   selected?: boolean
   onToggleSelect?: () => void
+  onReport?: () => void
   }) {
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState(message.content)
@@ -445,6 +447,7 @@ export function MessageItem({
                 ]
               : []),
             ...(isOwn ? [{ label: 'Editar', onClick: () => setEditing(true) }] : []),
+            ...(!isOwn && onReport ? [{ label: 'Denunciar mensagem', onClick: onReport }] : []),
             ...(isOwn || canModerate
               ? [
                   {

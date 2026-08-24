@@ -42,6 +42,25 @@ export interface ScreenShareSource {
   isExactGameWindow?: boolean
 }
 
+// Sugestão de atalho "compartilhar seu jogo/janela" calculada no processo
+// principal (ver setDisplayMediaRequestHandler em electron/main.cjs) — pode
+// vir de um jogo CADASTRADO (KNOWN_GAMES, isKnownGame true, label bonito
+// tipo "Elden Ring") ou, generalizando pra qualquer app/jogo não
+// cadastrado, da última janela que esteve em primeiro plano antes de abrir
+// o seletor (isKnownGame false, label é o título da janela ou o nome do
+// processo). `processNames` é usado pra pedir o auto-stop quando aquele
+// processo fechar (ver ScreenSharePicker.tsx/VoiceContext.tsx).
+export interface ScreenShareSuggestion {
+  label: string
+  isKnownGame: boolean
+  processNames: string[]
+}
+
+export interface ScreenShareSourcesPayload {
+  sources: ScreenShareSource[]
+  suggestion: ScreenShareSuggestion | null
+}
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -52,7 +71,7 @@ declare global {
       onGameStatusChanged: (callback: (game: string | null) => void) => () => void
       onUpdateStatus: (callback: (payload: UpdateStatusPayload) => void) => () => void
       restartToUpdate: () => Promise<void>
-      onScreenShareSources: (callback: (sources: ScreenShareSource[]) => void) => () => void
+      onScreenShareSources: (callback: (payload: ScreenShareSourcesPayload) => void) => () => void
       selectScreenShareSource: (sourceId: string | null, includeSystemAudio?: boolean) => Promise<void>
       focusAppWindow: () => void
       isGlobalPTTAvailable: () => Promise<boolean>
@@ -67,9 +86,16 @@ declare global {
       // momento, e avisa aqui quando isso muda. A VoiceContext usa isso
       // pra trocar o vídeo enviado por um placeholder quando a pessoa
       // alterna pra outro programa, evitando vazar o resto da tela.
-      startForegroundWatch: (gameLabel: string) => Promise<boolean>
+      // Recebe os nomes de processo do jogo/app compartilhado (não mais um
+      // label do KNOWN_GAMES — funciona pra qualquer jogo, cadastrado ou não).
+      startForegroundWatch: (processNames: string[]) => Promise<boolean>
       stopForegroundWatch: () => Promise<void>
       onGameForegroundChanged: (callback: (focused: boolean) => void) => () => void
+      // Auto-parar (não só ocultar) o compartilhamento de tela cheia
+      // quando o processo compartilhado fecha de vez — ver electron/main.cjs.
+      watchProcessExit: (processNames: string[]) => Promise<void>
+      stopWatchProcessExit: () => Promise<void>
+      onWatchedProcessExited: (callback: () => void) => () => void
       // Login com Google — recebe a URL de callback (mamacovoip://...)
       // que o processo principal repassa assim que o sistema
       // operacional entrega o link de volta do navegador. Ver

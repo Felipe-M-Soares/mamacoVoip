@@ -11,6 +11,8 @@ import { GroupChatArea } from '../components/layout/GroupChatArea'
 import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
+import { OnboardingModal, useOnboarding } from '../components/modals/OnboardingModal'
+import { DMCallOverlay } from '../components/layout/DMCallOverlay'
 import { EditProfileModal } from '../components/modals/EditProfileModal'
 import { QuickSwitcher } from '../components/modals/QuickSwitcher'
 import { KeyboardShortcutsModal } from '../components/modals/KeyboardShortcutsModal'
@@ -50,7 +52,7 @@ function ActiveServerBody({
   server: Server
   activeChannel: Channel | null
   pendingChannelId?: string | null
-  onSelectChannel: (channel: Channel) => void
+  onSelectChannel: (channel: Channel, serverId?: string) => void
   onViewProfile: (profile: Profile) => void
   onMessageUser?: (userId: string) => void
   onToggleMembers: () => void
@@ -126,7 +128,7 @@ function ActiveServerContent({
   unreadServerIds: Set<string>
   onSelectServer: (server: Server) => void
   onSelectHome: () => void
-  onSelectChannel: (channel: Channel) => void
+  onSelectChannel: (channel: Channel, serverId?: string) => void
   onServerGone: () => void
   onViewProfile: (profile: Profile) => void
   onMessageUser?: (userId: string) => void
@@ -212,6 +214,7 @@ function MainLayoutInner() {
   // "pra sempre" depois de um convite).
   const pendingAutoJoinVoiceRef = useRef(false)
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
+  const onboarding = useOnboarding(ownProfile?.id)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   // O drawer "mobile" (ServerBar virando um overlay fixed por cima de
@@ -316,7 +319,23 @@ function MainLayoutInner() {
     setMobileSidebarOpen(false)
   }
 
-  function handleSelectChannel(channel: Channel) {
+  function handleSelectChannel(channel: Channel, targetServerId?: string) {
+    // Chamado com um targetServerId quando o canal vem de um resultado
+    // de busca "em todos os servidores" (ver SearchModal.tsx) que
+    // aponta pra um servidor diferente do atualmente aberto — troca de
+    // servidor primeiro (o que remonta o ChannelsProvider pra ele, via
+    // key={server.id} em ActiveServerContent) e deixa o canal-alvo
+    // marcado como pendente, do mesmo jeito que o fluxo de convite
+    // (pendingChannelId) já fazia.
+    if (targetServerId && targetServerId !== activeServer?.id) {
+      const target = servers.find((s) => s.id === targetServerId)
+      if (target) {
+        setActiveServer(target)
+        setPendingChannelId(channel.id)
+        setMobileSidebarOpen(false)
+        return
+      }
+    }
     setActiveChannel(channel)
     setMobileSidebarOpen(false)
   }
@@ -462,9 +481,17 @@ function MainLayoutInner() {
           targetProfile={viewingProfile}
           onClose={() => setViewingProfile(null)}
           onOpenConversation={handleOpenConversation}
+          serverId={activeServer?.id}
         />
       )}
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
+      {onboarding.show && <OnboardingModal onDismiss={onboarding.dismiss} />}
+      <DMCallOverlay
+        profilesById={{
+          ...Object.fromEntries(conversations.map((c) => [c.otherProfile.id, c.otherProfile])),
+          ...Object.fromEntries(groups.flatMap((g) => g.members.map((m) => [m.id, m]))),
+        }}
+      />
 
       <GameDetectedToast />
       <OverlayStateSync />

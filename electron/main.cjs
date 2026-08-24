@@ -249,36 +249,78 @@ let pendingDisplayMediaCallback = null
 let updateReadyToInstall = false
 let gameCheckTimer = null
 let currentGame = null
+// Última janela que esteve em primeiro plano ENQUANTO nossa própria janela
+// não estava em foco — ver getForegroundWindowInfo/o laço em
+// startGameDetection abaixo pro porquê disso existir (generaliza o atalho
+// "Compartilhar seu jogo" pra QUALQUER jogo/app, não só os da lista
+// KNOWN_GAMES).
+let lastForegroundApp = null
+// Nome(s) de processo que a gente está de olho pra saber quando a pessoa
+// FECHOU o jogo/app que estava compartilhando em modo tela cheia (ver
+// watchedProcessWasSeen logo abaixo e o bloco "screen-share-sources" mais
+// adiante) — generalização do que antes só existia pros jogos da lista
+// KNOWN_GAMES.
+let watchedProcessNames = []
+let watchedProcessWasSeen = false
 
-function detectRunningGame() {
+// Pega a lista de processos rodando UMA vez por verificação (a cada
+// GAME_CHECK_INTERVAL_MS) e reaproveita esse resultado tanto pra detectar
+// jogo conhecido (KNOWN_GAMES) quanto pra checar se um processo que
+// estamos vigiando (watchedProcessNames) ainda está rodando — evitar dois
+// `tasklist`/`ps` separados a cada tick.
+function getRunningProcessListLower() {
   return new Promise((resolve) => {
     const cmd =
       process.platform === 'win32' ? 'tasklist' : process.platform === 'darwin' ? 'ps -Ao comm' : 'ps -eo comm'
 
     exec(cmd, { windowsHide: true, timeout: 5000 }, (err, stdout) => {
-      if (err || !stdout) {
-        resolve(null)
-        return
-      }
-      const lower = stdout.toLowerCase()
-      for (const [processName, label] of Object.entries(KNOWN_GAMES)) {
-        if (lower.includes(processName)) {
-          resolve(label)
-          return
-        }
-      }
-      resolve(null)
+      resolve(err || !stdout ? '' : stdout.toLowerCase())
     })
   })
+}
+
+function detectRunningGameFromList(lower) {
+  if (!lower) return null
+  for (const [processName, label] of Object.entries(KNOWN_GAMES)) {
+    if (lower.includes(processName)) return label
+  }
+  return null
 }
 
 function startGameDetection() {
   if (gameCheckTimer) return
   gameCheckTimer = setInterval(async () => {
-    const game = await detectRunningGame()
+    const lower = await getRunningProcessListLower()
+
+    const game = detectRunningGameFromList(lower)
     if (game !== currentGame) {
       currentGame = game
       mainWindow?.webContents.send('game-status-changed', game)
+    }
+
+    // Se tem um processo sendo vigiado (compartilhamento de tela cheia
+    // ativo) e ele SUMIU da lista depois de já termos confirmado que
+    // estava rodando, avisa o renderer pra encerrar o compartilhamento
+    // sozinho — ver screenShareGameHint.ts e VoiceContext.tsx.
+    if (watchedProcessNames.length > 0) {
+      const stillRunning = Boolean(lower) && watchedProcessNames.some((name) => lower.includes(name))
+      if (stillRunning) {
+        watchedProcessWasSeen = true
+      } else if (watchedProcessWasSeen) {
+        watchedProcessNames = []
+        watchedProcessWasSeen = false
+        mainWindow?.webContents.send('watched-process-exited')
+      }
+    }
+
+    // Só atualiza o "último app em primeiro plano" quando NOSSA janela não
+    // está em foco — assim, no instante em que a pessoa clica em
+    // "Compartilhar tela" dentro do próprio app (quando o foco já é nosso),
+    // o valor guardado ainda é o do jogo/app que ela estava usando antes de
+    // alternar pra cá, não o nosso próprio processo.
+    if (process.platform === 'win32' && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
+      const fg = await getForegroundWindowInfo()
+      if (fg) lastForegroundApp = fg
     }
   }, GAME_CHECK_INTERVAL_MS)
 }
@@ -292,7 +334,7 @@ function startGameDetection() {
 //
 // A ideia: enquanto uma dessas transmissões de tela cheia "sobre um
 // jogo" está ativa, fica de olho em qual é a janela em PRIMEIRO PLANO
-// (não só "o processo está rodando", que é o que detectRunningGame()
+// (não só "o processo está rodando", que é o que detectRunningGameFromList()
 // já verifica) — assim que deixar de ser o próprio jogo, avisa o
 // renderer, que troca o vídeo enviado pelos outros por uma tela de
 // aviso (ver VoiceContext.tsx) até o jogo voltar a ser a janela ativa.
@@ -343,14 +385,13 @@ function processNamesForGameLabel(label) {
 // nenhum processo do jogo tiver janela (raro, mas possível logo no
 // instante de abrir o jogo), simplesmente devolve null e quem chama cai
 // de volta nos chutes de antes (nome parecido / tela principal).
-function getGameWindowInfo(gameLabel) {
+function getGameWindowInfo(processNames) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
       resolve(null)
       return
     }
-    const processNames = processNamesForGameLabel(gameLabel)
-    if (processNames.length === 0) {
+    if (!processNames || processNames.length === 0) {
       resolve(null)
       return
     }
@@ -403,6 +444,86 @@ Write-Output ''
   })
 }
 
+// ============================================================
+// Generalização de getGameWindowInfo acima: em vez de precisar saber de
+// ANTEMÃO o nome do processo (só possível pros jogos cadastrados em
+// KNOWN_GAMES), pergunta pro Windows QUAL é a janela em primeiro plano
+// agora e devolve os dados dela — funciona pra qualquer app/jogo, cadastrado
+// ou não. É o que dá suporte ao atalho genérico "Compartilhar [sua janela
+// ativa]" quando não reconhecemos o jogo pelo nome (ver startGameDetection,
+// que chama isso periodicamente e guarda em lastForegroundApp — chamar na
+// hora exata de abrir o seletor não funcionaria, porque nesse momento quem
+// está em primeiro plano é o NOSSO próprio app, não o jogo).
+//
+// Só Windows, best-effort — mesmas limitações de getGameWindowInfo acima.
+function getForegroundWindowInfo() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve(null)
+      return
+    }
+    const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class MamacosFgSnapshot {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+try {
+  $hwnd = [MamacosFgSnapshot]::GetForegroundWindow()
+  $procId = 0
+  [MamacosFgSnapshot]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+  $proc = Get-Process -Id $procId -ErrorAction Stop
+  if ($proc.MainWindowHandle -ne 0) {
+    $s = [System.Windows.Forms.Screen]::FromHandle($proc.MainWindowHandle)
+    $b = $s.Bounds
+    Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
+    Write-Output $proc.MainWindowTitle
+    Write-Output $proc.ProcessName
+  } else {
+    Write-Output ''
+  }
+} catch {
+  Write-Output ''
+}
+`
+    try {
+      const encoded = Buffer.from(script, 'utf16le').toString('base64')
+      exec(
+        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
+        { windowsHide: true, timeout: 2500 },
+        (err, stdout) => {
+          if (err || !stdout) {
+            resolve(null)
+            return
+          }
+          const outLines = stdout.split(/\r?\n/).filter((l) => l.length > 0)
+          if (outLines.length < 3) {
+            resolve(null)
+            return
+          }
+          const parts = outLines[0].trim().split(',').map(Number)
+          if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
+            resolve(null)
+            return
+          }
+          resolve({
+            bounds: { x: parts[0], y: parts[1], width: parts[2], height: parts[3] },
+            windowTitle: outLines[1]?.trim() || null,
+            processName: outLines[2]?.trim().toLowerCase() || null,
+          })
+        }
+      )
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
 // Casa os limites (bounds) devolvidos acima com um dos monitores que o
 // Electron enxerga (screen.getAllDisplays()) — comparando o CENTRO da
 // janela do jogo em vez das bordas exatas, porque bounds vindos de
@@ -419,11 +540,17 @@ function matchDisplayIdForBounds(bounds) {
   return match ? String(match.id) : null
 }
 
-function startForegroundWatch(gameLabel) {
+// Recebe os nomes de processo diretamente (não mais um label do
+// KNOWN_GAMES) — generalização pro caso de "compartilhar seu jogo" cair
+// num jogo/app não cadastrado (ver getForegroundWindowInfo acima e o
+// bloco "screen-share-sources" mais adiante, que monta essa lista tanto
+// pro caso conhecido — via processNamesForGameLabel — quanto pro
+// genérico).
+function startForegroundWatch(processNames) {
   stopForegroundWatch()
   if (process.platform !== 'win32') return false
 
-  foregroundWatcherGames = processNamesForGameLabel(gameLabel)
+  foregroundWatcherGames = (processNames || []).map((n) => String(n).toLowerCase())
   if (foregroundWatcherGames.length === 0) return false
 
   // -EncodedCommand (Base64, UTF-16LE) evita qualquer problema de
@@ -825,39 +952,71 @@ app.whenReady().then(() => {
         // sem problema, só não vai ter como marcar qual é a principal
       }
       // Pergunta em qual monitor E qual é o título exato da JANELA DO
-      // PRÓPRIO JOGO (ver getGameWindowInfo acima) — só quando tem um
-      // jogo detectado rodando, pra não gastar tempo/CPU abrindo
-      // PowerShell à toa toda vez que alguém for compartilhar tela sem
-      // estar jogando nada. Se não conseguir descobrir (Mac/Linux, jogo
-      // sem janela ainda, PowerShell bloqueado etc.), fica tudo null e o
-      // renderer cai de volta nos chutes de antes — nome parecido
-      // (findGameSource) e tela principal (ver ScreenSharePicker.tsx).
-      const gameWindowInfo = currentGame ? await getGameWindowInfo(currentGame) : null
-      const gameDisplayId = matchDisplayIdForBounds(gameWindowInfo?.bounds ?? null)
-      const gameWindowTitle = gameWindowInfo?.windowTitle ?? null
-      mainWindow?.webContents.send(
-        'screen-share-sources',
-        // O id que o desktopCapturer devolve sempre começa com "screen:" ou
-        // "window:" (formato documentado e estável da API) — usamos esse
-        // prefixo pra dizer pro renderer se cada opção é uma tela inteira ou
-        // uma janela específica. Isso importa porque jogos em modo tela
-        // cheia exclusiva (comum em jogos no Windows) não aparecem como uma
-        // "janela" capturável — só a captura de tela inteira consegue
-        // pegá-los — então o app precisa saber diferenciar as duas pra
-        // oferecer o fallback certo (ver ScreenSharePicker.tsx).
-        sources.map((s) => ({
+      // PRÓPRIO JOGO (ver getGameWindowInfo acima) — só quando tem um jogo
+      // CADASTRADO (KNOWN_GAMES) detectado rodando, pra não gastar tempo/CPU
+      // abrindo PowerShell à toa toda vez que alguém for compartilhar tela
+      // sem estar jogando nada reconhecido.
+      //
+      // Quando não tem jogo cadastrado — a reclamação real que motivou essa
+      // generalização: antes disso, um jogo fora da lista fixa KNOWN_GAMES
+      // nunca tinha o atalho "compartilhar seu jogo" e sempre caía pra
+      // "compartilhar a tela inteira" manual, o que parecia (e de fato
+      // era) bem mais limitado que o Discord/OBS — cai pro fallback
+      // genérico: a última janela que esteve em primeiro plano antes de a
+      // pessoa clicar em "Compartilhar tela" (lastForegroundApp, mantido
+      // fresco pelo laço em startGameDetection). Isso funciona pra
+      // QUALQUER app/jogo, cadastrado ou não — mesmo princípio do atalho de
+      // compartilhamento rápido do Discord, que também não depende de uma
+      // lista fixa.
+      let windowInfo = null
+      let isKnownGame = false
+      let suggestionLabel = null
+      let watchProcessNamesForShare = []
+
+      if (currentGame) {
+        const knownNames = processNamesForGameLabel(currentGame)
+        const info = await getGameWindowInfo(knownNames)
+        if (info) {
+          windowInfo = info
+          isKnownGame = true
+          suggestionLabel = currentGame
+          watchProcessNamesForShare = knownNames
+        }
+      }
+      if (!windowInfo && lastForegroundApp) {
+        windowInfo = lastForegroundApp
+        isKnownGame = false
+        suggestionLabel = lastForegroundApp.windowTitle || lastForegroundApp.processName
+        watchProcessNamesForShare = lastForegroundApp.processName ? [lastForegroundApp.processName] : []
+      }
+
+      const gameDisplayId = matchDisplayIdForBounds(windowInfo?.bounds ?? null)
+      const gameWindowTitle = windowInfo?.windowTitle ?? null
+      mainWindow?.webContents.send('screen-share-sources', {
+        sources: sources.map((s) => ({
           id: s.id,
           name: s.name,
           thumbnail: s.thumbnail.toDataURL(),
+          // O id que o desktopCapturer devolve sempre começa com "screen:" ou
+          // "window:" (formato documentado e estável da API) — usamos esse
+          // prefixo pra dizer pro renderer se cada opção é uma tela inteira ou
+          // uma janela específica. Isso importa porque jogos em modo tela
+          // cheia exclusiva (comum em jogos no Windows) não aparecem como uma
+          // "janela" capturável — só a captura de tela inteira consegue
+          // pegá-los — então o app precisa saber diferenciar as duas pra
+          // oferecer o fallback certo (ver ScreenSharePicker.tsx).
           type: s.id.startsWith('screen:') ? 'screen' : 'window',
           isPrimaryDisplay: Boolean(primaryDisplayId) && s.display_id === primaryDisplayId,
-          // Título EXATO bate com o da janela do processo do jogo (bem
-          // mais confiável que o "nome parecido" que findGameSource usa
-          // como fallback em ScreenSharePicker.tsx).
+          // Título EXATO bate com o da janela do jogo/app sugerido (bem mais
+          // confiável que "nome parecido"; e agora funciona tanto pro jogo
+          // cadastrado quanto pro genérico, ver acima).
           isExactGameWindow: Boolean(gameWindowTitle) && s.name === gameWindowTitle,
           isGameDisplay: Boolean(gameDisplayId) && s.display_id === gameDisplayId,
-        }))
-      )
+        })),
+        suggestion: suggestionLabel
+          ? { label: suggestionLabel, isKnownGame, processNames: watchProcessNamesForShare }
+          : null,
+      })
     } catch {
       callback({})
     }
@@ -988,10 +1147,26 @@ app.whenReady().then(() => {
   ipcMain.handle('app:getCurrentGame', () => currentGame)
 
   // Ver o bloco grande "Vigia de foco do jogo" (perto de
-  // startGameDetection) pra entender o que isso faz e por quê.
-  ipcMain.handle('game-foreground-watch:start', (_event, gameLabel) => startForegroundWatch(gameLabel))
+  // startGameDetection) pra entender o que isso faz e por quê. Recebe os
+  // nomes de processo diretamente agora (não mais um label do
+  // KNOWN_GAMES) — ver startForegroundWatch.
+  ipcMain.handle('game-foreground-watch:start', (_event, processNames) => startForegroundWatch(processNames))
   ipcMain.handle('game-foreground-watch:stop', () => {
     stopForegroundWatch()
+  })
+
+  // Auto-parar o compartilhamento de TELA CHEIA quando o jogo/app
+  // compartilhado é FECHADO de vez (não só perde o foco — isso quem cuida
+  // é o vigia acima) — ver watchedProcessNames/watchedProcessWasSeen no
+  // laço de startGameDetection, e VoiceContext.tsx (toggleScreenShare)
+  // pra como o renderer usa isso.
+  ipcMain.handle('game-share:watch-process-exit', (_event, processNames) => {
+    watchedProcessNames = Array.isArray(processNames) ? processNames.map((n) => String(n).toLowerCase()) : []
+    watchedProcessWasSeen = false
+  })
+  ipcMain.handle('game-share:stop-watch-process-exit', () => {
+    watchedProcessNames = []
+    watchedProcessWasSeen = false
   })
 
   // --- Push-to-talk global -----------------------------------------

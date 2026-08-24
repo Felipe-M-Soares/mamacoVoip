@@ -3,7 +3,8 @@ import { Modal } from './Modal'
 import { Avatar } from '../ui/Avatar'
 import { supabase } from '../../lib/supabase'
 import { useServerMembers } from '../../hooks/useServerMembers'
-import type { Channel, Message } from '../../types/database'
+import { useServers } from '../../hooks/useServers'
+import type { Channel, Message, Profile, Server } from '../../types/database'
 
 interface ParsedQuery {
   freeText: string
@@ -61,16 +62,31 @@ export function SearchModal({
   serverId: string
   channels: Channel[]
   onClose: () => void
-  onJumpToChannel: (channel: Channel) => void
+  // O segundo parâmetro (serverId de destino) só é passado quando o
+  // resultado clicado é de OUTRO servidor (busca em todos os
+  // servidores) — quem lida com isso (MainLayout) troca de servidor
+  // antes de abrir o canal. Pra um resultado do servidor atual, chega
+  // sem esse segundo parâmetro, igual sempre funcionou.
+  onJumpToChannel: (channel: Channel, serverId?: string) => void
 }) {
   const { members } = useServerMembers(serverId)
+  const { servers } = useServers()
   const [query, setQuery] = useState('')
+  const [crossServer, setCrossServer] = useState(false)
   const [results, setResults] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
 
-  const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
-  const channelById = Object.fromEntries(channels.map((c) => [c.id, c]))
+  // Em modo "todos os servidores", esses dois mapas são reconstruídos
+  // a cada busca (não dá pra confiar só nos dados do servidor atual,
+  // já que os resultados podem vir de qualquer servidor que o usuário
+  // participa).
+  const [extraProfilesById, setExtraProfilesById] = useState<Record<string, Profile>>({})
+  const [extraChannelsById, setExtraChannelsById] = useState<Record<string, Channel>>({})
+  const [serverById, setServerById] = useState<Record<string, Server>>({})
+
+  const profileById = { ...extraProfilesById, ...Object.fromEntries(members.map((m) => [m.user_id, m.profile])) }
+  const channelById = { ...extraChannelsById, ...Object.fromEntries(channels.map((c) => [c.id, c])) }
 
   const [filterError, setFilterError] = useState<string | null>(null)
 
@@ -83,30 +99,59 @@ export function SearchModal({
     setLoading(true)
     setSearched(true)
 
-    let dbQuery = supabase.from('messages').select('*').eq('server_id', serverId)
+    const serverIds = crossServer ? servers.map((s) => s.id) : [serverId]
+
+    // Em modo cross-server, os canais/perfis do servidor atual (vindos
+    // via props/hook) não bastam — busca canais de TODOS os servidores
+    // do usuário antes de rodar a busca em si, pra poder resolver nome
+    // de canal/autor nos resultados e aplicar o filtro em:canal.
+    let searchableChannels = channels
+    if (crossServer) {
+      const { data: allChannels } = await supabase.from('channels').select('*').in('server_id', serverIds)
+      searchableChannels = allChannels ?? []
+      setExtraChannelsById(Object.fromEntries(searchableChannels.map((c) => [c.id, c])))
+      setServerById(Object.fromEntries(servers.map((s) => [s.id, s])))
+    }
+
+    let dbQuery = supabase.from('messages').select('*').in('server_id', serverIds)
 
     if (parsed.freeText.length >= 1) dbQuery = dbQuery.ilike('content', `%${parsed.freeText}%`)
 
     if (parsed.fromUsername) {
-      const author = members.find((m) => m.profile.username.toLowerCase() === parsed.fromUsername!.toLowerCase())
-      if (!author) {
+      // Em modo cross-server não dá pra resolver "de:usuário" pela
+      // lista de membros de UM servidor só — filtra pelo texto
+      // diretamente na tabela profiles (username é único no app todo).
+      const { data: authorRows } = await supabase
+        .from('profiles')
+        .select('id')
+        .ilike('username', parsed.fromUsername)
+        .limit(1)
+      const authorId = crossServer
+        ? authorRows?.[0]?.id
+        : members.find((m) => m.profile.username.toLowerCase() === parsed.fromUsername!.toLowerCase())?.user_id
+      if (!authorId) {
         setResults([])
         setLoading(false)
-        setFilterError(`Ninguém com o nome de usuário "${parsed.fromUsername}" foi encontrado neste servidor.`)
+        setFilterError(`Ninguém com o nome de usuário "${parsed.fromUsername}" foi encontrado.`)
         return
       }
-      dbQuery = dbQuery.eq('author_id', author.user_id)
+      dbQuery = dbQuery.eq('author_id', authorId)
     }
 
     if (parsed.inChannelName) {
-      const channel = channels.find((c) => c.name.toLowerCase() === parsed.inChannelName!.toLowerCase())
-      if (!channel) {
+      // Nomes de canal podem se repetir entre servidores diferentes —
+      // em modo cross-server isso casa com QUALQUER canal com esse
+      // nome, não só um específico.
+      const matches = searchableChannels.filter((c) => c.name.toLowerCase() === parsed.inChannelName!.toLowerCase())
+      if (matches.length === 0) {
         setResults([])
         setLoading(false)
         setFilterError(`Nenhum canal chamado "${parsed.inChannelName}" foi encontrado.`)
         return
       }
-      dbQuery = dbQuery.eq('channel_id', channel.id)
+      dbQuery = crossServer
+        ? dbQuery.in('channel_id', matches.map((c) => c.id))
+        : dbQuery.eq('channel_id', matches[0].id)
     }
 
     if (parsed.before) dbQuery = dbQuery.lt('created_at', parsed.before.toISOString())
@@ -125,6 +170,12 @@ export function SearchModal({
         )
       const idsWithFile = new Set((attRows ?? []).map((r) => r.message_id))
       list = list.filter((m) => idsWithFile.has(m.id))
+    }
+
+    if (crossServer && list.length > 0) {
+      const authorIds = [...new Set(list.map((m) => m.author_id))]
+      const { data: profileRows } = await supabase.from('profiles').select('*').in('id', authorIds)
+      setExtraProfilesById(Object.fromEntries((profileRows ?? []).map((p) => [p.id, p])))
     }
 
     setResults(list)
@@ -150,6 +201,19 @@ export function SearchModal({
           Buscar
         </button>
       </div>
+
+      {servers.length > 1 && (
+        <label className="flex items-center gap-2 mb-2 text-xs text-discord-text-muted cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={crossServer}
+            onChange={(e) => setCrossServer(e.target.checked)}
+            className="accent-discord-blurple"
+          />
+          Buscar em todos os meus servidores ({servers.length})
+        </label>
+      )}
+
       <p className="text-[10px] text-discord-text-muted mb-4">
         Filtros: <code>de:usuário</code> · <code>em:canal</code> · <code>com:arquivo</code> ·{' '}
         <code>antes:DD/MM/AAAA</code> · <code>depois:DD/MM/AAAA</code>
@@ -168,11 +232,13 @@ export function SearchModal({
           {results.map((message) => {
             const author = profileById[message.author_id]
             const channel = channelById[message.channel_id]
+            const fromOtherServer = message.server_id !== serverId
+            const server = fromOtherServer ? serverById[message.server_id] : undefined
             return (
               <button
                 key={message.id}
                 onClick={() => {
-                  if (channel) onJumpToChannel(channel)
+                  if (channel) onJumpToChannel(channel, fromOtherServer ? message.server_id : undefined)
                   onClose()
                 }}
                 className="w-full flex gap-3 px-3 py-2 rounded hover:bg-white/5 text-left"
@@ -184,7 +250,8 @@ export function SearchModal({
                       {author?.display_name || author?.username || 'Usuário'}
                     </span>
                     <span className="text-xs text-discord-text-muted">
-                      em #{channel?.name ?? '?'} · {formatDate(message.created_at)}
+                      em #{channel?.name ?? '?'}
+                      {server ? ` · ${server.name}` : ''} · {formatDate(message.created_at)}
                     </span>
                   </div>
                   <p className="text-sm text-discord-text truncate">{message.content}</p>

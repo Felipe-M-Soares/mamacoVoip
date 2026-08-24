@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
+import { ReportModal } from './ReportModal'
 import { Avatar } from '../ui/Avatar'
 import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../context/FriendsContext'
@@ -20,10 +21,12 @@ export function UserProfileModal({
   targetProfile,
   onClose,
   onOpenConversation,
+  serverId,
 }: {
   targetProfile: Profile
   onClose: () => void
   onOpenConversation: (conversationId: string) => void
+  serverId?: string
 }) {
   const { user } = useAuth()
   const { friends, incoming, outgoing, blocked, sendRequest, acceptRequest, declineRequest, removeFriend, blockUser, unblockUser } =
@@ -31,6 +34,7 @@ export function UserProfileModal({
   const { openConversationWith } = useConversations()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reporting, setReporting] = useState(false)
 
   // "Jogando X" fica desatualizado assim que a pessoa fecha o app (o
   // campo playing no perfil só é limpo na próxima vez que ela abrir um
@@ -185,9 +189,27 @@ export function UserProfileModal({
                 Bloquear
               </button>
             )}
+
+            <button
+              onClick={() => setReporting(true)}
+              disabled={loading}
+              className="w-full py-2 text-xs text-discord-text-muted hover:text-red-400 transition-colors disabled:opacity-60"
+            >
+              Denunciar usuário
+            </button>
           </div>
         )}
       </div>
+
+      {reporting && (
+        <ReportModal
+          targetType="user"
+          targetLabel={`@${targetProfile.username}`}
+          reportedUserId={targetProfile.id}
+          serverId={serverId}
+          onClose={() => setReporting(false)}
+        />
+      )}
     </Modal>
   )
 }

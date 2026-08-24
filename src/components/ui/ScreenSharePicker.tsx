@@ -1,39 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { ScreenShareSource } from '../../hooks/useGamePresence'
+import { useEffect, useState } from 'react'
+import type { ScreenShareSource, ScreenShareSuggestion } from '../../hooks/useGamePresence'
 import { setPendingGameShareHint } from '../../lib/screenShareGameHint'
 import { QUALITY_PRESETS, loadQuality } from '../../hooks/useScreenShareQuality'
 
 // Discord tem um atalho de "compartilhar seu jogo" assim que detecta que
 // você está com um jogo aberto — em vez de forçar a pessoa a procurar a
-// janela certa na lista. A gente já sabe o nome bonito do jogo (mesmo
-// dado que aparece em "Jogando X" no perfil, vindo da detecção de
-// processo em electron/main.cjs), então só falta achar, entre as janelas
-// que o Electron listou, qual delas é a do próprio jogo.
-//
-// Duas formas de achar, em ordem de confiança: (1) `isExactGameWindow`
-// — o próprio Windows já confirmou que o TÍTULO dessa janela bate exato
-// com o da janela do processo do jogo (electron/main.cjs consulta isso
-// via PowerShell/.NET); bem mais confiável, usa isso quando disponível.
-// (2) Fallback: uma heurística por nome PARECIDO (a maioria dos jogos
-// usa o próprio nome como título de janela, então compara ignorando
-// maiúsculas/pontuação se um nome contém o outro) — só entra quando (1)
-// não deu (Mac/Linux, ou o Windows não conseguiu descobrir o título).
-function findGameSource(sources: ScreenShareSource[], gameName: string | null): ScreenShareSource | null {
-  if (!gameName) return null
-  const exact = sources.find((s) => s.type === 'window' && s.isExactGameWindow)
-  if (exact) return exact
-  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
-  const target = normalize(gameName)
-  if (!target) return null
-  return sources.find((s) => {
-    const name = normalize(s.name)
-    return name.length > 0 && (name.includes(target) || target.includes(name))
-  }) ?? null
-}
-
+// janela certa na lista. A sugestão (`suggestion`) já vem PRONTA do
+// processo principal (ver setDisplayMediaRequestHandler em
+// electron/main.cjs): ou é um jogo CADASTRADO (KNOWN_GAMES — nome bonito,
+// `isKnownGame: true`), ou, generalizando pra qualquer jogo/app não
+// cadastrado, a última janela que esteve em primeiro plano antes de você
+// abrir esse seletor (`isKnownGame: false`). Cada fonte da lista já vem
+// marcada (`isExactGameWindow`/`isGameDisplay`) dizendo se ela É essa
+// sugestão — este componente só precisa achar a marcada, não recalcular
+// nada.
 export function ScreenSharePicker() {
   const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
-  const [currentGame, setCurrentGame] = useState<string | null>(null)
+  const [suggestion, setSuggestion] = useState<ScreenShareSuggestion | null>(null)
   // Áudio do sistema junto com a tela: desligado por padrão. O Windows
   // só sabe capturar o som de TODO o sistema (nunca de uma janela
   // específica sozinha) — então essa opção só faz efeito quando a
@@ -45,38 +28,32 @@ export function ScreenSharePicker() {
 
   useEffect(() => {
     if (!window.electronAPI) return
-    return window.electronAPI.onScreenShareSources(setSources)
+    return window.electronAPI.onScreenShareSources((payload) => {
+      setSources(payload.sources)
+      setSuggestion(payload.suggestion)
+    })
   }, [])
 
-  // Mesma fonte que já alimenta o "Jogando X" do perfil (useGamePresence) —
-  // só pra saber qual jogo sugerir no atalho abaixo, sem duplicar a
-  // detecção em si.
-  useEffect(() => {
-    if (!window.electronAPI) return
-    window.electronAPI.getCurrentGame().then(setCurrentGame)
-    return window.electronAPI.onGameStatusChanged(setCurrentGame)
-  }, [])
-
-  const windowMatch = useMemo(() => (sources ? findGameSource(sources, currentGame) : null), [sources, currentGame])
+  const windowMatch = sources?.find((s) => s.type === 'window' && s.isExactGameWindow) ?? null
 
   // Muitos jogos rodam em modo "tela cheia exclusiva" no Windows — nesse
   // modo, o compositor do sistema (DWM) nem "enxerga" o jogo como uma
   // janela separada, só a API de tela inteira consegue capturá-lo. Então,
-  // se a gente sabe que tem um jogo aberto mas não achou nenhuma janela
-  // com esse nome na lista, a melhor aposta é oferecer a primeira tela
-  // inteira disponível como atalho "compartilhar seu jogo" — na prática é
-  // isso que vai mostrar o jogo pra quem está assistindo.
-  const fallbackScreen = useMemo(() => {
-    if (!sources || !currentGame || windowMatch) return null
+  // se a gente tem uma sugestão mas não achou uma janela correspondente na
+  // lista, a melhor aposta é oferecer a tela inteira certa como atalho —
+  // na prática é isso que vai mostrar o jogo pra quem está assistindo
+  // (mesma limitação que o Discord e o OBS têm nesse modo — ver o aviso
+  // logo abaixo na grade).
+  const fallbackScreen = (() => {
+    if (!sources || !suggestion || windowMatch) return null
     const screens = sources.filter((s) => s.type === 'screen')
-    // Prioridade: (1) o monitor que o Windows CONFIRMOU ser onde a
-    // janela do próprio jogo está (isGameDisplay — bem mais confiável,
+    // Prioridade: (1) o monitor que o Windows CONFIRMOU ser onde a janela
+    // do próprio jogo/app está (isGameDisplay — bem mais confiável,
     // funciona certo mesmo com o jogo no monitor secundário); (2) se não
-    // deu pra descobrir isso, cai pro chute de "tela principal" de
-    // antes (a maioria de quem tem um monitor só, ou não conseguiu essa
-    // detecção por algum motivo); (3) por fim, a primeira da lista.
+    // deu pra descobrir isso, cai pro chute de "tela principal" de antes;
+    // (3) por fim, a primeira da lista.
     return screens.find((s) => s.isGameDisplay) ?? screens.find((s) => s.isPrimaryDisplay) ?? screens[0] ?? null
-  }, [sources, currentGame, windowMatch])
+  })()
 
   const gameSource = windowMatch ?? fallbackScreen
   const isFullscreenFallback = !windowMatch && Boolean(fallbackScreen)
@@ -100,10 +77,10 @@ export function ScreenSharePicker() {
   }
 
   // Escolher qualquer coisa que NÃO seja o atalho "compartilhar seu
-  // jogo" (uma janela ou tela específica da grade abaixo) precisa limpar
-  // um recado de jogo que porventura tenha ficado setado — defensivo,
-  // não deveria acontecer no fluxo normal, mas evita um auto-stop
-  // errado "vazando" pra uma captura sem relação nenhuma com jogo.
+  // jogo/janela" (uma janela ou tela específica da grade abaixo) precisa
+  // limpar um recado que porventura tenha ficado setado — defensivo, não
+  // deveria acontecer no fluxo normal, mas evita um auto-stop errado
+  // "vazando" pra uma captura sem relação nenhuma com o recado.
   function chooseFromGrid(id: string) {
     setPendingGameShareHint(null)
     choose(id)
@@ -149,15 +126,17 @@ export function ScreenSharePicker() {
           </span>
         </label>
 
-        {gameSource && currentGame && (
+        {gameSource && suggestion && (
           <button
             onClick={() => {
               // Só precisa do "recado" no caso de tela cheia (sem janela
               // própria pra detectar o fechamento sozinha) — ver o
               // comentário grande em screenShareGameHint.ts. Compartilhar
-              // a JANELA do jogo já para sozinho quando ela fecha, sem
+              // a JANELA do jogo já para sozinha quando ela fecha, sem
               // precisar de nada extra aqui.
-              setPendingGameShareHint(isFullscreenFallback ? currentGame : null)
+              setPendingGameShareHint(
+                isFullscreenFallback ? { processNames: suggestion.processNames, label: suggestion.label } : null
+              )
               choose(gameSource.id)
             }}
             className="w-full flex items-center gap-3 mb-4 p-2.5 rounded-lg border-2 border-discord-blurple bg-discord-blurple/10 hover:bg-discord-blurple/20 transition-colors text-left"
@@ -169,18 +148,19 @@ export function ScreenSharePicker() {
             />
             <div className="min-w-0">
               <p className="text-[11px] font-bold uppercase text-discord-blurple tracking-wide">
-                Compartilhar seu jogo
+                {suggestion.isKnownGame ? 'Compartilhar seu jogo' : 'Compartilhar sua janela ativa'}
               </p>
-              <p className="text-sm font-semibold text-white truncate">🎮 {currentGame}</p>
+              <p className="text-sm font-semibold text-white truncate">
+                {suggestion.isKnownGame ? '🎮' : '🪟'} {suggestion.label}
+              </p>
               {isFullscreenFallback && (
                 <p className="text-[11px] text-discord-text-muted mt-0.5">
-                  Tela inteira — pausa sozinha (Windows) se você alternar pra fora do jogo
+                  Tela inteira — pausa sozinha (Windows) se você alternar pra fora, e encerra sozinha quando fechar
                 </p>
               )}
             </div>
           </button>
         )}
-
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[55vh] overflow-y-auto pr-1">
           {sources.map((s) => (
@@ -189,11 +169,41 @@ export function ScreenSharePicker() {
               onClick={() => chooseFromGrid(s.id)}
               className="text-left rounded-lg overflow-hidden border-2 border-transparent hover:border-discord-blurple transition-colors bg-discord-darker"
             >
-              <img src={s.thumbnail} alt={s.name} className="w-full aspect-video object-cover bg-black" />
+              <div className="relative">
+                <img src={s.thumbnail} alt={s.name} className="w-full aspect-video object-cover bg-black" />
+                {/* Deixa claro pra quem tá escolhendo a diferença entre uma
+                    JANELA (isola só aquele app — nunca mostra o resto da
+                    tela, nem depois se outra coisa passar por cima) e uma
+                    TELA INTEIRA (mostra tudo, sempre) — sem essa marcação
+                    as duas pareciam a mesma coisa na grade. */}
+                <span
+                  className={`absolute bottom-1 right-1 text-[9px] font-medium px-1.5 py-0.5 rounded ${
+                    s.type === 'window' ? 'bg-discord-blurple/80 text-white' : 'bg-black/60 text-discord-text-muted'
+                  }`}
+                >
+                  {s.type === 'window' ? 'Janela' : 'Tela inteira'}
+                </span>
+              </div>
               <p className="text-xs text-discord-text px-2 py-1.5 truncate">{s.name}</p>
             </button>
           ))}
         </div>
+
+        {/* Explica por que às vezes não tem como isolar só o jogo — mesma
+            limitação que o Discord e o OBS Studio têm (não é falha do
+            app): jogos em modo "Tela cheia exclusiva" não aparecem como
+            janela separada pra NENHUM programa capturar, só a tela toda.
+            O Discord recomenda exatamente essa mesma correção pros
+            usuários (trocar pra tela cheia SEM bordas nas configurações de
+            vídeo do jogo) — ver a nota grande sobre isso na resposta que
+            acompanhou essa mudança. */}
+        <p className="text-[11px] text-discord-text-muted mt-3 leading-relaxed">
+          Não achou seu jogo como uma janela separada na lista? Ele provavelmente está em modo{' '}
+          <span className="text-discord-text">Tela cheia exclusiva</span>. Nas configurações de vídeo/gráficos do
+          jogo, troque para <span className="text-discord-text font-medium">Tela cheia sem bordas</span> (Borderless
+          / Windowed Fullscreen) — aí ele passa a aparecer como janela e dá pra compartilhar só ele, sem o resto da
+          tela. É a mesma limitação do Windows que o Discord e o OBS também têm nesse modo.
+        </p>
 
         <button onClick={() => choose(null)} className="mt-4 w-full py-2.5 rounded btn-secondary">
           Cancelar

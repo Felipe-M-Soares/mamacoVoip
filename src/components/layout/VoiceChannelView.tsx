@@ -1,5 +1,6 @@
-import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
+import { VideoTile, RemoteAudio } from './CallMediaTiles'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useVoice } from '../../hooks/useVoice'
@@ -14,49 +15,9 @@ import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { VoiceParticipant } from '../../context/VoiceContext'
 import type { Channel, Profile, Role } from '../../types/database'
 
-const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sinkId?: string | null; fit?: 'cover' | 'contain' }>(
-  function VideoTile({ stream, sinkId, fit = 'cover' }, forwardedRef) {
-    const localRef = useRef<HTMLVideoElement>(null)
-    useEffect(() => {
-      if (localRef.current) localRef.current.srcObject = stream
-    }, [stream])
-    useEffect(() => {
-      const el = localRef.current as (HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }) | null
-      if (el && sinkId && el.setSinkId) el.setSinkId(sinkId).catch(() => {})
-    }, [sinkId])
-    // Sempre mudo — o áudio de participantes remotos toca via <RemoteAudio>,
-    // que aplica o volume individual. Tocar os dois ao mesmo tempo dava
-    // áudio duplicado sempre que alguém ligava a câmera.
-    return (
-      <video
-        ref={(node) => {
-          localRef.current = node
-          if (typeof forwardedRef === 'function') forwardedRef(node)
-          else if (forwardedRef) forwardedRef.current = node
-        }}
-        autoPlay
-        playsInline
-        muted
-        className={`w-full h-full rounded-lg bg-black ${fit === 'contain' ? 'object-contain' : 'object-cover'}`}
-      />
-    )
-  }
-)
-
-function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; sinkId?: string | null; volume: number }) {
-  const ref = useRef<HTMLAudioElement>(null)
-  useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream
-  }, [stream])
-  useEffect(() => {
-    const el = ref.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null
-    if (el && sinkId && el.setSinkId) el.setSinkId(sinkId).catch(() => {})
-  }, [sinkId])
-  useEffect(() => {
-    if (ref.current) ref.current.volume = Math.max(0, Math.min(1, volume))
-  }, [volume])
-  return <audio ref={ref} autoPlay />
-}
+// VideoTile/RemoteAudio agora moram em CallMediaTiles.tsx (arquivo
+// pequeno, compartilhado com DMCallOverlay.tsx) — ver o comentário lá
+// pra saber por quê (tem a ver com esse arquivo aqui ser lazy-loaded).
 
 // "Palco" de compartilhamentos de tela: divide o espaço certinho
 // dependendo de quantas pessoas estão compartilhando ao mesmo tempo.
@@ -331,7 +292,14 @@ function ParticipantTile({
         </svg>
       </button>
       {showVolumeSlider && (
-        <div className="absolute bottom-full left-0 mb-1 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2.5 w-32 z-10">
+        // No card não-compact, o botão fica perto do topo (top-1.5) e o
+        // card em volta corta qualquer coisa que passe da borda dele
+        // (overflow-hidden, ali embaixo em ParticipantTile) — abrindo
+        // pra CIMA (bottom-full) o popup saía inteiro por fora da área
+        // visível e ficava cortado (por isso "clicar não aparecia
+        // nada"). Abrindo pra BAIXO (top-full) ele fica dentro da área
+        // do próprio card, que tem espaço de sobra logo abaixo do botão.
+        <div className="absolute top-full left-0 mt-1 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2.5 w-32 z-10">
           <p className="text-[10px] text-discord-text-muted mb-1.5">{participantVolume}%</p>
           <input
             type="range"

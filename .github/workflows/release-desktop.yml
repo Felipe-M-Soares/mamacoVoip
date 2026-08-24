@@ -101,6 +101,9 @@ jobs:
           VITE_TURN_URL: ${{ secrets.VITE_TURN_URL }}
           VITE_TURN_USERNAME: ${{ secrets.VITE_TURN_USERNAME }}
           VITE_TURN_CREDENTIAL: ${{ secrets.VITE_TURN_CREDENTIAL }}
+          # Opcional — sem essa secret configurada, o GIF picker só fica
+          # desativado (ver src/lib/config.ts), não quebra o build.
+          VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
 
       - name: Empacotar + publicar release (${{ matrix.os }})
         run: npx electron-builder ${{ matrix.platform_flag }} --publish always

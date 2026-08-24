@@ -36,13 +36,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkForUpdatesNow: () => ipcRenderer.send('app:check-for-updates-now'),
   // Vigia de foco do jogo (mitigação de vazamento em compartilhamento de
   // tela inteira) — ver o bloco grande em electron/main.cjs pra entender
-  // o esquema completo.
-  startForegroundWatch: (gameLabel) => ipcRenderer.invoke('game-foreground-watch:start', gameLabel),
+  // o esquema completo. Recebe uma lista de nomes de processo (não mais
+  // um label do KNOWN_GAMES) — generalizado pra funcionar com qualquer
+  // jogo/app, não só os cadastrados.
+  startForegroundWatch: (processNames) => ipcRenderer.invoke('game-foreground-watch:start', processNames),
   stopForegroundWatch: () => ipcRenderer.invoke('game-foreground-watch:stop'),
   onGameForegroundChanged: (callback) => {
     const handler = (_event, focused) => callback(focused)
     ipcRenderer.on('game-foreground-changed', handler)
     return () => ipcRenderer.removeListener('game-foreground-changed', handler)
+  },
+  // Auto-parar o compartilhamento de tela cheia quando o processo
+  // compartilhado fecha de vez — ver electron/main.cjs.
+  watchProcessExit: (processNames) => ipcRenderer.invoke('game-share:watch-process-exit', processNames),
+  stopWatchProcessExit: () => ipcRenderer.invoke('game-share:stop-watch-process-exit'),
+  onWatchedProcessExited: (callback) => {
+    const handler = () => callback()
+    ipcRenderer.on('watched-process-exited', handler)
+    return () => ipcRenderer.removeListener('watched-process-exited', handler)
   },
   // Login com Google — o processo principal manda pra cá a URL de
   // volta (mamacovoip://...) assim que o sistema operacional entrega o

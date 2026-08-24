@@ -81,6 +81,14 @@ async function getUserMediaWithRetry(constraints: MediaStreamConstraints, attemp
   throw lastError
 }
 const SPEAKING_THRESHOLD = 12
+// Fala normal tem pausas curtas entre sílabas/palavras onde o nível de
+// áudio cai abaixo do limiar por uma fração de segundo — sem isso, o
+// indicador de "falando" (anel ao redor do avatar) piscava
+// rapidamente ligando/desligando a cada uma dessas pausas, em vez de
+// ficar aceso de forma contínua enquanto a pessoa fala. "Liga" na hora
+// (assim que passa do limiar) mas só "desliga" depois de ficar
+// SPEAKING_RELEASE_MS sem nenhuma amostra acima do limiar.
+const SPEAKING_RELEASE_MS = 500
 
 interface PeerState {
   pc: RTCPeerConnection
@@ -121,7 +129,11 @@ interface VoiceContextValue {
   screenSharing: boolean
   localScreenStream: MediaStream | null
   speaking: boolean
-  join: (channelId: string, serverId: string) => Promise<void>
+  // serverId é null pra uma chamada de voz em DM/grupo (não existe
+  // linha na tabela channels pra esse caso) — ver o branch dentro de
+  // join() logo abaixo. displayName/userLimit substituem o que
+  // normalmente viria da tabela channels quando não há uma.
+  join: (channelId: string, serverId: string | null, options?: { displayName?: string; userLimit?: number }) => Promise<void>
   leave: () => void
   toggleMute: () => void
   pushToTalkEnabled: boolean
@@ -524,6 +536,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }
   const audioContextRef = useRef<AudioContext | null>(null)
   const analysersRef = useRef<Map<string, AnalyserNode>>(new Map())
+  // Última vez (timestamp) que cada participante ficou acima do limiar
+  // de fala — usado pra suavizar a detecção (ver o useEffect "Detecção
+  // de fala" mais abaixo).
+  const lastAboveThresholdRef = useRef<Map<string, number>>(new Map())
   // Cada peer pode mandar mais de uma MediaStream (mic/câmera + tela).
   // Em vez de adivinhar qual é qual pela ordem de chegada (frágil e foi
   // a causa do compartilhamento de tela não aparecer pros outros),
@@ -531,8 +547,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // vindo do broadcast 'screen-meta' pra saber qual stream.id é a tela.
   const rawStreamsRef = useRef<Map<string, Map<string, MediaStream>>>(new Map())
   const screenStreamIdsRef = useRef<Map<string, string>>(new Map())
-  // Cancela a inscrição em onGameStatusChanged usada pra auto-parar o
-  // compartilhamento de TELA CHEIA quando o jogo fecha (ver
+  // Cancela a inscrição em onWatchedProcessExited usada pra auto-parar o
+  // compartilhamento de TELA CHEIA quando o jogo/app fecha (ver
   // screenShareGameHint.ts e toggleScreenShare abaixo). Só existe
   // enquanto uma captura desse tipo específico está ativa.
   const gameShareWatchRef = useRef<(() => void) | null>(null)
@@ -898,6 +914,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     peersRef.current.get(peerId)?.pc.close()
     peersRef.current.delete(peerId)
     analysersRef.current.delete(peerId)
+    lastAboveThresholdRef.current.delete(peerId)
     rawStreamsRef.current.delete(peerId)
     screenStreamIdsRef.current.delete(peerId)
     screenSendersRef.current.delete(peerId)
@@ -909,7 +926,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     })
   }
 
-  const join = useCallback(async (channelId: string, serverId: string) => {
+  const join = useCallback(async (channelId: string, serverId: string | null, options?: { displayName?: string; userLimit?: number }) => {
     if (!user || connectedRef.current) return
     // Avisa a UI (a lista de canais) IMEDIATAMENTE que estamos prestes a
     // entrar nesse canal, antes de qualquer trabalho assíncrono (pedir
@@ -925,9 +942,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     channelUserLimitRef.current = 0
     joinedAtRef.current = Date.now()
 
-    const { data: channelRow } = await supabase.from('channels').select('user_limit, name').eq('id', channelId).single()
-    channelUserLimitRef.current = channelRow?.user_limit ?? 0
-    setConnectedChannelName(channelRow?.name ?? null)
+    // Chamada em DM/grupo (serverId null) não tem linha na tabela
+    // channels pra buscar — nome e limite vêm de `options` (o valor já
+    // resolvido do lado de quem chamou join(), ex.: nome da outra
+    // pessoa na DM ou nome do grupo).
+    if (serverId) {
+      const { data: channelRow } = await supabase.from('channels').select('user_limit, name').eq('id', channelId).single()
+      channelUserLimitRef.current = channelRow?.user_limit ?? 0
+      setConnectedChannelName(channelRow?.name ?? null)
+    } else {
+      channelUserLimitRef.current = options?.userLimit ?? 0
+      setConnectedChannelName(options?.displayName ?? null)
+    }
 
     try {
       const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
@@ -1084,6 +1110,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     gameShareWatchRef.current = null
     setLocalScreenStream(null)
     analysersRef.current.clear()
+    lastAboveThresholdRef.current.clear()
     if (realtimeRef.current) {
       realtimeRef.current.untrack()
       supabase.removeChannel(realtimeRef.current)
@@ -1382,6 +1409,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     })
     gameShareWatchRef.current?.()
     gameShareWatchRef.current = null
+    window.electronAPI?.stopWatchProcessExit?.().catch(() => {})
     screenStreamRef.current = null
     screenAudioTrackIdRef.current = null
     setLocalScreenStream(null)
@@ -1459,18 +1487,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
 
       // Caso especial: captura de TELA CHEIA usada como substituto de
-      // "compartilhar o jogo" (jogo em modo exclusivo, sem janela
+      // "compartilhar o jogo/janela" (jogo em modo exclusivo, sem janela
       // própria pro sistema capturar separadamente). Diferente de uma
       // janela — que dispara `onended` sozinha quando é fechada — a
       // tela em si nunca "fecha", então sem isto aqui a transmissão
       // continuaria mostrando o desktop vazio mesmo depois do jogo ser
-      // fechado. Escuta a mesma detecção de processo que já alimenta o
-      // "Jogando X" do perfil (electron/main.cjs) e encerra sozinho
-      // assim que o jogo hintado deixar de ser o jogo atual (fechou, ou
-      // a pessoa trocou de jogo).
+      // fechado. Pede pro processo principal vigiar os processos do
+      // recado (funciona pra qualquer jogo/app, não só os cadastrados em
+      // KNOWN_GAMES — ver electron/main.cjs) e encerra sozinho assim que
+      // eles não estiverem mais rodando.
       if (gameShareHint && window.electronAPI) {
-        gameShareWatchRef.current = window.electronAPI.onGameStatusChanged((game) => {
-          if (game !== gameShareHint) stopScreenShareState()
+        window.electronAPI.watchProcessExit?.(gameShareHint.processNames).catch(() => {})
+        gameShareWatchRef.current = window.electronAPI.onWatchedProcessExited(() => {
+          stopScreenShareState()
         })
       }
 
@@ -1511,7 +1540,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // continua igual ao de antes (sempre visível), sem quebrar nada.
       if (gameShareHint && window.electronAPI?.startForegroundWatch) {
         window.electronAPI
-          .startForegroundWatch(gameShareHint)
+          .startForegroundWatch(gameShareHint.processNames)
           .then((started) => {
             if (!started || !window.electronAPI) return
             foregroundWatchUnsubRef.current = window.electronAPI.onGameForegroundChanged((focused) => {
@@ -1565,10 +1594,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (!connectedChannelId) return
     const buffer = new Uint8Array(256)
     const interval = setInterval(() => {
+      const now = Date.now()
       analysersRef.current.forEach((analyser, key) => {
         analyser.getByteFrequencyData(buffer)
         const avg = buffer.reduce((a, b) => a + b, 0) / buffer.length
-        const isSpeaking = avg > SPEAKING_THRESHOLD
+        if (avg > SPEAKING_THRESHOLD) lastAboveThresholdRef.current.set(key, now)
+        const lastAbove = lastAboveThresholdRef.current.get(key) ?? 0
+        const isSpeaking = now - lastAbove < SPEAKING_RELEASE_MS
         if (key === 'local') {
           setSpeaking((prev) => (prev !== isSpeaking ? isSpeaking : prev))
         } else {

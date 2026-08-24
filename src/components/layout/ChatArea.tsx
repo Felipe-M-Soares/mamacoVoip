@@ -13,6 +13,7 @@ import { useChannelThreads } from '../../hooks/useChannelThreads'
 import { ThreadPanel } from './ThreadPanel'
 import { useRoles } from '../../hooks/useRoles'
 import { ForwardMessageModal } from '../modals/ForwardMessageModal'
+import { ReportModal } from '../modals/ReportModal'
 import type { Channel, Message, Server, Profile, Thread } from '../../types/database'
 
 export function ChatArea({
@@ -25,7 +26,7 @@ export function ChatArea({
   channel: Channel
   server: Server
   onViewProfile: (profile: Profile) => void
-  onJumpToChannel: (channel: Channel) => void
+  onJumpToChannel: (channel: Channel, serverId?: string) => void
   onToggleMembers?: () => void
 }) {
   const { user } = useAuth()
@@ -40,6 +41,7 @@ export function ChatArea({
   const [activeThread, setActiveThread] = useState<Thread | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
   const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null)
+  const [reportingMessageId, setReportingMessageId] = useState<string | null>(null)
   const [revealedSpoilerChannelId, setRevealedSpoilerChannelId] = useState<string | null>(null)
   const isSpoilerHidden = channel.is_spoiler && revealedSpoilerChannelId !== channel.id
 
@@ -222,6 +224,7 @@ export function ChatArea({
         selectionMode={selectionMode}
         selectedMessageIds={selectedMessageIds}
         onToggleSelect={toggleSelectMessage}
+        onReport={setReportingMessageId}
       />
 
       {typingNames.length > 0 && (
@@ -285,6 +288,21 @@ export function ChatArea({
           onClose={() => setActiveThread(null)}
         />
       )}
+
+      {reportingMessageId &&
+        (() => {
+          const msg = messages.find((m) => m.id === reportingMessageId)
+          if (!msg) return null
+          return (
+            <ReportModal
+              targetType="message"
+              targetLabel={`mensagem em #${channel.name}`}
+              messageId={msg.id}
+              serverId={server.id}
+              onClose={() => setReportingMessageId(null)}
+            />
+          )
+        })()}
 
       {forwardingMessageId &&
         (() => {

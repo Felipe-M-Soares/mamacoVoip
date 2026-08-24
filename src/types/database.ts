@@ -32,6 +32,24 @@ export type ServerEmoji = {
   created_at: string
 }
 
+export type ReportTargetType = 'message' | 'user'
+export type ReportStatus = 'pending' | 'reviewed' | 'dismissed'
+
+export type Report = {
+  id: string
+  reporter_id: string
+  server_id: string | null
+  target_type: ReportTargetType
+  message_id: string | null
+  reported_user_id: string | null
+  reason: string
+  details: string | null
+  status: ReportStatus
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+}
+
 export type SoundboardSound = {
   id: string
   server_id: string
@@ -518,6 +536,16 @@ export type Database = {
         Row: SoundboardSound
         Insert: Pick<SoundboardSound, 'id' | 'server_id' | 'name' | 'storage_path' | 'uploaded_by'>
         Update: Record<string, never>
+        Relationships: []
+      }
+      reports: {
+        Row: Report
+        // server_id e reported_user_id (no caso de denúncia de mensagem)
+        // são recalculados no servidor por um trigger — o que o cliente
+        // manda aqui é só a intenção, não a decisão final de acesso.
+        Insert: Pick<Report, 'reporter_id' | 'target_type' | 'reason'> &
+          Partial<Pick<Report, 'message_id' | 'reported_user_id' | 'server_id' | 'details'>>
+        Update: Partial<Pick<Report, 'status'>>
         Relationships: []
       }
     }

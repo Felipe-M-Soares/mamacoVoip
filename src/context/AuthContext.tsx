@@ -13,6 +13,26 @@ import type { Profile, ProfileStatus } from '../types/database'
 // o próprio window.location.origin já funciona como redirecionamento.
 const GOOGLE_AUTH_REDIRECT_ELECTRON = 'mamacovoip://auth-callback'
 
+// mamacovoip:// é um esquema de URL REGISTRADO NO SISTEMA OPERACIONAL —
+// isso significa que, tecnicamente, QUALQUER site ou programa no
+// computador da pessoa pode "abrir" um link desses, não só o navegador
+// que a gente mesmo abriu no signInWithGoogle() abaixo. Sem alguma
+// forma de conferir "esse link realmente é resposta de um login que EU
+// pedi", alguém malicioso poderia forjar um link com token de UMA OUTRA
+// conta (a dele mesmo) e, se convencesse a vítima a clicar nele (num
+// site, e-mail, etc.), o app da vítima aceitaria e logaria ela sem
+// perceber na conta do golpista — um tipo de ataque conhecido (login
+// CSRF / session fixation via deep link customizado).
+//
+// A defesa: gera um código aleatório ANTES de abrir o navegador,
+// manda ele junto na URL de volta (?state=...), e só aceita o link que
+// chegar de volta se o código bater com o que a gente mesmo gerou —
+// um link forjado por fora nunca vai ter o código certo. Uso único
+// (apaga assim que usado) e expira sozinho depois de alguns minutos,
+// caso a pessoa desista no meio do caminho.
+let pendingGoogleAuthState: { value: string; expiresAt: number } | null = null
+const GOOGLE_AUTH_STATE_TTL_MS = 5 * 60 * 1000
+
 interface AuthContextValue {
   session: Session | null
   user: User | null
@@ -209,11 +229,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // endereço, sem precisar de nada especial aqui.
   async function signInWithGoogle(): Promise<{ error: string | null }> {
     if (isElectron()) {
+      const state = crypto.randomUUID()
+      pendingGoogleAuthState = { value: state, expiresAt: Date.now() + GOOGLE_AUTH_STATE_TTL_MS }
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: GOOGLE_AUTH_REDIRECT_ELECTRON, skipBrowserRedirect: true },
+        options: { redirectTo: `${GOOGLE_AUTH_REDIRECT_ELECTRON}?state=${state}`, skipBrowserRedirect: true },
       })
-      if (error) return { error: traduzErro(error.message) }
+      if (error) {
+        pendingGoogleAuthState = null
+        return { error: traduzErro(error.message) }
+      }
       if (data?.url) window.open(data.url, '_blank')
       return { error: null }
     }
@@ -235,6 +261,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return window.electronAPI.onGoogleAuthCallback(async (url) => {
       try {
         const hashIndex = url.indexOf('#')
+        const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url
+        const queryIndex = beforeHash.indexOf('?')
+        const stateFromLink =
+          queryIndex >= 0 ? new URLSearchParams(beforeHash.slice(queryIndex + 1)).get('state') : null
+
+        // Uso único — some com o código pendente já na primeira
+        // tentativa, bateu ou não (evita reaproveitar o mesmo código
+        // pra um segundo link forjado).
+        const pending = pendingGoogleAuthState
+        pendingGoogleAuthState = null
+
+        const isExpectedLogin = Boolean(
+          pending && pending.expiresAt >= Date.now() && stateFromLink && stateFromLink === pending.value
+        )
+        if (!isExpectedLogin) {
+          // Link não corresponde a um login que ESTE app pediu (código
+          // errado, ausente, ou expirado) — ignora silenciosamente em
+          // vez de logar a pessoa numa conta que pode não ser a dela.
+          // Ver o comentário grande acima sobre por que isso é
+          // necessário com um esquema de URL customizado.
+          return
+        }
+
         const params = new URLSearchParams(hashIndex >= 0 ? url.slice(hashIndex + 1) : '')
         const access_token = params.get('access_token')
         const refresh_token = params.get('refresh_token')
@@ -357,7 +406,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 // Mensagens de erro do Supabase Auth vêm em inglês — traduzimos as mais comuns
-function traduzErro(message: string): string {
+export function traduzErro(message: string): string {
   const mapa: Record<string, string> = {
     'Invalid login credentials': 'E-mail ou senha incorretos.',
     'User already registered': 'Já existe uma conta com este e-mail.',

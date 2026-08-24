@@ -78,7 +78,15 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
 
       <button
         onClick={onClose}
-        className="fixed top-6 right-6 w-10 h-10 rounded-full border-2 border-discord-text-muted text-discord-text-muted hover:border-white hover:text-white flex items-center justify-center transition-colors"
+        // top-14 (não top-6) — essa tela cobre a janela inteira (fixed
+        // inset-0) desde y=0, mas os botões NATIVOS de
+        // minimizar/maximizar/fechar do Windows ficam desenhados por
+        // cima dos primeiros 40px (ver titleBarOverlay em
+        // electron/main.cjs). Com top-6 (24px) esse botão ficava bem
+        // embaixo dessa faixa, cortado/"vazando" por trás dos botões
+        // nativos — subindo pra depois dos 40px (com uma folga) ele para
+        // de disputar esse espaço com o sistema.
+        className="fixed top-14 right-6 w-10 h-10 rounded-full border-2 border-discord-text-muted text-discord-text-muted hover:border-white hover:text-white flex items-center justify-center transition-colors"
         aria-label="Fechar"
         title="Fechar (Esc)"
       >

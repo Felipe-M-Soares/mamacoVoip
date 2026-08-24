@@ -146,6 +146,9 @@ interface VoiceContextValue {
   captureGlobalPushToTalkKey: () => Promise<string | null>
   toggleVideo: () => Promise<void>
   toggleScreenShare: () => Promise<void>
+  // Troca a janela/tela sendo compartilhada sem parar a transmissão
+  // atual primeiro — ver o comentário grande na implementação.
+  switchScreenShareSource: () => Promise<void>
   playSoundboardSound: (url: string) => void
   changeMicrophone: (deviceId: string) => Promise<void>
   refreshAudioConstraints: (
@@ -1437,13 +1440,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return
     }
     try {
-      // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
-      // no atalho "Compartilhar seu jogo" E caiu no caso de tela cheia
-      // (sem janela própria pra detectar o fechamento sozinha) — ver
-      // screenShareGameHint.ts. Lido (e já apagado) uma vez aqui; se
-      // tiver algo, ativa o auto-stop mais abaixo, depois que a captura
-      // realmente começar.
-      const gameShareHint = takePendingGameShareHint()
       const preset = screenShareQualityRef.current
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
@@ -1465,6 +1461,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // imagem — quem estiver assistindo ouve o som do jogo junto.
         audio: true,
       })
+      // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
+      // no atalho "Compartilhar seu jogo/janela" E caiu no caso de tela
+      // cheia (sem janela própria pra detectar o fechamento sozinha) — ver
+      // screenShareGameHint.ts. Só dá pra ler DEPOIS do getDisplayMedia
+      // acima resolver — é só nesse momento (a pessoa já escolheu algo no
+      // seletor) que o picker teria tido a chance de deixar esse recado;
+      // lendo antes (como era antes dessa correção) sempre pegava o
+      // recado vazio/velho de uma vez anterior, porque o seletor nem
+      // tinha aberto ainda.
+      const gameShareHint = takePendingGameShareHint()
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
       // Avisa a sala ANTES de adicionar a track — o broadcast chega quase
@@ -1589,6 +1595,153 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Troca a fonte (janela/tela) de uma transmissão que já está rolando,
+  // sem precisar parar e começar outra do zero. Abre o mesmo seletor de
+  // sempre (getDisplayMedia — no app desktop isso mostra de novo o
+  // ScreenSharePicker.tsx, com o mesmo atalho "compartilhar seu
+  // jogo/janela" se fizer sentido) e, assim que a pessoa escolhe algo
+  // novo, troca só o CONTEÚDO sendo enviado pra cada peer via
+  // replaceTrack — como isso não mexe no "canal" (m-line) já negociado,
+  // não dispara uma renegociação nem um piscar de "parou/começou de novo"
+  // pra quem está assistindo, diferente de um stop+start completo.
+  async function switchScreenShareSource() {
+    if (!screenSharing || !screenStreamRef.current) return
+    try {
+      const preset = screenShareQualityRef.current
+      const newStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: preset.capResolution ? { ideal: preset.width, max: preset.width } : { ideal: preset.width },
+          height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
+          frameRate: { ideal: preset.frameRate, max: preset.frameRate },
+        },
+        audio: true,
+      })
+      // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
+      // do picker DEPOIS do getDisplayMedia resolver.
+      const gameShareHint = takePendingGameShareHint()
+
+      const newVideoTrack = newStream.getVideoTracks()[0]
+      if (!newVideoTrack) {
+        newStream.getTracks().forEach((t) => t.stop())
+        return
+      }
+      const newAudioTrack = newStream.getAudioTracks()[0] ?? null
+      newVideoTrack.contentHint = 'motion'
+
+      const oldVideoTrack = realScreenVideoTrackRef.current
+      const oldAudioTrackId = screenAudioTrackIdRef.current
+      const hadAudioBefore = Boolean(oldAudioTrackId)
+
+      // Cancela o vigia de foco/fechamento da fonte ANTERIOR antes de
+      // trocar — senão, se a fonte antiga fosse o caso especial "tela
+      // cheia substituindo o jogo" e aquele jogo fechasse depois da
+      // troca, o vigia antigo ainda ativo ia encerrar a transmissão NOVA
+      // por engano, achando que ainda era sobre o jogo velho.
+      gameShareWatchRef.current?.()
+      gameShareWatchRef.current = null
+      window.electronAPI?.stopWatchProcessExit?.().catch(() => {})
+      foregroundWatchUnsubRef.current?.()
+      foregroundWatchUnsubRef.current = null
+      window.electronAPI?.stopForegroundWatch?.().catch(() => {})
+      if (placeholderTrackRef.current) {
+        placeholderTrackRef.current.stop()
+        placeholderTrackRef.current = null
+      }
+
+      peersRef.current.forEach(({ pc }) => {
+        let audioHandled = false
+        pc.getSenders().forEach((sender) => {
+          if (sender.track === oldVideoTrack) {
+            sender.replaceTrack(newVideoTrack).catch(() => {})
+            const params = sender.getParameters()
+            params.encodings = params.encodings?.length ? params.encodings : [{}]
+            params.encodings[0].maxBitrate = preset.maxBitrate
+            ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
+              preset.degradationPreference
+            sender.setParameters(params).catch(() => {})
+          } else if (hadAudioBefore && sender.track?.id === oldAudioTrackId) {
+            // Troca o áudio também quando já existia um sender de áudio
+            // antes — inclusive pra REMOVER (replaceTrack(null)) se a
+            // nova escolha não tiver áudio (ex: trocou de "tela inteira
+            // com áudio do sistema" pra "só uma janela específica",
+            // que nunca tem essa opção).
+            sender.replaceTrack(newAudioTrack).catch(() => {})
+            audioHandled = true
+          }
+        })
+        // Ganhou áudio que não existia antes (ex: trocou de "só uma
+        // janela" pra "tela inteira" com o áudio do sistema marcado) —
+        // isso sim precisa de um addTrack de verdade, o que dispara uma
+        // pequena renegociação só pra esse caso específico.
+        if (newAudioTrack && !hadAudioBefore && !audioHandled) {
+          const audioSender = pc.addTrack(newAudioTrack, newStream)
+          const audioParams = audioSender.getParameters()
+          audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
+          audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
+          audioSender.setParameters(audioParams).catch(() => {})
+        }
+      })
+
+      // Só agora encerra a captura ANTIGA de verdade (indicador do
+      // sistema apaga, recursos liberados) — e limpa o onended dela
+      // ANTES de parar, senão ele ainda dispararia stopScreenShareState()
+      // e derrubaria a transmissão NOVA que acabou de assumir o lugar.
+      if (oldVideoTrack) oldVideoTrack.onended = null
+      screenStreamRef.current.getTracks().forEach((t) => t.stop())
+
+      screenStreamRef.current = newStream
+      setLocalScreenStream(newStream)
+      realScreenVideoTrackRef.current = newVideoTrack
+      screenAudioTrackIdRef.current = newAudioTrack?.id ?? null
+      newVideoTrack.onended = () => {
+        stopScreenShareState()
+      }
+      broadcastScreenMeta(newStream.id)
+
+      // Mesmo par de mitigações de "compartilhar seu jogo" em tela cheia
+      // do toggleScreenShare acima, agora pra a fonte NOVA — ver os
+      // comentários grandes lá pra entender o esquema completo.
+      if (gameShareHint && window.electronAPI) {
+        window.electronAPI.watchProcessExit?.(gameShareHint.processNames).catch(() => {})
+        gameShareWatchRef.current = window.electronAPI.onWatchedProcessExited(() => {
+          stopScreenShareState()
+        })
+      }
+      if (gameShareHint && window.electronAPI?.startForegroundWatch) {
+        window.electronAPI
+          .startForegroundWatch(gameShareHint.processNames)
+          .then((started) => {
+            if (!started || !window.electronAPI) return
+            foregroundWatchUnsubRef.current = window.electronAPI.onGameForegroundChanged((focused) => {
+              const realTrack = realScreenVideoTrackRef.current
+              if (!realTrack) return
+              if (focused) {
+                screenSendersRef.current.forEach((sender) => {
+                  sender.replaceTrack(realTrack).catch(() => {})
+                })
+                if (placeholderTrackRef.current) {
+                  placeholderTrackRef.current.stop()
+                  placeholderTrackRef.current = null
+                }
+              } else {
+                if (!placeholderTrackRef.current) placeholderTrackRef.current = createPlaceholderVideoTrack()
+                const placeholder = placeholderTrackRef.current
+                screenSendersRef.current.forEach((sender) => {
+                  sender.replaceTrack(placeholder).catch(() => {})
+                })
+              }
+            })
+          })
+          .catch(() => {})
+      }
+      window.electronAPI?.focusAppWindow?.()
+    } catch {
+      // Cancelou o seletor, ou algo deu errado — mantém a transmissão
+      // ATUAL rodando normalmente, sem interromper nada por causa de uma
+      // troca que não deu certo.
+    }
+  }
+
   // Detecção de fala: amostra o nível de áudio de cada analyser a cada 200ms
   useEffect(() => {
     if (!connectedChannelId) return
@@ -1646,6 +1799,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         captureGlobalPushToTalkKey,
         toggleVideo,
         toggleScreenShare,
+        switchScreenShareSource,
         playSoundboardSound,
         changeMicrophone,
         refreshAudioConstraints,

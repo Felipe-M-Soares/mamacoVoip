@@ -882,6 +882,23 @@ export function VoiceChannelView({
               </svg>
             </button>
 
+            {/* Só aparece DURANTE uma transmissão — troca a janela/tela
+                sem precisar parar e compartilhar de novo do zero (abre o
+                mesmo seletor de novo e troca o conteúdo por baixo, sem
+                piscar pra quem está assistindo — ver switchScreenShareSource
+                em VoiceContext.tsx). */}
+            {voice.screenSharing && (
+              <button
+                onClick={voice.switchScreenShareSource}
+                title="Trocar janela/tela compartilhada"
+                className="w-11 h-11 rounded-full flex items-center justify-center bg-discord-lighter text-discord-text hover:bg-discord-darker transition-colors"
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                  <path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z" />
+                </svg>
+              </button>
+            )}
+
             {/* Precisa ser escolhido ANTES de clicar em "compartilhar tela"
                 — a resolução/fps viram uma constraint que já vai junto no
                 próprio pedido de captura (getDisplayMedia), então depois

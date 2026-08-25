@@ -40,6 +40,13 @@ export interface ScreenShareSource {
   // o "nome parecido" (findGameSource em ScreenSharePicker.tsx), que
   // era só uma aposta por não ter como saber o título real de antes.
   isExactGameWindow?: boolean
+  // PID do processo dono da janela (só type === 'window', quando o
+  // Windows consegue casar o título — ver getWindowPidMap em
+  // electron/main.cjs). Usado pra oferecer a captura de áudio
+  // experimental "só deste app" (ver ScreenSharePicker.tsx e a seção
+  // "Captura de áudio por processo" em VoiceContext.tsx). null/ausente
+  // quando não deu pra descobrir.
+  pid?: number | null
 }
 
 // Sugestão de atalho "compartilhar seu jogo/janela" calculada no processo
@@ -54,6 +61,11 @@ export interface ScreenShareSuggestion {
   label: string
   isKnownGame: boolean
   processNames: string[]
+  // PID resolvido pro caso de fallback de TELA CHEIA (jogo sem janela
+  // própria capturável) — ver windowInfo.pid em electron/main.cjs.
+  // Pro caso de uma janela normal (type 'window'), o PID já vem junto
+  // com o próprio ScreenShareSource.pid acima.
+  pid: number | null
 }
 
 export interface ScreenShareSourcesPayload {
@@ -96,6 +108,17 @@ declare global {
       watchProcessExit: (processNames: string[]) => Promise<void>
       stopWatchProcessExit: () => Promise<void>
       onWatchedProcessExited: (callback: () => void) => () => void
+      // Captura de áudio por processo (EXPERIMENTAL, só Windows) — ver
+      // o bloco grande em electron/main.cjs e
+      // native/process-audio-capture/capture.cpp. `startProcessAudioCapture`
+      // nunca lança: sempre devolve { ok, error? }.
+      startProcessAudioCapture: (pid: number) => Promise<{ ok: boolean; error?: string }>
+      stopProcessAudioCapture: () => Promise<void>
+      onProcessAudioFormat: (
+        callback: (format: { sampleRate: number; channels: number; sampleFormat: 'float32' | 'int16' }) => void
+      ) => () => void
+      onProcessAudioChunk: (callback: (chunk: Uint8Array) => void) => () => void
+      onProcessAudioError: (callback: (message: string) => void) => () => void
       // Login com Google — recebe a URL de callback (mamacovoip://...)
       // que o processo principal repassa assim que o sistema
       // operacional entrega o link de volta do navegador. Ver

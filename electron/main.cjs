@@ -407,6 +407,7 @@ foreach ($name in $names) {
     $b = $s.Bounds
     Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
     Write-Output $proc.MainWindowTitle
+    Write-Output $proc.Id
     exit
   }
 }
@@ -432,9 +433,11 @@ Write-Output ''
             resolve(null)
             return
           }
+          const pidNum = Number(outLines[2]?.trim())
           resolve({
             bounds: { x: parts[0], y: parts[1], width: parts[2], height: parts[3] },
             windowTitle: outLines[1]?.trim() || null,
+            pid: Number.isFinite(pidNum) && pidNum > 0 ? pidNum : null,
           })
         }
       )
@@ -484,6 +487,7 @@ try {
     Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
     Write-Output $proc.MainWindowTitle
     Write-Output $proc.ProcessName
+    Write-Output $proc.Id
   } else {
     Write-Output ''
   }
@@ -511,15 +515,66 @@ try {
             resolve(null)
             return
           }
+          const pidNum = Number(outLines[3]?.trim())
           resolve({
             bounds: { x: parts[0], y: parts[1], width: parts[2], height: parts[3] },
             windowTitle: outLines[1]?.trim() || null,
             processName: outLines[2]?.trim().toLowerCase() || null,
+            pid: Number.isFinite(pidNum) && pidNum > 0 ? pidNum : null,
           })
         }
       )
     } catch {
       resolve(null)
+    }
+  })
+}
+
+// ============================================================
+// "Captura de áudio por processo" — pega o PID de CADA janela que
+// aparece na lista do seletor de compartilhamento (não só a sugerida),
+// casando pelo TÍTULO exato — é esse PID que a "Captura de áudio por
+// processo" (ver process-audio-capture.exe em native/process-audio-capture/
+// e startProcessAudioCapture mais abaixo) usa pra isolar o áudio de só
+// aquele app, em vez do sistema inteiro (que inclui o próprio Mamacos
+// Voip — ver o pedido que motivou isso todo: "nao tem como focar o
+// audio somente na janela em que estou transmitindo?").
+//
+// Só Windows, best-effort. Feature experimental: se der errado (Get-Process
+// falhar, PowerShell bloqueado por política do sistema, etc.), devolve um
+// mapa vazio — quem chama simplesmente não oferece a opção de "áudio só
+// deste app" pra essas janelas, sem quebrar o resto do seletor.
+function getWindowPidMap() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve(new Map())
+      return
+    }
+    const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object { Write-Output "$($_.MainWindowTitle)|$($_.Id)" }
+`
+    try {
+      const encoded = Buffer.from(script, 'utf16le').toString('base64')
+      exec(
+        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
+        { windowsHide: true, timeout: 2500 },
+        (err, stdout) => {
+          const map = new Map()
+          if (!err && stdout) {
+            for (const line of stdout.split(/\r?\n/)) {
+              const sepIndex = line.lastIndexOf('|')
+              if (sepIndex <= 0) continue
+              const title = line.slice(0, sepIndex).trim()
+              const pid = Number(line.slice(sepIndex + 1).trim())
+              if (title && Number.isFinite(pid) && pid > 0) map.set(title, pid)
+            }
+          }
+          resolve(map)
+        }
+      )
+    } catch {
+      resolve(new Map())
     }
   })
 }
@@ -990,6 +1045,13 @@ app.whenReady().then(() => {
         watchProcessNamesForShare = lastForegroundApp.processName ? [lastForegroundApp.processName] : []
       }
 
+      // Mapa título -> PID pra TODAS as janelas visíveis, não só a
+      // sugerida — é o que permite oferecer "áudio só deste app" pra
+      // qualquer janela da lista "Janela" que a pessoa escolher, não só
+      // a que a gente já detectou automaticamente (ver getWindowPidMap
+      // acima e a "Captura de áudio por processo" em VoiceContext.tsx).
+      const windowPidMap = await getWindowPidMap()
+
       const gameDisplayId = matchDisplayIdForBounds(windowInfo?.bounds ?? null)
       const gameWindowTitle = windowInfo?.windowTitle ?? null
       mainWindow?.webContents.send('screen-share-sources', {
@@ -1012,9 +1074,25 @@ app.whenReady().then(() => {
           // cadastrado quanto pro genérico, ver acima).
           isExactGameWindow: Boolean(gameWindowTitle) && s.name === gameWindowTitle,
           isGameDisplay: Boolean(gameDisplayId) && s.display_id === gameDisplayId,
+          // PID do processo dono da janela, quando dá pra descobrir (só
+          // type === 'window'; uma tela inteira pode ter vários
+          // processos desenhando nela, não faz sentido isolar) — usado
+          // pra oferecer a captura de áudio experimental "só deste
+          // app". null quando não achou (Mac/Linux, ou nenhum processo
+          // com esse título exato no instante da consulta).
+          pid: s.id.startsWith('window:') ? windowPidMap.get(s.name) ?? null : null,
         })),
         suggestion: suggestionLabel
-          ? { label: suggestionLabel, isKnownGame, processNames: watchProcessNamesForShare }
+          ? {
+              label: suggestionLabel,
+              isKnownGame,
+              processNames: watchProcessNamesForShare,
+              // Cobre o caso "Jogo" caindo no fallback de tela cheia
+              // (sem janela própria — ver windowInfo.pid, resolvido via
+              // getGameWindowInfo/getForegroundWindowInfo acima), onde o
+              // mapa por título não tem como ajudar.
+              pid: windowInfo?.pid ?? null,
+            }
           : null,
       })
     } catch {
@@ -1169,6 +1247,165 @@ app.whenReady().then(() => {
     watchedProcessWasSeen = false
   })
 
+  // ============================================================
+  // "Captura de áudio por processo" (EXPERIMENTAL) — pedido explícito:
+  // "nao tem como focar o audio somente na janela em que estou
+  // trasnmitindo?". A captura de áudio "padrão" (audio: 'loopback' lá
+  // em cima) é a única coisa que o próprio Windows/Chromium oferecem
+  // via getDisplayMedia() — e ela sempre pega o MIX INTEIRO do sistema
+  // (todo mundo tocando som, inclusive o próprio Mamacos Voip), sem
+  // como isolar. Não existe um jeito de resolver isso só com
+  // JavaScript/Electron — por isso um .exe separado (ver
+  // native/process-audio-capture/capture.cpp) usando a API oficial da
+  // Microsoft de "Process Loopback Capture", que consegue pedir o
+  // áudio de só UM processo (+ os filhos dele).
+  //
+  // Limitações conhecidas, avisadas por completo aqui:
+  //  - Só existe no Windows 10 build 20348+ (efetivamente só Windows
+  //    11 em uso comum) — em qualquer outro sistema, ou se o .exe não
+  //    existir/falhar por qualquer motivo, essa opção simplesmente não
+  //    aparece/não funciona, sem quebrar a captura de tela em si.
+  //  - É um processo externo rodando enquanto a captura está ativa —
+  //    encerrado junto com o compartilhamento de tela (ver
+  //    stopProcessAudioCapture) e também ao fechar o app inteiro (ver
+  //    'before-quit' mais abaixo).
+  let processAudioCaptureProc = null
+  let processAudioHeaderBuffer = Buffer.alloc(0)
+  let processAudioHeaderParsed = false
+  let processAudioPendingChunks = []
+  let processAudioFlushTimer = null
+
+  const PROCESS_AUDIO_HEADER_SIZE = 16
+  const PROCESS_AUDIO_FLUSH_MS = 40
+
+  function resolveProcessAudioCaptureExePath() {
+    // Mesmo truque que o Electron builder já documenta pra qualquer
+    // binário dentro de asarUnpack: dentro do pacote final, o app roda
+    // de dentro de um arquivo .asar (não é uma pasta de verdade no
+    // disco), mas um .exe não pode ser executado de lá — asarUnpack
+    // (ver package.json) copia ele pra fora, numa pasta irmã chamada
+    // "app.asar.unpacked". __dirname sozinho ainda aponta pra dentro do
+    // .asar, então essa troca de texto no caminho é necessária pra
+    // achar o arquivo de verdade.
+    const packagedPath = path.join(__dirname, 'process-audio-capture.exe')
+    return packagedPath.replace('app.asar', 'app.asar.unpacked')
+  }
+
+  function flushProcessAudioChunks() {
+    processAudioFlushTimer = null
+    if (processAudioPendingChunks.length === 0) return
+    const merged = Buffer.concat(processAudioPendingChunks)
+    processAudioPendingChunks = []
+    mainWindow?.webContents.send('process-audio:chunk', merged)
+  }
+
+  function scheduleProcessAudioFlush() {
+    if (processAudioFlushTimer) return
+    processAudioFlushTimer = setTimeout(flushProcessAudioChunks, PROCESS_AUDIO_FLUSH_MS)
+  }
+
+  function stopProcessAudioCapture() {
+    if (processAudioFlushTimer) {
+      clearTimeout(processAudioFlushTimer)
+      processAudioFlushTimer = null
+    }
+    processAudioPendingChunks = []
+    processAudioHeaderBuffer = Buffer.alloc(0)
+    processAudioHeaderParsed = false
+    if (processAudioCaptureProc) {
+      try {
+        processAudioCaptureProc.kill()
+      } catch {
+        // já pode ter morrido sozinho — sem problema
+      }
+      processAudioCaptureProc = null
+    }
+  }
+
+  function startProcessAudioCapture(pid) {
+    stopProcessAudioCapture()
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Captura de áudio por processo só existe no Windows.' }
+    }
+    if (!pid || !Number.isFinite(pid) || pid <= 0) {
+      return { ok: false, error: 'PID inválido.' }
+    }
+    const exePath = resolveProcessAudioCaptureExePath()
+    if (!require('node:fs').existsSync(exePath)) {
+      return {
+        ok: false,
+        error:
+          'process-audio-capture.exe não encontrado nesta instalação (build sem esse componente, ou ainda não compilado pro seu sistema).',
+      }
+    }
+    try {
+      const proc = spawn(exePath, [String(pid)], { windowsHide: true })
+      processAudioCaptureProc = proc
+
+      proc.stdout.on('data', (chunk) => {
+        if (!processAudioHeaderParsed) {
+          processAudioHeaderBuffer = Buffer.concat([processAudioHeaderBuffer, chunk])
+          if (processAudioHeaderBuffer.length < PROCESS_AUDIO_HEADER_SIZE) return
+          const header = processAudioHeaderBuffer.subarray(0, PROCESS_AUDIO_HEADER_SIZE)
+          const rest = processAudioHeaderBuffer.subarray(PROCESS_AUDIO_HEADER_SIZE)
+          processAudioHeaderBuffer = Buffer.alloc(0)
+          processAudioHeaderParsed = true
+
+          const magic = header.readUInt32LE(0)
+          if (magic !== 0x4d43504c) {
+            mainWindow?.webContents.send('process-audio:error', 'Formato de cabeçalho inesperado.')
+            stopProcessAudioCapture()
+            return
+          }
+          const sampleRate = header.readUInt32LE(4)
+          const channels = header.readUInt16LE(8)
+          const sampleFormat = header.readUInt16LE(10) === 2 ? 'int16' : 'float32'
+          mainWindow?.webContents.send('process-audio:format', { sampleRate, channels, sampleFormat })
+
+          if (rest.length > 0) {
+            processAudioPendingChunks.push(Buffer.from(rest))
+            scheduleProcessAudioFlush()
+          }
+          return
+        }
+        processAudioPendingChunks.push(Buffer.from(chunk))
+        scheduleProcessAudioFlush()
+      })
+
+      // stderr é só texto de diagnóstico (ver capture.cpp) — repassa
+      // linhas "ERROR ..." pro renderer pra pelo menos dar um motivo em
+      // vez de simplesmente "não funcionou". Linhas "STATUS ..." só
+      // ajudam a depurar (não precisa mostrar na cara da pessoa).
+      let stderrBuffer = ''
+      proc.stderr?.on('data', (chunk) => {
+        stderrBuffer += chunk.toString('utf8')
+        let newlineIndex
+        while ((newlineIndex = stderrBuffer.indexOf('\n')) >= 0) {
+          const line = stderrBuffer.slice(0, newlineIndex).trim()
+          stderrBuffer = stderrBuffer.slice(newlineIndex + 1)
+          if (line.startsWith('ERROR')) {
+            mainWindow?.webContents.send('process-audio:error', line.replace(/^ERROR\s*/, ''))
+          }
+        }
+      })
+
+      proc.on('error', (err) => {
+        mainWindow?.webContents.send('process-audio:error', err?.message || 'Falha ao iniciar a captura de áudio.')
+        processAudioCaptureProc = null
+      })
+      proc.on('exit', () => {
+        if (processAudioCaptureProc === proc) processAudioCaptureProc = null
+      })
+
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Falha desconhecida ao iniciar a captura.' }
+    }
+  }
+
+  ipcMain.handle('process-audio:start', (_event, pid) => startProcessAudioCapture(pid))
+  ipcMain.handle('process-audio:stop', () => stopProcessAudioCapture())
+
   // --- Push-to-talk global -----------------------------------------
   let pttGlobalKeycode = null
   let pttCaptureResolver = null
@@ -1250,6 +1487,8 @@ app.whenReady().then(() => {
     // Sem isso o processo do PowerShell (vigia de foco do jogo) ficaria
     // rodando sozinho em segundo plano depois do app fechar.
     stopForegroundWatch()
+    // Idem pro process-audio-capture.exe (captura de áudio por processo).
+    stopProcessAudioCapture()
   })
   // -------------------------------------------------------------------
 

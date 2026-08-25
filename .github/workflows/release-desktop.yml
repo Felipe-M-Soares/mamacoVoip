@@ -86,6 +86,27 @@ jobs:
         shell: bash
         run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version --allow-same-version
 
+      # Compila o .exe standalone de captura de áudio por processo
+      # (native/process-audio-capture/capture.cpp — ver comentário no
+      # topo desse arquivo pra entender o que ele faz e por quê é um
+      # .exe separado em vez de um módulo nativo do Node). Só roda no
+      # job do Windows: é código Win32/WASAPI puro, não existe
+      # equivalente Mac/Linux, e o resto do app já lida bem com esse
+      # .exe simplesmente não existir nessas plataformas (ver
+      # electron/main.cjs — a captura por app fica indisponível, sem
+      # quebrar mais nada). msvc-dev-cmd@v1 coloca o compilador cl.exe
+      # (Visual Studio, já vem instalado no runner windows-latest) no
+      # PATH — sem essa ação, "cl" não é reconhecido pelo shell.
+      - name: Configurar compilador MSVC (só Windows)
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Compilar captura de áudio por processo (só Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: |
+          cl /EHsc /std:c++17 /O2 /DUNICODE /D_UNICODE native\process-audio-capture\capture.cpp /Fe:electron\process-audio-capture.exe /link ole32.lib mmdevapi.lib
+
       - name: Build do app desktop (tsc + vite, caminhos relativos)
         run: npm run build:electron
         env:

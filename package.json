@@ -59,7 +59,8 @@
     "asar": true,
     "npmRebuild": false,
     "asarUnpack": [
-      "**/node_modules/uiohook-napi/**"
+      "**/node_modules/uiohook-napi/**",
+      "electron/process-audio-capture.exe"
     ],
     "protocols": [
       {

@@ -6,6 +6,8 @@ import { useAudioSettings } from '../hooks/useAudioSettings'
 import { useScreenShareQuality } from '../hooks/useScreenShareQuality'
 import { createNoiseSuppressor, type NoiseSuppressor } from '../lib/noiseSuppression'
 import { takePendingGameShareHint } from '../lib/screenShareGameHint'
+import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
+import { PcmStreamPlayer } from '../lib/pcmStreamPlayer'
 import { preferStereoOpusForTrack } from '../lib/sdpStereo'
 import {
   playConnectSound,
@@ -590,6 +592,61 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // atual. Só existe enquanto o vigia de foco estiver ativo.
   const placeholderTrackRef = useRef<MediaStreamTrack | null>(null)
   const realScreenVideoTrackRef = useRef<MediaStreamTrack | null>(null)
+  // Captura de áudio por processo (EXPERIMENTAL, só Windows) — ver
+  // pendingAppAudioCapture.ts, pcmStreamPlayer.ts e o bloco grande em
+  // electron/main.cjs ("Captura de áudio por processo"). `appAudioPlayerRef`
+  // é o tocador que transforma os pedaços de PCM crus (vindos do .exe via
+  // IPC) numa MediaStreamTrack de verdade; `appAudioTrackRef` guarda ESSA
+  // track pra saber qual sender remover de cada peer quando a
+  // transmissão para ou troca de fonte (ela não faz parte de
+  // screenStreamRef.current, que é só o que getDisplayMedia devolveu —
+  // por isso não seria pega pelo laço normal de limpeza em
+  // stopScreenShareState).
+  const appAudioPlayerRef = useRef<PcmStreamPlayer | null>(null)
+  const appAudioTrackRef = useRef<MediaStreamTrack | null>(null)
+  const appAudioUnsubsRef = useRef<Array<() => void>>([])
+
+  function stopAppAudioCapture() {
+    appAudioUnsubsRef.current.forEach((unsub) => unsub())
+    appAudioUnsubsRef.current = []
+    window.electronAPI?.stopProcessAudioCapture?.().catch(() => {})
+    appAudioPlayerRef.current?.close()
+    appAudioPlayerRef.current = null
+  }
+
+  // Pede pro processo principal iniciar a captura nativa (ver
+  // process-audio-capture.exe) do PID escolhido e liga o resultado (via
+  // IPC — format + pedaços de PCM) num PcmStreamPlayer, devolvendo a
+  // track de áudio já pronta pra entrar num RTCPeerConnection igual
+  // qualquer outra. `null` em qualquer falha (fora do Windows, .exe
+  // ausente, PID não existe mais, etc.) — quem chama trata isso como
+  // "sem áudio nessa transmissão", sem quebrar o vídeo.
+  async function startAppAudioCapture(pid: number): Promise<MediaStreamTrack | null> {
+    if (!window.electronAPI?.startProcessAudioCapture) return null
+    try {
+      const result = await window.electronAPI.startProcessAudioCapture(pid)
+      if (!result?.ok) {
+        setError(
+          result?.error
+            ? `Captura de áudio só deste app falhou: ${result.error}`
+            : 'Não foi possível capturar o áudio só deste app.'
+        )
+        return null
+      }
+    } catch {
+      setError('Não foi possível capturar o áudio só deste app.')
+      return null
+    }
+    const player = new PcmStreamPlayer()
+    appAudioPlayerRef.current = player
+    const unsubFormat = window.electronAPI.onProcessAudioFormat((format) => player.setFormat(format))
+    const unsubChunk = window.electronAPI.onProcessAudioChunk((chunk) => player.push(chunk))
+    const unsubError = window.electronAPI.onProcessAudioError((message) => {
+      console.error('Captura de áudio por processo:', message)
+    })
+    appAudioUnsubsRef.current = [unsubFormat, unsubChunk, unsubError]
+    return player.stream.getAudioTracks()[0] ?? null
+  }
 
   // Desenha uma "cortina" simples (fundo escuro + aviso) e devolve uma
   // track de vídeo estática feita a partir disso — usada como substituta
@@ -1435,6 +1492,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     gameShareWatchRef.current?.()
     gameShareWatchRef.current = null
     window.electronAPI?.stopWatchProcessExit?.().catch(() => {})
+    // A track de "áudio só deste app" (quando ativa) não faz parte de
+    // screenStreamRef.current — vem de um MediaStream próprio dentro do
+    // PcmStreamPlayer (ver startAppAudioCapture acima) — por isso
+    // precisa ser removida dos peers e encerrada aqui à parte.
+    if (appAudioTrackRef.current) {
+      const appAudioTrack = appAudioTrackRef.current
+      peersRef.current.forEach(({ pc }) => {
+        const sender = pc.getSenders().find((s) => s.track === appAudioTrack)
+        if (sender) pc.removeTrack(sender)
+      })
+      appAudioTrackRef.current = null
+    }
+    stopAppAudioCapture()
     screenStreamRef.current = null
     screenAudioTrackIdRef.current = null
     setLocalScreenStream(null)
@@ -1495,6 +1565,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // recado vazio/velho de uma vez anterior, porque o seletor nem
       // tinha aberto ainda.
       const gameShareHint = takePendingGameShareHint()
+      // Ver pendingAppAudioCapture.ts — só tem valor quando a pessoa
+      // marcou "Capturar áudio só deste app" no seletor E escolheu
+      // "Jogo" ou uma janela com PID resolvido (ver ScreenSharePicker.tsx).
+      const appAudioPid = takePendingAppAudioPid()
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
       // Avisa a sala ANTES de adicionar a track — o broadcast chega quase
@@ -1502,7 +1576,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // leva alguns round-trips, então o aviso quase sempre chega primeiro.
       broadcastScreenMeta(stream.id)
       const videoTrack = stream.getVideoTracks()[0]
-      const audioTrack = stream.getAudioTracks()[0]
+      // Áudio "normal" (loopback do sistema, só existe pra tela cheia com
+      // o checkbox marcado) vs. captura por processo (EXPERIMENTAL — ver
+      // startAppAudioCapture acima): são mutuamente exclusivos na prática,
+      // já que appAudioPid só existe pra escolhas de Jogo/Janela, que
+      // nunca vêm com áudio de sistema (ver electron/main.cjs). Quando a
+      // captura por processo falha, cai pra "sem áudio nessa
+      // transmissão" (o vídeo continua funcionando normal) em vez de
+      // travar tudo.
+      let audioTrack: MediaStreamTrack | null = stream.getAudioTracks()[0] ?? null
+      let audioSourceStream: MediaStream = stream
+      if (appAudioPid) {
+        const appAudioTrack = await startAppAudioCapture(appAudioPid)
+        if (appAudioTrack) {
+          audioTrack = appAudioTrack
+          audioSourceStream = appAudioPlayerRef.current?.stream ?? stream
+          appAudioTrackRef.current = appAudioTrack
+        }
+      }
       // Guarda o ID pra próxima renegociação (seja a de agora mesmo, logo
       // abaixo, seja uma futura — por exemplo quando outra pessoa entra
       // na call no meio da transmissão) saber que ESSA é a track que
@@ -1550,7 +1641,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // acima) — o áudio da transmissão precisa do PRÓPRIO teto de
           // bitrate (128kbps, pensado pra som de jogo/música), não o
           // preset de vídeo nem o padrão baixo do navegador.
-          const audioSender = pc.addTrack(audioTrack, stream)
+          const audioSender = pc.addTrack(audioTrack, audioSourceStream)
           const audioParams = audioSender.getParameters()
           audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
           audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
@@ -1644,13 +1735,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
       // do picker DEPOIS do getDisplayMedia resolver.
       const gameShareHint = takePendingGameShareHint()
+      const appAudioPid = takePendingAppAudioPid()
 
       const newVideoTrack = newStream.getVideoTracks()[0]
       if (!newVideoTrack) {
         newStream.getTracks().forEach((t) => t.stop())
         return
       }
-      const newAudioTrack = newStream.getAudioTracks()[0] ?? null
+      let newAudioTrack: MediaStreamTrack | null = newStream.getAudioTracks()[0] ?? null
+      let audioSourceStream: MediaStream = newStream
       newVideoTrack.contentHint = 'motion'
 
       const oldVideoTrack = realScreenVideoTrackRef.current
@@ -1671,6 +1764,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       if (placeholderTrackRef.current) {
         placeholderTrackRef.current.stop()
         placeholderTrackRef.current = null
+      }
+      // Idem pra captura de áudio por processo (EXPERIMENTAL) da fonte
+      // ANTERIOR — precisa encerrar o processo nativo velho antes de
+      // (talvez) iniciar um novo pro PID recém-escolhido. `oldAudioTrackId`
+      // acima já guardou o que precisa (o ID, não o objeto) pra achar o
+      // sender certo daqui pra baixo, então pode parar com segurança.
+      stopAppAudioCapture()
+      appAudioTrackRef.current = null
+      if (appAudioPid) {
+        const appAudioTrack = await startAppAudioCapture(appAudioPid)
+        if (appAudioTrack) {
+          newAudioTrack = appAudioTrack
+          audioSourceStream = appAudioPlayerRef.current?.stream ?? newStream
+          appAudioTrackRef.current = appAudioTrack
+        }
       }
 
       peersRef.current.forEach(({ pc }) => {
@@ -1699,7 +1807,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // isso sim precisa de um addTrack de verdade, o que dispara uma
         // pequena renegociação só pra esse caso específico.
         if (newAudioTrack && !hadAudioBefore && !audioHandled) {
-          const audioSender = pc.addTrack(newAudioTrack, newStream)
+          const audioSender = pc.addTrack(newAudioTrack, audioSourceStream)
           const audioParams = audioSender.getParameters()
           audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
           audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE

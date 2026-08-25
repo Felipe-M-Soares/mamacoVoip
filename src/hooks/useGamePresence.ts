@@ -84,7 +84,9 @@ declare global {
       onUpdateStatus: (callback: (payload: UpdateStatusPayload) => void) => () => void
       restartToUpdate: () => Promise<void>
       onScreenShareSources: (callback: (payload: ScreenShareSourcesPayload) => void) => () => void
-      selectScreenShareSource: (sourceId: string | null, includeSystemAudio?: boolean) => Promise<void>
+      // Áudio automático conforme o tipo da fonte (tela cheia = sistema,
+      // janela = captura por processo) — ver electron/main.cjs.
+      selectScreenShareSource: (sourceId: string | null) => Promise<void>
       focusAppWindow: () => void
       isGlobalPTTAvailable: () => Promise<boolean>
       startPTTCapture: () => Promise<{ keycode: number; name: string } | null>

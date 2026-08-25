@@ -5,9 +5,19 @@ import { setPendingAppAudioPid } from '../../lib/pendingAppAudioCapture'
 import { QUALITY_PRESETS, loadQuality } from '../../hooks/useScreenShareQuality'
 
 // Versão enxuta: só o essencial — as fontes agrupadas por categoria
-// (Jogo / Tela cheia / Janela) e os dois controles que realmente mudam
-// o que vai ser compartilhado (áudio do sistema, cancelar). Sem parágrafo
-// de explicação por card — a categoria já diz o que é.
+// (Jogo / Tela cheia / Janela). Sem parágrafo de explicação por card — a
+// categoria já diz o que é, e sem checkbox de áudio nenhum: o áudio agora
+// é escolhido SOZINHO conforme o tipo da fonte (pedido explícito — "se for
+// janela captura audio da janela se for tela cheia captura tela cheia
+// automatico"):
+//   - Janela (ou "Jogo" quando resolve pra uma janela de verdade) → tenta
+//     capturar o áudio só DAQUELE app (ver pidForChoice abaixo e a seção
+//     "Captura de áudio por processo" em electron/main.cjs). Se não der
+//     (fora do Windows, PID não resolvido, falha da API), a transmissão
+//     simplesmente segue sem áudio — nunca trava por causa disso.
+//   - Tela cheia (ou "Jogo" caindo no fallback de tela cheia) → áudio do
+//     sistema (loopback) ligado direto, sem precisar marcar nada (ver
+//     ipcMain.handle('screen-share:select', ...) em electron/main.cjs).
 //
 // A sugestão (`suggestion`, calculada no processo principal — ver
 // electron/main.cjs) diferencia dois casos: jogo CADASTRADO (KNOWN_GAMES,
@@ -20,12 +30,6 @@ import { QUALITY_PRESETS, loadQuality } from '../../hooks/useScreenShareQuality'
 export function ScreenSharePicker() {
   const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
   const [suggestion, setSuggestion] = useState<ScreenShareSuggestion | null>(null)
-  const [includeSystemAudio, setIncludeSystemAudio] = useState(false)
-  // EXPERIMENTAL — ver pendingAppAudioCapture.ts e o bloco grande em
-  // electron/main.cjs ("Captura de áudio por processo"). Só faz sentido
-  // pra Jogo/Janela (que têm PID resolvido); telas inteiras continuam
-  // usando o checkbox de áudio do sistema acima.
-  const [useAppAudio, setUseAppAudio] = useState(false)
 
   useEffect(() => {
     if (!window.electronAPI) return
@@ -45,17 +49,18 @@ export function ScreenSharePicker() {
   const currentQualityPreset = QUALITY_PRESETS[loadQuality()]
 
   // PID resolvido pra cada escolha possível — Jogo usa o PID vindo da
-  // sugestão (windowInfo.pid, cobre inclusive o fallback de tela cheia);
-  // qualquer Janela usa o próprio source.pid (mapa por título, ver
-  // getWindowPidMap em electron/main.cjs). Telas inteiras nunca têm PID
-  // (podem ter vários processos desenhando nela), então a opção "áudio só
-  // deste app" nunca se aplica a elas.
+  // sugestão (windowInfo.pid, só quando esse "Jogo" é mesmo uma JANELA —
+  // ver abaixo); qualquer Janela usa o próprio source.pid (mapa por
+  // título, ver getWindowPidMap em electron/main.cjs). Telas inteiras
+  // nunca têm PID (podem ter vários processos desenhando nela) — pra
+  // essas, o áudio automático é sempre o do sistema (ver
+  // ipcMain.handle('screen-share:select', ...) em electron/main.cjs), não
+  // captura por processo.
   function pidForChoice(id: string | null): number | null {
     if (!id) return null
-    if (gameCard && id === gameCard.id) return suggestion?.pid ?? null
+    if (gameCard && id === gameCard.id && gameCard.type === 'window') return suggestion?.pid ?? null
     return windows.find((w) => w.id === id)?.pid ?? null
   }
-  const anyPidAvailable = Boolean((gameCard && suggestion?.pid) || windows.some((w) => w.pid))
 
   function choose(id: string | null, viaGameShortcut?: { processNames: string[]; label: string }) {
     // O recado só faz sentido pro atalho "Jogo" caindo no fallback de
@@ -64,8 +69,13 @@ export function ScreenSharePicker() {
     // limpa esse recado, defensivo — evita um auto-stop errado "vazando"
     // pra uma captura sem relação com ele.
     setPendingGameShareHint(viaGameShortcut && gameCard?.type === 'screen' ? viaGameShortcut : null)
-    setPendingAppAudioPid(useAppAudio ? pidForChoice(id) : null)
-    window.electronAPI?.selectScreenShareSource(id, includeSystemAudio).catch(() => {})
+    // Automático, sem checkbox nenhum: se der pra saber o processo dono
+    // da janela escolhida, tenta capturar o áudio só dele — senão (tela
+    // cheia, ou não deu pra descobrir o PID), fica por conta do áudio de
+    // sistema automático que electron/main.cjs já liga sozinho pra
+    // qualquer escolha de tela cheia.
+    setPendingAppAudioPid(pidForChoice(id))
+    window.electronAPI?.selectScreenShareSource(id).catch(() => {})
     setSources(null)
   }
 
@@ -82,30 +92,6 @@ export function ScreenSharePicker() {
           <h2 className="font-display text-lg font-bold text-white tracking-wide">Escolha o que compartilhar</h2>
           <span className="text-[10px] text-discord-text-muted shrink-0">{currentQualityPreset.label}</span>
         </div>
-
-        <label className="flex items-center gap-2 mb-4 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={includeSystemAudio}
-            onChange={(e) => setIncludeSystemAudio(e.target.checked)}
-            className="accent-discord-blurple"
-          />
-          <span className="text-xs text-discord-text">Compartilhar áudio do sistema (só tela inteira)</span>
-        </label>
-
-        {anyPidAvailable && (
-          <label className="flex items-center gap-2 mb-4 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useAppAudio}
-              onChange={(e) => setUseAppAudio(e.target.checked)}
-              className="accent-discord-blurple"
-            />
-            <span className="text-xs text-discord-text">
-              Capturar áudio só deste app (experimental — ao escolher "Jogo" ou uma janela)
-            </span>
-          </label>
-        )}
 
         <div className="max-h-[55vh] overflow-y-auto pr-1 space-y-4">
           {gameCard && suggestion && (

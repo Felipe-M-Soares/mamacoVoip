@@ -396,22 +396,91 @@ function getGameWindowInfo(processNames) {
       return
     }
     const namesList = processNames.map((n) => `'${n.replace(/'/g, "''")}'`).join(',')
+    // ANTES disso, essa função usava $proc.MainWindowHandle (uma
+    // propriedade de conveniência do .NET) pra achar a janela do jogo —
+    // só que MainWindowHandle tem uma limitação conhecida e documentada:
+    // ele só reconhece a janela como "principal" se ela tiver um TÍTULO
+    // não vazio. Muitos jogos em modo "janela sem bordas" (borderless
+    // windowed) não definem título nenhum na janela (não têm barra de
+    // título pra mostrar de qualquer forma) — pra esses, MainWindowHandle
+    // sempre voltava 0, e a função inteira desistia (é exatamente o bug
+    // relatado: "o jogo esta em janela sem bordas e nao esta aparecendo
+    // na lista"). A troca abaixo usa GetTopWindow + GetWindow(...,
+    // GW_HWNDNEXT) — uma varredura direta de TODAS as janelas de nível
+    // superior do sistema, sem depender de título nenhum — e escolhe a
+    // MAIOR janela visível pertencente a algum dos processos-alvo (jogos
+    // costumam ter uma ou duas janelas auxiliares pequenas — launcher,
+    // overlay de anti-cheat — além da janela principal de verdade; pegar
+    // a maior evita escolher uma dessas por engano).
     const script = `
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Windows.Forms
-$names = @(${namesList})
-foreach ($name in $names) {
-  $proc = Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-  if ($proc) {
-    $s = [System.Windows.Forms.Screen]::FromHandle($proc.MainWindowHandle)
-    $b = $s.Bounds
-    Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
-    Write-Output $proc.MainWindowTitle
-    Write-Output $proc.Id
-    exit
-  }
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class MamacosWinScan {
+  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 }
-Write-Output ''
+"@
+$names = @(${namesList})
+$targetPids = @{}
+foreach ($name in $names) {
+  Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object { $targetPids[[int]$_.Id] = $true }
+}
+$bestHwnd = [IntPtr]::Zero
+$bestArea = 0
+$bestTitle = ''
+$bestPid = 0
+$hwnd = [MamacosWinScan]::GetTopWindow([IntPtr]::Zero)
+while ($hwnd -ne [IntPtr]::Zero) {
+  if ($targetPids.Count -gt 0 -and [MamacosWinScan]::IsWindowVisible($hwnd) -and -not [MamacosWinScan]::IsIconic($hwnd)) {
+    # GA_ROOT (2): só janelas de nível superior "de verdade" — descarta
+    # janelas filhas/controles internos que também aparecem nessa varredura.
+    if ([MamacosWinScan]::GetAncestor($hwnd, 2) -eq $hwnd) {
+      $procId = 0
+      [MamacosWinScan]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+      if ($targetPids.ContainsKey([int]$procId)) {
+        $rect = New-Object 'MamacosWinScan+RECT'
+        [MamacosWinScan]::GetWindowRect($hwnd, [ref]$rect) | Out-Null
+        $w = $rect.Right - $rect.Left
+        $h = $rect.Bottom - $rect.Top
+        # Descarta janelas minúsculas (ícones invisíveis, janelas de
+        # mensagem, etc.) — a janela de verdade do jogo é sempre bem
+        # maior que isso.
+        if ($w -ge 200 -and $h -ge 200) {
+          $area = $w * $h
+          if ($area -gt $bestArea) {
+            $bestArea = $area
+            $bestHwnd = $hwnd
+            $bestPid = $procId
+            $sb = New-Object System.Text.StringBuilder 512
+            [MamacosWinScan]::GetWindowText($hwnd, $sb, 512) | Out-Null
+            $bestTitle = $sb.ToString()
+          }
+        }
+      }
+    }
+  }
+  $hwnd = [MamacosWinScan]::GetWindow($hwnd, 2)
+}
+if ($bestHwnd -ne [IntPtr]::Zero) {
+  $s = [System.Windows.Forms.Screen]::FromHandle($bestHwnd)
+  $b = $s.Bounds
+  Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
+  Write-Output $bestTitle
+  Write-Output $bestPid
+} else {
+  Write-Output ''
+}
 `
     try {
       const encoded = Buffer.from(script, 'utf16le').toString('base64')
@@ -423,7 +492,14 @@ Write-Output ''
             resolve(null)
             return
           }
-          const outLines = stdout.split(/\r?\n/).filter((l) => l.length > 0)
+          // IMPORTANTE: não filtra linhas vazias aqui — pra uma janela
+          // sem título (borderless, ver comentário grande acima), a
+          // linha do título É pra vir vazia mesmo, e ela PRECISA contar
+          // como uma linha de verdade, senão o PID (linha seguinte) some
+          // do lugar certo. Só remove a ÚLTIMA linha vazia, que é sempre
+          // só a quebra de linha final do próprio PowerShell.
+          const outLines = stdout.split(/\r?\n/)
+          if (outLines.length > 0 && outLines[outLines.length - 1] === '') outLines.pop()
           if (outLines.length === 0) {
             resolve(null)
             return
@@ -465,29 +541,40 @@ function getForegroundWindowInfo() {
       resolve(null)
       return
     }
+    // Mesmo bug/correção de getGameWindowInfo acima: GetForegroundWindow()
+    // já devolve o HWND certo diretamente, sem depender de título nenhum
+    // — o bug era usar $proc.MainWindowHandle/$proc.MainWindowTitle
+    // DEPOIS (que sim exigem título não vazio) em vez do HWND que a
+    // gente já tinha em mãos. Usando $hwnd direto em Screen.FromHandle e
+    // GetWindowText, uma janela sem bordas/sem título (comum em jogos
+    // borderless) passa a funcionar igual qualquer outra.
     const script = `
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public class MamacosFgSnapshot {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 }
 "@
 try {
   $hwnd = [MamacosFgSnapshot]::GetForegroundWindow()
-  $procId = 0
-  [MamacosFgSnapshot]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
-  $proc = Get-Process -Id $procId -ErrorAction Stop
-  if ($proc.MainWindowHandle -ne 0) {
-    $s = [System.Windows.Forms.Screen]::FromHandle($proc.MainWindowHandle)
+  if ($hwnd -ne [IntPtr]::Zero) {
+    $procId = 0
+    [MamacosFgSnapshot]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+    $proc = Get-Process -Id $procId -ErrorAction Stop
+    $s = [System.Windows.Forms.Screen]::FromHandle($hwnd)
     $b = $s.Bounds
+    $sb = New-Object System.Text.StringBuilder 512
+    [MamacosFgSnapshot]::GetWindowText($hwnd, $sb, 512) | Out-Null
     Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
-    Write-Output $proc.MainWindowTitle
+    Write-Output $sb.ToString()
     Write-Output $proc.ProcessName
-    Write-Output $proc.Id
+    Write-Output $procId
   } else {
     Write-Output ''
   }
@@ -505,8 +592,11 @@ try {
             resolve(null)
             return
           }
-          const outLines = stdout.split(/\r?\n/).filter((l) => l.length > 0)
-          if (outLines.length < 3) {
+          // Mesmo motivo do comentário em getGameWindowInfo acima — não
+          // filtra linhas vazias (o título pode legitimamente vir vazio).
+          const outLines = stdout.split(/\r?\n/)
+          if (outLines.length > 0 && outLines[outLines.length - 1] === '') outLines.pop()
+          if (outLines.length < 4) {
             resolve(null)
             return
           }
@@ -1108,7 +1198,7 @@ app.whenReady().then(() => {
     useSystemPicker: true,
   })
 
-  ipcMain.handle('screen-share:select', async (_event, sourceId, includeSystemAudio) => {
+  ipcMain.handle('screen-share:select', async (_event, sourceId) => {
     if (!pendingDisplayMediaCallback) return
     const resolve = pendingDisplayMediaCallback
     pendingDisplayMediaCallback = null
@@ -1123,19 +1213,23 @@ app.whenReady().then(() => {
       }
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
       const source = sources.find((s) => s.id === sourceId)
-      // 'loopback' captura o áudio de TODO o sistema (é a única opção
-      // que o Windows/Linux oferecem — não existe uma API que isole o
-      // som de só uma janela/app específico). Antes isso era ligado
-      // sempre, mesmo quando a pessoa escolhia compartilhar só uma
-      // janela — resultado: quem assistia ouvia áudio de QUALQUER outro
-      // app aberto, e o pior, ouvia de volta a própria call (que sai
-      // pelo alto-falante de quem está compartilhando), causando eco.
-      // Agora só liga quando (a) é uma tela inteira mesmo (não dá pra
-      // isolar áudio de janela de qualquer forma) E (b) a pessoa marcou
-      // a opção explicitamente no seletor (ver ScreenSharePicker.tsx) —
-      // o padrão é desligado.
+      // Áudio agora é 100% automático conforme o TIPO da escolha (pedido
+      // explícito — sem checkbox nenhum no seletor, ver
+      // ScreenSharePicker.tsx):
+      //   - Tela cheia: 'loopback' (áudio de TODO o sistema — é a única
+      //     opção que o Windows/Linux oferecem pra uma tela inteira, não
+      //     dá pra isolar só um app dentro dela) liga sozinho, sempre.
+      //   - Janela: NUNCA usa loopback aqui (pegaria o sistema inteiro,
+      //     incluindo o próprio Mamacos Voip — motivo original desse
+      //     código só ligar loopback pra tela cheia). O áudio de uma
+      //     janela específica vem da captura por processo (EXPERIMENTAL —
+      //     ver startAppAudioCapture em VoiceContext.tsx e a seção
+      //     "Captura de áudio por processo" mais abaixo neste arquivo),
+      //     que o renderer inicia à parte assim que sabe o PID (ver
+      //     pidForChoice em ScreenSharePicker.tsx) — completamente
+      //     desacoplado desta escolha de vídeo.
       const isFullScreen = Boolean(source?.id.startsWith('screen:'))
-      resolve(source ? { video: source, ...(isFullScreen && includeSystemAudio ? { audio: 'loopback' } : {}) } : {})
+      resolve(source ? { video: source, ...(isFullScreen ? { audio: 'loopback' } : {}) } : {})
       // Capturar uma JANELA específica (diferente de capturar a tela
       // inteira) faz o Windows trazer aquela janela pra frente sozinho —
       // é assim que a API de captura do sistema funciona, nada que o

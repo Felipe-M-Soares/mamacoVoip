@@ -21,8 +21,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('screen-share-sources', handler)
     return () => ipcRenderer.removeListener('screen-share-sources', handler)
   },
-  selectScreenShareSource: (sourceId, includeSystemAudio) =>
-    ipcRenderer.invoke('screen-share:select', sourceId, includeSystemAudio),
+  // Áudio agora é automático conforme o tipo da fonte escolhida (ver
+  // ipcMain.handle('screen-share:select', ...) em electron/main.cjs) —
+  // não recebe mais um parâmetro de "incluir áudio do sistema" aqui.
+  selectScreenShareSource: (sourceId) => ipcRenderer.invoke('screen-share:select', sourceId),
   focusAppWindow: () => ipcRenderer.send('app:focus-window'),
   isGlobalPTTAvailable: () => ipcRenderer.invoke('ptt:is-global-available'),
   startPTTCapture: () => ipcRenderer.invoke('ptt:start-capture'),

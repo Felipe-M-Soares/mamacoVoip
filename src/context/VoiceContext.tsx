@@ -63,6 +63,28 @@ const MIC_MAX_BITRATE = 128_000
 // vale a pena".
 const SCREEN_SHARE_AUDIO_MAX_BITRATE = 256_000
 
+// Sem isso, pedir `audio: true` (booleano puro) faz o Chromium aplicar o
+// MESMO processamento de voz em tempo real que usa pro microfone —
+// cancelamento de eco, redução de ruído e ganho automático (AGC) — só que
+// dessa vez em cima do áudio do SISTEMA/JOGO, não de uma voz. Esse
+// processamento foi desenhado pra UM canal de voz falado; aplicado em som
+// de jogo/música (várias fontes ao mesmo tempo, faixa de frequência bem
+// mais larga) costuma sair chiado/abafado/com artefato — é basicamente o
+// mesmo motivo do microfone (com o processamento certo, ajustado só pra
+// voz) ficar bom e a transmissão (com esse mesmo processamento errado pro
+// tipo de áudio) ficar ruim. Desligando os três aqui, o áudio do
+// sistema/jogo passa direto, sem esse tratamento que não faz sentido pra
+// ele.
+const SCREEN_SHARE_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  // Reforça a intenção de estéreo desde a CAPTURA (o forçar de verdade
+  // continua sendo a edição do SDP em preferStereoOpusForTrack — isso
+  // aqui é só um pedido a mais, não garante nada sozinho).
+  channelCount: 2,
+}
+
 // No Windows, a PRIMEIRA chamada de getUserMedia às vezes esbarra numa
 // corrida com a permissão de microfone do próprio sistema operacional
 // (mais comum dentro do app desktop) — falha na primeira tentativa e
@@ -1458,8 +1480,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           frameRate: { ideal: preset.frameRate, max: preset.frameRate },
         },
         // Inclui o áudio do sistema/jogo na transmissão, não só a
-        // imagem — quem estiver assistindo ouve o som do jogo junto.
-        audio: true,
+        // imagem — quem estiver assistindo ouve o som do jogo junto. Ver
+        // SCREEN_SHARE_AUDIO_CONSTRAINTS acima pro porquê de não ser só
+        // `audio: true`.
+        audio: SCREEN_SHARE_AUDIO_CONSTRAINTS,
       })
       // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
       // no atalho "Compartilhar seu jogo/janela" E caiu no caso de tela
@@ -1614,7 +1638,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
           frameRate: { ideal: preset.frameRate, max: preset.frameRate },
         },
-        audio: true,
+        // Ver SCREEN_SHARE_AUDIO_CONSTRAINTS acima.
+        audio: SCREEN_SHARE_AUDIO_CONSTRAINTS,
       })
       // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
       // do picker DEPOIS do getDisplayMedia resolver.

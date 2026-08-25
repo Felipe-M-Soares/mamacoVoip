@@ -20,13 +20,19 @@ import { QUALITY_PRESETS, loadQuality } from '../../hooks/useScreenShareQuality'
 //     ipcMain.handle('screen-share:select', ...) em electron/main.cjs).
 //
 // A sugestão (`suggestion`, calculada no processo principal — ver
-// electron/main.cjs) diferencia dois casos: jogo CADASTRADO (KNOWN_GAMES,
-// `isKnownGame: true`) ganha a própria categoria "Jogo" em destaque;
-// qualquer outra janela sugerida (a última em primeiro plano antes de
-// abrir esse seletor, não necessariamente um jogo) só recebe um contorno
-// discreto dentro de "Janela", sem virar uma seção própria — não dá pra
-// saber com certeza que é um jogo, então não afirma isso na cara da
-// pessoa.
+// electron/main.cjs) sempre ganha a própria seção em destaque quando dá
+// pra resolver uma fonte pra ela — seja uma JANELA de verdade
+// (isExactGameWindow) seja o fallback de TELA CHEIA (isGameDisplay, pro
+// caso comum de jogo em modo exclusivo/sem janela própria capturável).
+// A seção chama "Jogo" quando é um processo CADASTRADO (KNOWN_GAMES,
+// `isKnownGame: true`); pra qualquer outro app/jogo detectado (a última
+// janela em primeiro plano antes de abrir esse seletor) chama "Sugestão"
+// — não dá pra saber com certeza que é um jogo, então não afirma isso na
+// cara da pessoa, mas ainda mostra em destaque (antes disso esse caso só
+// ganhava um contorno discreto dentro de "Janela"/"Tela cheia", fácil de
+// não notar — e o fallback de tela cheia sequer tinha esse contorno,
+// porque isGameDisplay nunca era usado aqui apesar de já vir calculado
+// do processo principal).
 export function ScreenSharePicker() {
   const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
   const [suggestion, setSuggestion] = useState<ScreenShareSuggestion | null>(null)
@@ -41,9 +47,14 @@ export function ScreenSharePicker() {
 
   if (!sources) return null
 
-  const suggestedSource = sources.find((s) => s.isExactGameWindow) ?? null
-  const gameCard = suggestion?.isKnownGame ? suggestedSource : null
-  const screens = sources.filter((s) => s.type === 'screen')
+  // Prioriza uma JANELA exata quando existe; só cai pro fallback de TELA
+  // CHEIA (isGameDisplay) quando não tem janela capturável pro jogo —
+  // exatamente o caso mais comum de jogo em modo exclusivo/borderless
+  // sem título, que antes ficava sem destaque nenhum.
+  const suggestedSource = sources.find((s) => s.isExactGameWindow) ?? sources.find((s) => s.isGameDisplay) ?? null
+  const gameCard = suggestion ? suggestedSource : null
+  const gameCardTitle = suggestion?.isKnownGame ? 'Jogo' : 'Sugestão'
+  const screens = sources.filter((s) => s.type === 'screen' && s !== gameCard)
   const windows = sources.filter((s) => s.type === 'window' && s !== gameCard)
 
   const currentQualityPreset = QUALITY_PRESETS[loadQuality()]
@@ -102,7 +113,7 @@ export function ScreenSharePicker() {
 
         <div className="max-h-[55vh] overflow-y-auto pr-1 space-y-4">
           {gameCard && suggestion && (
-            <SourceSection title="Jogo">
+            <SourceSection title={gameCardTitle}>
               <SourceCard
                 source={gameCard}
                 highlighted
@@ -119,8 +130,12 @@ export function ScreenSharePicker() {
           )}
           {windows.length > 0 && (
             <SourceSection title="Janela">
+              {/* Sem prop "highlighted" aqui de propósito: quando existe
+                  uma sugestão, ela já vira sua própria seção acima
+                  ("Jogo"/"Sugestão") e é excluída desta lista — nunca
+                  sobra uma janela sugerida pra destacar aqui dentro. */}
               {windows.map((s) => (
-                <SourceCard key={s.id} source={s} highlighted={s === suggestedSource} onClick={() => choose(s.id)} />
+                <SourceCard key={s.id} source={s} onClick={() => choose(s.id)} />
               ))}
             </SourceSection>
           )}

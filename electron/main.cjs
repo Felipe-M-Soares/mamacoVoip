@@ -242,12 +242,22 @@ const KNOWN_GAMES = {
 // ter esse sufixo — melhora um pouco a cobertura fora do Windows,
 // mesmo que a lista tenha sido pensada primariamente pra ele.
 const GAME_CHECK_INTERVAL_MS = 15_000
+// O "último app em primeiro plano" (lastForegroundApp, ver abaixo) tinha
+// esse mesmo intervalo de 15s — bom o bastante pra achar QUAL jogo está
+// rodando (tasklist inteiro, mais pesado), mas alto demais pra pegar o
+// jogo certo quando a pessoa alterna pra ele e volta rápido pro mamaco
+// pra compartilhar (ex: menos de 15s de diferença = ainda pegava o valor
+// ANTIGO/vazio). Como o snapshot de foreground é uma chamada leve e
+// separada (um PowerShell só, sem tasklist), roda numa frequência bem
+// maior, num timer próprio.
+const FOREGROUND_CHECK_INTERVAL_MS = 3_000
 
 let mainWindow = null
 let isQuitting = false
 let pendingDisplayMediaCallback = null
 let updateReadyToInstall = false
 let gameCheckTimer = null
+let foregroundCheckTimer = null
 let currentGame = null
 // Última janela que esteve em primeiro plano ENQUANTO nossa própria janela
 // não estava em foco — ver getForegroundWindowInfo/o laço em
@@ -313,6 +323,10 @@ function startGameDetection() {
       }
     }
 
+  }, GAME_CHECK_INTERVAL_MS)
+
+  if (foregroundCheckTimer) return
+  foregroundCheckTimer = setInterval(async () => {
     // Só atualiza o "último app em primeiro plano" quando NOSSA janela não
     // está em foco — assim, no instante em que a pessoa clica em
     // "Compartilhar tela" dentro do próprio app (quando o foco já é nosso),
@@ -322,7 +336,7 @@ function startGameDetection() {
       const fg = await getForegroundWindowInfo()
       if (fg) lastForegroundApp = fg
     }
-  }, GAME_CHECK_INTERVAL_MS)
+  }, FOREGROUND_CHECK_INTERVAL_MS)
 }
 
 // ============================================================
@@ -658,6 +672,89 @@ Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object { Writ
               const title = line.slice(0, sepIndex).trim()
               const pid = Number(line.slice(sepIndex + 1).trim())
               if (title && Number.isFinite(pid) && pid > 0) map.set(title, pid)
+            }
+          }
+          resolve(map)
+        }
+      )
+    } catch {
+      resolve(new Map())
+    }
+  })
+}
+
+// Casar pelo TÍTULO (acima) tem um problema real: o `desktopCapturer.getSources()`
+// tira uma "foto" do título de cada janela num instante, e getWindowPidMap()
+// roda um PowerShell separado um pouco DEPOIS — se o jogo mostra qualquer
+// coisa dinâmica no título (FPS, pontuação, nome da fase), os dois textos
+// já não batem mais e o casamento falha silenciosamente (era exatamente
+// isso que causava "não consegui identificar o processo dessa janela" —
+// confirmado, é o aviso que apareceu de verdade no teste). A alternativa
+// abaixo não depende de título NENHUM: no Windows, o `id` de uma fonte do
+// tipo "window" do desktopCapturer vem no formato "window:<HWND>:0" — o
+// número É o handle de janela nativo de verdade (comportamento observado
+// e usado por vários projetos Electron pra correlacionar uma fonte de
+// captura com APIs do Win32 diretamente, já que o Electron não expõe
+// isso por uma API própria). Extraindo esse número, dá pra perguntar o
+// PID direto pro Windows (GetWindowThreadProcessId) sem precisar casar
+// texto nenhum. Mantém getWindowPidMap() acima como fallback só pro caso
+// (raro) desse formato de id não bater com o esperado nalguma versão do
+// Electron.
+function parseHwndFromSourceId(id) {
+  const match = /^window:(\d+):/.exec(id || '')
+  if (!match) return null
+  const value = Number(match[1])
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function getPidsForWindowHandles(hwnds) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32' || !hwnds || hwnds.length === 0) {
+      resolve(new Map())
+      return
+    }
+    const hwndList = hwnds.map((h) => String(h)).join(',')
+    const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class MamacosHwndPid {
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+$hwnds = @(${hwndList})
+foreach ($h in $hwnds) {
+  $ptr = [IntPtr]$h
+  # IsWindow confirma que o handle ainda é válido AGORA — sem essa
+  # checagem, um número reaproveitado por outra janela (handles do
+  # Windows podem ser reciclados) poderia devolver um PID de um processo
+  # completamente diferente do esperado.
+  if ([MamacosHwndPid]::IsWindow($ptr)) {
+    $procId = 0
+    [MamacosHwndPid]::GetWindowThreadProcessId($ptr, [ref]$procId) | Out-Null
+    Write-Output "$h,$procId"
+  } else {
+    Write-Output "$h,0"
+  }
+}
+`
+    try {
+      const encoded = Buffer.from(script, 'utf16le').toString('base64')
+      exec(
+        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
+        { windowsHide: true, timeout: 2500 },
+        (err, stdout) => {
+          const map = new Map()
+          if (!err && stdout) {
+            for (const line of stdout.split(/\r?\n/)) {
+              const trimmed = line.trim()
+              if (!trimmed) continue
+              const [hStr, pidStr] = trimmed.split(',')
+              const h = Number(hStr)
+              const pid = Number(pidStr)
+              if (Number.isFinite(h) && Number.isFinite(pid) && pid > 0) map.set(h, pid)
             }
           }
           resolve(map)
@@ -1135,12 +1232,19 @@ app.whenReady().then(() => {
         watchProcessNamesForShare = lastForegroundApp.processName ? [lastForegroundApp.processName] : []
       }
 
-      // Mapa título -> PID pra TODAS as janelas visíveis, não só a
-      // sugerida — é o que permite oferecer "áudio só deste app" pra
-      // qualquer janela da lista "Janela" que a pessoa escolher, não só
-      // a que a gente já detectou automaticamente (ver getWindowPidMap
-      // acima e a "Captura de áudio por processo" em VoiceContext.tsx).
-      const windowPidMap = await getWindowPidMap()
+      // PID de CADA janela visível na lista, não só a sugerida — é o que
+      // permite oferecer "áudio só deste app" pra qualquer janela que a
+      // pessoa escolher (ver "Captura de áudio por processo" em
+      // VoiceContext.tsx). Método principal: extrai o HWND do próprio id
+      // do desktopCapturer (ver parseHwndFromSourceId acima — não
+      // depende de título, muito mais confiável); getWindowPidMap
+      // (casamento por título) só entra como reserva pras poucas janelas
+      // em que isso falhar.
+      const windowHwnds = sources
+        .filter((s) => s.id.startsWith('window:'))
+        .map((s) => parseHwndFromSourceId(s.id))
+        .filter((h) => h !== null)
+      const [hwndPidMap, titlePidMap] = await Promise.all([getPidsForWindowHandles(windowHwnds), getWindowPidMap()])
 
       const gameDisplayId = matchDisplayIdForBounds(windowInfo?.bounds ?? null)
       const gameWindowTitle = windowInfo?.windowTitle ?? null
@@ -1168,9 +1272,11 @@ app.whenReady().then(() => {
           // type === 'window'; uma tela inteira pode ter vários
           // processos desenhando nela, não faz sentido isolar) — usado
           // pra oferecer a captura de áudio experimental "só deste
-          // app". null quando não achou (Mac/Linux, ou nenhum processo
-          // com esse título exato no instante da consulta).
-          pid: s.id.startsWith('window:') ? windowPidMap.get(s.name) ?? null : null,
+          // app". null quando não achou (Mac/Linux, handle não resolvido
+          // e título também não bateu com nenhum processo).
+          pid: s.id.startsWith('window:')
+            ? hwndPidMap.get(parseHwndFromSourceId(s.id)) ?? titlePidMap.get(s.name) ?? null
+            : null,
         })),
         suggestion: suggestionLabel
           ? {
@@ -1763,6 +1869,7 @@ app.on('web-contents-created', (_event, contents) => {
 
 app.on('window-all-closed', () => {
   if (gameCheckTimer) clearInterval(gameCheckTimer)
+  if (foregroundCheckTimer) clearInterval(foregroundCheckTimer)
   stopForegroundWatch()
   globalShortcut.unregisterAll()
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()

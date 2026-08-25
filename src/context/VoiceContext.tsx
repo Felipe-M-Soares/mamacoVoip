@@ -1723,8 +1723,30 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // já está de fato fluindo, cobre o caso do foco mudar de novo nesse
       // meio-tempo.
       window.electronAPI?.focusAppWindow?.()
-    } catch {
-      setError('Não foi possível compartilhar a tela.')
+    } catch (err) {
+      // TERCEIRA RODADA de correção nesse fluxo: clicar em "Cancelar" no
+      // seletor (ScreenSharePicker.tsx) ou clicar fora dele chama
+      // choose(null), que no processo principal responde ao pedido do
+      // Electron com um objeto vazio (ver ipcMain.handle('screen-share:select', ...)
+      // em electron/main.cjs) — é assim que a API pede pra gente NEGAR o
+      // pedido. Isso faz getDisplayMedia() REJEITAR a Promise com
+      // DOMException "NotAllowedError", exatamente como quando o
+      // microfone é negado (ver o catch de joinChannel acima, que já
+      // trata esse mesmo nome de erro). Antes dessa correção, cancelar o
+      // seletor SEMPRE caía aqui e mostrava "Não foi possível
+      // compartilhar a tela." — só que isso ficava invisível até a
+      // correção anterior (o banner de erro em VoiceChannelView.tsx), daí
+      // parecer um bug NOVO quando na verdade sempre existiu, só que
+      // mudo. Cancelamento não é uma falha real, então não deve gerar
+      // aviso nenhum. Pra qualquer outro erro de verdade, agora inclui a
+      // mensagem original na tela — antes esse catch não guardava o erro
+      // (`catch {}`, sem variável nenhuma), então uma falha real nesse
+      // trecho (ex.: pc.addTrack, sender.setParameters) virava sempre o
+      // mesmo aviso genérico, sem pista nenhuma de qual foi o motivo de
+      // verdade — impossível de diagnosticar à distância.
+      if (err instanceof Error && err.name === 'NotAllowedError') return
+      const detail = err instanceof Error ? err.message : String(err)
+      setError(detail ? `Não foi possível compartilhar a tela: ${detail}` : 'Não foi possível compartilhar a tela.')
     }
   }
 

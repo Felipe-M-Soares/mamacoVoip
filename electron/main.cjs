@@ -426,6 +426,23 @@ function getGameWindowInfo(processNames) {
     // costumam ter uma ou duas janelas auxiliares pequenas — launcher,
     // overlay de anti-cheat — além da janela principal de verdade; pegar
     // a maior evita escolher uma dessas por engano).
+    //
+    // SEGUNDA RODADA de correção: a primeira versão desta função excluía
+    // de propósito qualquer janela MINIMIZADA (IsIconic) — a ideia era
+    // evitar pegar coordenadas erradas (GetWindowRect devolve uma
+    // posição sem sentido, tipo "-32000,-32000", pra janela minimizada).
+    // Só que isso tem um efeito colateral grave: jogo em modo TELA CHEIA
+    // EXCLUSIVA (bem comum — é justamente esse modo, e não o borderless,
+    // que faz o Windows MINIMIZAR o jogo sozinho ao alternar pra outro
+    // programa) ficava sempre excluído bem na hora em que a pessoa mais
+    // precisa dele: exatamente quando alternou pra fora do jogo pra abrir
+    // o mamaco e compartilhar a tela. GetWindowPlacement resolve os dois
+    // problemas ao mesmo tempo: dá o retângulo de "posição normal"
+    // (rcNormalPosition) que continua correto mesmo com a janela
+    // minimizada, então não precisa mais excluir IsIconic nenhum.
+    // Screen.FromHandle também já lida certo com janela minimizada por
+    // conta própria (documentado pela própria Microsoft), então a
+    // captura do monitor certo funciona nos dois casos.
     const script = `
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Windows.Forms
@@ -437,12 +454,17 @@ public class MamacosWinScan {
   [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
   [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  public struct POINT { public int X; public int Y; }
+  public struct WINDOWPLACEMENT {
+    public int length; public int flags; public int showCmd;
+    public POINT ptMinPosition; public POINT ptMaxPosition;
+    public RECT rcNormalPosition;
+  }
 }
 "@
 $names = @(${namesList})
@@ -456,15 +478,17 @@ $bestTitle = ''
 $bestPid = 0
 $hwnd = [MamacosWinScan]::GetTopWindow([IntPtr]::Zero)
 while ($hwnd -ne [IntPtr]::Zero) {
-  if ($targetPids.Count -gt 0 -and [MamacosWinScan]::IsWindowVisible($hwnd) -and -not [MamacosWinScan]::IsIconic($hwnd)) {
+  if ($targetPids.Count -gt 0 -and [MamacosWinScan]::IsWindowVisible($hwnd)) {
     # GA_ROOT (2): só janelas de nível superior "de verdade" — descarta
     # janelas filhas/controles internos que também aparecem nessa varredura.
     if ([MamacosWinScan]::GetAncestor($hwnd, 2) -eq $hwnd) {
       $procId = 0
       [MamacosWinScan]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
       if ($targetPids.ContainsKey([int]$procId)) {
-        $rect = New-Object 'MamacosWinScan+RECT'
-        [MamacosWinScan]::GetWindowRect($hwnd, [ref]$rect) | Out-Null
+        $wp = New-Object 'MamacosWinScan+WINDOWPLACEMENT'
+        $wp.length = 44
+        [MamacosWinScan]::GetWindowPlacement($hwnd, [ref]$wp) | Out-Null
+        $rect = $wp.rcNormalPosition
         $w = $rect.Right - $rect.Left
         $h = $rect.Bottom - $rect.Top
         # Descarta janelas minúsculas (ícones invisíveis, janelas de

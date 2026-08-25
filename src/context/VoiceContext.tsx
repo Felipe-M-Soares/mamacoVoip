@@ -145,6 +145,10 @@ interface VoiceContextValue {
   connectedServerId: string | null
   connecting: boolean
   error: string | null
+  // Fecha o aviso de erro manualmente (ver o banner em VoiceChannelView.tsx
+  // que aparece durante uma call em andamento) — sem isso não tinha
+  // nenhum jeito de tirar uma mensagem de erro da tela sem sair do canal.
+  clearError: () => void
   participants: Record<string, VoiceParticipant>
   muted: boolean
   deafened: boolean
@@ -642,7 +646,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const unsubFormat = window.electronAPI.onProcessAudioFormat((format) => player.setFormat(format))
     const unsubChunk = window.electronAPI.onProcessAudioChunk((chunk) => player.push(chunk))
     const unsubError = window.electronAPI.onProcessAudioError((message) => {
-      console.error('Captura de áudio por processo:', message)
+      // ANTES disso, isso só ia pro console.error — invisível pra
+      // qualquer pessoa rodando o app empacotado (o DevTools não abre
+      // sozinho fora do modo de desenvolvimento). Sem aparecer em lugar
+      // nenhum da tela, uma falha real da API nativa (ver capture.cpp)
+      // parecia simplesmente "sem áudio, sem explicação". setError aqui
+      // é o que torna isso diagnosticável a distância.
+      setError(`Captura de áudio por processo: ${message}`)
     })
     appAudioUnsubsRef.current = [unsubFormat, unsubChunk, unsubError]
     return player.stream.getAudioTracks()[0] ?? null
@@ -1565,10 +1575,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // recado vazio/velho de uma vez anterior, porque o seletor nem
       // tinha aberto ainda.
       const gameShareHint = takePendingGameShareHint()
-      // Ver pendingAppAudioCapture.ts — só tem valor quando a pessoa
-      // marcou "Capturar áudio só deste app" no seletor E escolheu
-      // "Jogo" ou uma janela com PID resolvido (ver ScreenSharePicker.tsx).
-      const appAudioPid = takePendingAppAudioPid()
+      // Ver pendingAppAudioCapture.ts — automático (sem checkbox) pra
+      // "Jogo"/Janela com PID resolvido (ver ScreenSharePicker.tsx).
+      // `isWindowChoice` é só diagnóstico: se era mesmo uma janela mas
+      // não veio PID, avisa em vez de ficar silenciosamente sem áudio
+      // sem pista nenhuma do motivo.
+      const appAudioChoice = takePendingAppAudioPid()
+      const appAudioPid = appAudioChoice?.pid ?? null
+      if (appAudioChoice?.isWindowChoice && !appAudioPid) {
+        setError(
+          'Não consegui identificar o processo dessa janela — a transmissão vai sem áudio automático (o vídeo continua normal).'
+        )
+      }
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
       // Avisa a sala ANTES de adicionar a track — o broadcast chega quase
@@ -1735,7 +1753,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
       // do picker DEPOIS do getDisplayMedia resolver.
       const gameShareHint = takePendingGameShareHint()
-      const appAudioPid = takePendingAppAudioPid()
+      const appAudioChoice = takePendingAppAudioPid()
+      const appAudioPid = appAudioChoice?.pid ?? null
+      if (appAudioChoice?.isWindowChoice && !appAudioPid) {
+        setError(
+          'Não consegui identificar o processo dessa janela — a transmissão vai sem áudio automático (o vídeo continua normal).'
+        )
+      }
 
       const newVideoTrack = newStream.getVideoTracks()[0]
       if (!newVideoTrack) {
@@ -1911,6 +1935,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         connectedServerId,
         connecting,
         error,
+        clearError: () => setError(null),
         participants,
         muted,
         deafened,

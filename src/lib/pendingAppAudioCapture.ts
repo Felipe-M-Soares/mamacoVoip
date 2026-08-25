@@ -12,14 +12,28 @@
 // efetivamente inicia essa captura é o VoiceContext, depois que o vídeo
 // já resolveu (mesmo motivo de timing de screenShareGameHint.ts: ler
 // isso ANTES de getDisplayMedia() resolver pegaria sempre vazio).
-let pendingAppAudioPid: number | null = null
-
-export function setPendingAppAudioPid(pid: number | null) {
-  pendingAppAudioPid = pid
+// `isWindowChoice` existe só pra diagnóstico: diz pro VoiceContext se a
+// escolha era mesmo uma JANELA (onde a gente SEMPRE espera conseguir um
+// PID e tentar áudio automático) — se for uma janela mas `pid` vier nulo
+// mesmo assim, é sinal de que o casamento por título falhou (ver
+// getWindowPidMap em electron/main.cjs), e isso deve aparecer como aviso
+// pra quem está usando, em vez de só ficar em silêncio sem áudio nenhum
+// e sem pista nenhuma do motivo (era exatamente esse silêncio, sem erro
+// visível em lugar nenhum, que tornava esse tipo de falha impossível de
+// diagnosticar à distância).
+export interface PendingAppAudioChoice {
+  pid: number | null
+  isWindowChoice: boolean
 }
 
-export function takePendingAppAudioPid(): number | null {
-  const value = pendingAppAudioPid
-  pendingAppAudioPid = null
+let pendingAppAudioChoice: PendingAppAudioChoice | null = null
+
+export function setPendingAppAudioPid(choice: PendingAppAudioChoice | null) {
+  pendingAppAudioChoice = choice
+}
+
+export function takePendingAppAudioPid(): PendingAppAudioChoice | null {
+  const value = pendingAppAudioChoice
+  pendingAppAudioChoice = null
   return value
 }

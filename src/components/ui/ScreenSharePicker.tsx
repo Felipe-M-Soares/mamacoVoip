@@ -61,6 +61,13 @@ export function ScreenSharePicker() {
     if (gameCard && id === gameCard.id && gameCard.type === 'window') return suggestion?.pid ?? null
     return windows.find((w) => w.id === id)?.pid ?? null
   }
+  // Só pra diagnóstico (ver pendingAppAudioCapture.ts) — diz se a escolha
+  // era mesmo uma JANELA, onde sempre esperamos um PID.
+  function isWindowChoice(id: string | null): boolean {
+    if (!id) return false
+    if (gameCard && id === gameCard.id) return gameCard.type === 'window'
+    return windows.some((w) => w.id === id)
+  }
 
   function choose(id: string | null, viaGameShortcut?: { processNames: string[]; label: string }) {
     // O recado só faz sentido pro atalho "Jogo" caindo no fallback de
@@ -74,7 +81,7 @@ export function ScreenSharePicker() {
     // cheia, ou não deu pra descobrir o PID), fica por conta do áudio de
     // sistema automático que electron/main.cjs já liga sozinho pra
     // qualquer escolha de tela cheia.
-    setPendingAppAudioPid(pidForChoice(id))
+    setPendingAppAudioPid(id ? { pid: pidForChoice(id), isWindowChoice: isWindowChoice(id) } : null)
     window.electronAPI?.selectScreenShareSource(id).catch(() => {})
     setSources(null)
   }

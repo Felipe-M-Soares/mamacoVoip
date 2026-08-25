@@ -573,6 +573,26 @@ export function VoiceChannelView({
         </div>
       ) : (
         <>
+          {/* Antes disso, voice.error só aparecia na tela de "ninguém no
+              canal ainda" (acima) — uma vez conectado, qualquer erro (ex:
+              falha na captura de áudio por processo experimental — ver
+              VoiceContext.tsx) ficava guardado no estado mas NUNCA
+              aparecia na tela pra ninguém ver, por mais que a mensagem
+              existisse de verdade. Esse aviso aqui é o que faltava pra
+              erros durante uma call em andamento serem visíveis de
+              verdade. */}
+          {voice.error && (
+            <div className="mx-4 mt-3 px-3 py-2 rounded bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center justify-between gap-3 shrink-0">
+              <span>{voice.error}</span>
+              <button
+                onClick={voice.clearError}
+                className="text-red-400/70 hover:text-red-400 shrink-0 text-base leading-none"
+                aria-label="Fechar aviso"
+              >
+                ×
+              </button>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto p-4 flex flex-col">
             {hiddenCount > 0 && (
               <button

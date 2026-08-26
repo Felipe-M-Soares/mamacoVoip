@@ -1406,23 +1406,32 @@ app.whenReady().then(() => {
       // grande em pendingDisplayMediaSources acima) — não chama
       // desktopCapturer.getSources() de novo aqui.
       const source = pendingDisplayMediaSources.find((s) => s.id === sourceId)
-      // QUARTA RODADA: antes disso, só TELA CHEIA vinha com 'loopback'
-      // (áudio de todo o sistema) — JANELA nunca tinha esse áudio junto,
-      // só o experimental "áudio por processo" (ver startAppAudioCapture
-      // em VoiceContext.tsx). Só que detectar o processo certo por trás de
-      // uma janela (PID) depende de várias coisas que podem falhar — e
-      // cada uma dessas falhas virava "transmissão sem áudio nenhum", o
-      // que a pessoa jogando não quer de jeito nenhum ("quero o melhor
-      // áudio pra transmitir todo jogo"). Agora 'loopback' vai SEMPRE
-      // junto, pra QUALQUER escolha (tela cheia OU janela) — e
-      // VoiceContext.tsx já troca esse áudio de sistema pelo áudio
-      // isolado por processo automaticamente QUANDO ele dá certo (ver
-      // startAppAudioCapture ali: só sobrescreve `audioTrack` se
-      // `appAudioTrack` realmente vier preenchido). Ou seja: continua
-      // tentando isolar só o áudio do jogo primeiro (sem pegar sons do
-      // sistema/do próprio Mamacos Voip), mas agora nunca mais fica em
-      // silêncio total só porque essa parte experimental não funcionou.
-      resolve(source ? { video: source, audio: 'loopback' } : {})
+      // QUINTA RODADA — mudança de arquitetura: esse resolve() ANTES
+      // pedia vídeo E áudio (loopback) juntos, numa coisa só. O problema:
+      // getDisplayMedia() trata os dois como um pacote ATÔMICO — se
+      // QUALQUER um dos dois falhar (mesmo só o áudio), a Promise inteira
+      // rejeita, e a pessoa perde a transmissão de vídeo TAMBÉM, mesmo o
+      // vídeo em si nunca tendo dado problema nenhum. É exatamente esse
+      // padrão que bate com "Invalid capture constraints (AbortError)"
+      // continuar voltando depois de mexer só nas constraints de vídeo —
+      // troquei frameRate, uni as duas chamadas de getSources, e nada
+      // mudou, o que sugere que a falha pode estar do lado do ÁUDIO
+      // (loopback), não do vídeo, mas os dois juntos escondiam qual era
+      // qual.
+      //
+      // A partir de agora, esse handler só resolve o VÍDEO — o áudio de
+      // sistema passou a ser pedido em uma chamada TOTALMENTE separada,
+      // direto do renderer (ver captureSystemAudioTrack em
+      // VoiceContext.tsx, que usa getUserMedia com
+      // "chromeMediaSource: 'desktop'" em vez de depender deste
+      // resolve()). Com isso: (1) o vídeo nunca mais é derrubado por uma
+      // falha do áudio — se o loopback falhar por qualquer motivo
+      // (anti-cheat de jogo competitivo bloqueando captura de áudio do
+      // sistema é um suspeito real), a transmissão de vídeo continua
+      // normal, só sem esse áudio extra; (2) se o erro voltar a
+      // acontecer, agora vai ficar claro de qual chamada (vídeo ou
+      // áudio) ele veio, em vez de continuar ambíguo.
+      resolve(source ? { video: source } : {})
       // Capturar uma JANELA específica (diferente de capturar a tela
       // inteira) faz o Windows trazer aquela janela pra frente sozinho —
       // é assim que a API de captura do sistema funciona, nada que o

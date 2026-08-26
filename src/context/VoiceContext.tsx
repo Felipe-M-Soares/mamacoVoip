@@ -65,27 +65,18 @@ const MIC_MAX_BITRATE = 128_000
 // vale a pena".
 const SCREEN_SHARE_AUDIO_MAX_BITRATE = 256_000
 
-// Sem isso, pedir `audio: true` (booleano puro) faz o Chromium aplicar o
-// MESMO processamento de voz em tempo real que usa pro microfone —
-// cancelamento de eco, redução de ruído e ganho automático (AGC) — só que
-// dessa vez em cima do áudio do SISTEMA/JOGO, não de uma voz. Esse
-// processamento foi desenhado pra UM canal de voz falado; aplicado em som
-// de jogo/música (várias fontes ao mesmo tempo, faixa de frequência bem
-// mais larga) costuma sair chiado/abafado/com artefato — é basicamente o
-// mesmo motivo do microfone (com o processamento certo, ajustado só pra
-// voz) ficar bom e a transmissão (com esse mesmo processamento errado pro
-// tipo de áudio) ficar ruim. Desligando os três aqui, o áudio do
-// sistema/jogo passa direto, sem esse tratamento que não faz sentido pra
-// ele.
-const SCREEN_SHARE_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
-  echoCancellation: false,
-  noiseSuppression: false,
-  autoGainControl: false,
-  // Reforça a intenção de estéreo desde a CAPTURA (o forçar de verdade
-  // continua sendo a edição do SDP em preferStereoOpusForTrack — isso
-  // aqui é só um pedido a mais, não garante nada sozinho).
-  channelCount: 2,
-}
+// ANTES disso existia uma SCREEN_SHARE_AUDIO_CONSTRAINTS aqui
+// (echoCancellation/noiseSuppression/autoGainControl desligados +
+// channelCount: 2), aplicada tanto no áudio "normal" do getDisplayMedia()
+// quanto — na QUINTA rodada de correção — na nova captura de áudio de
+// sistema separada (ver captureSystemAudioTrack). Removida de propósito
+// dessa segunda: ela usa a sintaxe ANTIGA "mandatory: {chromeMediaSource}",
+// e misturar constraints antigas com essas propriedades MODERNAS no mesmo
+// objeto é candidato relevante pra causa do "Invalid capture constraints"
+// que motivou essa rodada — ver o comentário grande em
+// captureSystemAudioTrack pro raciocínio completo. Perde-se esse ajuste
+// fino de qualidade só nesse áudio de sistema (a captura por processo,
+// quando funciona, não tem essa limitação — é PCM cru).
 
 // No Windows, a PRIMEIRA chamada de getUserMedia às vezes esbarra numa
 // corrida com a permissão de microfone do próprio sistema operacional
@@ -609,6 +600,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const appAudioPlayerRef = useRef<PcmStreamPlayer | null>(null)
   const appAudioTrackRef = useRef<MediaStreamTrack | null>(null)
   const appAudioUnsubsRef = useRef<Array<() => void>>([])
+  // QUINTA RODADA — ver comentário grande em ipcMain.handle('screen-share:select', ...)
+  // em electron/main.cjs: o áudio de sistema (loopback) não vem mais
+  // junto com o stream de vídeo do getDisplayMedia — agora é pedido à
+  // parte (ver captureSystemAudioTrack abaixo), então também precisa da
+  // própria referência pra limpeza em stopScreenShareState, do mesmo
+  // jeito que appAudioTrackRef já fazia pro áudio por processo.
+  const systemAudioTrackRef = useRef<MediaStreamTrack | null>(null)
 
   function stopAppAudioCapture() {
     appAudioUnsubsRef.current.forEach((unsub) => unsub())
@@ -656,6 +654,58 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     })
     appAudioUnsubsRef.current = [unsubFormat, unsubChunk, unsubError]
     return player.stream.getAudioTracks()[0] ?? null
+  }
+
+  // QUINTA RODADA de correção do compartilhamento de tela (ver o comentário
+  // grande em ipcMain.handle('screen-share:select', ...) em
+  // electron/main.cjs pro histórico completo): captura o áudio de TODO o
+  // sistema numa chamada SEPARADA de getUserMedia — em vez de pedir junto
+  // com o vídeo dentro de getDisplayMedia(), como era antes. O motivo é
+  // que getDisplayMedia() trata vídeo+áudio como um pacote só: se o áudio
+  // falhar por qualquer razão (aconteceu repetidas vezes com
+  // "Invalid capture constraints (AbortError)", possivelmente um jogo
+  // competitivo com anti-cheat bloqueando a captura de áudio do sistema
+  // enquanto está rodando — é só um suspeito, não confirmado, mas é o
+  // tipo de coisa que só interfere com ÁUDIO, não com captura de tela),
+  // a Promise INTEIRA rejeitava e a pessoa perdia o vídeo TAMBÉM, mesmo
+  // ele nunca tendo sido o problema.
+  //
+  // "chromeMediaSource: 'desktop'" é o jeito mais antigo (de antes do
+  // setDisplayMediaRequestHandler existir) de pedir áudio de sistema no
+  // Electron — funciona sozinho, sem precisar escolher uma janela/tela
+  // específica primeiro, exatamente por isso serve bem aqui: pega só o
+  // ÁUDIO, à parte do vídeo já resolvido separadamente.
+  //
+  // De propósito, NÃO misturo isso com SCREEN_SHARE_AUDIO_CONSTRAINTS
+  // (echoCancellation/noiseSuppression/autoGainControl/channelCount) —
+  // "mandatory" é sintaxe ANTIGA e essas são propriedades MODERNAS de
+  // MediaTrackConstraints; misturar os dois estilos no mesmo objeto de
+  // constraint é candidato relevante pra causa original de "Invalid
+  // capture constraints" (era exatamente esse tipo de mistura old+novo
+  // que rolava antes, só que do lado do vídeo). Fica mais simples e mais
+  // confiável assim, ao custo de perder esse ajuste fino de qualidade
+  // (cancelamento de eco etc.) só nesse áudio de sistema — a captura por
+  // processo, quando dá certo, não tem essa limitação (é PCM cru, sem
+  // passar pelas constraints do navegador).
+  //
+  // `null` em qualquer falha — quem chama trata como "sem áudio de
+  // sistema dessa vez", sem derrubar o vídeo.
+  async function captureSystemAudioTrack(): Promise<MediaStreamTrack | null> {
+    try {
+      const constraints = {
+        video: false,
+        audio: {
+          mandatory: { chromeMediaSource: 'desktop' },
+        },
+        // A API padrão de MediaTrackConstraints do TypeScript não conhece
+        // a propriedade "mandatory" (é específica do Electron/Chromium,
+        // de antes da era getDisplayMedia) — daí o "as unknown as ...".
+      } as unknown as MediaStreamConstraints
+      const audioStream = await navigator.mediaDevices.getUserMedia(constraints)
+      return audioStream.getAudioTracks()[0] ?? null
+    } catch {
+      return null
+    }
   }
 
   // Desenha uma "cortina" simples (fundo escuro + aviso) e devolve uma
@@ -1515,6 +1565,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       appAudioTrackRef.current = null
     }
     stopAppAudioCapture()
+    // QUINTA RODADA: mesma lógica acima, agora pro áudio de SISTEMA
+    // (ver captureSystemAudioTrack) — desde que vídeo e áudio viraram
+    // duas chamadas separadas, esse áudio também vem de um MediaStream
+    // próprio, fora de screenStreamRef.current, então precisa da própria
+    // limpeza aqui, senão o indicador "compartilhando microfone/tela" do
+    // Windows continuaria aceso e o processo WASAPI de loopback
+    // continuaria aberto à toa.
+    if (systemAudioTrackRef.current) {
+      const systemAudioTrack = systemAudioTrackRef.current
+      peersRef.current.forEach(({ pc }) => {
+        const sender = pc.getSenders().find((s) => s.track === systemAudioTrack)
+        if (sender) pc.removeTrack(sender)
+      })
+      systemAudioTrack.stop()
+      systemAudioTrackRef.current = null
+    }
     screenStreamRef.current = null
     screenAudioTrackIdRef.current = null
     setLocalScreenStream(null)
@@ -1570,11 +1636,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // em vez de travar a transmissão inteira por causa disso.
           frameRate: { ideal: preset.frameRate },
         },
-        // Inclui o áudio do sistema/jogo na transmissão, não só a
-        // imagem — quem estiver assistindo ouve o som do jogo junto. Ver
-        // SCREEN_SHARE_AUDIO_CONSTRAINTS acima pro porquê de não ser só
-        // `audio: true`.
-        audio: SCREEN_SHARE_AUDIO_CONSTRAINTS,
+        // QUINTA RODADA: áudio não é mais pedido AQUI, junto com o vídeo —
+        // ver captureSystemAudioTrack acima e o comentário grande em
+        // ipcMain.handle('screen-share:select', ...) em electron/main.cjs
+        // pro motivo (getDisplayMedia trata vídeo+áudio como um pacote só;
+        // se o áudio falhasse, o vídeo ia junto, mesmo sem culpa nenhuma).
+        audio: false,
       })
       // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
       // no atalho "Compartilhar seu jogo/janela" E caiu no caso de tela
@@ -1593,19 +1660,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // sem pista nenhuma do motivo.
       const appAudioChoice = takePendingAppAudioPid()
       const appAudioPid = appAudioChoice?.pid ?? null
-      if (appAudioChoice?.isWindowChoice && !appAudioPid) {
-        // QUARTA RODADA: essa mensagem dizia "vai sem áudio automático" —
-        // não é mais verdade desde que `stream`/`newStream` passou a vir
-        // sempre com o áudio de sistema (loopback) junto, mesmo pra
-        // janela (ver comentário grande em electron/main.cjs). Sem
-        // conseguir isolar só o áudio do jogo, a transmissão agora cai
-        // pro áudio de todo o sistema em vez de silêncio total — ainda
-        // vale avisar (pode incluir outros sons além do jogo), mas não é
-        // mais "sem áudio nenhum".
-        setError(
-          'Não consegui identificar o processo dessa janela — a transmissão vai com o áudio de todo o sistema em vez de só o do jogo (o vídeo continua normal).'
-        )
-      }
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
       // Avisa a sala ANTES de adicionar a track — o broadcast chega quase
@@ -1613,27 +1667,41 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // leva alguns round-trips, então o aviso quase sempre chega primeiro.
       broadcastScreenMeta(stream.id)
       const videoTrack = stream.getVideoTracks()[0]
-      // QUARTA RODADA: `stream` agora SEMPRE vem com áudio de sistema
-      // (loopback) junto, pra tela cheia OU janela (ver
-      // ipcMain.handle('screen-share:select', ...) em electron/main.cjs) —
-      // antes, janela nunca vinha com esse áudio, então uma falha na
-      // captura por processo (EXPERIMENTAL, PID incerto, várias coisas
-      // podem dar errado) virava "sem áudio nenhum", o que ninguém
-      // jogando quer. Por padrão usa esse áudio de sistema; SE a captura
-      // por processo der certo (isolando só o som do jogo, sem pegar
-      // outros sons do sistema/do próprio Mamacos Voip — o resultado
-      // melhor, quando funciona), troca pra ela e para a track de sistema
-      // que ficou sem uso (senão ela continuaria "ativa" à toa).
-      let audioTrack: MediaStreamTrack | null = stream.getAudioTracks()[0] ?? null
+      // QUINTA RODADA: vídeo e áudio agora são COMPLETAMENTE
+      // independentes — `stream` (acima) só tem vídeo. Tenta primeiro a
+      // captura por processo (isola só o som do jogo, quando o PID foi
+      // resolvido); se não der, cai pro áudio de todo o sistema via
+      // captureSystemAudioTrack (chamada separada, então uma falha aqui
+      // NUNCA mais derruba o vídeo, que já está garantido acima). Só na
+      // pior hipótese (as duas falharem) é que a transmissão fica sem
+      // áudio nenhum — mas o vídeo já foi, de qualquer forma.
+      let audioTrack: MediaStreamTrack | null = null
       let audioSourceStream: MediaStream = stream
       if (appAudioPid) {
         const appAudioTrack = await startAppAudioCapture(appAudioPid)
         if (appAudioTrack) {
-          audioTrack?.stop()
           audioTrack = appAudioTrack
           audioSourceStream = appAudioPlayerRef.current?.stream ?? stream
           appAudioTrackRef.current = appAudioTrack
         }
+      }
+      if (!audioTrack) {
+        const systemAudioTrack = await captureSystemAudioTrack()
+        if (systemAudioTrack) {
+          audioTrack = systemAudioTrack
+          audioSourceStream = new MediaStream([systemAudioTrack])
+          systemAudioTrackRef.current = systemAudioTrack
+        }
+      }
+      // Só avisa sobre o áudio depois de saber o resultado FINAL das duas
+      // tentativas acima — dizer isso antes seria um chute (poderia dar
+      // certo no áudio de sistema mesmo sem o PID da janela).
+      if (appAudioChoice?.isWindowChoice && !appAudioPid) {
+        setError(
+          audioTrack
+            ? 'Não consegui identificar o processo dessa janela — a transmissão vai com o áudio de todo o sistema em vez de só o do jogo (o vídeo continua normal).'
+            : 'Não consegui identificar o processo dessa janela, e também não consegui capturar o áudio de sistema — a transmissão vai sem áudio (o vídeo continua normal).'
+        )
       }
       // Guarda o ID pra próxima renegociação (seja a de agora mesmo, logo
       // abaixo, seja uma futura — por exemplo quando outra pessoa entra
@@ -1821,34 +1889,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // em vez de travar a transmissão inteira por causa disso.
           frameRate: { ideal: preset.frameRate },
         },
-        // Ver SCREEN_SHARE_AUDIO_CONSTRAINTS acima.
-        audio: SCREEN_SHARE_AUDIO_CONSTRAINTS,
+        // QUINTA RODADA: idem toggleScreenShare acima — áudio não vem
+        // mais junto com o vídeo aqui (ver captureSystemAudioTrack).
+        audio: false,
       })
       // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
       // do picker DEPOIS do getDisplayMedia resolver.
       const gameShareHint = takePendingGameShareHint()
       const appAudioChoice = takePendingAppAudioPid()
       const appAudioPid = appAudioChoice?.pid ?? null
-      if (appAudioChoice?.isWindowChoice && !appAudioPid) {
-        // QUARTA RODADA: essa mensagem dizia "vai sem áudio automático" —
-        // não é mais verdade desde que `stream`/`newStream` passou a vir
-        // sempre com o áudio de sistema (loopback) junto, mesmo pra
-        // janela (ver comentário grande em electron/main.cjs). Sem
-        // conseguir isolar só o áudio do jogo, a transmissão agora cai
-        // pro áudio de todo o sistema em vez de silêncio total — ainda
-        // vale avisar (pode incluir outros sons além do jogo), mas não é
-        // mais "sem áudio nenhum".
-        setError(
-          'Não consegui identificar o processo dessa janela — a transmissão vai com o áudio de todo o sistema em vez de só o do jogo (o vídeo continua normal).'
-        )
-      }
 
       const newVideoTrack = newStream.getVideoTracks()[0]
       if (!newVideoTrack) {
         newStream.getTracks().forEach((t) => t.stop())
         return
       }
-      let newAudioTrack: MediaStreamTrack | null = newStream.getAudioTracks()[0] ?? null
+      let newAudioTrack: MediaStreamTrack | null = null
       let audioSourceStream: MediaStream = newStream
       newVideoTrack.contentHint = 'motion'
 
@@ -1878,18 +1934,34 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // sender certo daqui pra baixo, então pode parar com segurança.
       stopAppAudioCapture()
       appAudioTrackRef.current = null
+      // QUINTA RODADA: idem — encerra o áudio de SISTEMA da fonte
+      // ANTERIOR (se tinha) antes de (talvez) capturar um novo pra fonte
+      // nova. Ver captureSystemAudioTrack acima e o comentário grande em
+      // stopScreenShareState pro porquê dessa referência à parte existir.
+      systemAudioTrackRef.current?.stop()
+      systemAudioTrackRef.current = null
       if (appAudioPid) {
         const appAudioTrack = await startAppAudioCapture(appAudioPid)
         if (appAudioTrack) {
-          // Idem toggleScreenShare acima: `newAudioTrack` já é o áudio de
-          // sistema (loopback, sempre presente agora) — se a captura por
-          // processo desta vez der certo, troca pra ela e para a track de
-          // sistema que ficou sem uso.
-          newAudioTrack?.stop()
           newAudioTrack = appAudioTrack
           audioSourceStream = appAudioPlayerRef.current?.stream ?? newStream
           appAudioTrackRef.current = appAudioTrack
         }
+      }
+      if (!newAudioTrack) {
+        const systemAudioTrack = await captureSystemAudioTrack()
+        if (systemAudioTrack) {
+          newAudioTrack = systemAudioTrack
+          audioSourceStream = new MediaStream([systemAudioTrack])
+          systemAudioTrackRef.current = systemAudioTrack
+        }
+      }
+      if (appAudioChoice?.isWindowChoice && !appAudioPid) {
+        setError(
+          newAudioTrack
+            ? 'Não consegui identificar o processo dessa janela — a transmissão vai com o áudio de todo o sistema em vez de só o do jogo (o vídeo continua normal).'
+            : 'Não consegui identificar o processo dessa janela, e também não consegui capturar o áudio de sistema — a transmissão vai sem áudio (o vídeo continua normal).'
+        )
       }
 
       peersRef.current.forEach(({ pc }) => {

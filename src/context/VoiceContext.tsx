@@ -3,7 +3,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
-import { useScreenShareQuality } from '../hooks/useScreenShareQuality'
+import { useScreenShareQuality, type QualityPreset } from '../hooks/useScreenShareQuality'
 import { createNoiseSuppressor, type NoiseSuppressor } from '../lib/noiseSuppression'
 import { takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
@@ -64,6 +64,45 @@ const MIC_MAX_BITRATE = 128_000
 // 256kbps) — dá pra considerar isso o teto prático de "o máximo que
 // vale a pena".
 const SCREEN_SHARE_AUDIO_MAX_BITRATE = 256_000
+
+// SEXTA RODADA de correção do compartilhamento de tela — a mudança mais
+// importante até agora. "Invalid capture constraints (AbortError)"
+// continuou aparecendo IDÊNTICO mesmo depois de: (1) tirar o "max" do
+// frameRate, (2) unificar as duas chamadas de desktopCapturer.getSources(),
+// (3) separar áudio e vídeo em chamadas totalmente independentes (áudio
+// virou `audio: false` aqui — e o erro continuou do mesmo jeito). Esse
+// último teste foi decisivo: já que o pedido de vídeo não tem NENHUM
+// áudio junto e o erro é o mesmo, a causa só pode estar no próprio objeto
+// de constraints de VÍDEO (width/height/frameRate como {ideal, max}),
+// não no áudio — as rodadas anteriores estavam mexendo na parte errada.
+//
+// Em vez de continuar adivinhando QUAL propriedade exata desse objeto o
+// Electron/Chromium está rejeitando (já tentei tirar o "max" sozinho e
+// não resolveu), a mudança agora é estrutural: getDisplayMedia() passa a
+// pedir só `video: true` — a forma mais simples e permissiva possível,
+// sem nenhum objeto de constraints — pra garantir que a CAPTURA em si
+// sempre funcione. A qualidade (resolução/taxa de quadros) deixa de ser
+// pedida NA HORA de abrir a captura e passa a ser ajustada DEPOIS, com
+// `track.applyConstraints(...)` na track de vídeo já ativa — uma chamada
+// completamente separada, cuja falha (se acontecer) só significa "a
+// captura continua na resolução/taxa nativa dela", nunca derruba a
+// transmissão inteira. Isso finalmente separa por completo "conseguir
+// compartilhar a tela" (agora à prova de qualquer constraint problemática)
+// de "ajustar a qualidade fina" (best-effort, sem risco pro básico
+// funcionar).
+async function applyVideoQualityConstraints(track: MediaStreamTrack, preset: QualityPreset) {
+  try {
+    await track.applyConstraints({
+      width: preset.capResolution ? { ideal: preset.width, max: preset.width } : { ideal: preset.width },
+      height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
+      frameRate: { ideal: preset.frameRate },
+    })
+  } catch {
+    // Sem problema — a transmissão já está rolando com a resolução/taxa
+    // nativa da captura (quase sempre já é boa o bastante sozinha); só
+    // não conseguiu o ajuste fino extra dessa vez.
+  }
+}
 
 // ANTES disso existia uma SCREEN_SHARE_AUDIO_CONSTRAINTS aqui
 // (echoCancellation/noiseSuppression/autoGainControl desligados +
@@ -1609,38 +1648,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
     try {
       const preset = screenShareQualityRef.current
+      // SEXTA RODADA: pede a captura da forma mais simples possível — sem
+      // NENHUM objeto de constraints — ver o comentário grande em
+      // applyVideoQualityConstraints acima pro raciocínio completo (esse
+      // era o pedaço causando "Invalid capture constraints", não o
+      // áudio). A qualidade (resolução/taxa de quadros) é ajustada
+      // DEPOIS, na track já ativa.
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          // Usa o preset de qualidade escolhido pela pessoa (Desempenho
-          // ou Qualidade máxima) — em vez de um valor fixo, ela decide
-          // o equilíbrio entre nitidez e não travar o jogo.
-          //
-          // O "max" só entra quando o preset realmente quer um TETO
-          // (Desempenho, de propósito, pra não pesar) — em "Qualidade
-          // máxima" não passamos "max" nenhum, só um "ideal" bem alto,
-          // pra a captura sair na resolução NATIVA da tela da pessoa em
-          // vez de ser reduzida pra um valor fixo (era isso que fazia a
-          // transmissão sair pior que a tela de verdade da pessoa).
-          width: preset.capResolution ? { ideal: preset.width, max: preset.width } : { ideal: preset.width },
-          height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
-          // ANTES disso, tinha um "max" aqui igual ao "ideal" — isso obriga
-          // o navegador a garantir EXATAMENTE esse valor de FPS, e se o
-          // sistema não conseguir cravar esse número exato num certo
-          // instante (bem provável logo depois de alternar pra fora de um
-          // jogo pesado em tela cheia exclusiva, que pode deixar o modo de
-          // vídeo do Windows instável por um instante), o pedido inteiro é
-          // recusado com "Invalid capture constraints" — foi exatamente
-          // esse erro que apareceu ao tentar compartilhar durante o
-          // Rainbow Six Siege. Tirando o "max" e deixando só "ideal", o
-          // navegador tenta chegar nesse valor mas aceita menos se não der,
-          // em vez de travar a transmissão inteira por causa disso.
-          frameRate: { ideal: preset.frameRate },
-        },
-        // QUINTA RODADA: áudio não é mais pedido AQUI, junto com o vídeo —
-        // ver captureSystemAudioTrack acima e o comentário grande em
-        // ipcMain.handle('screen-share:select', ...) em electron/main.cjs
-        // pro motivo (getDisplayMedia trata vídeo+áudio como um pacote só;
-        // se o áudio falhasse, o vídeo ia junto, mesmo sem culpa nenhuma).
+        video: true,
         audio: false,
       })
       // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
@@ -1667,6 +1682,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // leva alguns round-trips, então o aviso quase sempre chega primeiro.
       broadcastScreenMeta(stream.id)
       const videoTrack = stream.getVideoTracks()[0]
+      // Ajuste de qualidade best-effort, à parte — ver
+      // applyVideoQualityConstraints acima. Não bloqueia nem arrisca a
+      // transmissão: se falhar, só continua na resolução/taxa nativa.
+      void applyVideoQualityConstraints(videoTrack, preset)
       // QUINTA RODADA: vídeo e áudio agora são COMPLETAMENTE
       // independentes — `stream` (acima) só tem vídeo. Tenta primeiro a
       // captura por processo (isola só o som do jogo, quando o PID foi
@@ -1872,25 +1891,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (!screenSharing || !screenStreamRef.current) return
     try {
       const preset = screenShareQualityRef.current
+      // SEXTA RODADA: idem toggleScreenShare acima — sem objeto de
+      // constraints nenhum aqui, ver applyVideoQualityConstraints.
       const newStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          width: preset.capResolution ? { ideal: preset.width, max: preset.width } : { ideal: preset.width },
-          height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
-          // ANTES disso, tinha um "max" aqui igual ao "ideal" — isso obriga
-          // o navegador a garantir EXATAMENTE esse valor de FPS, e se o
-          // sistema não conseguir cravar esse número exato num certo
-          // instante (bem provável logo depois de alternar pra fora de um
-          // jogo pesado em tela cheia exclusiva, que pode deixar o modo de
-          // vídeo do Windows instável por um instante), o pedido inteiro é
-          // recusado com "Invalid capture constraints" — foi exatamente
-          // esse erro que apareceu ao tentar compartilhar durante o
-          // Rainbow Six Siege. Tirando o "max" e deixando só "ideal", o
-          // navegador tenta chegar nesse valor mas aceita menos se não der,
-          // em vez de travar a transmissão inteira por causa disso.
-          frameRate: { ideal: preset.frameRate },
-        },
-        // QUINTA RODADA: idem toggleScreenShare acima — áudio não vem
-        // mais junto com o vídeo aqui (ver captureSystemAudioTrack).
+        video: true,
         audio: false,
       })
       // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
@@ -1904,6 +1908,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         newStream.getTracks().forEach((t) => t.stop())
         return
       }
+      // Ajuste de qualidade best-effort, à parte — ver
+      // applyVideoQualityConstraints acima.
+      void applyVideoQualityConstraints(newVideoTrack, preset)
       let newAudioTrack: MediaStreamTrack | null = null
       let audioSourceStream: MediaStream = newStream
       newVideoTrack.contentHint = 'motion'

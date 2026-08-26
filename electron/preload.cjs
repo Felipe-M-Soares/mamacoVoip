@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // chromeMediaSource: 'desktop') — esse invoke só dispara o efeito
   // colateral de recuperar o foco da janela do app (ver electron/main.cjs).
   selectScreenShareSource: (sourceId) => ipcRenderer.invoke('screen-share:select', sourceId),
+  // NONA RODADA: plano B automático — "reserva" essa fonte pro caminho de
+  // captura ANTIGO (getDisplayMedia), usado só se o caminho principal
+  // (getUserMedia direto) falhar. Ver o comentário grande em
+  // electron/main.cjs perto de setDisplayMediaRequestHandler e
+  // captureScreenShareStream em VoiceContext.tsx.
+  pinFallbackShareSource: (sourceId) => ipcRenderer.invoke('screen-share:pin-fallback-source', sourceId),
   focusAppWindow: () => ipcRenderer.send('app:focus-window'),
   isGlobalPTTAvailable: () => ipcRenderer.invoke('ptt:is-global-available'),
   startPTTCapture: () => ipcRenderer.invoke('ptt:start-capture'),

@@ -91,6 +91,10 @@ declare global {
       // Áudio automático conforme o tipo da fonte (tela cheia = sistema,
       // janela = captura por processo) — ver electron/main.cjs.
       selectScreenShareSource: (sourceId: string | null) => Promise<void>
+      // NONA RODADA: plano B automático de captura — ver o comentário
+      // grande em captureScreenShareStream (VoiceContext.tsx) e em
+      // electron/main.cjs perto de setDisplayMediaRequestHandler.
+      pinFallbackShareSource: (sourceId: string) => Promise<void>
       focusAppWindow: () => void
       isGlobalPTTAvailable: () => Promise<boolean>
       startPTTCapture: () => Promise<{ keycode: number; name: string } | null>

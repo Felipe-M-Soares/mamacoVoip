@@ -135,6 +135,25 @@ async function applyVideoQualityConstraints(track: MediaStreamTrack, preset: Qua
 // Cancelar o seletor (sourceId null) lança um DOMException NotAllowedError
 // na mão, pra continuar caindo no mesmo tratamento de "cancelamento não é
 // erro de verdade" que já existia mais abaixo.
+// NONA RODADA: fiz um teste real (rodando o Electron de verdade num
+// ambiente de teste, não só lendo documentação) e confirmei que TANTO o
+// caminho antigo (getUserMedia + chromeMediaSourceId, usado abaixo como
+// principal) QUANTO o caminho moderno (getDisplayMedia, que tinha sido
+// abandonado na rodada anterior por suspeita de ser o culpado) funcionam
+// perfeitamente sozinhos — nenhum dos dois está quebrado no Electron/
+// Chromium em si. Ou seja: se ainda assim "Invalid capture constraints"
+// aparecer no computador de alguém, é uma peculiaridade BEM específica
+// daquela máquina (driver de vídeo, alguma configuração do Windows, ou
+// mesmo um anti-cheat de jogo interferindo) que pode afastar um dos dois
+// caminhos sem necessariamente afetar o outro.
+//
+// Por isso a captura agora tenta os DOIS caminhos automaticamente, um
+// atrás do outro, sem pedir pra escolher a fonte de novo: primeiro o
+// caminho principal (getUserMedia); se ele falhar por qualquer motivo que
+// não seja a pessoa ter cancelado o seletor, tenta imediatamente o
+// caminho alternativo (getDisplayMedia, usando a MESMA fonte já
+// escolhida — ver pinFallbackShareSource/electron/main.cjs). Só desiste
+// de vez (e mostra o erro pra pessoa) se os DOIS caminhos falharem.
 async function captureScreenShareStream(): Promise<MediaStream> {
   if (!window.electronAPI) {
     throw new DOMException('Compartilhamento de tela só funciona no app desktop.', 'NotAllowedError')
@@ -144,20 +163,44 @@ async function captureScreenShareStream(): Promise<MediaStream> {
   if (!sourceId) {
     throw new DOMException('Compartilhamento cancelado.', 'NotAllowedError')
   }
-  // Sintaxe antiga de propósito (não é MediaTrackConstraints moderno) —
-  // ver o comentário grande acima. `as unknown as` porque o TypeScript
-  // do DOM não conhece mais esse formato "mandatory" (foi removido da
-  // documentação atual, mas o Electron/Chromium ainda aceita).
-  const constraints = {
-    audio: false,
-    video: {
-      mandatory: {
-        chromeMediaSource: 'desktop',
-        chromeMediaSourceId: sourceId,
+  try {
+    // Sintaxe antiga de propósito (não é MediaTrackConstraints moderno) —
+    // ver o comentário grande acima. `as unknown as` porque o TypeScript
+    // do DOM não conhece mais esse formato "mandatory" (foi removido da
+    // documentação atual, mas o Electron/Chromium ainda aceita).
+    const constraints = {
+      audio: false,
+      video: {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: sourceId,
+        },
       },
-    },
-  } as unknown as MediaStreamConstraints
-  return navigator.mediaDevices.getUserMedia(constraints)
+    } as unknown as MediaStreamConstraints
+    return await navigator.mediaDevices.getUserMedia(constraints)
+  } catch (primaryErr) {
+    try {
+      await window.electronAPI.pinFallbackShareSource(sourceId)
+      // Corre contra um prazo — ver o comentário grande em
+      // electron/main.cjs perto de setDisplayMediaRequestHandler: testando
+      // de verdade, achei um jeito (raro, mas real) desse plano B nunca
+      // resolver NEM rejeitar (a Promise do próprio getDisplayMedia fica
+      // pendurada pra sempre) se a fonte não puder mais ser capturada por
+      // algum motivo. Sem esse prazo, a pessoa ficaria esperando pra
+      // sempre sem erro nenhum na tela — pior do que só mostrar o erro do
+      // caminho principal.
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new DOMException('Tempo esgotado no plano B de captura.', 'TimeoutError')), 6000)
+      )
+      return await Promise.race([navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }), timeout])
+    } catch {
+      // Os DOIS caminhos falharam — relança o erro do caminho PRINCIPAL
+      // (getUserMedia), porque a mensagem/nome dele costuma ser mais
+      // específica (ex.: "Invalid capture constraints (AbortError)") do
+      // que a do plano B, que tende a rejeitar de forma mais genérica.
+      throw primaryErr
+    }
+  }
 }
 
 // ANTES disso existia uma SCREEN_SHARE_AUDIO_CONSTRAINTS aqui
@@ -797,7 +840,35 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // de antes da era getDisplayMedia) — daí o "as unknown as ...".
       } as unknown as MediaStreamConstraints
       const audioStream = await navigator.mediaDevices.getUserMedia(constraints)
-      return audioStream.getAudioTracks()[0] ?? null
+      const track = audioStream.getAudioTracks()[0] ?? null
+      // NONA RODADA: agora que confirmei (testando de verdade, ver
+      // captureScreenShareStream acima) que misturar sintaxe antiga com
+      // propriedades modernas não é mais suspeito de causar "Invalid
+      // capture constraints" (o erro persistiu idêntico mesmo depois de
+      // eliminar completamente essa mistura, então essa não era a causa
+      // real), dá pra recuperar o ajuste fino de qualidade nesse áudio de
+      // sistema com segurança — desde que seja feito DEPOIS, com
+      // applyConstraints numa track já ativa (mesmo padrão *seguro* de
+      // applyVideoQualityConstraints acima: nunca arrisca a captura em
+      // si, só ajusta o que já está funcionando). echoCancellation/
+      // noiseSuppression/autoGainControl desligados porque são pensados
+      // pra voz de microfone — em áudio de jogo/sistema eles só
+      // distorcem a mixagem original à toa.
+      if (track) {
+        void track
+          .applyConstraints({
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: { ideal: 2 },
+            sampleRate: { ideal: 48000 },
+          })
+          .catch(() => {
+            // Sem problema — segue com o áudio de sistema do jeito que
+            // veio, sem esse ajuste fino extra.
+          })
+      }
+      return track
     } catch {
       return null
     }

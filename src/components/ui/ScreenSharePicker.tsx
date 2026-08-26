@@ -153,11 +153,21 @@ export function ScreenSharePicker() {
           )}
         </div>
 
-        {/* Único lembrete que sobrou — é a única explicação que muda o
-            que a pessoa faria (ir nas configurações do jogo), o resto
-            já dá pra entender só olhando a lista categorizada acima. */}
+        {/* Dois lembretes cobrindo os dois motivos mais comuns de uma
+            janela não aparecer aqui: (1) jogo em modo tela cheia
+            EXCLUSIVA de verdade, sem janela nenhuma pro Windows listar —
+            resolve trocando pra "tela cheia sem bordas"; (2) qualquer
+            janela (navegador incluso) MINIMIZADA — o Windows não
+            consegue gerar uma miniatura de uma janela minimizada, então
+            NENHUM programa de captura (nem Discord, Zoom, OBS) lista
+            ela nesse estado — não é bug nosso, é limitação do próprio
+            Windows. Precisa estar pelo menos visível (pode estar atrás
+            de outra janela) na hora de abrir esse seletor. */}
         <p className="text-[10px] text-discord-text-muted mt-3">
           Jogo não aparece como janela? Troque pra "tela cheia sem bordas" nas configurações dele.
+        </p>
+        <p className="text-[10px] text-discord-text-muted mt-1">
+          Não vê a janela que procura? Ela pode estar minimizada — o Windows só mostra aqui janelas abertas e visíveis (restaure a janela e tente de novo).
         </p>
 
         <button onClick={() => choose(null)} className="mt-3 w-full py-2.5 rounded btn-secondary">

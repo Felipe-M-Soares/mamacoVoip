@@ -280,6 +280,14 @@ let lastForegroundApp = null
 // KNOWN_GAMES.
 let watchedProcessNames = []
 let watchedProcessWasSeen = false
+// NONA RODADA: contador de "vezes seguidas que detectamos um jogo
+// CADASTRADO pelo tasklist, mas o Windows não conseguiu achar NENHUMA
+// janela de verdade pra ele" — ver a verificação extra dentro de
+// startGameDetection logo abaixo. Existe pra não "piscar" o status
+// (mostrar "Jogando" e sumir de novo) por causa de uma falha isolada e
+// passageira do PowerShell.
+let gameWindowMissStreak = 0
+let gameCheckTickCount = 0
 
 // Pega a lista de processos rodando UMA vez por verificação (a cada
 // GAME_CHECK_INTERVAL_MS) e reaproveita esse resultado tanto pra detectar
@@ -308,9 +316,51 @@ function detectRunningGameFromList(lower) {
 function startGameDetection() {
   if (gameCheckTimer) return
   gameCheckTimer = setInterval(async () => {
+    gameCheckTickCount++
     const lower = await getRunningProcessListLower()
 
-    const game = detectRunningGameFromList(lower)
+    let game = detectRunningGameFromList(lower)
+
+    // NONA RODADA — corrige o status "Jogando X" ficando travado mesmo
+    // depois de fechar o jogo de verdade. `tasklist` sozinho só prova que
+    // EXISTE um processo com aquele nome — não que o jogo está de fato
+    // aberto e jogável. Jogos com anti-cheat (BattlEye/EasyAntiCheat, ex.:
+    // Rainbow Six Siege) são conhecidos por às vezes deixar o processo
+    // principal PENDURADO em segundo plano, sem janela nenhuma, mesmo
+    // depois da pessoa fechar o jogo — o `tasklist` nunca reflete isso,
+    // então o status ficava "Jogando" pra sempre.
+    //
+    // A correção: quando um jogo CADASTRADO é detectado, confirma com o
+    // Windows que existe uma JANELA de verdade pra esse processo
+    // (reaproveita getGameWindowInfo, a mesma varredura usada pro atalho
+    // de compartilhar — já lida bem com jogos borderless/minimizados, não
+    // depende de título). Só roda essa verificação extra (mais pesada,
+    // compila C# via Add-Type) na hora que o status MUDA (pra não mostrar
+    // "Jogando" nem por um instante se já nasce sem janela — caso clássico
+    // do processo zumbi) e, enquanto continuar "jogando", só de novo a
+    // cada ~1 minuto (a cada 4 verificações de 15s) — não a cada tick, pra
+    // não pesar à toa enquanto o jogo de verdade está rodando normal.
+    // Uma falha ISOLADA nessas re-checagens periódicas não derruba o
+    // status na hora (só na segunda falha SEGUIDA) — evita "piscar" por
+    // causa de um PowerShell lento/travado só daquela vez.
+    if (game && process.platform === 'win32') {
+      const justChanged = game !== currentGame
+      const periodicRecheck = gameCheckTickCount % 4 === 0
+      if (justChanged || periodicRecheck) {
+        const info = await getGameWindowInfo(processNamesForGameLabel(game))
+        if (info) {
+          gameWindowMissStreak = 0
+        } else {
+          gameWindowMissStreak++
+          if (justChanged || gameWindowMissStreak >= 2) {
+            game = null
+          }
+        }
+      }
+    } else {
+      gameWindowMissStreak = 0
+    }
+
     if (game !== currentGame) {
       currentGame = game
       mainWindow?.webContents.send('game-status-changed', game)
@@ -1459,6 +1509,68 @@ app.whenReady().then(() => {
   // de volta em seguida.
   ipcMain.handle('screen-share:select', (_event, sourceId) => {
     if (sourceId) scheduleFocusReclaim()
+  })
+
+  // NONA RODADA — caminho de emergência automático: fiz um teste real
+  // (rodando o Electron de verdade, não só lendo documentação) confirmando
+  // que TANTO o caminho antigo (getUserMedia + chromeMediaSourceId, usado
+  // acima) QUANTO o caminho moderno (getDisplayMedia +
+  // setDisplayMediaRequestHandler, abandonado na rodada anterior)
+  // funcionam perfeitamente nesse ambiente de teste — ou seja, nenhum dos
+  // dois está quebrado no Electron/Chromium em si. Se ainda assim o erro
+  // "Invalid capture constraints" persistir só no computador de alguém, é
+  // sinal de algo BEM específico daquele Windows (driver de vídeo,
+  // anti-cheat de um jogo específico, política de segurança) que afeta um
+  // dos dois caminhos mas não necessariamente o outro.
+  //
+  // Por isso: se o caminho principal (getUserMedia) falhar por QUALQUER
+  // motivo que não seja a pessoa cancelar, VoiceContext.tsx agora tenta
+  // AUTOMATICAMENTE o caminho antigo (getDisplayMedia) como plano B, sem
+  // pedir pra escolher de novo — usando a MESMA fonte já escolhida. Esse
+  // handler "fixa" qual fonte vai ser usada assim que o plano B disparar o
+  // pedido de getDisplayMedia (ver 'screen-share:pin-fallback-source'
+  // logo abaixo).
+  let fallbackPinnedSourceId = null
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    // Testei isso de verdade (rodando o Electron num ambiente de teste) e
+    // encontrei um bug real aqui: se `callback(...)` em si lançar uma
+    // exceção internamente (ex.: a fonte resolvida não servir mais pra
+    // captura — pode acontecer se outra captura já tiver "reservado" o
+    // recurso), o catch chamava `callback({})` de novo — e o Electron
+    // proíbe chamar esse callback mais de uma vez ("One-time callback was
+    // called more than once"), o que derrubava o processo principal
+    // inteiro. `respond()` garante que callback() só é chamado NO MÁXIMO
+    // uma vez, não importa o que aconteça.
+    let responded = false
+    const respond = (value) => {
+      if (responded) return
+      responded = true
+      try {
+        callback(value)
+      } catch {
+        // Se mesmo essa única chamada falhar, não tem mais nada a fazer
+        // — o pior caso é a Promise do getDisplayMedia() no renderer
+        // ficar pendurada; por isso VoiceContext.tsx corre esse plano B
+        // contra um timeout (ver captureScreenShareStream).
+      }
+    }
+    try {
+      if (!fallbackPinnedSourceId) {
+        respond({})
+        return
+      }
+      const wanted = fallbackPinnedSourceId
+      fallbackPinnedSourceId = null
+      const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
+      const source = sources.find((s) => s.id === wanted)
+      respond(source ? { video: source, audio: undefined } : {})
+    } catch {
+      respond({})
+    }
+  })
+
+  ipcMain.handle('screen-share:pin-fallback-source', (_event, sourceId) => {
+    fallbackPinnedSourceId = sourceId || null
   })
 
   // Segunda chamada de reforço: o renderer chama isso de novo assim que

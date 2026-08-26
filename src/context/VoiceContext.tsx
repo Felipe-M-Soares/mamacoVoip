@@ -1557,7 +1557,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // transmissão sair pior que a tela de verdade da pessoa).
           width: preset.capResolution ? { ideal: preset.width, max: preset.width } : { ideal: preset.width },
           height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
-          frameRate: { ideal: preset.frameRate, max: preset.frameRate },
+          // ANTES disso, tinha um "max" aqui igual ao "ideal" — isso obriga
+          // o navegador a garantir EXATAMENTE esse valor de FPS, e se o
+          // sistema não conseguir cravar esse número exato num certo
+          // instante (bem provável logo depois de alternar pra fora de um
+          // jogo pesado em tela cheia exclusiva, que pode deixar o modo de
+          // vídeo do Windows instável por um instante), o pedido inteiro é
+          // recusado com "Invalid capture constraints" — foi exatamente
+          // esse erro que apareceu ao tentar compartilhar durante o
+          // Rainbow Six Siege. Tirando o "max" e deixando só "ideal", o
+          // navegador tenta chegar nesse valor mas aceita menos se não der,
+          // em vez de travar a transmissão inteira por causa disso.
+          frameRate: { ideal: preset.frameRate },
         },
         // Inclui o áudio do sistema/jogo na transmissão, não só a
         // imagem — quem estiver assistindo ouve o som do jogo junto. Ver
@@ -1767,7 +1778,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         video: {
           width: preset.capResolution ? { ideal: preset.width, max: preset.width } : { ideal: preset.width },
           height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
-          frameRate: { ideal: preset.frameRate, max: preset.frameRate },
+          // ANTES disso, tinha um "max" aqui igual ao "ideal" — isso obriga
+          // o navegador a garantir EXATAMENTE esse valor de FPS, e se o
+          // sistema não conseguir cravar esse número exato num certo
+          // instante (bem provável logo depois de alternar pra fora de um
+          // jogo pesado em tela cheia exclusiva, que pode deixar o modo de
+          // vídeo do Windows instável por um instante), o pedido inteiro é
+          // recusado com "Invalid capture constraints" — foi exatamente
+          // esse erro que apareceu ao tentar compartilhar durante o
+          // Rainbow Six Siege. Tirando o "max" e deixando só "ideal", o
+          // navegador tenta chegar nesse valor mas aceita menos se não der,
+          // em vez de travar a transmissão inteira por causa disso.
+          frameRate: { ideal: preset.frameRate },
         },
         // Ver SCREEN_SHARE_AUDIO_CONSTRAINTS acima.
         audio: SCREEN_SHARE_AUDIO_CONSTRAINTS,

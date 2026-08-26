@@ -258,6 +258,15 @@ let pendingDisplayMediaCallback = null
 let updateReadyToInstall = false
 let gameCheckTimer = null
 let foregroundCheckTimer = null
+// Trava simples pra nunca ter duas chamadas de getForegroundWindowInfo() (que
+// abrem um PowerShell + compilam um pedacinho de C# via Add-Type CADA vez)
+// rodando ao mesmo tempo. Sem isso: se uma chamada demorar mais que
+// FOREGROUND_CHECK_INTERVAL_MS (bem provável com um jogo pesado tomando toda
+// a CPU/GPU — é justamente PowerShell+Add-Type que fica lento nessa hora), o
+// próximo tick do setInterval dispara outra chamada por cima da anterior
+// ainda rodando, empilhando cada vez mais processos concorrentes e piorando
+// a lentidão que causou o atraso em primeiro lugar (efeito bola de neve).
+let foregroundCheckInFlight = false
 let currentGame = null
 // Última janela que esteve em primeiro plano ENQUANTO nossa própria janela
 // não estava em foco — ver getForegroundWindowInfo/o laço em
@@ -332,9 +341,15 @@ function startGameDetection() {
     // "Compartilhar tela" dentro do próprio app (quando o foco já é nosso),
     // o valor guardado ainda é o do jogo/app que ela estava usando antes de
     // alternar pra cá, não o nosso próprio processo.
+    if (foregroundCheckInFlight) return
     if (process.platform === 'win32' && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
-      const fg = await getForegroundWindowInfo()
-      if (fg) lastForegroundApp = fg
+      foregroundCheckInFlight = true
+      try {
+        const fg = await getForegroundWindowInfo()
+        if (fg) lastForegroundApp = fg
+      } finally {
+        foregroundCheckInFlight = false
+      }
     }
   }, FOREGROUND_CHECK_INTERVAL_MS)
 }
@@ -524,7 +539,15 @@ if ($bestHwnd -ne [IntPtr]::Zero) {
       const encoded = Buffer.from(script, 'utf16le').toString('base64')
       exec(
         `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        { windowsHide: true, timeout: 2500 },
+        // 2500ms era curto demais: esse PowerShell compila um pedacinho de
+        // C# na hora (Add-Type) TODA vez que roda, do zero — com um jogo
+        // pesado (tipo Rainbow Six Siege) consumindo CPU/GPU ao mesmo
+        // tempo, isso pode facilmente passar de 2.5s, e o `exec` mata o
+        // processo por timeout SEM erro nenhum visível — só devolve
+        // resultado vazio, o que fazia parecer que a detecção da janela do
+        // jogo simplesmente "não funcionava", quando na verdade só não deu
+        // tempo de terminar.
+        { windowsHide: true, timeout: 4500 },
         (err, stdout) => {
           if (err || !stdout) {
             resolve(null)
@@ -624,7 +647,15 @@ try {
       const encoded = Buffer.from(script, 'utf16le').toString('base64')
       exec(
         `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        { windowsHide: true, timeout: 2500 },
+        // 2500ms era curto demais: esse PowerShell compila um pedacinho de
+        // C# na hora (Add-Type) TODA vez que roda, do zero — com um jogo
+        // pesado (tipo Rainbow Six Siege) consumindo CPU/GPU ao mesmo
+        // tempo, isso pode facilmente passar de 2.5s, e o `exec` mata o
+        // processo por timeout SEM erro nenhum visível — só devolve
+        // resultado vazio, o que fazia parecer que a detecção da janela do
+        // jogo simplesmente "não funcionava", quando na verdade só não deu
+        // tempo de terminar.
+        { windowsHide: true, timeout: 4500 },
         (err, stdout) => {
           if (err || !stdout) {
             resolve(null)
@@ -686,7 +717,15 @@ Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object { Writ
       const encoded = Buffer.from(script, 'utf16le').toString('base64')
       exec(
         `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        { windowsHide: true, timeout: 2500 },
+        // 2500ms era curto demais: esse PowerShell compila um pedacinho de
+        // C# na hora (Add-Type) TODA vez que roda, do zero — com um jogo
+        // pesado (tipo Rainbow Six Siege) consumindo CPU/GPU ao mesmo
+        // tempo, isso pode facilmente passar de 2.5s, e o `exec` mata o
+        // processo por timeout SEM erro nenhum visível — só devolve
+        // resultado vazio, o que fazia parecer que a detecção da janela do
+        // jogo simplesmente "não funcionava", quando na verdade só não deu
+        // tempo de terminar.
+        { windowsHide: true, timeout: 4500 },
         (err, stdout) => {
           const map = new Map()
           if (!err && stdout) {
@@ -768,7 +807,15 @@ foreach ($h in $hwnds) {
       const encoded = Buffer.from(script, 'utf16le').toString('base64')
       exec(
         `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        { windowsHide: true, timeout: 2500 },
+        // 2500ms era curto demais: esse PowerShell compila um pedacinho de
+        // C# na hora (Add-Type) TODA vez que roda, do zero — com um jogo
+        // pesado (tipo Rainbow Six Siege) consumindo CPU/GPU ao mesmo
+        // tempo, isso pode facilmente passar de 2.5s, e o `exec` mata o
+        // processo por timeout SEM erro nenhum visível — só devolve
+        // resultado vazio, o que fazia parecer que a detecção da janela do
+        // jogo simplesmente "não funcionava", quando na verdade só não deu
+        // tempo de terminar.
+        { windowsHide: true, timeout: 4500 },
         (err, stdout) => {
           const map = new Map()
           if (!err && stdout) {

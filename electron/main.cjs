@@ -255,6 +255,19 @@ const FOREGROUND_CHECK_INTERVAL_MS = 3_000
 let mainWindow = null
 let isQuitting = false
 let pendingDisplayMediaCallback = null
+// Guarda a MESMA lista de fontes (desktopCapturer.getSources) que foi usada
+// pra montar o seletor (ScreenSharePicker.tsx) — ver ipcMain.handle(
+// 'screen-share:select', ...) mais abaixo, que agora escolhe a fonte
+// diretamente DAQUI em vez de chamar desktopCapturer.getSources() de novo.
+// Motivo: eram duas chamadas SEPARADAS antes (uma pra montar a lista, outra
+// pra resolver o clique), cada uma abrindo sua própria "sessão" de captura
+// internamente no Chromium/Electron — o id (string) até bate entre as duas,
+// mas o objeto de origem por trás pode não ser mais o mesmo que o sistema
+// esperava usar pra abrir o stream de verdade. Isso é um suspeito forte pro
+// erro "Invalid capture constraints" que continuou aparecendo mesmo depois
+// de tirar o "max" do frameRate — reaproveitar o MESMO objeto de fonte do
+// início ao fim evita esse descompasso.
+let pendingDisplayMediaSources = []
 let updateReadyToInstall = false
 let gameCheckTimer = null
 let foregroundCheckTimer = null
@@ -1249,6 +1262,7 @@ app.whenReady().then(() => {
         fetchWindowIcons: true,
       })
       pendingDisplayMediaCallback = callback
+      pendingDisplayMediaSources = sources
       // Em telas múltiplas, precisamos saber qual delas é a PRINCIPAL —
       // sem isso, o atalho "Compartilhar seu jogo" (quando cai no
       // fallback de tela cheia — ver ScreenSharePicker.tsx) só pegava a
@@ -1388,25 +1402,27 @@ app.whenReady().then(() => {
         resolve({})
         return
       }
-      const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
-      const source = sources.find((s) => s.id === sourceId)
-      // Áudio agora é 100% automático conforme o TIPO da escolha (pedido
-      // explícito — sem checkbox nenhum no seletor, ver
-      // ScreenSharePicker.tsx):
-      //   - Tela cheia: 'loopback' (áudio de TODO o sistema — é a única
-      //     opção que o Windows/Linux oferecem pra uma tela inteira, não
-      //     dá pra isolar só um app dentro dela) liga sozinho, sempre.
-      //   - Janela: NUNCA usa loopback aqui (pegaria o sistema inteiro,
-      //     incluindo o próprio Mamacos Voip — motivo original desse
-      //     código só ligar loopback pra tela cheia). O áudio de uma
-      //     janela específica vem da captura por processo (EXPERIMENTAL —
-      //     ver startAppAudioCapture em VoiceContext.tsx e a seção
-      //     "Captura de áudio por processo" mais abaixo neste arquivo),
-      //     que o renderer inicia à parte assim que sabe o PID (ver
-      //     pidForChoice em ScreenSharePicker.tsx) — completamente
-      //     desacoplado desta escolha de vídeo.
-      const isFullScreen = Boolean(source?.id.startsWith('screen:'))
-      resolve(source ? { video: source, ...(isFullScreen ? { audio: 'loopback' } : {}) } : {})
+      // Reaproveita a MESMA lista da montagem do seletor (ver comentário
+      // grande em pendingDisplayMediaSources acima) — não chama
+      // desktopCapturer.getSources() de novo aqui.
+      const source = pendingDisplayMediaSources.find((s) => s.id === sourceId)
+      // QUARTA RODADA: antes disso, só TELA CHEIA vinha com 'loopback'
+      // (áudio de todo o sistema) — JANELA nunca tinha esse áudio junto,
+      // só o experimental "áudio por processo" (ver startAppAudioCapture
+      // em VoiceContext.tsx). Só que detectar o processo certo por trás de
+      // uma janela (PID) depende de várias coisas que podem falhar — e
+      // cada uma dessas falhas virava "transmissão sem áudio nenhum", o
+      // que a pessoa jogando não quer de jeito nenhum ("quero o melhor
+      // áudio pra transmitir todo jogo"). Agora 'loopback' vai SEMPRE
+      // junto, pra QUALQUER escolha (tela cheia OU janela) — e
+      // VoiceContext.tsx já troca esse áudio de sistema pelo áudio
+      // isolado por processo automaticamente QUANDO ele dá certo (ver
+      // startAppAudioCapture ali: só sobrescreve `audioTrack` se
+      // `appAudioTrack` realmente vier preenchido). Ou seja: continua
+      // tentando isolar só o áudio do jogo primeiro (sem pegar sons do
+      // sistema/do próprio Mamacos Voip), mas agora nunca mais fica em
+      // silêncio total só porque essa parte experimental não funcionou.
+      resolve(source ? { video: source, audio: 'loopback' } : {})
       // Capturar uma JANELA específica (diferente de capturar a tela
       // inteira) faz o Windows trazer aquela janela pra frente sozinho —
       // é assim que a API de captura do sistema funciona, nada que o

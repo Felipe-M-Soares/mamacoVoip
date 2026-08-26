@@ -1594,8 +1594,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const appAudioChoice = takePendingAppAudioPid()
       const appAudioPid = appAudioChoice?.pid ?? null
       if (appAudioChoice?.isWindowChoice && !appAudioPid) {
+        // QUARTA RODADA: essa mensagem dizia "vai sem áudio automático" —
+        // não é mais verdade desde que `stream`/`newStream` passou a vir
+        // sempre com o áudio de sistema (loopback) junto, mesmo pra
+        // janela (ver comentário grande em electron/main.cjs). Sem
+        // conseguir isolar só o áudio do jogo, a transmissão agora cai
+        // pro áudio de todo o sistema em vez de silêncio total — ainda
+        // vale avisar (pode incluir outros sons além do jogo), mas não é
+        // mais "sem áudio nenhum".
         setError(
-          'Não consegui identificar o processo dessa janela — a transmissão vai sem áudio automático (o vídeo continua normal).'
+          'Não consegui identificar o processo dessa janela — a transmissão vai com o áudio de todo o sistema em vez de só o do jogo (o vídeo continua normal).'
         )
       }
       screenStreamRef.current = stream
@@ -1605,19 +1613,23 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // leva alguns round-trips, então o aviso quase sempre chega primeiro.
       broadcastScreenMeta(stream.id)
       const videoTrack = stream.getVideoTracks()[0]
-      // Áudio "normal" (loopback do sistema, só existe pra tela cheia com
-      // o checkbox marcado) vs. captura por processo (EXPERIMENTAL — ver
-      // startAppAudioCapture acima): são mutuamente exclusivos na prática,
-      // já que appAudioPid só existe pra escolhas de Jogo/Janela, que
-      // nunca vêm com áudio de sistema (ver electron/main.cjs). Quando a
-      // captura por processo falha, cai pra "sem áudio nessa
-      // transmissão" (o vídeo continua funcionando normal) em vez de
-      // travar tudo.
+      // QUARTA RODADA: `stream` agora SEMPRE vem com áudio de sistema
+      // (loopback) junto, pra tela cheia OU janela (ver
+      // ipcMain.handle('screen-share:select', ...) em electron/main.cjs) —
+      // antes, janela nunca vinha com esse áudio, então uma falha na
+      // captura por processo (EXPERIMENTAL, PID incerto, várias coisas
+      // podem dar errado) virava "sem áudio nenhum", o que ninguém
+      // jogando quer. Por padrão usa esse áudio de sistema; SE a captura
+      // por processo der certo (isolando só o som do jogo, sem pegar
+      // outros sons do sistema/do próprio Mamacos Voip — o resultado
+      // melhor, quando funciona), troca pra ela e para a track de sistema
+      // que ficou sem uso (senão ela continuaria "ativa" à toa).
       let audioTrack: MediaStreamTrack | null = stream.getAudioTracks()[0] ?? null
       let audioSourceStream: MediaStream = stream
       if (appAudioPid) {
         const appAudioTrack = await startAppAudioCapture(appAudioPid)
         if (appAudioTrack) {
+          audioTrack?.stop()
           audioTrack = appAudioTrack
           audioSourceStream = appAudioPlayerRef.current?.stream ?? stream
           appAudioTrackRef.current = appAudioTrack
@@ -1756,8 +1768,26 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // mesmo aviso genérico, sem pista nenhuma de qual foi o motivo de
       // verdade — impossível de diagnosticar à distância.
       if (err instanceof Error && err.name === 'NotAllowedError') return
+      // QUARTA RODADA: "Invalid capture constraints" continuou aparecendo
+      // mesmo depois de tirar o "max" do frameRate — ou seja, a causa era
+      // outra (ver a correção em pendingDisplayMediaSources, no
+      // electron/main.cjs: as duas chamadas separadas de
+      // desktopCapturer.getSources() — uma pra montar a lista, outra pra
+      // resolver o clique — foram unificadas numa só). Pra não ficar
+      // adivinhando de novo se essa também não for a causa completa,
+      // inclui aqui TODO detalhe que o navegador expuser: além da
+      // mensagem, o nome do erro (err.name) e, se for OverconstrainedError
+      // (erro específico de constraint de vídeo/áudio inválida), o nome
+      // exato da propriedade que falhou (err.constraint — ex.: "frameRate",
+      // "channelCount") — informação que a mensagem sozinha não mostra.
+      const name = err instanceof Error ? err.name : null
+      const constraint =
+        err && typeof err === 'object' && 'constraint' in err ? String((err as { constraint: unknown }).constraint) : null
       const detail = err instanceof Error ? err.message : String(err)
-      setError(detail ? `Não foi possível compartilhar a tela: ${detail}` : 'Não foi possível compartilhar a tela.')
+      const parts = [detail, name && name !== 'Error' ? `(${name}${constraint ? `: ${constraint}` : ''})` : null].filter(
+        Boolean
+      )
+      setError(parts.length ? `Não foi possível compartilhar a tela: ${parts.join(' ')}` : 'Não foi possível compartilhar a tela.')
     }
   }
 
@@ -1800,8 +1830,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const appAudioChoice = takePendingAppAudioPid()
       const appAudioPid = appAudioChoice?.pid ?? null
       if (appAudioChoice?.isWindowChoice && !appAudioPid) {
+        // QUARTA RODADA: essa mensagem dizia "vai sem áudio automático" —
+        // não é mais verdade desde que `stream`/`newStream` passou a vir
+        // sempre com o áudio de sistema (loopback) junto, mesmo pra
+        // janela (ver comentário grande em electron/main.cjs). Sem
+        // conseguir isolar só o áudio do jogo, a transmissão agora cai
+        // pro áudio de todo o sistema em vez de silêncio total — ainda
+        // vale avisar (pode incluir outros sons além do jogo), mas não é
+        // mais "sem áudio nenhum".
         setError(
-          'Não consegui identificar o processo dessa janela — a transmissão vai sem áudio automático (o vídeo continua normal).'
+          'Não consegui identificar o processo dessa janela — a transmissão vai com o áudio de todo o sistema em vez de só o do jogo (o vídeo continua normal).'
         )
       }
 
@@ -1843,6 +1881,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       if (appAudioPid) {
         const appAudioTrack = await startAppAudioCapture(appAudioPid)
         if (appAudioTrack) {
+          // Idem toggleScreenShare acima: `newAudioTrack` já é o áudio de
+          // sistema (loopback, sempre presente agora) — se a captura por
+          // processo desta vez der certo, troca pra ela e para a track de
+          // sistema que ficou sem uso.
+          newAudioTrack?.stop()
           newAudioTrack = appAudioTrack
           audioSourceStream = appAudioPlayerRef.current?.stream ?? newStream
           appAudioTrackRef.current = appAudioTrack

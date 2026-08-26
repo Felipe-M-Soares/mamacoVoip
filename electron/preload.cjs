@@ -16,14 +16,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update-status', handler)
   },
   restartToUpdate: () => ipcRenderer.invoke('app:restartToUpdate'),
-  onScreenShareSources: (callback) => {
-    const handler = (_event, sources) => callback(sources)
-    ipcRenderer.on('screen-share-sources', handler)
-    return () => ipcRenderer.removeListener('screen-share-sources', handler)
-  },
-  // Áudio agora é automático conforme o tipo da fonte escolhida (ver
-  // ipcMain.handle('screen-share:select', ...) em electron/main.cjs) —
-  // não recebe mais um parâmetro de "incluir áudio do sistema" aqui.
+  // OITAVA RODADA: trocado de "evento que chega sozinho" (onScreenShareSources)
+  // pra "pedido ativo" (getScreenShareSources) — ver o comentário grande em
+  // electron/main.cjs perto de ipcMain.handle('screen-share:get-sources', ...)
+  // pro porquê da mudança de arquitetura (abandonar
+  // setDisplayMediaRequestHandler). ScreenSharePicker.tsx agora chama isso
+  // diretamente assim que abre, em vez de ficar esperando um evento.
+  getScreenShareSources: () => ipcRenderer.invoke('screen-share:get-sources'),
+  // Áudio agora é automático conforme o tipo da fonte escolhida (captura
+  // separada em VoiceContext.tsx via getUserMedia com
+  // chromeMediaSource: 'desktop') — esse invoke só dispara o efeito
+  // colateral de recuperar o foco da janela do app (ver electron/main.cjs).
   selectScreenShareSource: (sourceId) => ipcRenderer.invoke('screen-share:select', sourceId),
   focusAppWindow: () => ipcRenderer.send('app:focus-window'),
   isGlobalPTTAvailable: () => ipcRenderer.invoke('ptt:is-global-available'),

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ScreenShareSource, ScreenShareSuggestion } from '../../hooks/useGamePresence'
 import { setPendingGameShareHint } from '../../lib/screenShareGameHint'
 import { setPendingAppAudioPid } from '../../lib/pendingAppAudioCapture'
+import { subscribeScreenSharePicker, resolveScreenSharePicker } from '../../lib/screenSharePickerBridge'
 import { QUALITY_PRESETS, loadQuality } from '../../hooks/useScreenShareQuality'
 
 // Versão enxuta: só o essencial — as fontes agrupadas por categoria
@@ -37,11 +38,16 @@ export function ScreenSharePicker() {
   const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
   const [suggestion, setSuggestion] = useState<ScreenShareSuggestion | null>(null)
 
+  // OITAVA RODADA: em vez de escutar um evento que chega sozinho, agora
+  // se inscreve na "caixa de correio" de screenSharePickerBridge.ts —
+  // VoiceContext.tsx busca a lista de fontes (getScreenShareSources) e
+  // "abre" o picker com ela; aqui só reage a isso. payload null fecha o
+  // picker de novo (usado logo depois de escolher/cancelar, ver choose
+  // abaixo).
   useEffect(() => {
-    if (!window.electronAPI) return
-    return window.electronAPI.onScreenShareSources((payload) => {
-      setSources(payload.sources)
-      setSuggestion(payload.suggestion)
+    return subscribeScreenSharePicker((payload) => {
+      setSources(payload?.sources ?? null)
+      setSuggestion(payload?.suggestion ?? null)
     })
   }, [])
 
@@ -93,8 +99,14 @@ export function ScreenSharePicker() {
     // sistema automático que electron/main.cjs já liga sozinho pra
     // qualquer escolha de tela cheia.
     setPendingAppAudioPid(id ? { pid: pidForChoice(id), isWindowChoice: isWindowChoice(id) } : null)
+    // OITAVA RODADA: selectScreenShareSource agora só dispara o efeito
+    // colateral de recuperar o foco da janela do app (ver
+    // ipcMain.handle('screen-share:select', ...) em electron/main.cjs) —
+    // quem realmente pega o vídeo é VoiceContext.tsx, direto via
+    // getUserMedia com este mesmo sourceId, assim que a Promise abaixo
+    // resolver.
     window.electronAPI?.selectScreenShareSource(id).catch(() => {})
-    setSources(null)
+    resolveScreenSharePicker(id)
   }
 
   return (

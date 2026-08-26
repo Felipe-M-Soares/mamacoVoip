@@ -7,6 +7,7 @@ import { useScreenShareQuality, type QualityPreset } from '../hooks/useScreenSha
 import { createNoiseSuppressor, type NoiseSuppressor } from '../lib/noiseSuppression'
 import { takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
+import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
 import { PcmStreamPlayer } from '../lib/pcmStreamPlayer'
 import { preferStereoOpusForTrack } from '../lib/sdpStereo'
 import {
@@ -102,6 +103,61 @@ async function applyVideoQualityConstraints(track: MediaStreamTrack, preset: Qua
     // nativa da captura (quase sempre já é boa o bastante sozinha); só
     // não conseguiu o ajuste fino extra dessa vez.
   }
+}
+
+// OITAVA RODADA — mudança de arquitetura mais importante até agora: o
+// erro "Invalid capture constraints (AbortError)" continuou IDÊNTICO
+// depois de tirar o "max" do frameRate, unificar as chamadas de
+// getSources, separar áudio e vídeo, e até reduzir o pedido de vídeo pro
+// mínimo absoluto (`video: true`, sem NENHUM objeto de constraints) — ou
+// seja, o problema nunca esteve em nenhum valor específico. Pesquisei a
+// fundo (issues oficiais do electron/electron, documentação atual, como
+// ferramentas de terceiros fazem isso) e a pista mais forte: o mecanismo
+// por trás de getDisplayMedia() no Electron — session.setDisplayMediaRequestHandler,
+// que intermediava esse pedido no processo principal — é uma API
+// relativamente nova com histórico real de bugs em casos de borda. Como a
+// mensagem nunca mudava não importa o que eu configurasse do lado de cá,
+// a suspeita deixou de ser "algum valor errado" e passou a ser "o
+// mecanismo em si".
+//
+// A partir de agora, esse mecanismo foi eliminado por completo. Em vez de
+// getDisplayMedia() (que dispara o seletor sozinho, por trás), o fluxo
+// passa a ser explícito, em três passos: (1) pede a lista de fontes
+// ativamente via window.electronAPI.getScreenShareSources() — puro
+// desktopCapturer.getSources() no processo principal, sem
+// setDisplayMediaRequestHandler nenhum no meio; (2) abre o
+// ScreenSharePicker.tsx "na mão" através de screenSharePickerBridge.ts e
+// espera a pessoa escolher; (3) com o sourceId escolhido, chama
+// getUserMedia() com a constraint CLÁSSICA "mandatory: {chromeMediaSource:
+// 'desktop', chromeMediaSourceId}" — o jeito mais antigo do Electron pra
+// isso, usado há anos por ferramentas de terceiros (ex.: ToDesktop) e por
+// apps como o Rocket.Chat, que não passa nem perto do mecanismo suspeito.
+// Cancelar o seletor (sourceId null) lança um DOMException NotAllowedError
+// na mão, pra continuar caindo no mesmo tratamento de "cancelamento não é
+// erro de verdade" que já existia mais abaixo.
+async function captureScreenShareStream(): Promise<MediaStream> {
+  if (!window.electronAPI) {
+    throw new DOMException('Compartilhamento de tela só funciona no app desktop.', 'NotAllowedError')
+  }
+  const payload = await window.electronAPI.getScreenShareSources()
+  const sourceId = await openScreenSharePicker(payload)
+  if (!sourceId) {
+    throw new DOMException('Compartilhamento cancelado.', 'NotAllowedError')
+  }
+  // Sintaxe antiga de propósito (não é MediaTrackConstraints moderno) —
+  // ver o comentário grande acima. `as unknown as` porque o TypeScript
+  // do DOM não conhece mais esse formato "mandatory" (foi removido da
+  // documentação atual, mas o Electron/Chromium ainda aceita).
+  const constraints = {
+    audio: false,
+    video: {
+      mandatory: {
+        chromeMediaSource: 'desktop',
+        chromeMediaSourceId: sourceId,
+      },
+    },
+  } as unknown as MediaStreamConstraints
+  return navigator.mediaDevices.getUserMedia(constraints)
 }
 
 // ANTES disso existia uma SCREEN_SHARE_AUDIO_CONSTRAINTS aqui
@@ -1648,16 +1704,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
     try {
       const preset = screenShareQualityRef.current
-      // SEXTA RODADA: pede a captura da forma mais simples possível — sem
-      // NENHUM objeto de constraints — ver o comentário grande em
-      // applyVideoQualityConstraints acima pro raciocínio completo (esse
-      // era o pedaço causando "Invalid capture constraints", não o
-      // áudio). A qualidade (resolução/taxa de quadros) é ajustada
-      // DEPOIS, na track já ativa.
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      })
+      // OITAVA RODADA: getDisplayMedia() foi abandonado — ver o
+      // comentário grande em captureScreenShareStream acima pro
+      // raciocínio completo. A qualidade (resolução/taxa de quadros)
+      // continua sendo ajustada DEPOIS, na track já ativa.
+      const stream = await captureScreenShareStream()
       // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
       // no atalho "Compartilhar seu jogo/janela" E caiu no caso de tela
       // cheia (sem janela própria pra detectar o fechamento sozinha) — ver
@@ -1891,12 +1942,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (!screenSharing || !screenStreamRef.current) return
     try {
       const preset = screenShareQualityRef.current
-      // SEXTA RODADA: idem toggleScreenShare acima — sem objeto de
-      // constraints nenhum aqui, ver applyVideoQualityConstraints.
-      const newStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      })
+      // OITAVA RODADA: idem toggleScreenShare acima — ver
+      // captureScreenShareStream.
+      const newStream = await captureScreenShareStream()
       // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
       // do picker DEPOIS do getDisplayMedia resolver.
       const gameShareHint = takePendingGameShareHint()

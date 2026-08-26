@@ -83,7 +83,11 @@ declare global {
       onGameStatusChanged: (callback: (game: string | null) => void) => () => void
       onUpdateStatus: (callback: (payload: UpdateStatusPayload) => void) => () => void
       restartToUpdate: () => Promise<void>
-      onScreenShareSources: (callback: (payload: ScreenShareSourcesPayload) => void) => () => void
+      // OITAVA RODADA: pedido ativo (invoke/Promise) em vez de esperar
+      // um evento chegar sozinho — ver electron/preload.cjs e o
+      // comentário grande em electron/main.cjs sobre abandonar
+      // setDisplayMediaRequestHandler.
+      getScreenShareSources: () => Promise<ScreenShareSourcesPayload>
       // Áudio automático conforme o tipo da fonte (tela cheia = sistema,
       // janela = captura por processo) — ver electron/main.cjs.
       selectScreenShareSource: (sourceId: string | null) => Promise<void>

@@ -254,20 +254,6 @@ const FOREGROUND_CHECK_INTERVAL_MS = 3_000
 
 let mainWindow = null
 let isQuitting = false
-let pendingDisplayMediaCallback = null
-// Guarda a MESMA lista de fontes (desktopCapturer.getSources) que foi usada
-// pra montar o seletor (ScreenSharePicker.tsx) — ver ipcMain.handle(
-// 'screen-share:select', ...) mais abaixo, que agora escolhe a fonte
-// diretamente DAQUI em vez de chamar desktopCapturer.getSources() de novo.
-// Motivo: eram duas chamadas SEPARADAS antes (uma pra montar a lista, outra
-// pra resolver o clique), cada uma abrindo sua própria "sessão" de captura
-// internamente no Chromium/Electron — o id (string) até bate entre as duas,
-// mas o objeto de origem por trás pode não ser mais o mesmo que o sistema
-// esperava usar pra abrir o stream de verdade. Isso é um suspeito forte pro
-// erro "Invalid capture constraints" que continuou aparecendo mesmo depois
-// de tirar o "max" do frameRate — reaproveitar o MESMO objeto de fonte do
-// início ao fim evita esse descompasso.
-let pendingDisplayMediaSources = []
 let updateReadyToInstall = false
 let gameCheckTimer = null
 let foregroundCheckTimer = null
@@ -1270,21 +1256,53 @@ app.whenReady().then(() => {
     callback(allowed.includes(permission))
   })
 
-  // Diferente de um navegador comum, o Electron não tem um seletor de
-  // tela/janela embutido — sem isso, o botão de compartilhar tela fica
-  // "morto" (o pedido de getDisplayMedia() nunca resolve). Em vez de
-  // escolher a tela automaticamente, manda a lista de telas/janelas
-  // disponíveis (com miniatura) pro app mostrar um seletor de verdade,
-  // e espera a pessoa escolher.
-  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+  // OITAVA RODADA — mudança de arquitetura importante: esse trecho inteiro
+  // ANTES vivia dentro de session.defaultSession.setDisplayMediaRequestHandler
+  // (a API "moderna" do Electron pra intermediar getDisplayMedia). Depois
+  // de VÁRIAS rodadas trocando só os detalhes das constraints de vídeo e
+  // áudio sem NENHUMA mudança no erro "Invalid capture constraints
+  // (AbortError)" — sempre a mesma mensagem, palavra por palavra, não
+  // importa o que mudasse — pesquisei a fundo (issues oficiais do
+  // electron/electron, documentação atual, como ferramentas de terceiros
+  // fazem isso) e a pista mais forte que achei: setDisplayMediaRequestHandler
+  // é uma API relativamente nova, com um histórico real de bugs em casos
+  // de borda (existem vários issues abertos no repositório oficial do
+  // Electron sobre esse handler engasgando/travando em situações
+  // específicas). Já que a mensagem de erro NUNCA mudava por mais que eu
+  // mexesse nos valores passados pro getDisplayMedia() do lado do
+  // renderer, a suspeita mais forte deixou de ser "algum valor de
+  // constraint está errado" e passou a ser "o problema está no mecanismo
+  // do setDisplayMediaRequestHandler em si, não em nada que eu esteja
+  // configurando".
+  //
+  // A partir de agora, ELIMINEI esse mecanismo por completo — em vez
+  // disso, uso o jeito MAIS ANTIGO e mais testado do Electron pra capturar
+  // tela/janela: desktopCapturer.getSources() (que já usávamos) +
+  // navigator.mediaDevices.getUserMedia() do lado do renderer com a
+  // constraint clássica "mandatory: { chromeMediaSource: 'desktop',
+  // chromeMediaSourceId }" (ver toggleScreenShare/switchScreenShareSource
+  // em VoiceContext.tsx). Esse é o padrão usado há anos por várias
+  // ferramentas de terceiros que empacotam Electron (ex.: ToDesktop) e por
+  // apps abertos como o Rocket.Chat — não é mais o exemplo OFICIAL da
+  // documentação atual do Electron (que recomenda
+  // setDisplayMediaRequestHandler), mas continua funcionando, é mais
+  // simples, e — o mais importante — não depende NENHUM POUCO do
+  // mecanismo que suspeito ser a causa real do travamento.
+  //
+  // Esse handler agora só PREPARA a lista de fontes (telas/janelas com
+  // miniatura + a sugestão de "Jogo") e devolve isso DIRETO pra quem
+  // pediu, via ipcMain.handle comum — sem callback pendente, sem
+  // setDisplayMediaRequestHandler, sem esperar getDisplayMedia() decidir
+  // nada. O ScreenSharePicker.tsx passou a PEDIR essa lista ativamente
+  // (em vez de esperar um evento chegar sozinho) assim que a pessoa clica
+  // em "Compartilhar tela".
+  ipcMain.handle('screen-share:get-sources', async () => {
     try {
       const sources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
         thumbnailSize: { width: 320, height: 200 },
         fetchWindowIcons: true,
       })
-      pendingDisplayMediaCallback = callback
-      pendingDisplayMediaSources = sources
       // Em telas múltiplas, precisamos saber qual delas é a PRINCIPAL —
       // sem isso, o atalho "Compartilhar seu jogo" (quando cai no
       // fallback de tela cheia — ver ScreenSharePicker.tsx) só pegava a
@@ -1374,7 +1392,11 @@ app.whenReady().then(() => {
         }
       }
       const gameWindowTitle = windowInfo?.windowTitle ?? null
-      mainWindow?.webContents.send('screen-share-sources', {
+      // OITAVA RODADA: devolve o payload DIRETO como retorno do
+      // ipcMain.handle (em vez de mandar por webContents.send pra um
+      // listener que já estava esperando) — o formato de cada item e da
+      // sugestão continua exatamente igual, só a forma de ENTREGAR mudou.
+      return {
         sources: sources.map((s) => ({
           id: s.id,
           name: s.name,
@@ -1416,80 +1438,27 @@ app.whenReady().then(() => {
               pid: windowInfo?.pid ?? null,
             }
           : null,
-      })
+      }
     } catch {
-      callback({})
+      // Sem callback pendente pra "recusar" aqui (não é mais
+      // setDisplayMediaRequestHandler) — devolver null é suficiente:
+      // ScreenSharePicker.tsx trata a ausência de fontes como "não
+      // encontrei nada" e mostra o erro genérico normalmente.
+      return null
     }
-  }, {
-    // No Mac, isso troca nosso seletor customizado (a lista com
-    // miniaturas acima) pelo seletor NATIVO do próprio macOS — a mesma
-    // janela do sistema que aparece em apps como o Zoom/Teams. No
-    // Windows essa opção ainda não existe na versão do Electron usada
-    // aqui (é exclusiva do Mac por enquanto), então lá continua usando
-    // o seletor customizado normalmente — não atrapalha em nada.
-    useSystemPicker: true,
   })
 
-  ipcMain.handle('screen-share:select', async (_event, sourceId) => {
-    if (!pendingDisplayMediaCallback) return
-    const resolve = pendingDisplayMediaCallback
-    pendingDisplayMediaCallback = null
-    try {
-      if (!sourceId) {
-        // Cancelamento (usuário clicou fora ou em "Cancelar"). Chamar o
-        // callback com um objeto vazio é como o Electron espera que a
-        // gente negue o pedido — mas isso pode lançar uma exceção
-        // interna dependendo da versão, por isso o try/catch em volta.
-        resolve({})
-        return
-      }
-      // Reaproveita a MESMA lista da montagem do seletor (ver comentário
-      // grande em pendingDisplayMediaSources acima) — não chama
-      // desktopCapturer.getSources() de novo aqui.
-      const source = pendingDisplayMediaSources.find((s) => s.id === sourceId)
-      // QUINTA RODADA — mudança de arquitetura: esse resolve() ANTES
-      // pedia vídeo E áudio (loopback) juntos, numa coisa só. O problema:
-      // getDisplayMedia() trata os dois como um pacote ATÔMICO — se
-      // QUALQUER um dos dois falhar (mesmo só o áudio), a Promise inteira
-      // rejeita, e a pessoa perde a transmissão de vídeo TAMBÉM, mesmo o
-      // vídeo em si nunca tendo dado problema nenhum. É exatamente esse
-      // padrão que bate com "Invalid capture constraints (AbortError)"
-      // continuar voltando depois de mexer só nas constraints de vídeo —
-      // troquei frameRate, uni as duas chamadas de getSources, e nada
-      // mudou, o que sugere que a falha pode estar do lado do ÁUDIO
-      // (loopback), não do vídeo, mas os dois juntos escondiam qual era
-      // qual.
-      //
-      // A partir de agora, esse handler só resolve o VÍDEO — o áudio de
-      // sistema passou a ser pedido em uma chamada TOTALMENTE separada,
-      // direto do renderer (ver captureSystemAudioTrack em
-      // VoiceContext.tsx, que usa getUserMedia com
-      // "chromeMediaSource: 'desktop'" em vez de depender deste
-      // resolve()). Com isso: (1) o vídeo nunca mais é derrubado por uma
-      // falha do áudio — se o loopback falhar por qualquer motivo
-      // (anti-cheat de jogo competitivo bloqueando captura de áudio do
-      // sistema é um suspeito real), a transmissão de vídeo continua
-      // normal, só sem esse áudio extra; (2) se o erro voltar a
-      // acontecer, agora vai ficar claro de qual chamada (vídeo ou
-      // áudio) ele veio, em vez de continuar ambíguo.
-      resolve(source ? { video: source } : {})
-      // Capturar uma JANELA específica (diferente de capturar a tela
-      // inteira) faz o Windows trazer aquela janela pra frente sozinho —
-      // é assim que a API de captura do sistema funciona, nada que o
-      // Electron ou a gente controle diretamente. Resultado: quem clica
-      // em "compartilhar tela" via de repente se vê jogado pra fora do
-      // app, olhando pra janela que ele PEDIU pra compartilhar, em vez de
-      // continuar vendo a call. Dispara várias tentativas de recuperar o
-      // foco em momentos diferentes, porque não dá pra saber de antemão
-      // exatamente QUANDO o Windows vai roubar o foco (pode ser na hora
-      // de resolver o pedido, ou só quando o primeiro frame do vídeo
-      // começa a fluir de verdade um pouco depois).
-      scheduleFocusReclaim()
-    } catch {
-      // Engolir aqui de propósito — sem isso, cancelar o compartilhamento
-      // de tela derrubava o app inteiro (o erro escapava até o processo
-      // renderer via IPC e acionava a tela de "Erro ao iniciar o app").
-    }
+  // OITAVA RODADA: agora que a captura de vídeo em si acontece direto no
+  // renderer via getUserMedia({ mandatory: { chromeMediaSourceId } }) —
+  // ver toggleScreenShare/switchScreenShareSource em VoiceContext.tsx —
+  // esse handler não precisa mais resolver callback nenhum nem reaproveitar
+  // lista de fontes nenhuma. Ele só cuida do efeito colateral de foco: ao
+  // escolher compartilhar uma JANELA específica, o Windows costuma trazer
+  // essa janela pra frente sozinho (comportamento da própria API de
+  // captura do sistema), então precisamos tentar recuperar o foco do app
+  // de volta em seguida.
+  ipcMain.handle('screen-share:select', (_event, sourceId) => {
+    if (sourceId) scheduleFocusReclaim()
   })
 
   // Segunda chamada de reforço: o renderer chama isso de novo assim que

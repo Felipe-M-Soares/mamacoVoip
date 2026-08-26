@@ -167,6 +167,37 @@ async function captureScreenShareStream(): Promise<MediaStream> {
   if (!window.electronAPI) {
     throw new DOMException('Compartilhamento de tela só funciona no app desktop.', 'NotAllowedError')
   }
+  // DÉCIMA PRIMEIRA RODADA — bug real relatado com print de tela: no
+  // Linux (bem provavelmente Wayland, a julgar pelo visual do sistema no
+  // print), o seletor customizado abaixo (baseado em
+  // window.electronAPI.getScreenShareSources(), que por baixo é
+  // desktopCapturer.getSources()) só listava a JANELA DO PRÓPRIO Mamacos
+  // Voip — nem o navegador, nem o jogo, apareciam, mesmo abertos e
+  // visíveis. Não é um bug de matching (o tipo de coisa corrigida na
+  // rodada anterior) — é estrutural: no Wayland, por segurança do
+  // próprio protocolo, um app comum não pode enumerar sozinho as janelas
+  // de outros processos; só o compositor sabe disso, através do "portal"
+  // do sistema (xdg-desktop-portal / ScreenCast) — é ELE quem mostra um
+  // seletor NATIVO com miniaturas de verdade de tudo que está aberto.
+  // desktopCapturer.getSources() nesse ambiente não devolve essa lista
+  // completa pra gente montar uma UI própria (daí sobrar só a própria
+  // janela, que o Electron sempre enxerga por ser dono dela).
+  //
+  // É exatamente esse portal nativo que o Discord/OBS/Chrome usam no
+  // Wayland — em vez de montar uma lista própria (que funciona bem no
+  // Windows, onde desktopCapturer.getSources() devolve tudo de verdade),
+  // eles chamam getDisplayMedia() puro e deixam o SISTEMA mostrar o
+  // seletor dele, com miniaturas de qualquer janela (jogo, navegador,
+  // etc.) e um toggle de "compartilhar também o áudio" quando o
+  // compositor suporta. Pra isso funcionar, electron/main.cjs
+  // deliberadamente NÃO registra session.setDisplayMediaRequestHandler
+  // no Linux (ver o comentário grande lá) — sem esse handler no meio, o
+  // Electron/Chromium entrega o pedido direto pro portal do sistema, que
+  // devolve um MediaStream já com a escolha da pessoa (vídeo, e áudio
+  // quando ela marcou a opção no próprio seletor nativo).
+  if (window.electronAPI.platform === 'linux') {
+    return await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+  }
   const payload = await window.electronAPI.getScreenShareSources()
   const sourceId = await openScreenSharePicker(payload)
   if (!sourceId) {
@@ -1996,9 +2027,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // NUNCA mais derruba o vídeo, que já está garantido acima). Só na
       // pior hipótese (as duas falharem) é que a transmissão fica sem
       // áudio nenhum — mas o vídeo já foi, de qualquer forma.
-      let audioTrack: MediaStreamTrack | null = null
+      //
+      // DÉCIMA PRIMEIRA RODADA: no Linux, `stream` já pode vir com uma
+      // track de áudio DENTRO dela — o seletor NATIVO do sistema (ver o
+      // branch de Linux em captureScreenShareStream acima) tem seu
+      // próprio toggle de "compartilhar também o áudio", e quando a
+      // pessoa marca isso, getDisplayMedia() já devolve vídeo+áudio
+      // juntos no mesmo MediaStream, exatamente como o Chrome/Discord
+      // fazem. Usar essa track direto (em vez de tentar as duas
+      // capturas Windows-only abaixo, que nem se aplicam aqui) significa
+      // reaproveitar o áudio que o PRÓPRIO SISTEMA já isolou pra área
+      // escolhida — evita duplicar captura à toa e evita cair no áudio
+      // de sistema inteiro sem necessidade.
+      let audioTrack: MediaStreamTrack | null = stream.getAudioTracks()[0] ?? null
       let audioSourceStream: MediaStream = stream
-      if (appAudioPid) {
+      if (!audioTrack && appAudioPid) {
         const appAudioTrack = await startAppAudioCapture(appAudioPid)
         if (appAudioTrack) {
           audioTrack = appAudioTrack
@@ -2211,7 +2254,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Ajuste de qualidade best-effort, à parte — ver
       // applyVideoQualityConstraints acima.
       void applyVideoQualityConstraints(newVideoTrack, preset)
-      let newAudioTrack: MediaStreamTrack | null = null
+      // DÉCIMA PRIMEIRA RODADA: idem toggleScreenShare acima — no Linux
+      // `newStream` já pode vir com a track de áudio embutida (seletor
+      // nativo do sistema, ver captureScreenShareStream).
+      let newAudioTrack: MediaStreamTrack | null = newStream.getAudioTracks()[0] ?? null
       let audioSourceStream: MediaStream = newStream
       newVideoTrack.contentHint = 'motion'
 
@@ -2247,7 +2293,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // stopScreenShareState pro porquê dessa referência à parte existir.
       systemAudioTrackRef.current?.stop()
       systemAudioTrackRef.current = null
-      if (appAudioPid) {
+      if (!newAudioTrack && appAudioPid) {
         const appAudioTrack = await startAppAudioCapture(appAudioPid)
         if (appAudioTrack) {
           newAudioTrack = appAudioTrack

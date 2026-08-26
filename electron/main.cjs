@@ -1574,6 +1574,50 @@ app.whenReady().then(() => {
   // handler "fixa" qual fonte vai ser usada assim que o plano B disparar o
   // pedido de getDisplayMedia (ver 'screen-share:pin-fallback-source'
   // logo abaixo).
+  // DÉCIMA PRIMEIRA RODADA — bug real relatado com print de tela: no Linux
+  // (testado com Wayland — a bem provável causa, dado o visual do
+  // sistema no print), o seletor customizado (ScreenSharePicker.tsx,
+  // baseado em desktopCapturer.getSources()) só listava a JANELA DO
+  // PRÓPRIO Mamacos Voip — nem o navegador aberto, nem o jogo, apareciam
+  // na grade de "Janela", mesmo com essas janelas abertas e visíveis.
+  //
+  // O motivo é estrutural, não um bug de código: no Wayland, por design
+  // de segurança do próprio protocolo, um app comum NÃO tem permissão de
+  // enumerar as janelas de outros processos sozinho — só o compositor
+  // (GNOME/KDE/etc.) sabe quais janelas existem e pode desenhar
+  // miniaturas delas. Pra resolver isso, existe o "portal" do sistema
+  // (xdg-desktop-portal, seção ScreenCast) — é ELE quem mostra um
+  // seletor NATIVO (de verdade do sistema operacional, fora do controle
+  // do Electron) com as miniaturas de tudo que está aberto, e só devolve
+  // pro app o que a PESSOA escolheu ali. desktopCapturer.getSources() no
+  // Wayland ou já dispara esse portal sozinho (te devolvendo só a escolha
+  // feita nele, não uma lista completa pra montar uma UI própria) ou, em
+  // compositores mais restritos, simplesmente não enxerga outras janelas
+  // — daí sobrar só "Mamacos Voip" (a própria janela do app, que o
+  // Electron sempre enxerga por ser o processo dono dela).
+  //
+  // É exatamente esse portal nativo que o Discord (e qualquer app sério
+  // no Linux — OBS, Zoom, o próprio Chrome) usa no Wayland: em vez de
+  // tentar montar uma UI própria com a lista de janelas (como esse app
+  // faz pro Windows, onde desktopCapturer.getSources() realmente devolve
+  // tudo), eles chamam getDisplayMedia() e deixam o SISTEMA mostrar o
+  // seletor dele — com as miniaturas de verdade de qualquer janela,
+  // incluindo jogos e navegador, e com um toggle de "compartilhar
+  // também o áudio" quando o compositor suporta (GNOME/KDE recentes
+  // suportam). Ver o branch de Linux em captureScreenShareStream
+  // (VoiceContext.tsx), que agora faz exatamente isso.
+  //
+  // Pra esse seletor nativo aparecer de verdade, este processo principal
+  // NÃO PODE registrar um setDisplayMediaRequestHandler — registrar esse
+  // handler (como já fazíamos, só como plano B pro Windows — ver NONA
+  // RODADA abaixo) faz o Electron entregar CADA pedido de getDisplayMedia
+  // pra gente resolver na mão, o que troca o portal nativo do sistema
+  // pela nossa lista (quebrada) do desktopCapturer de novo — exatamente
+  // o problema que queremos evitar aqui. Por isso esse handler (e o
+  // "pino" de fallback que ele usa) só é registrado fora do Linux —
+  // nessa plataforma, a ausência TOTAL de handler é o que deixa o
+  // Electron/Chromium negociar com o portal do jeito nativo.
+  if (process.platform !== 'linux') {
   let fallbackPinnedSourceId = null
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     // Testei isso de verdade (rodando o Electron num ambiente de teste) e
@@ -1616,6 +1660,7 @@ app.whenReady().then(() => {
   ipcMain.handle('screen-share:pin-fallback-source', (_event, sourceId) => {
     fallbackPinnedSourceId = sourceId || null
   })
+  } // fim do `if (process.platform !== 'linux')` — ver DÉCIMA PRIMEIRA RODADA acima
 
   // Segunda chamada de reforço: o renderer chama isso de novo assim que
   // o MediaStream do compartilhamento realmente começa a fluir (pode

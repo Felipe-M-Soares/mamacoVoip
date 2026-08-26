@@ -359,7 +359,29 @@ function startGameDetection() {
       foregroundCheckInFlight = true
       try {
         const fg = await getForegroundWindowInfo()
-        if (fg) lastForegroundApp = fg
+        // SÉTIMA RODADA — corrida de dados real, achada revendo com calma:
+        // o `!mainWindow.isFocused()` acima só é checado ANTES de chamar
+        // getForegroundWindowInfo(), que é ASSÍNCRONO e pode levar vários
+        // segundos (abre um PowerShell + compila C# na hora — daí o
+        // timeout de até 4.5s). Se a pessoa alternar PRA o mamaco bem
+        // nesse meio-tempo (exatamente o que acontece ao clicar em
+        // "Compartilhar tela" logo depois de sair do jogo), o resultado só
+        // chega DEPOIS que o mamaco já está em primeiro plano — e aí
+        // `lastForegroundApp` era sobrescrito com a janela do PRÓPRIO
+        // mamaco, bem na hora de abrir o seletor. Foi exatamente isso que
+        // explicou a sugestão aparecer como "Mamacos Voip" em vez do jogo.
+        // Rechecando o foco AGORA, depois do await, descarta esse
+        // resultado quando ele já está velho/contaminado, em vez de usá-lo.
+        // Segunda camada de proteção, independente da checagem de foco
+        // acima: `fg.pid` nunca pode ser o PID do PRÓPRIO mamaco
+        // (process.pid aqui é o processo principal do Electron, dono de
+        // toda janela nativa do app — inclusive a overlay). Rejeita isso
+        // incondicionalmente, mesmo que a checagem de foco por algum
+        // motivo não pegue (ex.: alguma janela secundária nossa ganhando
+        // foco sem mainWindow.isFocused() perceber).
+        if (fg && fg.pid !== process.pid && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
+          lastForegroundApp = fg
+        }
       } finally {
         foregroundCheckInFlight = false
       }
@@ -1331,7 +1353,26 @@ app.whenReady().then(() => {
         .filter((h) => h !== null)
       const [hwndPidMap, titlePidMap] = await Promise.all([getPidsForWindowHandles(windowHwnds), getWindowPidMap()])
 
-      const gameDisplayId = matchDisplayIdForBounds(windowInfo?.bounds ?? null)
+      let gameDisplayId = matchDisplayIdForBounds(windowInfo?.bounds ?? null)
+      // SÉTIMA RODADA: quando tem um jogo CADASTRADO (KNOWN_GAMES) rodando
+      // mas NENHUM dos métodos acima achou a janela/bounds dele (comum em
+      // jogo de tela cheia EXCLUSIVA de verdade — pode nem aparecer pro
+      // desktopCapturer como janela capturável, e pode estar minimizado
+      // bem no instante de abrir esse seletor, que é exatamente quando a
+      // pessoa alternou pra fora dele) — se só existe UM monitor no
+      // sistema, não tem ambiguidade nenhuma sobre onde o jogo está: só
+      // pode ser ali. Isso dá uma sugestão de "Jogo" funcional mesmo
+      // quando a varredura de janela falha por completo, pro caso mais
+      // comum (a maioria de quem joga tem 1 monitor só).
+      const screenSources = sources.filter((s) => s.id.startsWith('screen:'))
+      if (!gameDisplayId && currentGame && screenSources.length === 1) {
+        gameDisplayId = screenSources[0].display_id
+        isKnownGame = true
+        suggestionLabel = currentGame
+        if (watchProcessNamesForShare.length === 0) {
+          watchProcessNamesForShare = processNamesForGameLabel(currentGame)
+        }
+      }
       const gameWindowTitle = windowInfo?.windowTitle ?? null
       mainWindow?.webContents.send('screen-share-sources', {
         sources: sources.map((s) => ({

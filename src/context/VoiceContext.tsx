@@ -66,6 +66,15 @@ const MIC_MAX_BITRATE = 128_000
 // vale a pena".
 const SCREEN_SHARE_AUDIO_MAX_BITRATE = 256_000
 
+// DÉCIMA RODADA — prazo pra confirmar que a captura de áudio por
+// processo (native, ver startAppAudioCapture) está mesmo entregando
+// áudio antes de aceitar a track dela como boa. Generoso o bastante pra
+// nunca cortar uma ativação legítima (o próprio capture.cpp documenta
+// "menos de 100ms" em condições normais), curto o bastante pra não
+// atrasar perceptivelmente o início da transmissão quando a captura vai
+// mesmo falhar.
+const APP_AUDIO_CONFIRM_TIMEOUT_MS = 3000
+
 // SEXTA RODADA de correção do compartilhamento de tela — a mudança mais
 // importante até agora. "Invalid capture constraints (AbortError)"
 // continuou aparecendo IDÊNTICO mesmo depois de: (1) tirar o "max" do
@@ -719,6 +728,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // jogo, e de volta quando ela volta. Sem guardar por peer, teríamos que
   // procurar o sender certo em cada pc de novo a cada troca de foco.
   const screenSendersRef = useRef<Map<string, RTCRtpSender>>(new Map())
+  // DÉCIMA RODADA — bug real achado revendo com calma createPeerConnection:
+  // o áudio da transmissão de tela (captura por processo OU áudio de
+  // sistema — ver appAudioTrackRef/systemAudioTrackRef abaixo) vive FORA
+  // de screenStreamRef.current desde a QUINTA RODADA (vídeo e áudio viraram
+  // duas chamadas independentes). createPeerConnection só replicava
+  // screenStreamRef.current (só vídeo) pra quem entra na call DEPOIS que a
+  // transmissão já começou — a track de áudio nunca era adicionada a essa
+  // conexão nova. Resultado: qualquer pessoa que entrasse no canal DEPOIS
+  // de alguém já estar compartilhando tela recebia o vídeo perfeitamente,
+  // mas NUNCA o áudio daquela transmissão — do ponto de vista de quem
+  // entrou depois, era exatamente "compartilhamento de tela sem som",
+  // mesmo com a captura de áudio funcionando perfeitamente do lado de
+  // quem compartilha. Este Map (paralelo a screenSendersRef acima) guarda
+  // o RTCRtpSender de ÁUDIO da transmissão por peer, pra createPeerConnection
+  // saber que precisa adicionar essa track também pra gente nova, e pra
+  // switchScreenShareSource/toggleScreenShare conseguirem reaproveitar o
+  // mesmo sender ao trocar de fonte sem precisar reconstruir do zero.
+  const audioSendersRef = useRef<Map<string, RTCRtpSender>>(new Map())
   const foregroundWatchUnsubRef = useRef<(() => void) | null>(null)
   // Track "cortina" — um frame preto único (via canvas.captureStream),
   // criada sob demanda e reaproveitada enquanto durar o compartilhamento
@@ -761,6 +788,37 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // qualquer outra. `null` em qualquer falha (fora do Windows, .exe
   // ausente, PID não existe mais, etc.) — quem chama trata isso como
   // "sem áudio nessa transmissão", sem quebrar o vídeo.
+  //
+  // DÉCIMA RODADA — bug real achado revendo com calma: `startProcessAudioCapture`
+  // (IPC) só confirma que o processo `process-audio-capture.exe` foi
+  // CRIADO com sucesso (spawn síncrono) — não que ele conseguiu de fato
+  // ativar a captura (ActivateAudioInterfaceAsync, ver capture.cpp). Esse
+  // .exe faz seu trabalho de verdade de forma ASSÍNCRONA por dentro: se o
+  // PID já não existir mais, se o Windows for anterior ao build 20348, ou
+  // se a ativação falhar por qualquer outro motivo, ele só reporta isso
+  // BEM depois (evento `process-audio:error`), tempo depois de já termos
+  // devolvido `player.stream.getAudioTracks()[0]` pra quem chamou. E
+  // `MediaStreamAudioDestinationNode.stream` (ver PcmStreamPlayer) SEMPRE
+  // tem uma track de áudio válida e "ativa" desde a criação, mesmo sem
+  // nenhum áudio de verdade tendo chegado ainda — então o código anterior
+  // devolvia uma track que PARECIA boa, era adicionada normalmente na
+  // RTCPeerConnection, e ficava tocando SILÊNCIO PURO pelo resto da
+  // transmissão inteira, porque `toggleScreenShare`/`switchScreenShareSource`
+  // só caem pro áudio de sistema (ver captureSystemAudioTrack) quando
+  // `audioTrack` volta `null` — o que nunca acontecia aqui, mesmo com a
+  // captura nativa tendo falhado de verdade. Do lado de quem assiste,
+  // isso é EXATAMENTE "compartilhamento de janela sem som": um sender de
+  // áudio conectado e "funcionando", só que mudo.
+  //
+  // A correção: espera de verdade por uma confirmação de que áudio está
+  // fluindo (o evento `onProcessAudioFormat`, mandado pelo .exe só DEPOIS
+  // que a ativação e o formato foram resolvidos com sucesso) ou por um
+  // erro explícito (`onProcessAudioError`) — o que vier primeiro — com um
+  // prazo (APP_AUDIO_CONFIRM_TIMEOUT_MS) pro caso raro de nenhum dos dois
+  // chegar. Só devolve a track quando a confirmação de verdade chegou;
+  // em qualquer outro caso, encerra a captura nativa (stopAppAudioCapture)
+  // e devolve `null` — deixando quem chama cair pro áudio de sistema,
+  // como já era a intenção original.
   async function startAppAudioCapture(pid: number): Promise<MediaStreamTrack | null> {
     if (!window.electronAPI?.startProcessAudioCapture) return null
     try {
@@ -779,18 +837,64 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
     const player = new PcmStreamPlayer()
     appAudioPlayerRef.current = player
-    const unsubFormat = window.electronAPI.onProcessAudioFormat((format) => player.setFormat(format))
-    const unsubChunk = window.electronAPI.onProcessAudioChunk((chunk) => player.push(chunk))
-    const unsubError = window.electronAPI.onProcessAudioError((message) => {
-      // ANTES disso, isso só ia pro console.error — invisível pra
-      // qualquer pessoa rodando o app empacotado (o DevTools não abre
-      // sozinho fora do modo de desenvolvimento). Sem aparecer em lugar
-      // nenhum da tela, uma falha real da API nativa (ver capture.cpp)
-      // parecia simplesmente "sem áudio, sem explicação". setError aqui
-      // é o que torna isso diagnosticável a distância.
-      setError(`Captura de áudio por processo: ${message}`)
+    let confirmedOnce = false
+    const confirmed = await new Promise<boolean>((resolve) => {
+      let settled = false
+      const finish = (ok: boolean) => {
+        if (settled) return
+        settled = true
+        resolve(ok)
+      }
+      const unsubFormat = window.electronAPI!.onProcessAudioFormat((format) => {
+        player.setFormat(format)
+        // Chegou um formato de verdade — a captura nativa está mesmo
+        // funcionando. Continua escutando pra tocar os pedaços de PCM
+        // que vêm em seguida (ver unsubChunk), mas já não precisa mais
+        // esperar pra decidir se a track é utilizável.
+        confirmedOnce = true
+        finish(true)
+      })
+      const unsubChunk = window.electronAPI!.onProcessAudioChunk((chunk) => player.push(chunk))
+      const unsubError = window.electronAPI!.onProcessAudioError((message) => {
+        // ANTES disso, isso só ia pro console.error — invisível pra
+        // qualquer pessoa rodando o app empacotado (o DevTools não abre
+        // sozinho fora do modo de desenvolvimento). Sem aparecer em lugar
+        // nenhum da tela, uma falha real da API nativa (ver capture.cpp)
+        // parecia simplesmente "sem áudio, sem explicação". setError aqui
+        // é o que torna isso diagnosticável a distância.
+        setError(`Captura de áudio só deste app falhou: ${message}`)
+        // Ainda esperando a primeira confirmação (ver `confirmed` acima)
+        // — trata como qualquer outra falha de partida, cai pro áudio de
+        // sistema como já fazia.
+        if (!confirmedOnce) {
+          finish(false)
+          return
+        }
+        // DÉCIMA RODADA: já tínhamos confirmado a captura (áudio estava
+        // fluindo de verdade) e ela quebrou NO MEIO da transmissão — caso
+        // mais comum: o jogo/app compartilhado foi fechado, e o .exe
+        // reporta ERRO em vez de simplesmente ficar em silêncio (ver
+        // capture.cpp). Sem tratar isso aqui, a transmissão continuaria
+        // "com áudio" pro resto da call (o sender já existe, já foi
+        // negociado), só que mudo pra sempre a partir desse ponto — de
+        // novo, indistinguível de "sem som" pra quem está assistindo.
+        // Troca automaticamente pro áudio de sistema em vez de deixar
+        // silencioso — melhor um áudio menos isolado do que nenhum.
+        const deadTrack = player.stream.getAudioTracks()[0] ?? null
+        if (deadTrack) void recoverScreenShareAudioToSystem(deadTrack)
+      })
+      appAudioUnsubsRef.current = [unsubFormat, unsubChunk, unsubError]
+      // Em condições normais a ativação é quase instantânea (o próprio
+      // capture.cpp documenta "menos de 100ms") — este prazo só cobre o
+      // caso raro de nem o formato nem o erro chegarem (processo travado,
+      // IPC perdido) pra nunca deixar a pessoa esperando pra sempre antes
+      // de cair pro áudio de sistema.
+      setTimeout(() => finish(false), APP_AUDIO_CONFIRM_TIMEOUT_MS)
     })
-    appAudioUnsubsRef.current = [unsubFormat, unsubChunk, unsubError]
+    if (!confirmed) {
+      stopAppAudioCapture()
+      return null
+    }
     return player.stream.getAudioTracks()[0] ?? null
   }
 
@@ -872,6 +976,61 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     } catch {
       return null
     }
+  }
+
+  // DÉCIMA RODADA: chamada de dentro de startAppAudioCapture (ver o
+  // comentário grande lá) quando a captura de áudio por processo já
+  // tinha sido confirmada funcionando, mas quebrou NO MEIO da
+  // transmissão (caso mais comum: a pessoa fechou o jogo/app que estava
+  // compartilhando, mas continuou compartilhando a janela/tela — ex:
+  // olhando o desktop — sem parar o compartilhamento). Sem isso, o
+  // sender de áudio já negociado com cada peer ficaria mudo pro resto da
+  // call inteira, mesmo com a transmissão de vídeo continuando normal.
+  // Troca automaticamente pro áudio de sistema (menos isolado, mas
+  // continua sendo áudio de verdade) em vez de deixar em silêncio.
+  async function recoverScreenShareAudioToSystem(deadTrack: MediaStreamTrack) {
+    // Duas checagens de segurança: (1) a transmissão pode já ter sido
+    // encerrada entre o erro chegar e este `await` seguinte rodar — não
+    // faz sentido "recuperar" áudio de uma call que já acabou; (2)
+    // `appAudioTrackRef.current` pode já ter mudado (ex: a pessoa trocou
+    // de fonte via switchScreenShareSource logo antes deste erro chegar)
+    // — só mexe se a track morta ainda for a mesma que está ativa agora,
+    // senão estaríamos derrubando uma captura NOVA por engano.
+    // Usa screenStreamRef.current (ref, sempre atual) em vez do estado
+    // `screenSharing` de propósito: esta função é chamada de dentro de um
+    // callback de IPC registrado bem antes (dentro de startAppAudioCapture,
+    // chamado lá no início de toggleScreenShare/switchScreenShareSource) —
+    // `screenSharing` capturado nesse fechamento reflete o valor de QUANDO
+    // a função foi criada (quase sempre `false`, já que a transmissão só
+    // vira `true` no fim daquela mesma chamada), não o valor atual.
+    if (!screenStreamRef.current || appAudioTrackRef.current !== deadTrack) return
+    stopAppAudioCapture()
+    appAudioTrackRef.current = null
+    const systemAudioTrack = await captureSystemAudioTrack()
+    if (!screenStreamRef.current) {
+      // A transmissão terminou enquanto capturávamos o áudio de sistema
+      // acima — descarta e não mexe em mais nada.
+      systemAudioTrack?.stop()
+      return
+    }
+    if (!systemAudioTrack) {
+      setError(
+        'A captura de áudio só deste app parou (o jogo/app foi fechado?) e não consegui recuperar com áudio de sistema — a transmissão continua sem som (o vídeo continua normal).'
+      )
+      screenAudioTrackIdRef.current = null
+      audioSendersRef.current.forEach((sender) => {
+        sender.replaceTrack(null).catch(() => {})
+      })
+      return
+    }
+    systemAudioTrackRef.current = systemAudioTrack
+    screenAudioTrackIdRef.current = systemAudioTrack.id
+    audioSendersRef.current.forEach((sender) => {
+      sender.replaceTrack(systemAudioTrack).catch(() => {})
+    })
+    setError(
+      'A captura de áudio só deste app parou (o jogo/app foi fechado?) — a transmissão passou a usar o áudio de todo o sistema automaticamente.'
+    )
   }
 
   // Desenha uma "cortina" simples (fundo escuro + aviso) e devolve uma
@@ -1137,6 +1296,25 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         if (placeholderTrackRef.current) sender.replaceTrack(placeholderTrackRef.current).catch(() => {})
       })
     }
+    // DÉCIMA RODADA: ver o comentário grande em audioSendersRef acima —
+    // esta é a correção de verdade do bug. A track de ÁUDIO da
+    // transmissão ativa (se tiver alguma tocando agora) não faz parte de
+    // screenStreamRef.current, então precisa ser adicionada aqui à parte
+    // pra quem está entrando na call agora, do mesmo jeito que
+    // toggleScreenShare/switchScreenShareSource já fazem pra quem já
+    // estava na call no momento em que a transmissão começou/trocou.
+    const activeScreenAudioTrack = appAudioTrackRef.current ?? systemAudioTrackRef.current
+    if (activeScreenAudioTrack && activeScreenAudioTrack.readyState !== 'ended') {
+      const audioSourceStream = appAudioTrackRef.current
+        ? appAudioPlayerRef.current?.stream ?? new MediaStream([activeScreenAudioTrack])
+        : new MediaStream([activeScreenAudioTrack])
+      const audioSender = pc.addTrack(activeScreenAudioTrack, audioSourceStream)
+      const audioParams = audioSender.getParameters()
+      audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
+      audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
+      audioSender.setParameters(audioParams).catch(() => {})
+      audioSendersRef.current.set(peerId, audioSender)
+    }
 
     pc.onnegotiationneeded = async () => {
       try {
@@ -1226,6 +1404,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     rawStreamsRef.current.delete(peerId)
     screenStreamIdsRef.current.delete(peerId)
     screenSendersRef.current.delete(peerId)
+    audioSendersRef.current.delete(peerId)
     setParticipants((prev) => {
       if (!(peerId in prev)) return prev
       const next = { ...prev }
@@ -1761,6 +1940,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     foregroundWatchUnsubRef.current = null
     window.electronAPI?.stopForegroundWatch?.().catch(() => {})
     screenSendersRef.current.clear()
+    audioSendersRef.current.clear()
     realScreenVideoTrackRef.current = null
     if (placeholderTrackRef.current) {
       placeholderTrackRef.current.stop()
@@ -1896,6 +2076,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
           audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
           audioSender.setParameters(audioParams).catch(() => {})
+          audioSendersRef.current.set(peerId, audioSender)
         }
       })
       setScreenSharing(true)
@@ -2090,7 +2271,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         )
       }
 
-      peersRef.current.forEach(({ pc }) => {
+      peersRef.current.forEach(({ pc }, peerId) => {
         let audioHandled = false
         pc.getSenders().forEach((sender) => {
           if (sender.track === oldVideoTrack) {
@@ -2121,6 +2302,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
           audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
           audioSender.setParameters(audioParams).catch(() => {})
+          audioSendersRef.current.set(peerId, audioSender)
         }
       })
 

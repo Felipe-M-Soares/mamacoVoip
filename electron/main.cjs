@@ -1441,41 +1441,85 @@ app.whenReady().then(() => {
           watchProcessNamesForShare = processNamesForGameLabel(currentGame)
         }
       }
+      // DÉCIMA RODADA: a mesma lacuna acima, generalizada pra quem tem
+      // MAIS de um monitor — antes disso, se um jogo CADASTRADO estava
+      // rodando mas a varredura de janela falhou (tela cheia exclusiva de
+      // verdade, sem MainWindowHandle nenhum pro Windows achar — ou o
+      // PowerShell simplesmente não deu tempo/travou), a sugestão "Jogo"
+      // desaparecia por completo pra quem tem 2+ monitores (o caso mais
+      // comum é justamente jogo no monitor principal + chat/mamaco no
+      // secundário, exatamente o setup que esse recado do topo do
+      // arquivo já descreve). Sem saber em qual monitor o jogo está,
+      // apostar no monitor PRINCIPAL ainda é bem melhor do que não
+      // sugerir nada — a pessoa sempre pode escolher a tela certa na mão
+      // pela seção "Tela cheia" se o palpite errar.
+      if (!gameDisplayId && currentGame && primaryDisplayId) {
+        gameDisplayId = primaryDisplayId
+        isKnownGame = true
+        suggestionLabel = currentGame
+        if (watchProcessNamesForShare.length === 0) {
+          watchProcessNamesForShare = processNamesForGameLabel(currentGame)
+        }
+      }
       const gameWindowTitle = windowInfo?.windowTitle ?? null
+      const gameWindowPid = windowInfo?.pid ?? null
+      // Resolve o PID de cada janela ANTES de montar a lista final —
+      // precisamos dele tanto pro campo `pid` de cada fonte (já existia)
+      // quanto, a partir de agora, pra decidir `isExactGameWindow` (ver
+      // abaixo).
+      const resolvedPidBySourceId = new Map(
+        sources
+          .filter((s) => s.id.startsWith('window:'))
+          .map((s) => [s.id, hwndPidMap.get(parseHwndFromSourceId(s.id)) ?? titlePidMap.get(s.name) ?? null])
+      )
       // OITAVA RODADA: devolve o payload DIRETO como retorno do
       // ipcMain.handle (em vez de mandar por webContents.send pra um
       // listener que já estava esperando) — o formato de cada item e da
       // sugestão continua exatamente igual, só a forma de ENTREGAR mudou.
       return {
-        sources: sources.map((s) => ({
-          id: s.id,
-          name: s.name,
-          thumbnail: s.thumbnail.toDataURL(),
-          // O id que o desktopCapturer devolve sempre começa com "screen:" ou
-          // "window:" (formato documentado e estável da API) — usamos esse
-          // prefixo pra dizer pro renderer se cada opção é uma tela inteira ou
-          // uma janela específica. Isso importa porque jogos em modo tela
-          // cheia exclusiva (comum em jogos no Windows) não aparecem como uma
-          // "janela" capturável — só a captura de tela inteira consegue
-          // pegá-los — então o app precisa saber diferenciar as duas pra
-          // oferecer o fallback certo (ver ScreenSharePicker.tsx).
-          type: s.id.startsWith('screen:') ? 'screen' : 'window',
-          isPrimaryDisplay: Boolean(primaryDisplayId) && s.display_id === primaryDisplayId,
-          // Título EXATO bate com o da janela do jogo/app sugerido (bem mais
-          // confiável que "nome parecido"; e agora funciona tanto pro jogo
-          // cadastrado quanto pro genérico, ver acima).
-          isExactGameWindow: Boolean(gameWindowTitle) && s.name === gameWindowTitle,
-          isGameDisplay: Boolean(gameDisplayId) && s.display_id === gameDisplayId,
-          // PID do processo dono da janela, quando dá pra descobrir (só
-          // type === 'window'; uma tela inteira pode ter vários
-          // processos desenhando nela, não faz sentido isolar) — usado
-          // pra oferecer a captura de áudio experimental "só deste
-          // app". null quando não achou (Mac/Linux, handle não resolvido
-          // e título também não bateu com nenhum processo).
-          pid: s.id.startsWith('window:')
-            ? hwndPidMap.get(parseHwndFromSourceId(s.id)) ?? titlePidMap.get(s.name) ?? null
-            : null,
-        })),
+        sources: sources.map((s) => {
+          const pid = s.id.startsWith('window:') ? resolvedPidBySourceId.get(s.id) ?? null : null
+          return {
+            id: s.id,
+            name: s.name,
+            thumbnail: s.thumbnail.toDataURL(),
+            // O id que o desktopCapturer devolve sempre começa com "screen:" ou
+            // "window:" (formato documentado e estável da API) — usamos esse
+            // prefixo pra dizer pro renderer se cada opção é uma tela inteira ou
+            // uma janela específica. Isso importa porque jogos em modo tela
+            // cheia exclusiva (comum em jogos no Windows) não aparecem como uma
+            // "janela" capturável — só a captura de tela inteira consegue
+            // pegá-los — então o app precisa saber diferenciar as duas pra
+            // oferecer o fallback certo (ver ScreenSharePicker.tsx).
+            type: s.id.startsWith('screen:') ? 'screen' : 'window',
+            isPrimaryDisplay: Boolean(primaryDisplayId) && s.display_id === primaryDisplayId,
+            // DÉCIMA RODADA: casar por PID (via HWND, ver hwndPidMap acima)
+            // em vez de só por TÍTULO — a comparação de título sozinha
+            // (`s.name === gameWindowTitle`) falha sempre que o título vem
+            // vazio, e isso acontece em bem mais casos do que só janela
+            // borderless "de propósito": qualquer processo com um nível de
+            // integridade MAIS ALTO que o do Mamacos Voip (comum em jogos
+            // competitivos com anti-cheat, ex.: Valorant/Vanguard, Fortnite/
+            // EasyAntiCheat, Rainbow Six/BattlEye) faz o Windows bloquear
+            // GetWindowText entre processos (proteção UIPI padrão do
+            // sistema) — o título chega vazio mesmo a janela tendo um de
+            // verdade. GetWindowThreadProcessId (usado pra resolver `pid`
+            // acima) NÃO tem essa restrição — funciona igual pra qualquer
+            // processo, elevado ou não — por isso é a comparação preferida
+            // agora. Título continua como plano B pro caso (raro) do PID
+            // não resolver de nenhuma forma.
+            isExactGameWindow:
+              gameWindowPid !== null ? pid === gameWindowPid : Boolean(gameWindowTitle) && s.name === gameWindowTitle,
+            isGameDisplay: Boolean(gameDisplayId) && s.display_id === gameDisplayId,
+            // PID do processo dono da janela, quando dá pra descobrir (só
+            // type === 'window'; uma tela inteira pode ter vários
+            // processos desenhando nela, não faz sentido isolar) — usado
+            // pra oferecer a captura de áudio experimental "só deste
+            // app". null quando não achou (Mac/Linux, handle não resolvido
+            // e título também não bateu com nenhum processo).
+            pid,
+          }
+        }),
         suggestion: suggestionLabel
           ? {
               label: suggestionLabel,

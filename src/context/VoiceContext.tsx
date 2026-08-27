@@ -920,7 +920,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // caso raro de nem o formato nem o erro chegarem (processo travado,
       // IPC perdido) pra nunca deixar a pessoa esperando pra sempre antes
       // de cair pro áudio de sistema.
-      setTimeout(() => finish(false), APP_AUDIO_CONFIRM_TIMEOUT_MS)
+      setTimeout(() => {
+        if (!settled) {
+          // DÉCIMA QUARTA RODADA: esse é o único caso da função inteira
+          // que NÃO tinha setError nem console.error nenhum — nem o
+          // formato nem o erro chegaram a tempo, o que antes virava só
+          // silêncio total sem pista nenhuma (ver DevTools agora
+          // acessível via Ctrl+Shift+I no build empacotado).
+          console.error(
+            `[VoiceContext] startAppAudioCapture: nem process-audio:format nem process-audio:error chegaram em ${APP_AUDIO_CONFIRM_TIMEOUT_MS}ms (pid ${pid}) — caindo pro áudio de sistema.`
+          )
+        }
+        finish(false)
+      }, APP_AUDIO_CONFIRM_TIMEOUT_MS)
     })
     if (!confirmed) {
       stopAppAudioCapture()
@@ -1004,7 +1016,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           })
       }
       return track
-    } catch {
+    } catch (err) {
+      // DÉCIMA QUARTA RODADA: só engolir o erro aqui (sem log nenhum)
+      // deixava "áudio de sistema falhou" completamente invisível — pior
+      // ainda quando é a ÚLTIMA linha de defesa (depois da captura por
+      // processo já ter falhado antes) e o resultado final vira
+      // silêncio total sem NENHUMA pista em lugar nenhum, nem no
+      // DevTools (agora acessível via Ctrl+Shift+I mesmo no build
+      // empacotado — ver electron/main.cjs). Logar aqui é o que torna
+      // esse tipo de falha diagnosticável à distância.
+      console.error('[VoiceContext] captureSystemAudioTrack falhou:', err)
       return null
     }
   }

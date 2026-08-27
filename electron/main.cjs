@@ -1225,6 +1225,20 @@ function createWindow() {
     win.loadURL('app://bundle/index.html')
   }
 
+  // DÉCIMA QUARTA RODADA: Ctrl+Shift+I agora abre o DevTools mesmo no
+  // build EMPACOTADO (antes só existia em desenvolvimento, via
+  // openDevTools acima) — só pra diagnóstico à distância mesmo, sem essa
+  // válvula de escape nenhum erro no console (ex.: por que a captura de
+  // áudio por processo ou o fallback de áudio de sistema falharam) fica
+  // visível pra quem está rodando o app já instalado, e todo esse tipo
+  // de bug vira "só não funciona, sem pista nenhuma do motivo" pra
+  // qualquer pessoa fora de quem tem acesso ao código-fonte.
+  win.webContents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'i') {
+      win.webContents.toggleDevTools()
+    }
+  })
+
   // Se o arquivo/página falhar ao carregar (ex: caminho errado, arquivo
   // ausente), mostra um alerta nativo do sistema automaticamente — sem
   // isso, uma falha de carregamento vira só uma tela preta muda, sem
@@ -1292,6 +1306,22 @@ function createTray(win) {
       click: () => {
         win.show()
         win.focus()
+      },
+    },
+    { type: 'separator' },
+    // DÉCIMA QUARTA RODADA: caminho pro DevTools que NÃO depende de
+    // atalho de teclado nenhum — Ctrl+Shift+I (ver before-input-event
+    // acima) pode simplesmente não chegar ao webContents dependendo de
+    // como o Windows/launcher entrega as teclas pra essa janela
+    // específica (relatado: "não tem como usar teclas de atalho"). Um
+    // clique no ícone da bandeja sempre funciona, independente de foco
+    // ou de captura de teclado.
+    {
+      label: 'Ferramentas do desenvolvedor',
+      click: () => {
+        win.show()
+        win.focus()
+        win.webContents.toggleDevTools()
       },
     },
     { type: 'separator' },
@@ -1792,6 +1822,24 @@ app.whenReady().then(() => {
   })
   if (!registered) {
     console.error('Não foi possível registrar o atalho da sobreposição (Ctrl+Shift+O) — pode já estar em uso por outro programa.')
+  }
+
+  // DÉCIMA QUARTA RODADA: além do before-input-event na janela principal
+  // (que só dispara se ELA estiver com foco) e do item no menu da
+  // bandeja (ver createTray acima), registra Ctrl+Shift+I também como
+  // atalho GLOBAL — funciona mesmo com outra janela em foco (relatado:
+  // "não tem como usar teclas de atalho do console", possivelmente
+  // porque o jogo ainda estava em foco na hora de tentar). Três
+  // caminhos independentes pro mesmo lugar — só precisa UM deles
+  // funcionar no ambiente da pessoa.
+  const devToolsRegistered = globalShortcut.register('Control+Shift+I', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.webContents.toggleDevTools()
+  })
+  if (!devToolsRegistered) {
+    console.error('Não foi possível registrar o atalho do DevTools (Ctrl+Shift+I) — pode já estar em uso por outro programa; use o menu da bandeja como alternativa.')
   }
 
   startGameDetection()

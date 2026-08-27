@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import { notify } from '../lib/notifications'
 import { describeError } from '../lib/errors'
+import { rateLimitError } from '../lib/rateLimit'
 import type { GroupMessage, GroupMessageAttachment } from '../types/database'
 
 export function useGroupMessages(groupId: string | null) {
@@ -108,6 +109,10 @@ export function useGroupMessages(groupId: string | null) {
   // composer — parecia "escrever e mandar não faz nada" em grupo também.
   async function sendMessage(content: string, replyToId: string | null = null, files: File[] = []) {
     if (!groupId || !user) return { error: 'Não foi possível enviar' }
+    // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
+    // flood acidental — por grupo, não global.
+    const limited = rateLimitError(`message:group:${groupId}`, 8, 10_000, 'você está mandando mensagem')
+    if (limited) return { error: limited }
     try {
       const { data: message, error } = await supabase
         .from('group_messages')

@@ -4,6 +4,7 @@ import { useAuth } from './useAuth'
 import { useChannelMutes } from './useChannelMutes'
 import { notify } from '../lib/notifications'
 import { describeError } from '../lib/errors'
+import { rateLimitError } from '../lib/rateLimit'
 import type { Message, MessageAttachment, MessageReaction } from '../types/database'
 
 export function useMessages(channelId: string | null, serverId: string | null, threadId: string | null = null) {
@@ -167,6 +168,11 @@ export function useMessages(channelId: string | null, serverId: string | null, t
   // que sempre volta uma resposta, com o motivo real do problema.
   async function sendMessage(content: string, replyToId: string | null, files: File[] = []) {
     if (!channelId || !serverId || !user) return { error: 'Não foi possível enviar a mensagem' }
+    // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
+    // flood acidental — por CANAL, não global, pra mandar rápido em um
+    // canal não travar outro.
+    const limited = rateLimitError(`message:channel:${channelId}`, 8, 10_000, 'você está mandando mensagem')
+    if (limited) return { error: limited }
 
     try {
       const { data: message, error } = await supabase

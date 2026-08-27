@@ -323,6 +323,7 @@ export function MessageComposer({
           onClick={() => fileInputRef.current?.click()}
           className="text-discord-text-muted hover:text-white hover:bg-white/10 rounded-full p-1.5 shrink-0 transition-colors"
           title="Anexar arquivo"
+          aria-label="Anexar arquivo"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
             <path d="M12 2a1 1 0 0 1 1 1v8h8a1 1 0 1 1 0 2h-8v8a1 1 0 1 1-2 0v-8H3a1 1 0 1 1 0-2h8V3a1 1 0 0 1 1-1z" />
@@ -336,12 +337,12 @@ export function MessageComposer({
             <span className="text-xs text-red-300 font-mono tabular-nums">
               {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
             </span>
-            <button onClick={cancelRecording} title="Cancelar gravação" className="text-red-400 hover:text-white">
+            <button onClick={cancelRecording} title="Cancelar gravação" aria-label="Cancelar gravação" className="text-red-400 hover:text-white">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
                 <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
               </svg>
             </button>
-            <button onClick={stopRecording} title="Parar e anexar" className="text-discord-green hover:text-white">
+            <button onClick={stopRecording} title="Parar e anexar" aria-label="Parar e anexar" className="text-discord-green hover:text-white">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
                 <path d="M9 16.2l-3.5-3.5-1.4 1.4L9 19 20 8l-1.4-1.4z" />
               </svg>
@@ -352,6 +353,7 @@ export function MessageComposer({
             onClick={startRecording}
             className="text-discord-text-muted hover:text-white hover:bg-white/10 rounded-full p-1.5 shrink-0 transition-colors"
             title="Gravar mensagem de voz"
+            aria-label="Gravar mensagem de voz"
           >
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
               <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
@@ -364,6 +366,7 @@ export function MessageComposer({
             onClick={() => setShowGifPicker((v) => !v)}
             className="text-discord-text-muted hover:text-white hover:bg-white/10 rounded-full p-1.5 transition-colors"
             title="Enviar GIF"
+            aria-label="Enviar GIF"
           >
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
               <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm2.5 4.5A2.5 2.5 0 0 0 4 11v2a2.5 2.5 0 0 0 4.5 1.5V13H7v-1h3v1.5A3.5 3.5 0 0 1 3 13v-2a3.5 3.5 0 0 1 6-2.5l-.7.7a2.5 2.5 0 0 0-1.8-.7zM11 8h1v8h-1V8zm3 0h4v1h-3v2.5h2.5v1H15V16h-1V8z" />
@@ -406,6 +409,7 @@ export function MessageComposer({
               : 'text-discord-text-muted hover:bg-white/10'
           }`}
           title="Enviar"
+          aria-label="Enviar"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
             <path d="M3.4 20.6l17.5-8.2a1 1 0 0 0 0-1.8L3.4 2.4a1 1 0 0 0-1.4 1.1L4.5 12l-2.5 8.5a1 1 0 0 0 1.4 1.1z" />
@@ -442,6 +446,7 @@ function FileAttachmentPreview({ file, onRemove }: { file: File; onRemove: () =>
         <button
           onClick={onRemove}
           title="Remover"
+          aria-label="Remover anexo"
           className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-discord-darker border border-black/40 text-white opacity-0 group-hover/file:opacity-100 transition-opacity hover:bg-red-600"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
@@ -464,6 +469,7 @@ function FileAttachmentPreview({ file, onRemove }: { file: File; onRemove: () =>
         <button
           onClick={onRemove}
           title="Remover"
+          aria-label="Remover anexo"
           className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-discord-darker border border-black/40 text-white opacity-0 group-hover/file:opacity-100 transition-opacity hover:bg-red-600"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
@@ -495,6 +501,7 @@ function FileAttachmentPreview({ file, onRemove }: { file: File; onRemove: () =>
       <button
         onClick={onRemove}
         title="Remover"
+        aria-label="Remover anexo"
         className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full text-discord-text-muted opacity-0 group-hover/file:opacity-100 transition-opacity hover:bg-red-600 hover:text-white"
       >
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">

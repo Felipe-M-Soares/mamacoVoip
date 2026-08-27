@@ -50,6 +50,33 @@ function detachStartupErrorHandlers() {
   window.removeEventListener('unhandledrejection', handleUnhandledRejection)
 }
 
+// DÉCIMA SÉTIMA RODADA — diferente dos dois handlers acima (que
+// mostram a tela de emergência e são removidos depois de 3s, DE
+// PROPÓSITO: um erro bobo do dia a dia não deveria derrubar a tela
+// inteira), estes aqui ficam ligados o tempo TODO que o app estiver
+// aberto, mas só REGISTRAM no arquivo de log (window.electronAPI.logDebug
+// — mesmo mecanismo já usado por VoiceContext.tsx, ver
+// electron/main.cjs) em vez de interromper qualquer coisa. A app inteira
+// dependeu, essa sessão inteira, de mandar log manualmente a partir de
+// pontos específicos do código pra diagnosticar problemas à distância —
+// isso cobre o caso genérico (qualquer erro não tratado em QUALQUER
+// lugar do app, não só nos pontos que alguém lembrou de instrumentar),
+// sem precisar reproduzir o problema de novo com mais logging.
+function logRuntimeErrorToFile(source: string, detail: string) {
+  try {
+    window.electronAPI?.logDebug?.(`[${source}] ${detail}`)
+  } catch {
+    // best-effort — nunca deveria quebrar por causa disso
+  }
+}
+window.addEventListener('error', (e) => {
+  logRuntimeErrorToFile('window:error', `${e.message}${e.filename ? ` (${e.filename}:${e.lineno})` : ''}`)
+})
+window.addEventListener('unhandledrejection', (e) => {
+  const reason = e.reason
+  logRuntimeErrorToFile('window:unhandledrejection', reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason))
+})
+
 // Checa ANTES de importar o resto do app — se importássemos ./App.tsx
 // de forma estática lá em cima, o cliente do Supabase seria avaliado
 // (e travaria, se faltar configuração) antes mesmo dessa checagem

@@ -128,6 +128,7 @@ function ScreenShareStage({
                 <button
                   onClick={() => voice.setScreenShareVolume(share.key, isMuted ? 100 : 0)}
                   title={isMuted ? 'Reativar áudio' : 'Silenciar essa transmissão'}
+                  aria-label={isMuted ? 'Reativar áudio' : 'Silenciar essa transmissão'}
                   className={`w-6 h-6 flex items-center justify-center rounded-full text-white ${
                     isMuted ? 'bg-red-600' : 'bg-black/60 hover:bg-black/80'
                   }`}
@@ -147,6 +148,7 @@ function ScreenShareStage({
                   <button
                     onClick={() => setOpenVolumeFor((v) => (v === share.key ? null : share.key))}
                     title="Ajustar volume do áudio desta transmissão"
+                    aria-label="Ajustar volume do áudio desta transmissão"
                     className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
@@ -178,6 +180,7 @@ function ScreenShareStage({
                   <button
                     onClick={() => goFullscreen(share.key)}
                     title="Tela cheia"
+                    aria-label="Tela cheia"
                     className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
@@ -188,6 +191,7 @@ function ScreenShareStage({
                   <button
                     onClick={() => goFloating(share.key)}
                     title="Janela flutuante (pode arrastar pra fora do app)"
+                    aria-label="Janela flutuante (pode arrastar pra fora do app)"
                     className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
@@ -204,6 +208,7 @@ function ScreenShareStage({
               <button
                 onClick={() => onHide(share.key)}
                 title="Fechar esta transmissão (continua no ar, só não aparece mais aqui)"
+                aria-label="Fechar esta transmissão (continua no ar, só não aparece mais aqui)"
                 className="w-6 h-6 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-red-600"
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
@@ -281,6 +286,7 @@ function ParticipantTile({
       <button
         onClick={() => setShowVolumeSlider((v) => !v)}
         title="Ajustar volume deste participante"
+        aria-label="Ajustar volume deste participante"
         className={
           compact
             ? 'w-5 h-5 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80'
@@ -768,6 +774,13 @@ export function VoiceChannelView({
                           ? 'Ativar microfone'
                           : 'Mutar microfone'
                     }
+                    aria-label={
+                      !isSpeaker
+                        ? 'Só donos/moderadores podem falar neste canal Palco'
+                        : voice.muted
+                          ? 'Ativar microfone'
+                          : 'Mutar microfone'
+                    }
                     className={`w-11 h-11 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       deafened || voice.muted
                         ? 'bg-red-600 text-white'
@@ -788,6 +801,7 @@ export function VoiceChannelView({
                 <button
                   onClick={() => setShowMicMenu((v) => !v)}
                   title="Configurações de voz"
+                  aria-label="Configurações de voz"
                   className={`w-5 h-11 flex items-center justify-center transition-colors ${
                     deafened || voice.muted
                       ? 'bg-red-600/80 text-white/80 hover:text-white'
@@ -881,6 +895,7 @@ export function VoiceChannelView({
             <button
               onClick={voice.toggleVideo}
               title={voice.videoEnabled ? 'Desativar câmera' : 'Ativar câmera'}
+              aria-label={voice.videoEnabled ? 'Desativar câmera' : 'Ativar câmera'}
               className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
                 voice.videoEnabled ? 'bg-discord-blurple text-white' : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'
               }`}
@@ -893,6 +908,7 @@ export function VoiceChannelView({
             <button
               onClick={() => voice.toggleScreenShare()}
               title={voice.screenSharing ? 'Parar compartilhamento' : 'Compartilhar tela'}
+              aria-label={voice.screenSharing ? 'Parar compartilhamento' : 'Compartilhar tela'}
               className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
                 voice.screenSharing ? 'bg-discord-blurple text-white' : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'
               }`}
@@ -911,6 +927,7 @@ export function VoiceChannelView({
               <button
                 onClick={voice.switchScreenShareSource}
                 title="Trocar janela/tela compartilhada"
+                aria-label="Trocar janela/tela compartilhada"
                 className="w-11 h-11 rounded-full flex items-center justify-center bg-discord-lighter text-discord-text hover:bg-discord-darker transition-colors"
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -937,6 +954,7 @@ export function VoiceChannelView({
                   value={voice.screenShareQuality.quality}
                   onChange={(e) => voice.screenShareQuality.setQuality(e.target.value as 'performance' | 'quality')}
                   title="Qualidade e fps do compartilhamento de tela"
+                  aria-label="Qualidade e fps do compartilhamento de tela"
                   className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none max-w-[190px] truncate"
                 >
                   <option value="performance">Desempenho — 1080p, 30fps</option>
@@ -948,6 +966,7 @@ export function VoiceChannelView({
             <button
               onClick={() => setShowSoundboard(true)}
               title="Soundboard"
+              aria-label="Soundboard"
               className="w-11 h-11 rounded-full flex items-center justify-center bg-discord-lighter text-discord-text hover:bg-discord-darker transition-colors"
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -962,6 +981,7 @@ export function VoiceChannelView({
               <button
                 onClick={() => setShowMoreMenu((v) => !v)}
                 title="Mais opções"
+                aria-label="Mais opções"
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
                   showMoreMenu ? 'bg-discord-darker text-white' : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'
                 }`}
@@ -1033,6 +1053,7 @@ export function VoiceChannelView({
             <button
               onClick={voice.leave}
               title="Desconectar"
+              aria-label="Desconectar"
               className="w-11 h-11 rounded-full flex items-center justify-center bg-red-600 text-white hover:bg-red-700 transition-colors"
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">

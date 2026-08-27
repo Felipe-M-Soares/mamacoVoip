@@ -1,6 +1,7 @@
 import { createContext, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { rateLimitError } from '../lib/rateLimit'
 import type { Server } from '../types/database'
 
 interface ServersContextValue {
@@ -217,6 +218,10 @@ export function ServersProvider({ children }: { children: ReactNode }) {
   }
 
   async function createInvite(serverId: string, maxUses?: number, expiresHours?: number) {
+    // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
+    // flood acidental — por servidor.
+    const limited = rateLimitError(`invite:${serverId}`, 5, 60_000, 'você está criando convite')
+    if (limited) return { error: limited, invite: undefined }
     const { data, error } = await supabase.rpc('create_server_invite', {
       p_server_id: serverId,
       p_max_uses: maxUses ?? null,

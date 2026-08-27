@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
 import { useScreenShareQuality, type QualityPreset } from '../hooks/useScreenShareQuality'
-import { createNoiseSuppressor, type NoiseSuppressor } from '../lib/noiseSuppression'
+import { createNoiseSuppressor, type NoiseSuppressor, createScreenAudioDenoiser, type ScreenAudioDenoiser } from '../lib/noiseSuppression'
 import { takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
@@ -777,6 +777,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // diferente, e o broadcast (que é um só, pra sala toda) só podia
   // acertar quem recebesse por último.
   const screenAudioSourceStreamRef = useRef<MediaStream | null>(null)
+  // DÉCIMA SÉTIMA RODADA — igual applyNoiseSuppression faz pro
+  // microfone (ver mais abaixo), mas pro áudio da TRANSMISSÃO (ver
+  // createScreenAudioDenoiser em lib/noiseSuppression.ts, e o
+  // comentário grande lá pro porquê). `screenAudioDenoiserRef` é a
+  // instância WASM ativa; `screenAudioOutputTrackRef` é a track que
+  // REALMENTE está sendo mandada pros peers agora (já filtrada, quando
+  // o filtro funcionou — a bruta, se ele falhar) — existe pra
+  // substituir `appAudioTrackRef.current ?? systemAudioTrackRef.current`
+  // em todo lugar que precisa saber "qual track está no ar", já que
+  // agora essas duas passaram a guardar só a captura BRUTA (usada pra
+  // parar o processo nativo/o loopback quando a transmissão termina ou
+  // troca de fonte), não mais a track de verdade enviada por WebRTC.
+  const screenAudioDenoiserRef = useRef<ScreenAudioDenoiser | null>(null)
+  const screenAudioOutputTrackRef = useRef<MediaStreamTrack | null>(null)
   // A track de áudio dentro de `localStreamRef` passa a ser a track JÁ
   // TRATADA pelo RNNoise (quando ativo), não mais a track crua do
   // dispositivo — então precisamos guardar a crua separadamente aqui só
@@ -1164,16 +1178,36 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         'A captura de áudio só deste app parou (o jogo/app foi fechado?) e não consegui recuperar com áudio de sistema — a transmissão continua sem som (o vídeo continua normal).'
       )
       screenAudioTrackIdRef.current = null
+      screenAudioOutputTrackRef.current = null
+      screenAudioSourceStreamRef.current = null
+      teardownScreenAudioDenoiser()
       audioSendersRef.current.forEach((sender) => {
         sender.replaceTrack(null).catch(() => {})
       })
+      // DÉCIMA SÉTIMA RODADA: avisa a sala que a transmissão ficou sem
+      // áudio agora — sem isso, quem já tinha recebido um screenAudioStreamId
+      // anterior ficaria com o mapeamento antigo (apontando pra uma
+      // stream que não existe mais), em vez de simplesmente não ter
+      // áudio nenhum.
+      if (screenStreamRef.current) broadcastScreenMeta(screenStreamRef.current.id, null)
       return
     }
     systemAudioTrackRef.current = systemAudioTrack
-    screenAudioTrackIdRef.current = systemAudioTrack.id
+    // DÉCIMA SÉTIMA RODADA: idem toggleScreenShare/switchScreenShareSource
+    // — passa a track de recuperação pelo mesmo redutor de ruído da
+    // transmissão antes de mandar pros peers, e reanuncia o novo
+    // screenAudioStreamId (mudou — é uma MediaStream nova) pra sala,
+    // senão quem já estava assistindo ficaria com o mapeamento antigo
+    // (da fonte de áudio que acabou de morrer) e o áudio recuperado
+    // cairia de novo como se fosse webcam.
+    const prepared = await prepareScreenAudioForSending(systemAudioTrack)
+    screenAudioTrackIdRef.current = prepared.track.id
+    screenAudioOutputTrackRef.current = prepared.track
+    screenAudioSourceStreamRef.current = prepared.stream
     audioSendersRef.current.forEach((sender) => {
-      sender.replaceTrack(systemAudioTrack).catch(() => {})
+      sender.replaceTrack(prepared.track).catch(() => {})
     })
+    if (screenStreamRef.current) broadcastScreenMeta(screenStreamRef.current.id, prepared.stream.id)
     setError(
       'A captura de áudio só deste app parou (o jogo/app foi fechado?) — a transmissão passou a usar o áudio de todo o sistema automaticamente.'
     )
@@ -1281,6 +1315,35 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       noiseSuppressorRef.current = null
       return rawTrack
     }
+  }
+
+  // DÉCIMA SÉTIMA RODADA — equivalente de applyNoiseSuppression acima,
+  // só que pro áudio da TRANSMISSÃO DE TELA em vez do microfone (ver
+  // createScreenAudioDenoiser em lib/noiseSuppression.ts). Recebe a
+  // track BRUTA (já resolvida por startAppAudioCapture ou
+  // captureSystemAudioTrack) e devolve a versão filtrada — junto com
+  // uma MediaStream própria pra ela (msid estável, sempre um objeto
+  // NOVO por chamada, já que isso só roda uma vez por início/troca de
+  // transmissão, nunca por frame). Se o WASM falhar por qualquer
+  // motivo, cai pra bruta sem filtro — a transmissão nunca deve quebrar
+  // por causa disso, só perde o reforço.
+  async function prepareScreenAudioForSending(rawTrack: MediaStreamTrack): Promise<{ track: MediaStreamTrack; stream: MediaStream }> {
+    try {
+      screenAudioDenoiserRef.current?.destroy()
+      screenAudioDenoiserRef.current = await createScreenAudioDenoiser()
+      const processed = screenAudioDenoiserRef.current.setInputTrack(rawTrack)
+      return { track: processed, stream: new MediaStream([processed]) }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      logDebug(`prepareScreenAudioForSending: redutor de ruído da transmissão indisponível, seguindo sem ele — ${detail}`)
+      screenAudioDenoiserRef.current = null
+      return { track: rawTrack, stream: new MediaStream([rawTrack]) }
+    }
+  }
+
+  function teardownScreenAudioDenoiser() {
+    screenAudioDenoiserRef.current?.destroy()
+    screenAudioDenoiserRef.current = null
   }
 
   function sendSignal(to: string, data: { description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }) {
@@ -1458,20 +1521,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
     })
     if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((track) => {
+      // DÉCIMA SÉTIMA RODADA: usa getVideoTracks() aqui, não getTracks()
+      // — no Linux, o seletor NATIVO do sistema pode embutir uma track
+      // de ÁUDIO dentro do próprio screenStreamRef.current (ver o
+      // comentário grande em toggleScreenShare, "DÉCIMA PRIMEIRA
+      // RODADA"). Essa track de áudio agora SEMPRE passa pelo redutor de
+      // ruído da transmissão antes de ser enviada (ver
+      // prepareScreenAudioForSending) e SEMPRE é adicionada pelo bloco
+      // de screenAudioOutputTrackRef logo abaixo — se este laço aqui
+      // também mandasse a track crua embutida na stream, quem entrasse
+      // na call DEPOIS do compartilhamento já ter começado receberia
+      // ÁUDIO DUPLICADO (a crua E a filtrada, ao mesmo tempo) nesse
+      // caso específico do Linux.
+      screenStreamRef.current.getVideoTracks().forEach((track) => {
         const sender = pc.addTrack(track, screenStreamRef.current!)
         const params = sender.getParameters()
         params.encodings = params.encodings?.length ? params.encodings : [{}]
-        if (track.kind === 'audio') {
-          // Áudio da transmissão (som do jogo/sistema) usa seu PRÓPRIO
-          // teto de bitrate — o preset de vídeo (maxBitrate em Mbps,
-          // pensado pra nitidez de imagem) não faz sentido aqui. Antes
-          // esse valor era aplicado nos dois tracks (vídeo E áudio) sem
-          // distinção, deixando o áudio sem nenhum ajuste de verdade.
-          params.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
-          sender.setParameters(params).catch(() => {})
-          return
-        }
         // Antes isso usava um valor fixo (4Mbps) sem olhar a preferência
         // de qualidade escolhida — então quem entrava na call DEPOIS que
         // a transmissão já tinha começado recebia uma versão bem pior
@@ -1498,7 +1563,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // pra quem está entrando na call agora, do mesmo jeito que
     // toggleScreenShare/switchScreenShareSource já fazem pra quem já
     // estava na call no momento em que a transmissão começou/trocou.
-    const activeScreenAudioTrack = appAudioTrackRef.current ?? systemAudioTrackRef.current
+    // DÉCIMA SÉTIMA RODADA: usa screenAudioOutputTrackRef — a track que
+    // REALMENTE está sendo enviada agora (já passou pelo redutor de
+    // ruído da transmissão, quando ele funcionou — ver
+    // prepareScreenAudioForSending) — em vez de
+    // `appAudioTrackRef.current ?? systemAudioTrackRef.current`, que
+    // agora guardam só a captura BRUTA (antes do filtro). Usar a bruta
+    // aqui mandaria áudio sem filtro só pra quem entra DEPOIS da
+    // transmissão já ter começado — inconsistente com quem já estava na
+    // call.
+    const activeScreenAudioTrack = screenAudioOutputTrackRef.current
     if (activeScreenAudioTrack && activeScreenAudioTrack.readyState !== 'ended') {
       // DÉCIMA QUINTA RODADA: usa screenAudioSourceStreamRef (a MESMA
       // MediaStream, com o MESMO .id, que já foi anunciada via
@@ -1509,11 +1583,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // um deles. O fallback só existe pra nunca ficar sem enviar áudio
       // nenhum no caso (não deveria acontecer) dessa referência ainda
       // não estar setada.
-      const audioSourceStream =
-        screenAudioSourceStreamRef.current ??
-        (appAudioTrackRef.current
-          ? appAudioPlayerRef.current?.stream ?? new MediaStream([activeScreenAudioTrack])
-          : new MediaStream([activeScreenAudioTrack]))
+      const audioSourceStream = screenAudioSourceStreamRef.current ?? new MediaStream([activeScreenAudioTrack])
       const audioSender = pc.addTrack(activeScreenAudioTrack, audioSourceStream)
       const audioParams = audioSender.getParameters()
       audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
@@ -2139,18 +2209,28 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     gameShareWatchRef.current?.()
     gameShareWatchRef.current = null
     window.electronAPI?.stopWatchProcessExit?.().catch(() => {})
-    // A track de "áudio só deste app" (quando ativa) não faz parte de
-    // screenStreamRef.current — vem de um MediaStream próprio dentro do
-    // PcmStreamPlayer (ver startAppAudioCapture acima) — por isso
-    // precisa ser removida dos peers e encerrada aqui à parte.
-    if (appAudioTrackRef.current) {
-      const appAudioTrack = appAudioTrackRef.current
+    // DÉCIMA SÉTIMA RODADA: a track REALMENTE enviada pros peers (senders
+    // seguram essa, não mais a bruta — ver screenAudioOutputTrackRef, o
+    // porquê está no comentário grande na declaração dele) é a que
+    // precisa ser usada aqui pra achar e remover o sender certo — usar a
+    // bruta (appAudioTrackRef/systemAudioTrackRef) não bateria com
+    // `sender.track` desde que o redutor de ruído da transmissão passou
+    // a existir, e o sender ficaria "esquecido" (nunca removido).
+    if (screenAudioOutputTrackRef.current) {
+      const outputTrack = screenAudioOutputTrackRef.current
       peersRef.current.forEach(({ pc }) => {
-        const sender = pc.getSenders().find((s) => s.track === appAudioTrack)
+        const sender = pc.getSenders().find((s) => s.track === outputTrack)
         if (sender) pc.removeTrack(sender)
       })
-      appAudioTrackRef.current = null
+      screenAudioOutputTrackRef.current = null
     }
+    teardownScreenAudioDenoiser()
+    // A captura BRUTA (quando ativa) não faz parte de
+    // screenStreamRef.current — vem de um MediaStream próprio dentro do
+    // PcmStreamPlayer (ver startAppAudioCapture acima) — por isso
+    // precisa ser encerrada aqui à parte (o sender que a carregava,
+    // já filtrada, foi removido acima).
+    appAudioTrackRef.current = null
     stopAppAudioCapture()
     // QUINTA RODADA: mesma lógica acima, agora pro áudio de SISTEMA
     // (ver captureSystemAudioTrack) — desde que vídeo e áudio viraram
@@ -2160,12 +2240,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // Windows continuaria aceso e o processo WASAPI de loopback
     // continuaria aberto à toa.
     if (systemAudioTrackRef.current) {
-      const systemAudioTrack = systemAudioTrackRef.current
-      peersRef.current.forEach(({ pc }) => {
-        const sender = pc.getSenders().find((s) => s.track === systemAudioTrack)
-        if (sender) pc.removeTrack(sender)
-      })
-      systemAudioTrack.stop()
+      systemAudioTrackRef.current.stop()
       systemAudioTrackRef.current = null
     }
     screenStreamRef.current = null
@@ -2281,6 +2356,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             : 'Não consegui identificar o processo do app/jogo, e também não consegui capturar o áudio de sistema — a transmissão vai sem áudio (o vídeo continua normal).'
         )
       }
+      // DÉCIMA SÉTIMA RODADA: passa a track de áudio resolvida (seja
+      // qual for a origem) pelo redutor de ruído da transmissão antes de
+      // mandar pra qualquer peer — ver prepareScreenAudioForSending /
+      // createScreenAudioDenoiser. `audioTrack`/`audioSourceStream`
+      // passam a apontar pra versão FILTRADA daqui em diante (o resto da
+      // função, incluindo o laço de peers logo abaixo, nem precisa saber
+      // que isso aconteceu).
+      if (audioTrack) {
+        const prepared = await prepareScreenAudioForSending(audioTrack)
+        audioTrack = prepared.track
+        audioSourceStream = prepared.stream
+      } else {
+        teardownScreenAudioDenoiser()
+      }
+      screenAudioOutputTrackRef.current = audioTrack
       // Guarda o ID pra próxima renegociação (seja a de agora mesmo, logo
       // abaixo, seja uma futura — por exemplo quando outra pessoa entra
       // na call no meio da transmissão) saber que ESSA é a track que
@@ -2543,6 +2633,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         )
       }
 
+      // DÉCIMA SÉTIMA RODADA: idem toggleScreenShare acima — filtra a
+      // track de áudio da fonte NOVA antes de trocar nos peers.
+      if (newAudioTrack) {
+        const prepared = await prepareScreenAudioForSending(newAudioTrack)
+        newAudioTrack = prepared.track
+        audioSourceStream = prepared.stream
+      } else {
+        teardownScreenAudioDenoiser()
+      }
+
       peersRef.current.forEach(({ pc }, peerId) => {
         let audioHandled = false
         pc.getSenders().forEach((sender) => {
@@ -2589,6 +2689,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setLocalScreenStream(newStream)
       realScreenVideoTrackRef.current = newVideoTrack
       screenAudioTrackIdRef.current = newAudioTrack?.id ?? null
+      screenAudioOutputTrackRef.current = newAudioTrack
       // DÉCIMA QUINTA RODADA — idem toggleScreenShare acima: guarda a
       // stream de áudio da fonte NOVA (pra quem entrar depois reaproveitar
       // o mesmo .id) e avisa a sala com os dois ids já resolvidos, não só

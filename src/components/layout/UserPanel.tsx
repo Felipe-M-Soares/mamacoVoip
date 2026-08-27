@@ -179,6 +179,7 @@ function HudSquareButton({
     <button
       onClick={onClick}
       title={title}
+      aria-label={title}
       className={`aspect-square rounded-md flex items-center justify-center transition-colors ${
         active
           ? 'bg-discord-blurple/20 text-discord-blurple hover:bg-discord-blurple/30'
@@ -247,6 +248,7 @@ function VoiceHud() {
         <button
           onClick={voice.leave}
           title="Desconectar"
+          aria-label="Desconectar"
           className="w-8 h-8 rounded-full flex items-center justify-center text-discord-text-muted hover:bg-red-500/10 hover:text-red-400 transition-colors shrink-0"
         >
           <PhoneHangupIcon className="w-4 h-4" />
@@ -370,6 +372,7 @@ export function UserPanel() {
       <div className="relative shrink-0" ref={micMenuRef}>
         <button
           title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
+          aria-label={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
           onClick={voice.toggleMute}
           className={`w-9 h-9 rounded flex items-center justify-center transition-colors ${
             voice.deafened || voice.muted ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
@@ -379,6 +382,7 @@ export function UserPanel() {
         </button>
         <button
           title="Configurações de microfone"
+          aria-label="Configurações de microfone"
           onClick={(e) => {
             e.stopPropagation()
             setMicMenuOpen((v) => !v)
@@ -424,6 +428,7 @@ export function UserPanel() {
       <div className="relative shrink-0" ref={headphoneMenuRef}>
         <button
           title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
+          aria-label={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
           onClick={voice.toggleDeafen}
           className={`w-9 h-9 rounded flex items-center justify-center transition-colors ${
             voice.deafened ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
@@ -433,6 +438,7 @@ export function UserPanel() {
         </button>
         <button
           title="Configurações de áudio"
+          aria-label="Configurações de áudio"
           onClick={(e) => {
             e.stopPropagation()
             setHeadphoneMenuOpen((v) => !v)
@@ -486,6 +492,7 @@ export function UserPanel() {
 
       <button
         title="Configurações"
+        aria-label="Configurações"
         onClick={() => setShowSettings(true)}
         className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors shrink-0"
       >

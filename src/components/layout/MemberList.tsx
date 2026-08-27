@@ -94,6 +94,7 @@ export function MemberList({
           <button
             onClick={() => setManagingProfile(member.profile)}
             title="Gerenciar membro"
+            aria-label="Gerenciar membro"
             className="hidden group-hover:block text-discord-text-muted hover:text-white shrink-0"
           >
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">

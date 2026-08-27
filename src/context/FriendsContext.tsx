@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { notify } from '../lib/notifications'
+import { rateLimitError } from '../lib/rateLimit'
 import type { BlockedUser, Friendship, Profile } from '../types/database'
 
 export type FriendshipWithProfile = Friendship & { profile: Profile }
@@ -124,6 +125,11 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
   }, [user, refresh])
 
   async function sendRequest(username: string, note?: string) {
+    // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
+    // flood acidental — bem mais apertado que o de mensagem, já que
+    // mandar pedido de amizade é algo raro de fazer repetidamente rápido.
+    const limited = rateLimitError(`friend-request:${user?.id ?? 'anon'}`, 5, 60_000, 'você está mandando pedido de amizade')
+    if (limited) return { error: limited }
     const { error } = await supabase.rpc('send_friend_request', { p_username: username, p_note: note ?? null })
     if (!error) await refresh()
     return { error: error?.message ?? null }

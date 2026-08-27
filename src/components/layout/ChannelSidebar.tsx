@@ -272,6 +272,7 @@ function ChannelRow({
         <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
           <button
             title="Mover para cima"
+            aria-label="Mover canal para cima"
             onClick={(e) => {
               e.stopPropagation()
               onMoveUp()
@@ -284,6 +285,7 @@ function ChannelRow({
           </button>
           <button
             title="Mover para baixo"
+            aria-label="Mover canal para baixo"
             onClick={(e) => {
               e.stopPropagation()
               onMoveDown()
@@ -296,6 +298,7 @@ function ChannelRow({
           </button>
           <button
             title="Editar canal"
+            aria-label="Editar canal"
             onClick={(e) => {
               e.stopPropagation()
               onEdit()
@@ -631,6 +634,7 @@ export function ChannelSidebar({
                   <div className="hidden group-hover/category:flex items-center gap-1 shrink-0">
                     <button
                       title="Mover categoria para cima"
+                      aria-label="Mover categoria para cima"
                       onClick={(e) => {
                         e.stopPropagation()
                         moveCategory(category.id, 'up')
@@ -643,6 +647,7 @@ export function ChannelSidebar({
                     </button>
                     <button
                       title="Mover categoria para baixo"
+                      aria-label="Mover categoria para baixo"
                       onClick={(e) => {
                         e.stopPropagation()
                         moveCategory(category.id, 'down')
@@ -655,6 +660,7 @@ export function ChannelSidebar({
                     </button>
                     <button
                       title="Criar canal nesta categoria"
+                      aria-label="Criar canal nesta categoria"
                       onClick={(e) => {
                         e.stopPropagation()
                         setShowCreateChannel({ categoryId: category.id })

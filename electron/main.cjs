@@ -106,6 +106,25 @@ const isDev = !app.isPackaged
 // falhar sozinha.
 process.on('uncaughtException', (err) => {
   console.error('Erro não tratado no processo principal:', err)
+  // DÉCIMA SÉTIMA RODADA: além do console (que ninguém vê num app
+  // empacotado — foi exatamente esse o motivo de existir o log em
+  // arquivo abaixo, appendDebugLog), grava aqui também. `appendDebugLog`
+  // é uma DECLARAÇÃO de função (não uma const/arrow), então já está
+  // disponível aqui mesmo definida mais abaixo no arquivo — só importa
+  // que os dois já existam quando um erro de verdade acontecer em
+  // tempo de execução, o que sempre é depois do script inteiro já ter
+  // rodado uma vez.
+  appendDebugLog('main:uncaughtException', `${err?.message ?? err}\n${err?.stack ?? ''}`)
+})
+
+// Antes só existia o de cima (uncaughtException) — uma Promise rejeitada
+// sem .catch() no processo principal NÃO dispara esse evento, dispara
+// este aqui (unhandledRejection), que não existia. Mesmo tratamento:
+// não derruba o processo, só registra pra dar pra diagnosticar depois.
+process.on('unhandledRejection', (reason) => {
+  console.error('Promise rejeitada sem tratamento no processo principal:', reason)
+  const detail = reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason)
+  appendDebugLog('main:unhandledRejection', detail)
 })
 
 // ============================================================

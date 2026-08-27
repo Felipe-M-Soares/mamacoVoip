@@ -268,3 +268,79 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
 
   return { setInputTrack, setSensitivity, setSensitivityDb, sampleLevelDb, destroy }
 }
+
+// DÉCIMA SÉTIMA RODADA — o mesmo motor (RNNoise) do microfone, aplicado
+// agora no ÁUDIO DA TRANSMISSÃO DE TELA (som do jogo/sistema), pra
+// resolver um chiado/estática CONSTANTE relatado numa transmissão via
+// captura por processo (WASAPI "process loopback" — ver
+// process-audio-capture.exe): revisando o código nativo, não achamos
+// nenhum bug óbvio de lá causando isso — é uma limitação conhecida
+// dessa API específica do Windows em algumas máquinas/drivers, não algo
+// que dê pra "consertar" na captura em si. RNNoise é bom exatamente
+// nesse tipo de ruído CONTÍNUO (ver o comentário grande no topo deste
+// arquivo), então reaproveitá-lo aqui é razoável — mas montado bem
+// diferente do microfone:
+//   - SEM o "gate": o gate corta o áudio inteiro quando o volume cai
+//     abaixo de um limiar — ótimo pra voz (silêncio entre frases), mas
+//     errado pra som de jogo/música, que tem trechos baixos/silenciosos
+//     LEGÍTIMOS que não deveriam ser cortados.
+//   - EM ESTÉREO de verdade (maxChannels: 2, documentado pelo pacote —
+//     processa os dois canais como duas instâncias RNNoise
+//     independentes, uma por canal) em vez de forçar mono como o
+//     microfone faz — preserva a separação espacial do jogo, que
+//     importa pro som ficar bom (é o mesmo motivo da correção de SDP em
+//     sdpStereo.ts, que força a=fmtp;stereo=1 pra essa track).
+export interface ScreenAudioDenoiser {
+  setInputTrack: (rawTrack: MediaStreamTrack) => MediaStreamTrack
+  destroy: () => void
+}
+
+export async function createScreenAudioDenoiser(): Promise<ScreenAudioDenoiser> {
+  const audioContext = new AudioContext({ sampleRate: 48000 })
+  const wasmBinary = await getWasmBinary()
+  await audioContext.audioWorklet.addModule(rnnoiseWorkletPath)
+
+  let source: MediaStreamAudioSourceNode | null = null
+  let rnnoiseNode: RnnoiseWorkletNode | null = null
+  const destination = audioContext.createMediaStreamDestination()
+
+  function setInputTrack(rawTrack: MediaStreamTrack): MediaStreamTrack {
+    try {
+      source?.disconnect()
+    } catch {
+      // já desconectado — sem problema
+    }
+    try {
+      rnnoiseNode?.disconnect()
+      rnnoiseNode?.destroy()
+    } catch {
+      // já destruído — sem problema
+    }
+    source = audioContext.createMediaStreamSource(new MediaStream([rawTrack]))
+    rnnoiseNode = new RnnoiseWorkletNode(audioContext, { wasmBinary, maxChannels: 2 })
+    source.connect(rnnoiseNode)
+    rnnoiseNode.connect(destination)
+    return destination.stream.getAudioTracks()[0]
+  }
+
+  function destroy() {
+    try {
+      source?.disconnect()
+    } catch {
+      // já desconectado — sem problema
+    }
+    try {
+      rnnoiseNode?.disconnect()
+      rnnoiseNode?.destroy()
+    } catch {
+      // já destruído — sem problema
+    }
+    source = null
+    rnnoiseNode = null
+    audioContext.close().catch(() => {
+      // já fechado — sem problema
+    })
+  }
+
+  return { setInputTrack, destroy }
+}

@@ -764,6 +764,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // de fora de propósito, então precisa desse ID pra saber ONDE mexer
   // sem afetar a voz.
   const screenAudioTrackIdRef = useRef<string | null>(null)
+  // DÉCIMA QUINTA RODADA — a MediaStream (não só a track) que carrega o
+  // áudio da transmissão de tela ATUAL, seja qual for a origem (captura
+  // por processo via appAudioPlayerRef.current.stream, ou áudio de
+  // sistema via `new MediaStream([systemAudioTrack])` em
+  // toggleScreenShare/switchScreenShareSource). Guardar essa referência
+  // aqui — em vez de deixar createPeerConnection construir uma
+  // MediaStream NOVA a cada peer que entra depois (como acontecia antes)
+  // — garante que o .id enviado a todo mundo via broadcastScreenMeta seja
+  // sempre O MESMO, não importa quantos peers já existiam ou entraram
+  // depois: sem isso, cada `new MediaStream([track])` gerava um id
+  // diferente, e o broadcast (que é um só, pra sala toda) só podia
+  // acertar quem recebesse por último.
+  const screenAudioSourceStreamRef = useRef<MediaStream | null>(null)
   // A track de áudio dentro de `localStreamRef` passa a ser a track JÁ
   // TRATADA pelo RNNoise (quando ativo), não mais a track crua do
   // dispositivo — então precisamos guardar a crua separadamente aqui só
@@ -798,6 +811,27 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // vindo do broadcast 'screen-meta' pra saber qual stream.id é a tela.
   const rawStreamsRef = useRef<Map<string, Map<string, MediaStream>>>(new Map())
   const screenStreamIdsRef = useRef<Map<string, string>>(new Map())
+  // DÉCIMA QUINTA RODADA — o áudio da transmissão de tela (som do
+  // jogo/sistema, capturado à parte — ver appAudioTrackRef/
+  // systemAudioTrackRef) sempre viajou numa MediaStream SEPARADA da de
+  // vídeo (audioSourceStream, com .id próprio, diferente do stream.id de
+  // screenStreamRef.current). O broadcast 'screen-meta' avisava só o
+  // stream.id do VÍDEO — o lado que recebe nunca tinha como saber que
+  // aquela outra stream de áudio que chegou também era da tela
+  // compartilhada, e ela caía direto no `else if (!cameraStream)` de
+  // recomputeParticipant, sendo tratada (errado) como se fosse
+  // webcam. Resultado: screenStream nunca tinha uma track de áudio pra
+  // NINGUÉM que estivesse assistindo, não importa o quão bem a captura
+  // local tivesse funcionado — a causa raiz de "transmissão muda pros
+  // outros". Este par de Maps é o espelho, do lado de quem recebe, do
+  // screenAudioSourceStreamRef abaixo: guarda qual stream.id (por peer)
+  // é o ÁUDIO da tela, e o resultado combinado (vídeo+áudio) já pronto
+  // pra não recriar a MediaStream toda vez que uma nova track chega (ver
+  // combineScreenStream mais abaixo).
+  const screenAudioStreamIdsRef = useRef<Map<string, string>>(new Map())
+  const combinedScreenStreamsRef = useRef<
+    Map<string, { stream: MediaStream; videoTrackId: string | null; audioTrackId: string | null }>
+  >(new Map())
   // Cancela a inscrição em onWatchedProcessExited usada pra auto-parar o
   // compartilhamento de TELA CHEIA quando o jogo/app fecha (ver
   // screenShareGameHint.ts e toggleScreenShare abaixo). Só existe
@@ -1259,10 +1293,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // específico) qual é o stream.id da MINHA tela compartilhada agora —
   // ou null quando paro. É esse aviso explícito que os outros usam pra
   // saber, com certeza, qual das minhas streams é a tela.
-  function broadcastScreenMeta(screenStreamId: string | null) {
+  //
+  // DÉCIMA QUINTA RODADA: agora também carrega o stream.id do ÁUDIO da
+  // transmissão (screenAudioStreamId), quando tiver — ver o comentário
+  // grande em screenAudioStreamIdsRef acima pro porquê disso ser
+  // necessário (sem isso, o áudio nunca chegava marcado como "da tela"
+  // do lado de quem recebe). `null` cobre tanto "ainda não resolvi o
+  // áudio" (chamada inicial, só com o vídeo) quanto "essa transmissão não
+  // tem áudio mesmo".
+  function broadcastScreenMeta(screenStreamId: string | null, screenAudioStreamId: string | null = null) {
     const from = userIdRef.current
     if (!realtimeRef.current || !from) return
-    realtimeRef.current.send({ type: 'broadcast', event: 'screen-meta', payload: { from, screenStreamId } })
+    realtimeRef.current.send({
+      type: 'broadcast',
+      event: 'screen-meta',
+      payload: { from, screenStreamId, screenAudioStreamId },
+    })
   }
 
   // Toca um efeito do soundboard localmente — igual o Discord, o áudio
@@ -1296,19 +1342,56 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // DÉCIMA QUINTA RODADA — combina a stream de VÍDEO da tela com a stream
+  // de ÁUDIO da tela (duas MediaStreams distintas do lado de quem
+  // compartilha — ver screenAudioSourceStreamRef) numa única MediaStream
+  // pronta pra UI tocar (<video>/<audio> só entendem uma stream por vez
+  // pra exibir os dois juntos com controle de volume). Memoiza por peer
+  // (videoTrackId/audioTrackId) pra não recriar a MediaStream — e com
+  // ela, reiniciar o elemento <video> que depende da identidade do
+  // objeto — toda vez que `recomputeParticipant` roda de novo (ex.: cada
+  // `ontrack`) sem a track de vídeo ou de áudio ter mudado de verdade.
+  // Quando só uma das duas existir (o caso mais comum: uma track chega
+  // antes da outra), usa a própria stream original em vez de criar uma
+  // combinada só com uma track — assim que a outra chegar, essa função
+  // roda de novo e monta a combinada de verdade.
+  function combineScreenStream(peerId: string, videoStream: MediaStream | null, audioStream: MediaStream | null): MediaStream {
+    const videoTrack = videoStream?.getVideoTracks()[0] ?? null
+    const audioTrack = audioStream?.getAudioTracks()[0] ?? null
+    const videoTrackId = videoTrack?.id ?? null
+    const audioTrackId = audioTrack?.id ?? null
+    const cached = combinedScreenStreamsRef.current.get(peerId)
+    if (cached && cached.videoTrackId === videoTrackId && cached.audioTrackId === audioTrackId) {
+      return cached.stream
+    }
+    const combined = videoTrack && audioTrack ? new MediaStream([videoTrack, audioTrack]) : (videoStream ?? audioStream)!
+    combinedScreenStreamsRef.current.set(peerId, { stream: combined, videoTrackId, audioTrackId })
+    return combined
+  }
+
   // Recalcula cameraStream/screenStream de um peer a partir de TODAS as
   // streams já recebidas dele + o mapeamento de qual stream.id é tela
   // (vindo do broadcast). Funciona não importa a ordem de chegada.
+  //
+  // DÉCIMA QUINTA RODADA: agora também reconhece a stream de ÁUDIO da
+  // tela (screenAudioId, vindo do mesmo broadcast — ver
+  // screenAudioStreamIdsRef acima) e a combina com a de vídeo em vez de
+  // deixá-la cair no `else if (!cameraStream)` de baixo, onde virava
+  // (errado) uma suposta stream de webcam.
   function recomputeParticipant(peerId: string) {
     const streams = rawStreamsRef.current.get(peerId)
     if (!streams || streams.size === 0) return
     const screenId = screenStreamIdsRef.current.get(peerId)
+    const screenAudioId = screenAudioStreamIdsRef.current.get(peerId)
     let cameraStream: MediaStream | null = null
-    let screenStream: MediaStream | null = null
+    let screenVideoStream: MediaStream | null = null
+    let screenAudioStream: MediaStream | null = null
     streams.forEach((s, id) => {
-      if (screenId && id === screenId) screenStream = s
+      if (screenId && id === screenId) screenVideoStream = s
+      else if (screenAudioId && id === screenAudioId) screenAudioStream = s
       else if (!cameraStream) cameraStream = s
     })
+    const screenStream = screenVideoStream || screenAudioStream ? combineScreenStream(peerId, screenVideoStream, screenAudioStream) : null
     setParticipants((prev) => ({
       ...prev,
       [peerId]: {
@@ -1417,9 +1500,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // estava na call no momento em que a transmissão começou/trocou.
     const activeScreenAudioTrack = appAudioTrackRef.current ?? systemAudioTrackRef.current
     if (activeScreenAudioTrack && activeScreenAudioTrack.readyState !== 'ended') {
-      const audioSourceStream = appAudioTrackRef.current
-        ? appAudioPlayerRef.current?.stream ?? new MediaStream([activeScreenAudioTrack])
-        : new MediaStream([activeScreenAudioTrack])
+      // DÉCIMA QUINTA RODADA: usa screenAudioSourceStreamRef (a MESMA
+      // MediaStream, com o MESMO .id, que já foi anunciada via
+      // broadcastScreenMeta pra sala toda) em vez de construir uma
+      // `new MediaStream([...])` aqui — que antes gerava um .id
+      // DIFERENTE a cada peer que entrasse depois da transmissão já
+      // rolando, e o broadcast (um só, pra sala toda) só podia acertar
+      // um deles. O fallback só existe pra nunca ficar sem enviar áudio
+      // nenhum no caso (não deveria acontecer) dessa referência ainda
+      // não estar setada.
+      const audioSourceStream =
+        screenAudioSourceStreamRef.current ??
+        (appAudioTrackRef.current
+          ? appAudioPlayerRef.current?.stream ?? new MediaStream([activeScreenAudioTrack])
+          : new MediaStream([activeScreenAudioTrack]))
       const audioSender = pc.addTrack(activeScreenAudioTrack, audioSourceStream)
       const audioParams = audioSender.getParameters()
       audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
@@ -1515,6 +1609,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     lastAboveThresholdRef.current.delete(peerId)
     rawStreamsRef.current.delete(peerId)
     screenStreamIdsRef.current.delete(peerId)
+    screenAudioStreamIdsRef.current.delete(peerId)
+    combinedScreenStreamsRef.current.delete(peerId)
     screenSendersRef.current.delete(peerId)
     audioSendersRef.current.delete(peerId)
     setParticipants((prev) => {
@@ -1575,9 +1671,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       rt.on('broadcast', { event: 'rtc' }, ({ payload }) => handleSignal(payload as SignalPayload))
 
       rt.on('broadcast', { event: 'screen-meta' }, ({ payload }) => {
-        const { from, screenStreamId } = payload as { from: string; screenStreamId: string | null }
+        const { from, screenStreamId, screenAudioStreamId } = payload as {
+          from: string
+          screenStreamId: string | null
+          screenAudioStreamId?: string | null
+        }
         if (screenStreamId) screenStreamIdsRef.current.set(from, screenStreamId)
         else screenStreamIdsRef.current.delete(from)
+        if (screenAudioStreamId) screenAudioStreamIdsRef.current.set(from, screenAudioStreamId)
+        else screenAudioStreamIdsRef.current.delete(from)
         recomputeParticipant(from)
       })
 
@@ -1644,7 +1746,35 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // aviso original (broadcast não guarda histórico) — reenvia
         // sempre que alguém novo aparece na sala.
         if (hasNewPeer && screenStreamRef.current) {
-          broadcastScreenMeta(screenStreamRef.current.id)
+          // DÉCIMA SEXTA RODADA — bug relatado: quem entra na call
+          // enquanto alguém já está compartilhando tela não vê a
+          // transmissão, a menos que a pessoa pare e comece de novo.
+          // Esse broadcast aqui é a ÚNICA vez que a sala reenvia
+          // screen-meta pra quem acabou de chegar (a mensagem original,
+          // de quando a transmissão começou, não fica guardada em
+          // lugar nenhum — broadcast não tem histórico). É
+          // "fire-and-forget", sem confirmação de entrega: o Supabase
+          // Realtime pode descartar uma mensagem de broadcast mandada
+          // bem no instante em que alguém acabou de entrar no canal — o
+          // socket do recém-chegado já aparece no presence (por isso
+          // `hasNewPeer` fica true e a gente tenta mandar), mas o lado
+          // de RECEBER broadcast desse mesmo socket pode ainda não
+          // estar 100% pronto um instante depois da inscrição, e
+          // nenhum erro chega até aqui pra avisar que isso aconteceu.
+          // Reiniciar a transmissão sempre "conserta" porque manda um
+          // broadcast novo bem mais tarde, quando a conexão já assentou
+          // de sobra. Em vez de confiar numa mensagem só, reenvia mais
+          // duas vezes nos segundos seguintes — não tem custo nenhum
+          // reenviar (quem recebe só sobrescreve com o mesmo valor e
+          // recalcula o participante de novo), e cobre a janela inteira
+          // em que esse tipo de perda costuma acontecer.
+          const resendScreenMeta = () => {
+            if (!screenStreamRef.current) return
+            broadcastScreenMeta(screenStreamRef.current.id, screenAudioSourceStreamRef.current?.id ?? null)
+          }
+          resendScreenMeta()
+          window.setTimeout(resendScreenMeta, 1500)
+          window.setTimeout(resendScreenMeta, 4000)
         }
       })
 
@@ -2040,9 +2170,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
     screenStreamRef.current = null
     screenAudioTrackIdRef.current = null
+    screenAudioSourceStreamRef.current = null
     setLocalScreenStream(null)
     setScreenSharing(false)
-    broadcastScreenMeta(null)
+    broadcastScreenMeta(null, null)
 
     // Desliga o vigia de foco do jogo (se estava ativo) e limpa tudo que
     // ele usava — senão o processo do PowerShell continuaria rodando à
@@ -2205,6 +2336,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           audioSendersRef.current.set(peerId, audioSender)
         }
       })
+      // DÉCIMA QUINTA RODADA — guarda a MediaStream de áudio (pra
+      // createPeerConnection reaproveitar o MESMO .id com quem entrar
+      // depois — ver o comentário grande em screenAudioSourceStreamRef) e
+      // reenvia o broadcast agora com o .id do áudio, já resolvido. O
+      // broadcast lá em cima (logo depois de captureScreenShareStream)
+      // saiu só com o vídeo — nesse momento a captura de áudio ainda nem
+      // tinha começado — então esse segundo envio é o que finalmente
+      // avisa a sala que a stream de áudio X é a mesma tela; sem ele,
+      // recomputeParticipant nunca teria como saber disso e a track de
+      // áudio caía como se fosse webcam (o bug original desta rodada).
+      screenAudioSourceStreamRef.current = audioTrack ? audioSourceStream : null
+      broadcastScreenMeta(stream.id, audioTrack ? audioSourceStream.id : null)
       setScreenSharing(true)
 
       // Mitigação de vazamento pro caso "compartilhar seu jogo" em tela
@@ -2446,10 +2589,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setLocalScreenStream(newStream)
       realScreenVideoTrackRef.current = newVideoTrack
       screenAudioTrackIdRef.current = newAudioTrack?.id ?? null
+      // DÉCIMA QUINTA RODADA — idem toggleScreenShare acima: guarda a
+      // stream de áudio da fonte NOVA (pra quem entrar depois reaproveitar
+      // o mesmo .id) e avisa a sala com os dois ids já resolvidos, não só
+      // o de vídeo.
+      screenAudioSourceStreamRef.current = newAudioTrack ? audioSourceStream : null
       newVideoTrack.onended = () => {
         stopScreenShareState()
       }
-      broadcastScreenMeta(newStream.id)
+      broadcastScreenMeta(newStream.id, newAudioTrack ? audioSourceStream.id : null)
 
       // Mesmo par de mitigações de "compartilhar seu jogo" em tela cheia
       // do toggleScreenShare acima, agora pra a fonte NOVA — ver os

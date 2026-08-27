@@ -891,7 +891,7 @@ export function VoiceChannelView({
             </button>
 
             <button
-              onClick={voice.toggleScreenShare}
+              onClick={() => voice.toggleScreenShare()}
               title={voice.screenSharing ? 'Parar compartilhamento' : 'Compartilhar tela'}
               className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
                 voice.screenSharing ? 'bg-discord-blurple text-white' : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'

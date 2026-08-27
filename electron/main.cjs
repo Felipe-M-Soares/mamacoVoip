@@ -108,6 +108,33 @@ process.on('uncaughtException', (err) => {
   console.error('Erro não tratado no processo principal:', err)
 })
 
+// ============================================================
+// DÉCIMA QUARTA RODADA — log em ARQUIVO, sem depender do DevTools.
+// Motivo direto: pedi pra abrir o DevTools (Ctrl+Shift+I) pra ver por
+// que a captura de áudio (por processo OU a reserva de sistema) estava
+// falhando muda, e a resposta foi "não tem como, o app é instalado no
+// PC" — ou seja, a pessoa nem sabia que dava pra abrir DevTools num app
+// Electron empacotado (e o atalho de teclado pode nem chegar até a
+// janela certa se outra janela — o próprio jogo — estiver em foco, ver
+// o item "Ferramentas do desenvolvedor" na bandeja e o atalho GLOBAL
+// registrados mais abaixo). Um arquivo de log simples remove essa
+// dependência inteira: só precisa abrir um .txt no Bloco de Notas.
+// Grava tanto o que o processo PRINCIPAL sabe (spawn do
+// process-audio-capture.exe, formato/erro reportado por ele) quanto o
+// que o RENDERER sabe (ver window.electronAPI.logDebug em preload.cjs e
+// os pontos de uso em VoiceContext.tsx) — tudo no mesmo arquivo, em
+// ordem, pra dar o quadro completo de uma tentativa de compartilhamento
+// sem precisar cruzar dois lugares diferentes.
+const debugLogPath = path.join(app.getPath('userData'), 'mamacos-debug.log')
+function appendDebugLog(source, message) {
+  try {
+    require('node:fs').appendFileSync(debugLogPath, `[${new Date().toISOString()}] [${source}] ${message}\n`)
+  } catch {
+    // Sem essa pasta gravável, ou disco cheio — não é crítico o
+    // suficiente pra incomodar quem está usando o app com isso.
+  }
+}
+
 // URL/arquivo que o app tem permissão de carregar — qualquer tentativa
 // de navegar pra outro lugar (ex: um link malicioso injetado de algum
 // jeito) é bloqueada e reaberta no navegador do sistema em vez de
@@ -1324,6 +1351,17 @@ function createTray(win) {
         win.webContents.toggleDevTools()
       },
     },
+    // Caminho AINDA mais simples que o DevTools pro mesmo diagnóstico —
+    // ver o log em arquivo (appendDebugLog) perto do topo do arquivo:
+    // só abre a pasta onde o mamacos-debug.log fica, pra abrir ele num
+    // Bloco de Notas qualquer, sem precisar entender nada de DevTools/
+    // Console.
+    {
+      label: 'Abrir pasta de logs',
+      click: () => {
+        shell.showItemInFolder(debugLogPath)
+      },
+    },
     { type: 'separator' },
     {
       label: 'Sair',
@@ -1947,14 +1985,17 @@ app.whenReady().then(() => {
 
   function startProcessAudioCapture(pid) {
     stopProcessAudioCapture()
+    appendDebugLog('main', `startProcessAudioCapture: pedido pra pid=${pid}`)
     if (process.platform !== 'win32') {
       return { ok: false, error: 'Captura de áudio por processo só existe no Windows.' }
     }
     if (!pid || !Number.isFinite(pid) || pid <= 0) {
+      appendDebugLog('main', `startProcessAudioCapture: pid inválido (${pid})`)
       return { ok: false, error: 'PID inválido.' }
     }
     const exePath = resolveProcessAudioCaptureExePath()
     if (!require('node:fs').existsSync(exePath)) {
+      appendDebugLog('main', `startProcessAudioCapture: exe não encontrado em ${exePath}`)
       return {
         ok: false,
         error:
@@ -1964,6 +2005,7 @@ app.whenReady().then(() => {
     try {
       const proc = spawn(exePath, [String(pid)], { windowsHide: true })
       processAudioCaptureProc = proc
+      appendDebugLog('main', `startProcessAudioCapture: spawn ok (exe=${exePath}, pid=${pid})`)
 
       proc.stdout.on('data', (chunk) => {
         if (!processAudioHeaderParsed) {
@@ -1976,6 +2018,7 @@ app.whenReady().then(() => {
 
           const magic = header.readUInt32LE(0)
           if (magic !== 0x4d43504c) {
+            appendDebugLog('main', `startProcessAudioCapture: cabeçalho com magic inesperado (0x${magic.toString(16)})`)
             mainWindow?.webContents.send('process-audio:error', 'Formato de cabeçalho inesperado.')
             stopProcessAudioCapture()
             return
@@ -1983,6 +2026,10 @@ app.whenReady().then(() => {
           const sampleRate = header.readUInt32LE(4)
           const channels = header.readUInt16LE(8)
           const sampleFormat = header.readUInt16LE(10) === 2 ? 'int16' : 'float32'
+          appendDebugLog(
+            'main',
+            `startProcessAudioCapture: formato confirmado (sampleRate=${sampleRate}, channels=${channels}, sampleFormat=${sampleFormat})`
+          )
           mainWindow?.webContents.send('process-audio:format', { sampleRate, channels, sampleFormat })
 
           if (rest.length > 0) {
@@ -2007,27 +2054,42 @@ app.whenReady().then(() => {
           const line = stderrBuffer.slice(0, newlineIndex).trim()
           stderrBuffer = stderrBuffer.slice(newlineIndex + 1)
           if (line.startsWith('ERROR')) {
+            appendDebugLog('main', `startProcessAudioCapture: capture.cpp reportou erro — ${line}`)
             mainWindow?.webContents.send('process-audio:error', line.replace(/^ERROR\s*/, ''))
+          } else if (line.startsWith('STATUS')) {
+            // Só pra esse log de diagnóstico — não precisa incomodar
+            // quem está usando com isso (ver comentário original acima).
+            appendDebugLog('main', `startProcessAudioCapture: ${line}`)
           }
         }
       })
 
       proc.on('error', (err) => {
+        appendDebugLog('main', `startProcessAudioCapture: evento 'error' do processo — ${err?.message}`)
         mainWindow?.webContents.send('process-audio:error', err?.message || 'Falha ao iniciar a captura de áudio.')
         processAudioCaptureProc = null
       })
-      proc.on('exit', () => {
+      proc.on('exit', (code, signal) => {
+        appendDebugLog('main', `startProcessAudioCapture: processo encerrou (code=${code}, signal=${signal})`)
         if (processAudioCaptureProc === proc) processAudioCaptureProc = null
       })
 
       return { ok: true }
     } catch (err) {
+      appendDebugLog('main', `startProcessAudioCapture: exceção ao dar spawn — ${err?.message}`)
       return { ok: false, error: err?.message || 'Falha desconhecida ao iniciar a captura.' }
     }
   }
 
   ipcMain.handle('process-audio:start', (_event, pid) => startProcessAudioCapture(pid))
   ipcMain.handle('process-audio:stop', () => stopProcessAudioCapture())
+
+  // Ver o bloco grande "DÉCIMA QUARTA RODADA" perto do topo do arquivo —
+  // deixa o RENDERER (VoiceContext.tsx) escrever no mesmo arquivo de log
+  // que o processo principal já usa, sem depender do DevTools.
+  ipcMain.on('debug:log', (_event, message) => {
+    appendDebugLog('renderer', String(message))
+  })
 
   // --- Push-to-talk global -----------------------------------------
   let pttGlobalKeycode = null

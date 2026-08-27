@@ -135,6 +135,12 @@ declare global {
       // AuthContext.tsx (signInWithGoogle) e o bloco grande no topo de
       // electron/main.cjs.
       onGoogleAuthCallback: (callback: (url: string) => void) => () => void
+      // Log em arquivo (mamacos-debug.log, na pasta de dados do app) —
+      // ver o bloco grande perto do topo de electron/main.cjs. Existe
+      // pra diagnosticar problemas à distância sem depender do DevTools
+      // (nem sempre óbvio como abrir, ou alcançável por atalho de
+      // teclado, num app empacotado).
+      logDebug: (message: string) => void
     }
   }
 }

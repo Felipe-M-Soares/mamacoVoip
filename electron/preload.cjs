@@ -99,4 +99,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('google-auth-callback', handler)
     return () => ipcRenderer.removeListener('google-auth-callback', handler)
   },
+  // DÉCIMA QUARTA RODADA: log em arquivo, sem depender do DevTools — ver
+  // o bloco grande perto do topo de electron/main.cjs (appendDebugLog) e
+  // os pontos de uso em VoiceContext.tsx. `send` (fire-and-forget) em
+  // vez de `invoke` de propósito — logar nunca deve fazer quem chama
+  // esperar nem falhar por causa disso.
+  logDebug: (message) => ipcRenderer.send('debug:log', message),
 })

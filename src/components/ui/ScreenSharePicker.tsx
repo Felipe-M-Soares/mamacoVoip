@@ -4,6 +4,7 @@ import { setPendingGameShareHint } from '../../lib/screenShareGameHint'
 import { setPendingAppAudioPid } from '../../lib/pendingAppAudioCapture'
 import { subscribeScreenSharePicker, resolveScreenSharePicker } from '../../lib/screenSharePickerBridge'
 import { QUALITY_PRESETS, loadQuality } from '../../hooks/useScreenShareQuality'
+import { armScreenShareChoice } from '../../lib/chooseScreenShareSource'
 
 // Versão enxuta: só o essencial — as fontes agrupadas por categoria
 // (Jogo / Tela cheia / Janela). Sem parágrafo de explicação por card — a
@@ -52,6 +53,11 @@ export function ScreenSharePicker() {
   }, [])
 
   if (!sources) return null
+  // TypeScript não propaga o `if (!sources) return null` acima pra
+  // dentro de `choose` (uma função aninhada, fechamento separado) —
+  // essa constante com tipo explícito (não-nulo) resolve isso sem
+  // precisar de `!` no meio do código.
+  const confirmedSources: ScreenShareSource[] = sources
 
   // Prioriza uma JANELA exata quando existe; só cai pro fallback de TELA
   // CHEIA (isGameDisplay) quando não tem janela capturável pro jogo —
@@ -65,60 +71,22 @@ export function ScreenSharePicker() {
 
   const currentQualityPreset = QUALITY_PRESETS[loadQuality()]
 
-  // PID resolvido pra cada escolha possível — qualquer Janela usa o
-  // próprio source.pid (mapa por HWND/título, ver electron/main.cjs).
-  // Telas inteiras normalmente NUNCA têm PID (podem ter vários processos
-  // desenhando nela) — EXCETO o card "Jogo" quando ele caiu no fallback
-  // de tela cheia (gameCard.type === 'screen', ver electron/main.cjs):
-  // nesse caso a gente SABE qual processo é o jogo (windowInfo.pid, o
-  // mesmo PID descoberto pra decidir em qual monitor sugerir a tela) —
-  // mesmo sem dar pra capturar a JANELA dele (jogo em modo tela cheia
-  // exclusiva/flip-model, sem janela composta pro Windows fotografar),
-  // ainda dá pra isolar o ÁUDIO por processo normalmente, porque a
-  // captura de áudio (ver "Captura de áudio por processo" em
-  // VoiceContext.tsx) não tem NENHUMA relação com como o vídeo foi
-  // capturado — só precisa do PID. Sem este caso aqui, jogos assim
-  // (comuns — qualquer um com DirectX em modo "flip") sempre caíam pro
-  // áudio de todo o sistema mesmo quando dava pra isolar só o jogo.
-  function pidForChoice(id: string | null): number | null {
-    if (!id) return null
-    if (gameCard && id === gameCard.id) return suggestion?.pid ?? null
-    return windows.find((w) => w.id === id)?.pid ?? null
-  }
-  // Só pra diagnóstico (ver pendingAppAudioCapture.ts) — diz se a gente
-  // ESPERAVA conseguir um PID pra essa escolha (janela normal, ou o card
-  // "Jogo" nos dois formatos — janela ou tela cheia). Se for uma dessas
-  // e mesmo assim `pid` vier nulo, é sinal de que a descoberta do
-  // processo falhou, e isso deve virar um aviso pra quem está usando,
-  // em vez de cair silenciosamente pro áudio de sistema sem pista
-  // nenhuma do motivo.
-  function pidExpected(id: string | null): boolean {
-    if (!id) return false
-    if (gameCard && id === gameCard.id) return true
-    return windows.some((w) => w.id === id)
-  }
-
+  // DÉCIMA QUARTA RODADA: a lógica de "qual PID usar pra essa escolha, e
+  // qual recado deixar pro fechamento automático" (antes vivia só aqui,
+  // duplicada em pidForChoice/pidExpected) agora é compartilhada com
+  // GameDetectedToast.tsx (o atalho "Compartilhar tela" do aviso
+  // "Jogando X!") via armScreenShareChoice — ver o comentário grande em
+  // src/lib/chooseScreenShareSource.ts pro porquê.
   function choose(id: string | null, viaGameShortcut?: { processNames: string[]; label: string }) {
-    // O recado só faz sentido pro atalho "Jogo" caindo no fallback de
-    // TELA CHEIA (sem janela própria pra detectar o fechamento sozinha —
-    // ver screenShareGameHint.ts). Qualquer outra escolha (grade normal)
-    // limpa esse recado, defensivo — evita um auto-stop errado "vazando"
-    // pra uma captura sem relação com ele.
-    setPendingGameShareHint(viaGameShortcut && gameCard?.type === 'screen' ? viaGameShortcut : null)
-    // Automático, sem checkbox nenhum: se der pra saber o processo dono
-    // da janela escolhida (ou do jogo, mesmo quando ele só pôde ser
-    // resolvido como tela cheia — ver pidForChoice acima), tenta
-    // capturar o áudio só dele — senão (tela cheia comum, ou não deu
-    // pra descobrir o PID), fica por conta do áudio de sistema
-    // automático que VoiceContext.tsx já liga sozinho como reserva.
-    setPendingAppAudioPid(id ? { pid: pidForChoice(id), isWindowChoice: pidExpected(id) } : null)
-    // OITAVA RODADA: selectScreenShareSource agora só dispara o efeito
-    // colateral de recuperar o foco da janela do app (ver
-    // ipcMain.handle('screen-share:select', ...) em electron/main.cjs) —
-    // quem realmente pega o vídeo é VoiceContext.tsx, direto via
-    // getUserMedia com este mesmo sourceId, assim que a Promise abaixo
-    // resolver.
-    window.electronAPI?.selectScreenShareSource(id).catch(() => {})
+    if (id) {
+      armScreenShareChoice(id, confirmedSources, gameCard, suggestion, viaGameShortcut)
+    } else {
+      // Cancelou — limpa qualquer recado pendente de uma escolha
+      // anterior, defensivo, pra nunca "vazar" pra uma captura sem
+      // relação com ele.
+      setPendingGameShareHint(null)
+      setPendingAppAudioPid(null)
+    }
     resolveScreenSharePicker(id)
   }
 

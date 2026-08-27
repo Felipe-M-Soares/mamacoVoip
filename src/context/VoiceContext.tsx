@@ -8,6 +8,7 @@ import { createNoiseSuppressor, type NoiseSuppressor } from '../lib/noiseSuppres
 import { takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
+import { armScreenShareChoice } from '../lib/chooseScreenShareSource'
 import { PcmStreamPlayer } from '../lib/pcmStreamPlayer'
 import { preferStereoOpusForTrack } from '../lib/sdpStereo'
 import {
@@ -29,6 +30,20 @@ import {
 // via variáveis de ambiente (VITE_TURN_URL / VITE_TURN_USERNAME /
 // VITE_TURN_CREDENTIAL) — se não estiverem definidas, o app funciona
 // normal só com STUN, exatamente como já funcionava antes.
+// DÉCIMA QUARTA RODADA: log em arquivo (ver window.electronAPI.logDebug
+// em electron/preload.cjs e appendDebugLog em electron/main.cjs) além do
+// console.error normal — existe especificamente pra diagnóstico à
+// distância de bugs no compartilhamento de tela/áudio, quando quem está
+// usando o app empacotado não tem (ou não sabe que tem) acesso ao
+// DevTools. Usado nos pontos que podiam falhar completamente MUDOS
+// antes desta rodada (a captura de áudio por processo E a reserva de
+// áudio de sistema, ambas dentro de toggleScreenShare/
+// switchScreenShareSource).
+function logDebug(message: string) {
+  console.error(`[VoiceContext] ${message}`)
+  window.electronAPI?.logDebug?.(message)
+}
+
 const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined
 const turnUsername = import.meta.env.VITE_TURN_USERNAME as string | undefined
 const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined
@@ -163,7 +178,7 @@ async function applyVideoQualityConstraints(track: MediaStreamTrack, preset: Qua
 // caminho alternativo (getDisplayMedia, usando a MESMA fonte já
 // escolhida — ver pinFallbackShareSource/electron/main.cjs). Só desiste
 // de vez (e mostra o erro pra pessoa) se os DOIS caminhos falharem.
-async function captureScreenShareStream(): Promise<MediaStream> {
+async function captureScreenShareStream(opts?: { auto?: boolean }): Promise<MediaStream> {
   if (!window.electronAPI) {
     throw new DOMException('Compartilhamento de tela só funciona no app desktop.', 'NotAllowedError')
   }
@@ -199,7 +214,39 @@ async function captureScreenShareStream(): Promise<MediaStream> {
     return await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
   }
   const payload = await window.electronAPI.getScreenShareSources()
-  const sourceId = await openScreenSharePicker(payload)
+  // DÉCIMA QUARTA RODADA — atalho "Compartilhar tela" do aviso "Jogando
+  // X!" (GameDetectedToast.tsx): antes disso, esse botão sempre abria o
+  // seletor completo de novo, mesmo já sabendo qual jogo é (relatado:
+  // "esse botão já devia compartilhar direto"). Quando `opts.auto` pede
+  // isso, resolve a MESMA fonte que ganharia destaque no seletor (o card
+  // "Jogo"/"Sugestão" — ver a mesma lógica em ScreenSharePicker.tsx) e
+  // pula a etapa manual, reaproveitando armScreenShareChoice pra deixar
+  // os mesmos recados (PID pro áudio isolado, aviso de fechamento
+  // automático) que o clique manual deixaria. Se não tiver candidato
+  // nenhum (ex.: o jogo saiu de primeiro plano entre o aviso aparecer e
+  // a pessoa clicar), cai pro seletor manual normal em vez de travar ou
+  // "não fazer nada".
+  let sourceId: string | null
+  if (opts?.auto) {
+    const { sources, suggestion } = payload
+    const gameCard = suggestion
+      ? (sources.find((s) => s.isExactGameWindow) ?? sources.find((s) => s.isGameDisplay) ?? null)
+      : null
+    if (gameCard && suggestion) {
+      armScreenShareChoice(
+        gameCard.id,
+        sources,
+        gameCard,
+        suggestion,
+        suggestion.isKnownGame ? { processNames: suggestion.processNames, label: suggestion.label } : undefined
+      )
+      sourceId = gameCard.id
+    } else {
+      sourceId = await openScreenSharePicker(payload)
+    }
+  } else {
+    sourceId = await openScreenSharePicker(payload)
+  }
   if (!sourceId) {
     throw new DOMException('Compartilhamento cancelado.', 'NotAllowedError')
   }
@@ -342,7 +389,11 @@ interface VoiceContextValue {
   pushToTalkGlobalKeyName: string | null
   captureGlobalPushToTalkKey: () => Promise<string | null>
   toggleVideo: () => Promise<void>
-  toggleScreenShare: () => Promise<void>
+  // `opts.auto` — ver o comentário grande em captureScreenShareStream —
+  // usado só pelo atalho "Compartilhar tela" do aviso "Jogando X!"
+  // (GameDetectedToast.tsx) pra pular o seletor manual quando dá pra
+  // resolver a fonte sozinho.
+  toggleScreenShare: (opts?: { auto?: boolean }) => Promise<void>
   // Troca a janela/tela sendo compartilhada sem parar a transmissão
   // atual primeiro — ver o comentário grande na implementação.
   switchScreenShareSource: () => Promise<void>
@@ -851,10 +902,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // e devolve `null` — deixando quem chama cair pro áudio de sistema,
   // como já era a intenção original.
   async function startAppAudioCapture(pid: number): Promise<MediaStreamTrack | null> {
-    if (!window.electronAPI?.startProcessAudioCapture) return null
+    logDebug(`startAppAudioCapture: iniciando pra pid=${pid}`)
+    if (!window.electronAPI?.startProcessAudioCapture) {
+      logDebug('startAppAudioCapture: window.electronAPI.startProcessAudioCapture não existe (fora do Electron?)')
+      return null
+    }
     try {
       const result = await window.electronAPI.startProcessAudioCapture(pid)
       if (!result?.ok) {
+        logDebug(`startAppAudioCapture: IPC voltou ok=false — ${result?.error ?? '(sem mensagem)'}`)
         setError(
           result?.error
             ? `Captura de áudio só deste app falhou: ${result.error}`
@@ -862,7 +918,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         )
         return null
       }
-    } catch {
+      logDebug('startAppAudioCapture: IPC voltou ok=true, esperando confirmação (format/error)...')
+    } catch (err) {
+      logDebug(`startAppAudioCapture: IPC startProcessAudioCapture lançou exceção — ${String(err)}`)
       setError('Não foi possível capturar o áudio só deste app.')
       return null
     }
@@ -877,6 +935,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         resolve(ok)
       }
       const unsubFormat = window.electronAPI!.onProcessAudioFormat((format) => {
+        logDebug(`startAppAudioCapture: process-audio:format recebido — ${JSON.stringify(format)}`)
         player.setFormat(format)
         // Chegou um formato de verdade — a captura nativa está mesmo
         // funcionando. Continua escutando pra tocar os pedaços de PCM
@@ -891,8 +950,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // qualquer pessoa rodando o app empacotado (o DevTools não abre
         // sozinho fora do modo de desenvolvimento). Sem aparecer em lugar
         // nenhum da tela, uma falha real da API nativa (ver capture.cpp)
-        // parecia simplesmente "sem áudio, sem explicação". setError aqui
-        // é o que torna isso diagnosticável a distância.
+        // parecia simplesmente "sem áudio, sem explicação". setError +
+        // logDebug aqui é o que torna isso diagnosticável a distância.
+        logDebug(`startAppAudioCapture: process-audio:error recebido — ${message}`)
         setError(`Captura de áudio só deste app falhou: ${message}`)
         // Ainda esperando a primeira confirmação (ver `confirmed` acima)
         // — trata como qualquer outra falha de partida, cai pro áudio de
@@ -925,10 +985,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // DÉCIMA QUARTA RODADA: esse é o único caso da função inteira
           // que NÃO tinha setError nem console.error nenhum — nem o
           // formato nem o erro chegaram a tempo, o que antes virava só
-          // silêncio total sem pista nenhuma (ver DevTools agora
-          // acessível via Ctrl+Shift+I no build empacotado).
-          console.error(
-            `[VoiceContext] startAppAudioCapture: nem process-audio:format nem process-audio:error chegaram em ${APP_AUDIO_CONFIRM_TIMEOUT_MS}ms (pid ${pid}) — caindo pro áudio de sistema.`
+          // silêncio total sem pista nenhuma.
+          logDebug(
+            `startAppAudioCapture: nem process-audio:format nem process-audio:error chegaram em ${APP_AUDIO_CONFIRM_TIMEOUT_MS}ms (pid ${pid}) — caindo pro áudio de sistema.`
           )
         }
         finish(false)
@@ -1021,11 +1080,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // deixava "áudio de sistema falhou" completamente invisível — pior
       // ainda quando é a ÚLTIMA linha de defesa (depois da captura por
       // processo já ter falhado antes) e o resultado final vira
-      // silêncio total sem NENHUMA pista em lugar nenhum, nem no
-      // DevTools (agora acessível via Ctrl+Shift+I mesmo no build
-      // empacotado — ver electron/main.cjs). Logar aqui é o que torna
-      // esse tipo de falha diagnosticável à distância.
-      console.error('[VoiceContext] captureSystemAudioTrack falhou:', err)
+      // silêncio total sem NENHUMA pista em lugar nenhum. Logar aqui
+      // (arquivo + DevTools, ver logDebug acima) é o que torna esse tipo
+      // de falha diagnosticável à distância.
+      const name = err instanceof Error ? err.name : null
+      const detail = err instanceof Error ? err.message : String(err)
+      logDebug(`captureSystemAudioTrack falhou: ${detail}${name ? ` (${name})` : ''}`)
       return null
     }
   }
@@ -2000,7 +2060,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function toggleScreenShare() {
+  async function toggleScreenShare(opts?: { auto?: boolean }) {
     if (screenSharing) {
       stopScreenShareState()
       return
@@ -2011,7 +2071,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // comentário grande em captureScreenShareStream acima pro
       // raciocínio completo. A qualidade (resolução/taxa de quadros)
       // continua sendo ajustada DEPOIS, na track já ativa.
-      const stream = await captureScreenShareStream()
+      const stream = await captureScreenShareStream(opts)
       // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
       // no atalho "Compartilhar seu jogo/janela" E caiu no caso de tela
       // cheia (sem janela própria pra detectar o fechamento sozinha) — ver
@@ -2029,6 +2089,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // sem pista nenhuma do motivo.
       const appAudioChoice = takePendingAppAudioPid()
       const appAudioPid = appAudioChoice?.pid ?? null
+      logDebug(`toggleScreenShare: appAudioChoice=${JSON.stringify(appAudioChoice)}`)
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
       // Avisa a sala ANTES de adicionar a track — o broadcast chega quase
@@ -2078,6 +2139,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           systemAudioTrackRef.current = systemAudioTrack
         }
       }
+      logDebug(`toggleScreenShare: resultado final do áudio — ${audioTrack ? `track ok (${audioTrack.label || audioTrack.id})` : 'NENHUMA track de áudio (transmissão vai muda)'}`)
       // Só avisa sobre o áudio depois de saber o resultado FINAL das duas
       // tentativas acima — dizer isso antes seria um chute (poderia dar
       // certo no áudio de sistema mesmo sem o PID da janela).

@@ -10,8 +10,13 @@ export function GameDetectedToast() {
   const inVoiceCall = Boolean(voice.connectedChannelId)
 
   async function handleShare() {
+    // DÉCIMA QUARTA RODADA: `{ auto: true }` pula o seletor manual —
+    // antes disso, clicar aqui abria o MESMO seletor completo de novo
+    // (relatado: "esse botão já devia compartilhar direto"), mesmo já
+    // sabendo qual jogo é. Ver o comentário grande em
+    // captureScreenShareStream (VoiceContext.tsx).
     if (inVoiceCall && !voice.screenSharing) {
-      await voice.toggleScreenShare()
+      await voice.toggleScreenShare({ auto: true })
     }
     dismiss()
   }

@@ -39,6 +39,8 @@ const suggestion: ScreenShareSuggestion = {
   isKnownGame: true,
   processNames: ['RainbowSix.exe'],
   pid: 9999,
+  hwnd: null,
+  looksMinimized: false,
 }
 
 const sources = [windowSource, windowSourceNoPid, screenSource]

@@ -26,6 +26,20 @@ interface StoredSettings {
   // 'auto': o app mede o ruído de fundo continuamente e ajusta o
   // limiar sozinho, sem precisar que a pessoa mexa em nada.
   micSensitivityMode: 'auto' | 'manual'
+  // DÉCIMA NONA RODADA: bug relatado com o Rainbow Six como exemplo — "as
+  // vozes dos personagens saem mas o som dos tiros e outras coisas do
+  // jogo não". Causa: o RNNoise (ligado por padrão pra transmissão de
+  // tela desde a rodada anterior, pra resolver um chiado constante) é
+  // uma rede treinada especificamente pra ISOLAR VOZ — qualquer coisa
+  // que não pareça fala (tiro, explosão, música, passos) é tratada como
+  // "ruído" e suprimida de propósito, é literalmente o trabalho dela.
+  // Aplicar isso na mixagem de áudio INTEIRA de um jogo destrói o som
+  // de verdade, não só "chiado" — regressão séria, pior que o problema
+  // original. Virou opt-in, DESLIGADO por padrão: quem tinha o chiado
+  // específico da captura por processo pode ligar sabendo da troca
+  // (efeitos sonoros não-vocais do jogo ficam mais discretos/cortados),
+  // mas ninguém perde o áudio do jogo sem pedir.
+  screenAudioNoiseSuppression: boolean
 }
 
 const DEFAULTS: StoredSettings = {
@@ -36,6 +50,7 @@ const DEFAULTS: StoredSettings = {
   autoGainControl: true,
   micSensitivity: DEFAULT_MIC_SENSITIVITY,
   micSensitivityMode: 'manual',
+  screenAudioNoiseSuppression: false,
 }
 
 function loadSettings(): StoredSettings {
@@ -130,6 +145,9 @@ export function useAudioSettings() {
   function setMicSensitivityMode(v: 'auto' | 'manual') {
     persist({ ...settings, micSensitivityMode: v })
   }
+  function setScreenAudioNoiseSuppression(v: boolean) {
+    persist({ ...settings, screenAudioNoiseSuppression: v })
+  }
 
   // `overrides` existe pro caso de ligar/desligar um desses três (eco,
   // ruído, ganho) enquanto já se está numa call: o botão precisa
@@ -185,6 +203,7 @@ export function useAudioSettings() {
     autoGainControl: settings.autoGainControl,
     micSensitivity: settings.micSensitivity,
     micSensitivityMode: settings.micSensitivityMode,
+    screenAudioNoiseSuppression: settings.screenAudioNoiseSuppression,
     microphones,
     speakers,
     permissionGranted,
@@ -198,6 +217,7 @@ export function useAudioSettings() {
     setAutoGainControl,
     setMicSensitivity,
     setMicSensitivityMode,
+    setScreenAudioNoiseSuppression,
     getAudioConstraints,
   }
 }

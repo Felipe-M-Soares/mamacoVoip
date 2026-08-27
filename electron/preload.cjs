@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // electron/main.cjs perto de setDisplayMediaRequestHandler e
   // captureScreenShareStream em VoiceContext.tsx.
   pinFallbackShareSource: (sourceId) => ipcRenderer.invoke('screen-share:pin-fallback-source', sourceId),
+  // DÉCIMA OITAVA RODADA: "Restaurar e compartilhar" — jogo cadastrado
+  // detectado rodando, mas minimizado (por isso não aparece na lista de
+  // janelas — ver looksMinimized em electron/main.cjs). Restaura a
+  // janela pelo HWND antes de buscar as fontes de novo.
+  restoreGameWindow: (hwnd) => ipcRenderer.invoke('screen-share:restore-window', hwnd),
   focusAppWindow: () => ipcRenderer.send('app:focus-window'),
   isGlobalPTTAvailable: () => ipcRenderer.invoke('ptt:is-global-available'),
   startPTTCapture: () => ipcRenderer.invoke('ptt:start-capture'),

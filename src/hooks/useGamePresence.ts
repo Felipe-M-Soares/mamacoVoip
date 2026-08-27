@@ -66,6 +66,19 @@ export interface ScreenShareSuggestion {
   // Pro caso de uma janela normal (type 'window'), o PID já vem junto
   // com o próprio ScreenShareSource.pid acima.
   pid: number | null
+  // DÉCIMA OITAVA RODADA: handle nativo (Windows) da janela do jogo
+  // detectado, usado só pra "Restaurar e compartilhar" (ver
+  // looksMinimized abaixo) — null em qualquer plataforma que não seja
+  // Windows, ou quando não deu pra resolver.
+  hwnd: number | null
+  // true quando o processo do jogo CADASTRADO está rodando de verdade,
+  // mas nenhuma fonte capturável (desktopCapturer.getSources()) bate com
+  // ele — sinal forte de que a janela está MINIMIZADA (Chromium exclui
+  // janelas minimizadas da lista, sempre — não é bug nosso, ver o
+  // comentário grande em electron/main.cjs). Nesse caso o
+  // ScreenSharePicker.tsx oferece um botão de restaurar em vez de
+  // simplesmente não ter nada pra escolher.
+  looksMinimized: boolean
 }
 
 export interface ScreenShareSourcesPayload {
@@ -95,6 +108,9 @@ declare global {
       // grande em captureScreenShareStream (VoiceContext.tsx) e em
       // electron/main.cjs perto de setDisplayMediaRequestHandler.
       pinFallbackShareSource: (sourceId: string) => Promise<void>
+      // DÉCIMA OITAVA RODADA — ver ScreenShareSuggestion.looksMinimized
+      // acima e o botão "Restaurar e compartilhar" em ScreenSharePicker.tsx.
+      restoreGameWindow?: (hwnd: number) => Promise<{ ok: boolean }>
       focusAppWindow: () => void
       isGlobalPTTAvailable: () => Promise<boolean>
       startPTTCapture: () => Promise<{ keycode: number; name: string } | null>

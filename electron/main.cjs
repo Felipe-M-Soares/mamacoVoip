@@ -573,11 +573,14 @@ public class MamacosScan {
   [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
   [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
   [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   public struct POINT { public int X; public int Y; }
   public struct WINDOWPLACEMENT {
@@ -630,9 +633,40 @@ function Find-MamacosGameWindow($names) {
   if ($bestHwnd -ne [IntPtr]::Zero) {
     $s = [System.Windows.Forms.Screen]::FromHandle($bestHwnd)
     $b = $s.Bounds
-    return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $bestTitle; pid = $bestPid }
+    # DÉCIMA OITAVA RODADA: inclui o HWND agora (antes só bounds/title/pid)
+    # — é o que permite mandar "restaurar essa janela" (comando R| abaixo)
+    # quando ela está MINIMIZADA: GetWindowPlacement acima devolve os
+    # bounds "de quando estava restaurada" (rcNormalPosition) mesmo com o
+    # jogo minimizado agora, então esse achado continua valendo mesmo
+    # nesse estado — só faltava o HWND pra dar pra agir sobre ele.
+    return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $bestTitle; pid = $bestPid; hwnd = $bestHwnd.ToInt64() }
   }
   return $null
+}
+
+# DÉCIMA OITAVA RODADA: "compartilhamento de tela não reconhece tela
+# minimizada" — não é bug nosso, é o próprio Chromium (a base do
+# Electron) que EXCLUI janelas minimizadas da lista de fontes
+# capturáveis (desktopCapturer.getSources() em main.cjs), então elas
+# nunca aparecem no seletor pra escolher, ponto. Isso é assim pra
+# QUALQUER programa de captura no Windows, não só o nosso. O que dá pra
+# fazer de verdade: se a gente já sabe (via Find-MamacosGameWindow acima)
+# que o jogo detectado está minimizado, oferece um botão "Restaurar e
+# compartilhar" que chama isso aqui pra trazer a janela de volta ANTES
+# de buscar a lista de fontes de novo — depois de restaurada, ela some
+# do estado minimizado e passa a aparecer normalmente.
+function Restore-MamacosWindow($hwndStr) {
+  $ptr = [IntPtr][int64]$hwndStr
+  if (-not [MamacosScan]::IsWindow($ptr)) {
+    return [PSCustomObject]@{ ok = $false }
+  }
+  # SW_RESTORE = 9. Assíncrono (ShowWindowAsync) de propósito — ShowWindow
+  # comum pode travar esperando o processo dono da janela responder à
+  # mensagem, e um jogo pesado/travado momentaneamente não pode travar
+  # nosso scanner junto.
+  [MamacosScan]::ShowWindowAsync($ptr, 9) | Out-Null
+  [MamacosScan]::SetForegroundWindow($ptr) | Out-Null
+  return [PSCustomObject]@{ ok = $true }
 }
 
 function Find-MamacosForegroundWindow {
@@ -652,6 +686,34 @@ function Find-MamacosForegroundWindow {
   return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $sb.ToString(); processName = $proc.ProcessName; pid = $procId }
 }
 
+function Find-MamacosPidsForHandles($hwnds) {
+  $out = @()
+  foreach ($h in $hwnds) {
+    if ($h -eq '') { continue }
+    $ptr = [IntPtr][int64]$h
+    # IsWindow confirma que o handle ainda é válido AGORA — sem essa
+    # checagem, um número reaproveitado por outra janela (handles do
+    # Windows podem ser reciclados) poderia devolver um PID de um
+    # processo completamente diferente do esperado.
+    if ([MamacosScan]::IsWindow($ptr)) {
+      $procId = 0
+      [MamacosScan]::GetWindowThreadProcessId($ptr, [ref]$procId) | Out-Null
+      $out += [PSCustomObject]@{ hwnd = $h; pid = $procId }
+    } else {
+      $out += [PSCustomObject]@{ hwnd = $h; pid = 0 }
+    }
+  }
+  return ,$out
+}
+
+function Find-MamacosTitlePidMap {
+  $out = @()
+  Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object {
+    $out += [PSCustomObject]@{ title = $_.MainWindowTitle; pid = $_.Id }
+  }
+  return ,$out
+}
+
 Write-Output 'READY'
 while ($true) {
   $line = [Console]::In.ReadLine()
@@ -665,6 +727,15 @@ while ($true) {
       $result = Find-MamacosGameWindow $names
     } elseif ($line -eq 'F') {
       $result = Find-MamacosForegroundWindow
+    } elseif ($line.StartsWith('P|')) {
+      $rest = $line.Substring(2)
+      $hwnds = @()
+      if ($rest -ne '') { $hwnds = $rest.Split(',') }
+      $result = Find-MamacosPidsForHandles $hwnds
+    } elseif ($line -eq 'T') {
+      $result = Find-MamacosTitlePidMap
+    } elseif ($line.StartsWith('R|')) {
+      $result = Restore-MamacosWindow ($line.Substring(2))
     }
   } catch {
     $result = $null
@@ -672,7 +743,16 @@ while ($true) {
   if ($result -eq $null) {
     Write-Output 'null'
   } else {
-    Write-Output ($result | ConvertTo-Json -Compress)
+    # -InputObject (em vez de PIPAR $result pro ConvertTo-Json) importa
+    # de verdade pros comandos P|/T acima: um ARRAY com 0 ou 1 item, se
+    # PIPADO, o PowerShell "desembrulha" item por item antes do
+    # ConvertTo-Json ver a coleção inteira — o resultado vira um objeto
+    # solto (ou nada, se vazio) em vez de um array JSON de verdade, e o
+    # JSON.parse(...) do lado do Node quebraria/interpretaria errado.
+    # Passando por -InputObject, o array inteiro chega de uma vez e o
+    # formato ([] / [x] / [x,y]) fica sempre correto, com 0, 1 ou mais
+    # itens.
+    Write-Output (ConvertTo-Json -InputObject $result -Compress)
   }
 }
 `
@@ -833,6 +913,11 @@ function getGameWindowInfo(processNames) {
         bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
         windowTitle: typeof r.title === 'string' && r.title ? r.title : null,
         pid: r.pid,
+        // DÉCIMA OITAVA RODADA: usado só pra oferecer "Restaurar e
+        // compartilhar" quando esse jogo está minimizado — ver
+        // screen-share:restore-window abaixo e Restore-MamacosWindow no
+        // SCANNER_SCRIPT.
+        hwnd: typeof r.hwnd === 'number' && r.hwnd > 0 ? r.hwnd : null,
       })
     })
   })
@@ -888,46 +973,38 @@ function getForegroundWindowInfo() {
 // falhar, PowerShell bloqueado por política do sistema, etc.), devolve um
 // mapa vazio — quem chama simplesmente não oferece a opção de "áudio só
 // deste app" pra essas janelas, sem quebrar o resto do seletor.
+// DÉCIMA OITAVA RODADA: isso ABRIA um powershell.exe NOVO — sem
+// Add-Type, mas ainda assim o custo normal de iniciar o interpretador do
+// zero (tipicamente algumas centenas de ms, bem mais sob carga) — TODA
+// VEZ que a pessoa clicava em "Compartilhar tela", e SOMADO ao
+// getPidsForWindowHandles abaixo (que reconstruía Add-Type do zero a
+// cada chamada, isso sim pesado) rodando em paralelo (Promise.all lá no
+// handler screen-share:get-sources): junto, isso segurava a lista de
+// janelas/telas na tela por 1-4+ segundos antes do seletor aparecer de
+// verdade — exatamente o "demora pra mostrar as janelas" relatado.
+// Reaproveita o MESMO processo PowerShell "scanner" que já fica vivo
+// pra detecção de jogo/foreground (ver SCANNER_SCRIPT/ensureScanner
+// acima) em vez de abrir um novo — normalmente o scanner já está de pé
+// (o vigia de jogo/foreground já o mantém rodando), então isso vira só
+// mandar uma linha por um processo já aberto, não iniciar+encerrar um
+// novo interpretador inteiro.
 function getWindowPidMap() {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
       resolve(new Map())
       return
     }
-    const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object { Write-Output "$($_.MainWindowTitle)|$($_.Id)" }
-`
-    try {
-      const encoded = Buffer.from(script, 'utf16le').toString('base64')
-      exec(
-        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        // 2500ms era curto demais: esse PowerShell compila um pedacinho de
-        // C# na hora (Add-Type) TODA vez que roda, do zero — com um jogo
-        // pesado (tipo Rainbow Six Siege) consumindo CPU/GPU ao mesmo
-        // tempo, isso pode facilmente passar de 2.5s, e o `exec` mata o
-        // processo por timeout SEM erro nenhum visível — só devolve
-        // resultado vazio, o que fazia parecer que a detecção da janela do
-        // jogo simplesmente "não funcionava", quando na verdade só não deu
-        // tempo de terminar.
-        { windowsHide: true, timeout: 4500 },
-        (err, stdout) => {
-          const map = new Map()
-          if (!err && stdout) {
-            for (const line of stdout.split(/\r?\n/)) {
-              const sepIndex = line.lastIndexOf('|')
-              if (sepIndex <= 0) continue
-              const title = line.slice(0, sepIndex).trim()
-              const pid = Number(line.slice(sepIndex + 1).trim())
-              if (title && Number.isFinite(pid) && pid > 0) map.set(title, pid)
-            }
-          }
-          resolve(map)
+    scannerQuery('T').then((rows) => {
+      const map = new Map()
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          const title = typeof row?.title === 'string' ? row.title.trim() : ''
+          const pid = Number(row?.pid)
+          if (title && Number.isFinite(pid) && pid > 0) map.set(title, pid)
         }
-      )
-    } catch {
-      resolve(new Map())
-    }
+      }
+      resolve(map)
+    })
   })
 }
 
@@ -955,70 +1032,34 @@ function parseHwndFromSourceId(id) {
   return Number.isFinite(value) && value > 0 ? value : null
 }
 
+// DÉCIMA OITAVA RODADA: essa era a parte mais pesada do atraso — abria
+// um powershell.exe NOVO e recompilava esse pedacinho de C# (Add-Type)
+// DO ZERO a cada clique em "Compartilhar tela" (mesmo custo, mesma
+// causa, já documentado em detalhe lá em cima no comentário sobre o
+// scanner persistente pro Rainbow Six Siege: ~1-4+ segundos, pior ainda
+// sob carga de CPU/GPU). Só que aqui isso rodava de novo a CADA
+// abertura do seletor, não só durante detecção de jogo. Agora reusa o
+// MamacosScan já compilado UMA vez no processo scanner persistente (que
+// já tem IsWindow/GetWindowThreadProcessId — ver SCANNER_SCRIPT acima)
+// via um novo comando "P|hwnd,hwnd,...", em vez de subir+recompilar um
+// interpretador inteiro só pra isso.
 function getPidsForWindowHandles(hwnds) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32' || !hwnds || hwnds.length === 0) {
       resolve(new Map())
       return
     }
-    const hwndList = hwnds.map((h) => String(h)).join(',')
-    const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class MamacosHwndPid {
-  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-}
-"@
-$hwnds = @(${hwndList})
-foreach ($h in $hwnds) {
-  $ptr = [IntPtr]$h
-  # IsWindow confirma que o handle ainda é válido AGORA — sem essa
-  # checagem, um número reaproveitado por outra janela (handles do
-  # Windows podem ser reciclados) poderia devolver um PID de um processo
-  # completamente diferente do esperado.
-  if ([MamacosHwndPid]::IsWindow($ptr)) {
-    $procId = 0
-    [MamacosHwndPid]::GetWindowThreadProcessId($ptr, [ref]$procId) | Out-Null
-    Write-Output "$h,$procId"
-  } else {
-    Write-Output "$h,0"
-  }
-}
-`
-    try {
-      const encoded = Buffer.from(script, 'utf16le').toString('base64')
-      exec(
-        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        // 2500ms era curto demais: esse PowerShell compila um pedacinho de
-        // C# na hora (Add-Type) TODA vez que roda, do zero — com um jogo
-        // pesado (tipo Rainbow Six Siege) consumindo CPU/GPU ao mesmo
-        // tempo, isso pode facilmente passar de 2.5s, e o `exec` mata o
-        // processo por timeout SEM erro nenhum visível — só devolve
-        // resultado vazio, o que fazia parecer que a detecção da janela do
-        // jogo simplesmente "não funcionava", quando na verdade só não deu
-        // tempo de terminar.
-        { windowsHide: true, timeout: 4500 },
-        (err, stdout) => {
-          const map = new Map()
-          if (!err && stdout) {
-            for (const line of stdout.split(/\r?\n/)) {
-              const trimmed = line.trim()
-              if (!trimmed) continue
-              const [hStr, pidStr] = trimmed.split(',')
-              const h = Number(hStr)
-              const pid = Number(pidStr)
-              if (Number.isFinite(h) && Number.isFinite(pid) && pid > 0) map.set(h, pid)
-            }
-          }
-          resolve(map)
+    scannerQuery(`P|${hwnds.map((h) => String(h)).join(',')}`).then((rows) => {
+      const map = new Map()
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          const h = Number(row?.hwnd)
+          const pid = Number(row?.pid)
+          if (Number.isFinite(h) && Number.isFinite(pid) && pid > 0) map.set(h, pid)
         }
-      )
-    } catch {
-      resolve(new Map())
-    }
+      }
+      resolve(map)
+    })
   })
 }
 
@@ -1627,6 +1668,24 @@ app.whenReady().then(() => {
           .filter((s) => s.id.startsWith('window:'))
           .map((s) => [s.id, hwndPidMap.get(parseHwndFromSourceId(s.id)) ?? titlePidMap.get(s.name) ?? null])
       )
+      // DÉCIMA OITAVA RODADA: "compartilhamento de tela não reconhece
+      // tela minimizada" — desktopCapturer.getSources() (o próprio
+      // Chromium) EXCLUI janelas minimizadas da lista, sempre, pra
+      // qualquer programa de captura, não só o nosso (ver o aviso já
+      // existente no rodapé do ScreenSharePicker.tsx). Isso detecta esse
+      // caso especificamente pro jogo CADASTRADO sugerido: se
+      // getGameWindowInfo achou o processo (então ele está rodando) mas
+      // NENHUMA fonte do tipo "window" bate com o PID dele, é sinal forte
+      // de que a janela existe mas está minimizada (ou, mais raro,
+      // também não capturável por outro motivo) — nesse caso o
+      // ScreenSharePicker.tsx pode oferecer "Restaurar e compartilhar"
+      // em vez de simplesmente não mostrar nada pra escolher.
+      const gameWindowHwnd = windowInfo?.hwnd ?? null
+      const hasCapturableGameWindow =
+        gameWindowPid !== null &&
+        sources.some((s) => s.id.startsWith('window:') && resolvedPidBySourceId.get(s.id) === gameWindowPid)
+      const looksMinimized = isKnownGame && gameWindowHwnd !== null && gameWindowPid !== null && !hasCapturableGameWindow
+
       // OITAVA RODADA: devolve o payload DIRETO como retorno do
       // ipcMain.handle (em vez de mandar por webContents.send pra um
       // listener que já estava esperando) — o formato de cada item e da
@@ -1685,6 +1744,11 @@ app.whenReady().then(() => {
               // getGameWindowInfo/getForegroundWindowInfo acima), onde o
               // mapa por título não tem como ajudar.
               pid: windowInfo?.pid ?? null,
+              // DÉCIMA OITAVA RODADA: hwnd + looksMinimized (ver acima) —
+              // usados só pelo botão "Restaurar e compartilhar" do
+              // ScreenSharePicker.tsx.
+              hwnd: gameWindowHwnd,
+              looksMinimized,
             }
           : null,
       }
@@ -1695,6 +1759,21 @@ app.whenReady().then(() => {
       // encontrei nada" e mostra o erro genérico normalmente.
       return null
     }
+  })
+
+  // DÉCIMA OITAVA RODADA: pedido do botão "Restaurar e compartilhar" (ver
+  // looksMinimized/hwnd acima e ScreenSharePicker.tsx) — manda restaurar
+  // a janela via o scanner persistente (comando R|, ver
+  // Restore-MamacosWindow no SCANNER_SCRIPT) e espera um instante antes
+  // de devolver, pra dar tempo do Windows recompositar a janela de
+  // verdade (senão o próximo screen-share:get-sources rodaria rápido
+  // demais e ainda pegaria ela como minimizada). Best-effort: `ok: false`
+  // só significa "segue mostrando o aviso de sempre", nunca quebra nada.
+  ipcMain.handle('screen-share:restore-window', async (_event, hwnd) => {
+    if (process.platform !== 'win32' || !Number.isFinite(hwnd) || hwnd <= 0) return { ok: false }
+    const result = await scannerQuery(`R|${Math.trunc(hwnd)}`)
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    return { ok: Boolean(result?.ok) }
   })
 
   // OITAVA RODADA: agora que a captura de vídeo em si acontece direto no

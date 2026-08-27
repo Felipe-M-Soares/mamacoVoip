@@ -699,7 +699,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }
 
   function setParticipantVolume(userId: string, volume: number) {
-    const clamped = Math.max(0, Math.min(100, volume))
+    // DÉCIMA OITAVA RODADA: teto subiu de 100 pra 200 — "qualidade tá boa
+    // mas o volume tá baixo" quando quem fala tem captação de mic fraca
+    // não tinha solução nenhuma antes: 100% aqui só reproduzia o áudio
+    // exatamente como chegou, sem reforço nenhum possível. Ver o GainNode
+    // novo em RemoteAudio (CallMediaTiles.tsx), que agora sabe amplificar
+    // de verdade acima de 100%, não só atenuar.
+    const clamped = Math.max(0, Math.min(200, volume))
     setParticipantVolumes((prev) => {
       const next = { ...prev, [userId]: clamped }
       try {
@@ -753,6 +759,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // sobra 1 vaga".
   const joinedAtRef = useRef(0)
   const realtimeRef = useRef<RealtimeChannel | null>(null)
+  // DÉCIMA NONA RODADA — bug relatado: "sair de uma sala e voltar buga,
+  // mostra que você está sozinho mesmo tendo gente". Causa: leave()
+  // sempre zerou connectedRef/realtimeRef NA HORA (bom pra UI reagir
+  // sem esperar rede nenhuma), mas o desligamento de verdade do canal
+  // Realtime anterior (untrack() + removeChannel(), os dois assíncronos,
+  // um round-trip até o servidor) continuava rodando em segundo plano.
+  // Se join() do MESMO canal disparasse antes desse desligamento
+  // terminar, a nova inscrição no MESMO tópico ("voice:<channelId>")
+  // podia colidir com a antiga ainda sendo encerrada do lado do
+  // servidor — o presence 'sync' que chegava de volta então refletia um
+  // estado incompleto (só você), já que o servidor ainda não tinha
+  // processado a saída/entrada limpa o bastante pra devolver a foto
+  // completa de quem está no canal. Guarda a Promise desse
+  // desligamento aqui; join() espera ela terminar (se existir) ANTES de
+  // criar o novo canal — sem atrasar o que a pessoa VÊ ao clicar
+  // "sair" (isso continua instantâneo), só atrasa uma reentrada rápida
+  // no MESMO canal até a saída anterior estar de fato confirmada.
+  const leaveTeardownRef = useRef<Promise<void> | null>(null)
   const peersRef = useRef<Map<string, PeerState>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
@@ -1328,6 +1352,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // motivo, cai pra bruta sem filtro — a transmissão nunca deve quebrar
   // por causa disso, só perde o reforço.
   async function prepareScreenAudioForSending(rawTrack: MediaStreamTrack): Promise<{ track: MediaStreamTrack; stream: MediaStream }> {
+    // DÉCIMA NONA RODADA: opt-in agora (ver screenAudioNoiseSuppression
+    // em useAudioSettings.ts) — desligado por padrão, porque o RNNoise
+    // isola VOZ e trata qualquer som não-vocal do jogo (tiro, explosão,
+    // música) como "ruído" a cortar. Sem a pessoa pedir explicitamente,
+    // manda a track crua sem passar pelo denoiser.
+    if (!audioSettingsRef.current.screenAudioNoiseSuppression) {
+      teardownScreenAudioDenoiser()
+      return { track: rawTrack, stream: new MediaStream([rawTrack]) }
+    }
     try {
       screenAudioDenoiserRef.current?.destroy()
       screenAudioDenoiserRef.current = await createScreenAudioDenoiser()
@@ -1693,6 +1726,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const join = useCallback(async (channelId: string, serverId: string | null, options?: { displayName?: string; userLimit?: number }) => {
     if (!user || connectedRef.current) return
+    // Ver o comentário grande em leaveTeardownRef — espera o
+    // desligamento em segundo plano de uma saída recente terminar antes
+    // de assinar o MESMO tópico Realtime de novo, senão o presence
+    // 'sync' que volta pode vir incompleto.
+    if (leaveTeardownRef.current) {
+      await leaveTeardownRef.current
+    }
     // Avisa a UI (a lista de canais) IMEDIATAMENTE que estamos prestes a
     // entrar nesse canal, antes de qualquer trabalho assíncrono (pedir
     // microfone, etc.) — isso dá tempo do observador de presença na
@@ -1911,8 +1951,29 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     analysersRef.current.clear()
     lastAboveThresholdRef.current.clear()
     if (realtimeRef.current) {
-      realtimeRef.current.untrack()
-      supabase.removeChannel(realtimeRef.current)
+      const channelToLeave = realtimeRef.current
+      // Ver o comentário grande em leaveTeardownRef acima — o
+      // desligamento de verdade (dois round-trips até o servidor) roda
+      // em segundo plano, sem atrasar nada do que a UI mostra aqui
+      // embaixo (tudo isso continua síncrono); só uma reentrada rápida
+      // no MESMO canal (join()) espera essa Promise terminar antes de
+      // assinar o tópico de novo.
+      const teardown = (async () => {
+        try {
+          await channelToLeave.untrack()
+        } catch {
+          // best-effort — segue pro removeChannel de qualquer jeito
+        }
+        try {
+          await supabase.removeChannel(channelToLeave)
+        } catch {
+          // best-effort — pior caso, o canal fica orfão até o socket cair sozinho
+        }
+      })()
+      leaveTeardownRef.current = teardown
+      teardown.finally(() => {
+        if (leaveTeardownRef.current === teardown) leaveTeardownRef.current = null
+      })
       realtimeRef.current = null
     }
     setParticipants({})

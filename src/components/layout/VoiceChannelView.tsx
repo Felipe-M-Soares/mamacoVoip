@@ -307,10 +307,13 @@ function ParticipantTile({
         // do próprio card, que tem espaço de sobra logo abaixo do botão.
         <div className="absolute top-full left-0 mt-1 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2.5 w-32 z-10">
           <p className="text-[10px] text-discord-text-muted mb-1.5">{participantVolume}%</p>
+          {/* Vai até 200% agora (não só 100%) — dá pra REFORÇAR o volume
+              de quem tem captação de mic fraca, não só abaixar quem já
+              está alto. Ver o GainNode em RemoteAudio, CallMediaTiles.tsx. */}
           <input
             type="range"
             min={0}
-            max={100}
+            max={200}
             value={participantVolume}
             onChange={(e) => voice.setParticipantVolume(userId, Number(e.target.value))}
             className="w-full accent-discord-blurple"

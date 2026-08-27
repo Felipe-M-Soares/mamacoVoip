@@ -759,6 +759,29 @@ function AudioTab() {
       </div>
 
       <div>
+        <p className="text-xs font-bold uppercase text-discord-text-muted tracking-wide mb-2">
+          Transmissão de tela
+        </p>
+        <div className="bg-discord-darker rounded-lg divide-y divide-white/5">
+          <div className="flex items-center justify-between gap-4 p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white">Redução de ruído da transmissão</p>
+              <p className="text-xs text-discord-text-muted mt-0.5">
+                Ajuda com chiado/estática constante no áudio da tela/jogo compartilhado — mas como é uma
+                tecnologia feita pra isolar VOZ, ela pode cortar ou abafar sons não-vocais do jogo (tiros,
+                explosões, música). Deixe desligado se quiser o áudio do jogo completo; ligue só se estiver
+                incomodado com chiado.
+              </p>
+            </div>
+            <ToggleSwitch
+              checked={audio.screenAudioNoiseSuppression}
+              onChange={(checked) => audio.setScreenAudioNoiseSuppression(checked)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div>
         <button
           onClick={testing ? stopTest : startTest}
           className="text-sm px-4 py-2 rounded btn-primary"

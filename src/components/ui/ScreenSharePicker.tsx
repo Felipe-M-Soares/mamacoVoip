@@ -65,24 +65,36 @@ export function ScreenSharePicker() {
 
   const currentQualityPreset = QUALITY_PRESETS[loadQuality()]
 
-  // PID resolvido pra cada escolha possível — Jogo usa o PID vindo da
-  // sugestão (windowInfo.pid, só quando esse "Jogo" é mesmo uma JANELA —
-  // ver abaixo); qualquer Janela usa o próprio source.pid (mapa por
-  // título, ver getWindowPidMap em electron/main.cjs). Telas inteiras
-  // nunca têm PID (podem ter vários processos desenhando nela) — pra
-  // essas, o áudio automático é sempre o do sistema (ver
-  // ipcMain.handle('screen-share:select', ...) em electron/main.cjs), não
-  // captura por processo.
+  // PID resolvido pra cada escolha possível — qualquer Janela usa o
+  // próprio source.pid (mapa por HWND/título, ver electron/main.cjs).
+  // Telas inteiras normalmente NUNCA têm PID (podem ter vários processos
+  // desenhando nela) — EXCETO o card "Jogo" quando ele caiu no fallback
+  // de tela cheia (gameCard.type === 'screen', ver electron/main.cjs):
+  // nesse caso a gente SABE qual processo é o jogo (windowInfo.pid, o
+  // mesmo PID descoberto pra decidir em qual monitor sugerir a tela) —
+  // mesmo sem dar pra capturar a JANELA dele (jogo em modo tela cheia
+  // exclusiva/flip-model, sem janela composta pro Windows fotografar),
+  // ainda dá pra isolar o ÁUDIO por processo normalmente, porque a
+  // captura de áudio (ver "Captura de áudio por processo" em
+  // VoiceContext.tsx) não tem NENHUMA relação com como o vídeo foi
+  // capturado — só precisa do PID. Sem este caso aqui, jogos assim
+  // (comuns — qualquer um com DirectX em modo "flip") sempre caíam pro
+  // áudio de todo o sistema mesmo quando dava pra isolar só o jogo.
   function pidForChoice(id: string | null): number | null {
     if (!id) return null
-    if (gameCard && id === gameCard.id && gameCard.type === 'window') return suggestion?.pid ?? null
+    if (gameCard && id === gameCard.id) return suggestion?.pid ?? null
     return windows.find((w) => w.id === id)?.pid ?? null
   }
-  // Só pra diagnóstico (ver pendingAppAudioCapture.ts) — diz se a escolha
-  // era mesmo uma JANELA, onde sempre esperamos um PID.
-  function isWindowChoice(id: string | null): boolean {
+  // Só pra diagnóstico (ver pendingAppAudioCapture.ts) — diz se a gente
+  // ESPERAVA conseguir um PID pra essa escolha (janela normal, ou o card
+  // "Jogo" nos dois formatos — janela ou tela cheia). Se for uma dessas
+  // e mesmo assim `pid` vier nulo, é sinal de que a descoberta do
+  // processo falhou, e isso deve virar um aviso pra quem está usando,
+  // em vez de cair silenciosamente pro áudio de sistema sem pista
+  // nenhuma do motivo.
+  function pidExpected(id: string | null): boolean {
     if (!id) return false
-    if (gameCard && id === gameCard.id) return gameCard.type === 'window'
+    if (gameCard && id === gameCard.id) return true
     return windows.some((w) => w.id === id)
   }
 
@@ -94,11 +106,12 @@ export function ScreenSharePicker() {
     // pra uma captura sem relação com ele.
     setPendingGameShareHint(viaGameShortcut && gameCard?.type === 'screen' ? viaGameShortcut : null)
     // Automático, sem checkbox nenhum: se der pra saber o processo dono
-    // da janela escolhida, tenta capturar o áudio só dele — senão (tela
-    // cheia, ou não deu pra descobrir o PID), fica por conta do áudio de
-    // sistema automático que electron/main.cjs já liga sozinho pra
-    // qualquer escolha de tela cheia.
-    setPendingAppAudioPid(id ? { pid: pidForChoice(id), isWindowChoice: isWindowChoice(id) } : null)
+    // da janela escolhida (ou do jogo, mesmo quando ele só pôde ser
+    // resolvido como tela cheia — ver pidForChoice acima), tenta
+    // capturar o áudio só dele — senão (tela cheia comum, ou não deu
+    // pra descobrir o PID), fica por conta do áudio de sistema
+    // automático que VoiceContext.tsx já liga sozinho como reserva.
+    setPendingAppAudioPid(id ? { pid: pidForChoice(id), isWindowChoice: pidExpected(id) } : null)
     // OITAVA RODADA: selectScreenShareSource agora só dispara o efeito
     // colateral de recuperar o foco da janela do app (ver
     // ipcMain.handle('screen-share:select', ...) em electron/main.cjs) —

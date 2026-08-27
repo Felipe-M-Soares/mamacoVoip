@@ -2063,8 +2063,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       if (appAudioChoice?.isWindowChoice && !appAudioPid) {
         setError(
           audioTrack
-            ? 'Não consegui identificar o processo dessa janela — a transmissão vai com o áudio de todo o sistema em vez de só o do jogo (o vídeo continua normal).'
-            : 'Não consegui identificar o processo dessa janela, e também não consegui capturar o áudio de sistema — a transmissão vai sem áudio (o vídeo continua normal).'
+            ? 'Não consegui identificar o processo do app/jogo — a transmissão vai com o áudio de todo o sistema em vez de só o dele (o vídeo continua normal).'
+            : 'Não consegui identificar o processo do app/jogo, e também não consegui capturar o áudio de sistema — a transmissão vai sem áudio (o vídeo continua normal).'
         )
       }
       // Guarda o ID pra próxima renegociação (seja a de agora mesmo, logo
@@ -2312,8 +2312,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       if (appAudioChoice?.isWindowChoice && !appAudioPid) {
         setError(
           newAudioTrack
-            ? 'Não consegui identificar o processo dessa janela — a transmissão vai com o áudio de todo o sistema em vez de só o do jogo (o vídeo continua normal).'
-            : 'Não consegui identificar o processo dessa janela, e também não consegui capturar o áudio de sistema — a transmissão vai sem áudio (o vídeo continua normal).'
+            ? 'Não consegui identificar o processo do app/jogo — a transmissão vai com o áudio de todo o sistema em vez de só o dele (o vídeo continua normal).'
+            : 'Não consegui identificar o processo do app/jogo, e também não consegui capturar o áudio de sistema — a transmissão vai sem áudio (o vídeo continua normal).'
         )
       }
 

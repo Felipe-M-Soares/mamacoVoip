@@ -13,9 +13,14 @@
 // já resolveu (mesmo motivo de timing de screenShareGameHint.ts: ler
 // isso ANTES de getDisplayMedia() resolver pegaria sempre vazio).
 // `isWindowChoice` existe só pra diagnóstico: diz pro VoiceContext se a
-// escolha era mesmo uma JANELA (onde a gente SEMPRE espera conseguir um
-// PID e tentar áudio automático) — se for uma janela mas `pid` vier nulo
-// mesmo assim, é sinal de que o casamento por título falhou (ver
+// gente ESPERAVA conseguir um PID pra essa escolha (onde a gente SEMPRE
+// tenta áudio automático por processo) — cobre tanto uma JANELA normal
+// quanto o card "Jogo" mesmo quando ele só pôde ser resolvido como TELA
+// CHEIA (jogo em modo exclusivo/flip-model, sem janela composta pro
+// Windows fotografar — ver pidForChoice em ScreenSharePicker.tsx: nesse
+// caso ainda sabemos o PID do jogo, só não dava pra capturar a janela
+// dele). Se `isWindowChoice` for true mas `pid` vier nulo mesmo assim, é
+// sinal de que a descoberta do processo falhou (ver getGameWindowInfo/
 // getWindowPidMap em electron/main.cjs), e isso deve aparecer como aviso
 // pra quem está usando, em vez de só ficar em silêncio sem áudio nenhum
 // e sem pista nenhuma do motivo (era exatamente esse silêncio, sem erro

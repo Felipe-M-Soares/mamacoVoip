@@ -481,10 +481,293 @@ function processNamesForGameLabel(label) {
 // não tem (tela cheia exclusiva), os `bounds` dizem qual monitor
 // oferecer no fallback.
 //
+// ============================================================
+// DÉCIMA TERCEIRA RODADA — o motivo real de "o Rainbow Six nunca aparece
+// como sugestão mesmo com tudo mais certo" (KNOWN_GAMES tem
+// 'rainbowsix.exe', o PID resolve certinho pelo tasklist, o processo
+// existe): getGameWindowInfo/getForegroundWindowInfo, do jeito que
+// existiam antes, abriam um powershell.exe NOVO e recompilavam o mesmo
+// pedacinho de C# via Add-Type DO ZERO (o compilador csc.exe sendo
+// chamado por baixo) a CADA chamada — isso NUNCA foi "alguns
+// milissegundos", é bem mais pesado que isso, e com um jogo pesado
+// (exatamente o caso do Rainbow Six Siege) consumindo CPU/GPU ao mesmo
+// tempo, esse custo cresce ainda mais e passa fácil do timeout de 4.5s.
+// O problema não parava na checagem individual falhar: em
+// startGameDetection, a PRIMEIRA falha logo depois de detectar um jogo
+// (justChanged) zerava `currentGame` NA HORA — então bastava UMA
+// verificação lenta (bem provável logo que o jogo abre/carrega, quando
+// tem pico de CPU) pra sugestão "Jogo" nunca se estabilizar, mesmo com
+// o jogo rodando normal o resto do tempo. E o vigia de foreground (a
+// cada 3s) tinha o mesmo custo por chamada, competindo por CPU com o
+// próprio jogo o tempo todo.
+//
+// A correção: um ÚNICO processo PowerShell "scanner" fica vivo (mesma
+// ideia já usada em startForegroundWatch/foregroundWatcherProc acima,
+// generalizada agora pra também servir essas duas funções) — o Add-Type
+// roda UMA vez só, na primeira vez que o scanner é preciso, e cada
+// checagem seguinte é só mandar um comando de uma linha pelo stdin e
+// ler uma linha de resposta (JSON) pelo stdout: sem processo novo, sem
+// recompilar nada. Isso reduz o custo de cada checagem de "1-4+
+// segundos, bem variável" pra tipicamente bem menos de um segundo, de
+// forma CONSISTENTE — não dependente de quanto o resto do sistema (o
+// próprio jogo incluso) está ocupado no instante exato.
+let scannerProc = null
+let scannerReadyPromise = null
+let scannerQueue = []
+let scannerBuffer = ''
+
+const SCANNER_SCRIPT = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class MamacosScan {
+  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  public struct POINT { public int X; public int Y; }
+  public struct WINDOWPLACEMENT {
+    public int length; public int flags; public int showCmd;
+    public POINT ptMinPosition; public POINT ptMaxPosition;
+    public RECT rcNormalPosition;
+  }
+}
+"@
+
+function Find-MamacosGameWindow($names) {
+  $targetPids = @{}
+  foreach ($name in $names) {
+    if ($name -eq '') { continue }
+    Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object { $targetPids[[int]$_.Id] = $true }
+  }
+  $bestHwnd = [IntPtr]::Zero
+  $bestArea = 0
+  $bestTitle = ''
+  $bestPid = 0
+  $hwnd = [MamacosScan]::GetTopWindow([IntPtr]::Zero)
+  while ($hwnd -ne [IntPtr]::Zero) {
+    if ($targetPids.Count -gt 0 -and [MamacosScan]::IsWindowVisible($hwnd)) {
+      if ([MamacosScan]::GetAncestor($hwnd, 2) -eq $hwnd) {
+        $procId = 0
+        [MamacosScan]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+        if ($targetPids.ContainsKey([int]$procId)) {
+          $wp = New-Object 'MamacosScan+WINDOWPLACEMENT'
+          $wp.length = 44
+          [MamacosScan]::GetWindowPlacement($hwnd, [ref]$wp) | Out-Null
+          $rect = $wp.rcNormalPosition
+          $w = $rect.Right - $rect.Left
+          $h = $rect.Bottom - $rect.Top
+          if ($w -ge 200 -and $h -ge 200) {
+            $area = $w * $h
+            if ($area -gt $bestArea) {
+              $bestArea = $area
+              $bestHwnd = $hwnd
+              $bestPid = $procId
+              $sb = New-Object System.Text.StringBuilder 512
+              [MamacosScan]::GetWindowText($hwnd, $sb, 512) | Out-Null
+              $bestTitle = $sb.ToString()
+            }
+          }
+        }
+      }
+    }
+    $hwnd = [MamacosScan]::GetWindow($hwnd, 2)
+  }
+  if ($bestHwnd -ne [IntPtr]::Zero) {
+    $s = [System.Windows.Forms.Screen]::FromHandle($bestHwnd)
+    $b = $s.Bounds
+    return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $bestTitle; pid = $bestPid }
+  }
+  return $null
+}
+
+function Find-MamacosForegroundWindow {
+  $hwnd = [MamacosScan]::GetForegroundWindow()
+  if ($hwnd -eq [IntPtr]::Zero) { return $null }
+  $procId = 0
+  [MamacosScan]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+  try {
+    $proc = Get-Process -Id $procId -ErrorAction Stop
+  } catch {
+    return $null
+  }
+  $s = [System.Windows.Forms.Screen]::FromHandle($hwnd)
+  $b = $s.Bounds
+  $sb = New-Object System.Text.StringBuilder 512
+  [MamacosScan]::GetWindowText($hwnd, $sb, 512) | Out-Null
+  return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $sb.ToString(); processName = $proc.ProcessName; pid = $procId }
+}
+
+Write-Output 'READY'
+while ($true) {
+  $line = [Console]::In.ReadLine()
+  if ($line -eq $null) { break }
+  $result = $null
+  try {
+    if ($line.StartsWith('G|')) {
+      $rest = $line.Substring(2)
+      $names = @()
+      if ($rest -ne '') { $names = $rest.Split(',') }
+      $result = Find-MamacosGameWindow $names
+    } elseif ($line -eq 'F') {
+      $result = Find-MamacosForegroundWindow
+    }
+  } catch {
+    $result = $null
+  }
+  if ($result -eq $null) {
+    Write-Output 'null'
+  } else {
+    Write-Output ($result | ConvertTo-Json -Compress)
+  }
+}
+`
+
+// Mata o scanner e libera (com null) qualquer pergunta que ainda estava
+// esperando resposta — melhor devolver "não sei" na hora do que deixar
+// a fila esperando pra sempre por uma resposta que nunca vai chegar.
+function killScanner() {
+  const queued = scannerQueue
+  scannerQueue = []
+  for (const pending of queued) {
+    clearTimeout(pending.timer)
+    pending.resolve(null)
+  }
+  if (scannerProc) {
+    try {
+      scannerProc.kill()
+    } catch {
+      // já pode ter morrido sozinho
+    }
+  }
+  scannerProc = null
+  scannerReadyPromise = null
+  scannerBuffer = ''
+}
+
+// Garante que existe um scanner vivo e devolve uma Promise que resolve
+// com o processo assim que ele sinalizar 'READY' (Add-Type já
+// compilado) — ou com null se não der pra usar (fora do Windows,
+// PowerShell bloqueado, etc.). Reaproveita a MESMA Promise/processo
+// entre chamadas concorrentes — sem isso, duas checagens pedidas quase
+// ao mesmo tempo (ex.: o vigia de foreground e o de jogo caindo juntos)
+// tentariam abrir um scanner CADA UMA.
+function ensureScanner() {
+  if (process.platform !== 'win32') return Promise.resolve(null)
+  if (scannerProc && scannerReadyPromise) return scannerReadyPromise
+
+  let proc
+  try {
+    const encoded = Buffer.from(SCANNER_SCRIPT, 'utf16le').toString('base64')
+    proc = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+      { windowsHide: true }
+    )
+  } catch {
+    return Promise.resolve(null)
+  }
+  scannerProc = proc
+  scannerBuffer = ''
+  scannerQueue = []
+
+  scannerReadyPromise = new Promise((resolve) => {
+    let settled = false
+    const settleOnce = (value) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    proc.stdout?.on('data', (chunk) => {
+      scannerBuffer += chunk.toString()
+      let idx
+      while ((idx = scannerBuffer.indexOf('\n')) >= 0) {
+        const line = scannerBuffer.slice(0, idx).trim()
+        scannerBuffer = scannerBuffer.slice(idx + 1)
+        if (line === 'READY') {
+          settleOnce(proc)
+          continue
+        }
+        const pending = scannerQueue.shift()
+        if (!pending) continue
+        clearTimeout(pending.timer)
+        if (line === 'null' || line === '') {
+          pending.resolve(null)
+          continue
+        }
+        try {
+          pending.resolve(JSON.parse(line))
+        } catch {
+          pending.resolve(null)
+        }
+      }
+    })
+    proc.on('error', () => {
+      settleOnce(null)
+      killScanner()
+    })
+    proc.on('exit', () => {
+      settleOnce(null)
+      killScanner()
+    })
+    // Segurança: se o 'READY' nunca chegar (Add-Type falhando por algum
+    // motivo raro do ambiente/política do sistema), não trava pra
+    // sempre — só desiste e volta a se comportar como antes (best-effort).
+    setTimeout(() => settleOnce(null), 8000)
+  })
+
+  return scannerReadyPromise
+}
+
+// Manda um comando de uma linha pro scanner e devolve a resposta já
+// decodificada (ou null em qualquer falha — processo indisponível,
+// timeout individual, JSON inválido). Timeout por consulta bem mais
+// generoso que o antigo (que incluía o custo de Add-Type) porque agora
+// só cobre o Win32 scan em si — se mesmo assim estourar, tratamos como
+// sinal de que o processo travou de verdade e reiniciamos ele pra
+// próxima vez, em vez de deixar a fila fora de sincronia.
+function scannerQuery(command) {
+  return ensureScanner().then((proc) => {
+    if (!proc || proc.killed || !proc.stdin || !proc.stdin.writable) return null
+    return new Promise((resolve) => {
+      const pending = {
+        resolve,
+        timer: setTimeout(() => {
+          const idx = scannerQueue.indexOf(pending)
+          if (idx >= 0) scannerQueue.splice(idx, 1)
+          resolve(null)
+          killScanner()
+        }, 6000),
+      }
+      scannerQueue.push(pending)
+      try {
+        proc.stdin.write(command + '\n')
+      } catch {
+        const idx = scannerQueue.indexOf(pending)
+        if (idx >= 0) scannerQueue.splice(idx, 1)
+        clearTimeout(pending.timer)
+        resolve(null)
+      }
+    })
+  })
+}
+
 // Só Windows, best-effort — se o PowerShell não estiver disponível, ou
 // nenhum processo do jogo tiver janela (raro, mas possível logo no
 // instante de abrir o jogo), simplesmente devolve null e quem chama cai
 // de volta nos chutes de antes (nome parecido / tela principal).
+//
+// A varredura em si (comentários abaixo) é a mesma de sempre — só a
+// FORMA de rodar ela mudou (via scannerQuery, ver bloco grande acima em
+// vez de abrir+compilar um PowerShell novo aqui).
 function getGameWindowInfo(processNames) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
@@ -495,163 +778,17 @@ function getGameWindowInfo(processNames) {
       resolve(null)
       return
     }
-    const namesList = processNames.map((n) => `'${n.replace(/'/g, "''")}'`).join(',')
-    // ANTES disso, essa função usava $proc.MainWindowHandle (uma
-    // propriedade de conveniência do .NET) pra achar a janela do jogo —
-    // só que MainWindowHandle tem uma limitação conhecida e documentada:
-    // ele só reconhece a janela como "principal" se ela tiver um TÍTULO
-    // não vazio. Muitos jogos em modo "janela sem bordas" (borderless
-    // windowed) não definem título nenhum na janela (não têm barra de
-    // título pra mostrar de qualquer forma) — pra esses, MainWindowHandle
-    // sempre voltava 0, e a função inteira desistia (é exatamente o bug
-    // relatado: "o jogo esta em janela sem bordas e nao esta aparecendo
-    // na lista"). A troca abaixo usa GetTopWindow + GetWindow(...,
-    // GW_HWNDNEXT) — uma varredura direta de TODAS as janelas de nível
-    // superior do sistema, sem depender de título nenhum — e escolhe a
-    // MAIOR janela visível pertencente a algum dos processos-alvo (jogos
-    // costumam ter uma ou duas janelas auxiliares pequenas — launcher,
-    // overlay de anti-cheat — além da janela principal de verdade; pegar
-    // a maior evita escolher uma dessas por engano).
-    //
-    // SEGUNDA RODADA de correção: a primeira versão desta função excluía
-    // de propósito qualquer janela MINIMIZADA (IsIconic) — a ideia era
-    // evitar pegar coordenadas erradas (GetWindowRect devolve uma
-    // posição sem sentido, tipo "-32000,-32000", pra janela minimizada).
-    // Só que isso tem um efeito colateral grave: jogo em modo TELA CHEIA
-    // EXCLUSIVA (bem comum — é justamente esse modo, e não o borderless,
-    // que faz o Windows MINIMIZAR o jogo sozinho ao alternar pra outro
-    // programa) ficava sempre excluído bem na hora em que a pessoa mais
-    // precisa dele: exatamente quando alternou pra fora do jogo pra abrir
-    // o mamaco e compartilhar a tela. GetWindowPlacement resolve os dois
-    // problemas ao mesmo tempo: dá o retângulo de "posição normal"
-    // (rcNormalPosition) que continua correto mesmo com a janela
-    // minimizada, então não precisa mais excluir IsIconic nenhum.
-    // Screen.FromHandle também já lida certo com janela minimizada por
-    // conta própria (documentado pela própria Microsoft), então a
-    // captura do monitor certo funciona nos dois casos.
-    const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class MamacosWinScan {
-  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
-  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-  [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
-  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
-  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-  public struct POINT { public int X; public int Y; }
-  public struct WINDOWPLACEMENT {
-    public int length; public int flags; public int showCmd;
-    public POINT ptMinPosition; public POINT ptMaxPosition;
-    public RECT rcNormalPosition;
-  }
-}
-"@
-$names = @(${namesList})
-$targetPids = @{}
-foreach ($name in $names) {
-  Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object { $targetPids[[int]$_.Id] = $true }
-}
-$bestHwnd = [IntPtr]::Zero
-$bestArea = 0
-$bestTitle = ''
-$bestPid = 0
-$hwnd = [MamacosWinScan]::GetTopWindow([IntPtr]::Zero)
-while ($hwnd -ne [IntPtr]::Zero) {
-  if ($targetPids.Count -gt 0 -and [MamacosWinScan]::IsWindowVisible($hwnd)) {
-    # GA_ROOT (2): só janelas de nível superior "de verdade" — descarta
-    # janelas filhas/controles internos que também aparecem nessa varredura.
-    if ([MamacosWinScan]::GetAncestor($hwnd, 2) -eq $hwnd) {
-      $procId = 0
-      [MamacosWinScan]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
-      if ($targetPids.ContainsKey([int]$procId)) {
-        $wp = New-Object 'MamacosWinScan+WINDOWPLACEMENT'
-        $wp.length = 44
-        [MamacosWinScan]::GetWindowPlacement($hwnd, [ref]$wp) | Out-Null
-        $rect = $wp.rcNormalPosition
-        $w = $rect.Right - $rect.Left
-        $h = $rect.Bottom - $rect.Top
-        # Descarta janelas minúsculas (ícones invisíveis, janelas de
-        # mensagem, etc.) — a janela de verdade do jogo é sempre bem
-        # maior que isso.
-        if ($w -ge 200 -and $h -ge 200) {
-          $area = $w * $h
-          if ($area -gt $bestArea) {
-            $bestArea = $area
-            $bestHwnd = $hwnd
-            $bestPid = $procId
-            $sb = New-Object System.Text.StringBuilder 512
-            [MamacosWinScan]::GetWindowText($hwnd, $sb, 512) | Out-Null
-            $bestTitle = $sb.ToString()
-          }
-        }
+    scannerQuery(`G|${processNames.map((n) => String(n).replace(/[,|\r\n]/g, '')).join(',')}`).then((r) => {
+      if (!r || typeof r.pid !== 'number' || !(r.pid > 0)) {
+        resolve(null)
+        return
       }
-    }
-  }
-  $hwnd = [MamacosWinScan]::GetWindow($hwnd, 2)
-}
-if ($bestHwnd -ne [IntPtr]::Zero) {
-  $s = [System.Windows.Forms.Screen]::FromHandle($bestHwnd)
-  $b = $s.Bounds
-  Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
-  Write-Output $bestTitle
-  Write-Output $bestPid
-} else {
-  Write-Output ''
-}
-`
-    try {
-      const encoded = Buffer.from(script, 'utf16le').toString('base64')
-      exec(
-        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        // 2500ms era curto demais: esse PowerShell compila um pedacinho de
-        // C# na hora (Add-Type) TODA vez que roda, do zero — com um jogo
-        // pesado (tipo Rainbow Six Siege) consumindo CPU/GPU ao mesmo
-        // tempo, isso pode facilmente passar de 2.5s, e o `exec` mata o
-        // processo por timeout SEM erro nenhum visível — só devolve
-        // resultado vazio, o que fazia parecer que a detecção da janela do
-        // jogo simplesmente "não funcionava", quando na verdade só não deu
-        // tempo de terminar.
-        { windowsHide: true, timeout: 4500 },
-        (err, stdout) => {
-          if (err || !stdout) {
-            resolve(null)
-            return
-          }
-          // IMPORTANTE: não filtra linhas vazias aqui — pra uma janela
-          // sem título (borderless, ver comentário grande acima), a
-          // linha do título É pra vir vazia mesmo, e ela PRECISA contar
-          // como uma linha de verdade, senão o PID (linha seguinte) some
-          // do lugar certo. Só remove a ÚLTIMA linha vazia, que é sempre
-          // só a quebra de linha final do próprio PowerShell.
-          const outLines = stdout.split(/\r?\n/)
-          if (outLines.length > 0 && outLines[outLines.length - 1] === '') outLines.pop()
-          if (outLines.length === 0) {
-            resolve(null)
-            return
-          }
-          const parts = outLines[0].trim().split(',').map(Number)
-          if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
-            resolve(null)
-            return
-          }
-          const pidNum = Number(outLines[2]?.trim())
-          resolve({
-            bounds: { x: parts[0], y: parts[1], width: parts[2], height: parts[3] },
-            windowTitle: outLines[1]?.trim() || null,
-            pid: Number.isFinite(pidNum) && pidNum > 0 ? pidNum : null,
-          })
-        }
-      )
-    } catch {
-      resolve(null)
-    }
+      resolve({
+        bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
+        windowTitle: typeof r.title === 'string' && r.title ? r.title : null,
+        pid: r.pid,
+      })
+    })
   })
 }
 
@@ -667,96 +804,27 @@ if ($bestHwnd -ne [IntPtr]::Zero) {
 // está em primeiro plano é o NOSSO próprio app, não o jogo).
 //
 // Só Windows, best-effort — mesmas limitações de getGameWindowInfo acima.
+// Mesma troca da DÉCIMA TERCEIRA RODADA: agora via scannerQuery (processo
+// PowerShell persistente) em vez de abrir+compilar um PowerShell novo
+// aqui a cada chamada.
 function getForegroundWindowInfo() {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
       resolve(null)
       return
     }
-    // Mesmo bug/correção de getGameWindowInfo acima: GetForegroundWindow()
-    // já devolve o HWND certo diretamente, sem depender de título nenhum
-    // — o bug era usar $proc.MainWindowHandle/$proc.MainWindowTitle
-    // DEPOIS (que sim exigem título não vazio) em vez do HWND que a
-    // gente já tinha em mãos. Usando $hwnd direto em Screen.FromHandle e
-    // GetWindowText, uma janela sem bordas/sem título (comum em jogos
-    // borderless) passa a funcionar igual qualquer outra.
-    const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class MamacosFgSnapshot {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-  [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-}
-"@
-try {
-  $hwnd = [MamacosFgSnapshot]::GetForegroundWindow()
-  if ($hwnd -ne [IntPtr]::Zero) {
-    $procId = 0
-    [MamacosFgSnapshot]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
-    $proc = Get-Process -Id $procId -ErrorAction Stop
-    $s = [System.Windows.Forms.Screen]::FromHandle($hwnd)
-    $b = $s.Bounds
-    $sb = New-Object System.Text.StringBuilder 512
-    [MamacosFgSnapshot]::GetWindowText($hwnd, $sb, 512) | Out-Null
-    Write-Output "$($b.X),$($b.Y),$($b.Width),$($b.Height)"
-    Write-Output $sb.ToString()
-    Write-Output $proc.ProcessName
-    Write-Output $procId
-  } else {
-    Write-Output ''
-  }
-} catch {
-  Write-Output ''
-}
-`
-    try {
-      const encoded = Buffer.from(script, 'utf16le').toString('base64')
-      exec(
-        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        // 2500ms era curto demais: esse PowerShell compila um pedacinho de
-        // C# na hora (Add-Type) TODA vez que roda, do zero — com um jogo
-        // pesado (tipo Rainbow Six Siege) consumindo CPU/GPU ao mesmo
-        // tempo, isso pode facilmente passar de 2.5s, e o `exec` mata o
-        // processo por timeout SEM erro nenhum visível — só devolve
-        // resultado vazio, o que fazia parecer que a detecção da janela do
-        // jogo simplesmente "não funcionava", quando na verdade só não deu
-        // tempo de terminar.
-        { windowsHide: true, timeout: 4500 },
-        (err, stdout) => {
-          if (err || !stdout) {
-            resolve(null)
-            return
-          }
-          // Mesmo motivo do comentário em getGameWindowInfo acima — não
-          // filtra linhas vazias (o título pode legitimamente vir vazio).
-          const outLines = stdout.split(/\r?\n/)
-          if (outLines.length > 0 && outLines[outLines.length - 1] === '') outLines.pop()
-          if (outLines.length < 4) {
-            resolve(null)
-            return
-          }
-          const parts = outLines[0].trim().split(',').map(Number)
-          if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
-            resolve(null)
-            return
-          }
-          const pidNum = Number(outLines[3]?.trim())
-          resolve({
-            bounds: { x: parts[0], y: parts[1], width: parts[2], height: parts[3] },
-            windowTitle: outLines[1]?.trim() || null,
-            processName: outLines[2]?.trim().toLowerCase() || null,
-            pid: Number.isFinite(pidNum) && pidNum > 0 ? pidNum : null,
-          })
-        }
-      )
-    } catch {
-      resolve(null)
-    }
+    scannerQuery('F').then((r) => {
+      if (!r || typeof r.pid !== 'number' || !(r.pid > 0)) {
+        resolve(null)
+        return
+      }
+      resolve({
+        bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
+        windowTitle: typeof r.title === 'string' && r.title ? r.title : null,
+        processName: typeof r.processName === 'string' && r.processName ? r.processName.toLowerCase() : null,
+        pid: r.pid,
+      })
+    })
   })
 }
 
@@ -1994,7 +2062,10 @@ app.whenReady().then(() => {
     // Sem isso o processo do PowerShell (vigia de foco do jogo) ficaria
     // rodando sozinho em segundo plano depois do app fechar.
     stopForegroundWatch()
-    // Idem pro process-audio-capture.exe (captura de áudio por processo).
+    // Idem pro scanner persistente (DÉCIMA TERCEIRA RODADA — ver
+    // ensureScanner/scannerQuery acima) e pro process-audio-capture.exe
+    // (captura de áudio por processo).
+    killScanner()
     stopProcessAudioCapture()
   })
   // -------------------------------------------------------------------
@@ -2178,6 +2249,7 @@ app.on('window-all-closed', () => {
   if (gameCheckTimer) clearInterval(gameCheckTimer)
   if (foregroundCheckTimer) clearInterval(foregroundCheckTimer)
   stopForegroundWatch()
+  killScanner()
   globalShortcut.unregisterAll()
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()
   if (process.platform !== 'darwin') {

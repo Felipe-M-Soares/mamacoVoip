@@ -5,35 +5,12 @@ const fs = require('fs');
 const { spawn, exec } = require('child_process');
 const os = require('os');
 
-// Tentativa segura de importar wrtc
-let wrtc = null;
-try {
-  wrtc = require('wrtc');
-  console.log('✅ wrtc carregado com sucesso');
-} catch (error) {
-  console.warn('⚠️ wrtc não disponível, usando fallback:', error.message);
-  // Fallback para API nativa do Electron
-  wrtc = {
-    RTCPeerConnection: null,
-    RTCSessionDescription: null,
-    MediaStream: null
-  };
-}
-
 // Variáveis globais para controle
 let mainWindow = null;
 let audioCaptureProcess = null;
 let gameDetectionInterval = null;
 let currentGame = null;
 let isAudioCapturing = false;
-
-// Configuração do WebRTC
-const rtcConfig = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-  ]
-};
 
 // Lista de jogos populares para detecção
 const GAME_PROCESSES = {
@@ -69,7 +46,6 @@ function detectGames() {
   
   exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
     if (error) {
-      console.log('Nenhum jogo detectado ou erro na detecção');
       return;
     }
     
@@ -115,15 +91,15 @@ function updateGameStatus(gameName) {
   }
 }
 
-// Função para capturar áudio do sistema (Windows)
+// Função para capturar áudio do sistema (Windows) - Usando PowerShell
 function captureSystemAudioWindows() {
   return new Promise((resolve, reject) => {
-    // Script PowerShell para capturar áudio do sistema via WASAPI
+    // Script PowerShell otimizado para captura de áudio
     const psScript = `
-      Add-Type -AssemblyName System.Speech
       Add-Type -AssemblyName System.Windows.Forms
+      Add-Type -AssemblyName System.Drawing
       
-      # Captura de áudio do sistema
+      # Cria um objeto para captura de áudio
       $audioCapture = New-Object -ComObject 'Audio.AudioCapture'
       
       # Configuração básica
@@ -146,10 +122,9 @@ function captureSystemAudioWindows() {
       }
     `;
     
-    const psProcess = spawn('powershell', ['-NoProfile', '-Command', psScript]);
+    const psProcess = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript]);
     
     psProcess.stdout.on('data', (data) => {
-      // Envia dados de áudio para o processo de renderização
       if (mainWindow && isAudioCapturing) {
         const audioData = data.toString().trim();
         if (audioData) {
@@ -174,6 +149,47 @@ function captureSystemAudioWindows() {
     });
     
     psProcess.on('error', reject);
+  });
+}
+
+// Função para capturar áudio no Mac/Linux
+function captureSystemAudioUnix() {
+  return new Promise((resolve, reject) => {
+    const platform = os.platform();
+    let command = '';
+    
+    if (platform === 'darwin') {
+      // Mac: usa osascript para capturar áudio do sistema
+      command = 'osascript -e "set volume output volume 100" && say "Áudio ativado"';
+    } else {
+      // Linux: usa parec
+      command = 'parec --device=alsa_output.pci-0000_00_1b.0.analog-stereo.monitor --format=s16le --channels=2 --rate=44100 2>/dev/null';
+    }
+    
+    const audioProcess = spawn('sh', ['-c', command]);
+    
+    audioProcess.stdout.on('data', (data) => {
+      if (mainWindow && isAudioCapturing) {
+        mainWindow.webContents.send('audio-capture-data', {
+          data: data.toString('base64'),
+          timestamp: Date.now()
+        });
+      }
+    });
+    
+    audioProcess.stderr.on('data', (data) => {
+      console.error('Erro na captura de áudio:', data.toString());
+    });
+    
+    audioProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve(audioProcess);
+      } else {
+        reject(new Error(`Erro na captura: código ${code}`));
+      }
+    });
+    
+    resolve(audioProcess);
   });
 }
 
@@ -281,12 +297,11 @@ function setupIpcHandlers() {
       isAudioCapturing = true;
       
       if (platform === 'win32') {
-        // Inicia captura com PowerShell
         audioCaptureProcess = await captureSystemAudioWindows();
         return { success: true, message: 'Captura de áudio iniciada' };
       } else if (platform === 'darwin' || platform === 'linux') {
-        // Para Mac/Linux, usa sox ou parec
-        return { success: true, message: 'Captura de áudio iniciada (Unix)' };
+        audioCaptureProcess = await captureSystemAudioUnix();
+        return { success: true, message: 'Captura de áudio iniciada' };
       } else {
         return { 
           success: false, 
@@ -319,16 +334,11 @@ function setupIpcHandlers() {
   // Handler: Compartilhamento de tela com áudio
   ipcMain.handle('start-screen-share-audio', async (event, { sourceId, gameName }) => {
     try {
-      // Verifica se é uma janela de jogo
       if (gameName) {
-        // Inicia captura de áudio do jogo
         await ipcMain.handle('start-audio-capture', event, gameName);
-        
-        // Aguarda o áudio iniciar
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       
-      // Obtém fontes de tela
       const sources = await desktopCapturer.getSources({
         types: ['window', 'screen'],
         thumbnailSize: { width: 1280, height: 720 }
@@ -338,7 +348,6 @@ function setupIpcHandlers() {
       if (sourceId) {
         selectedSource = sources.find(s => s.id === sourceId);
       } else if (gameName) {
-        // Tenta encontrar a janela do jogo pelo nome
         selectedSource = sources.find(s => 
           s.name.toLowerCase().includes(gameName.toLowerCase()) ||
           gameName.toLowerCase().includes(s.name.toLowerCase())
@@ -346,10 +355,9 @@ function setupIpcHandlers() {
       }
       
       if (!selectedSource) {
-        selectedSource = sources[0]; // Fallback para tela completa
+        selectedSource = sources[0];
       }
       
-      // Retorna a fonte selecionada
       return {
         success: true,
         source: {
@@ -457,7 +465,6 @@ app.whenReady().then(() => {
   createWindow();
   setupIpcHandlers();
   
-  // Inicia detecção de jogos a cada 15 segundos
   gameDetectionInterval = setInterval(detectGames, 15000);
   
   app.on('activate', () => {
@@ -473,7 +480,6 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Export para usar em outros módulos
 module.exports = {
   mainWindow,
   getMainWindow: () => mainWindow,

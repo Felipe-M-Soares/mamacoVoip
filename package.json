@@ -17,28 +17,28 @@
     "dist": "npm run build:electron"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.43.4",
-    "axios": "^1.6.7",
+    "@supabase/supabase-js": "^2.38.0",
+    "axios": "^1.6.2",
     "electron-updater": "^6.1.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.3",
-    "tailwindcss": "^3.4.1",
+    "react-router-dom": "^6.20.0",
+    "tailwindcss": "^3.3.6",
     "wrtc": "^0.4.7"
   },
   "devDependencies": {
-    "@types/node": "^20.11.16",
-    "@types/react": "^18.2.55",
-    "@types/react-dom": "^18.2.19",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.37",
+    "@types/react-dom": "^18.2.15",
     "@types/wrtc": "^0.4.0",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@vitejs/plugin-react": "^4.1.1",
     "concurrently": "^8.2.2",
-    "electron": "^28.2.0",
-    "electron-builder": "^24.9.1",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.6.4",
     "electron-rebuild": "^3.2.9",
-    "typescript": "^5.3.3",
-    "vite": "^5.0.12",
-    "wait-on": "^7.2.0"
+    "typescript": "^5.3.2",
+    "vite": "^4.5.0",
+    "wait-on": "^7.0.1"
   },
   "build": {
     "appId": "com.mamaco.voip",

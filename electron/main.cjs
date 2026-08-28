@@ -7,17 +7,18 @@ const os = require('os');
 
 // Variáveis globais para controle
 let mainWindow = null;
-let screenShareStream = null;
 let audioCaptureProcess = null;
 let gameDetectionInterval = null;
 let currentGame = null;
+let isAudioCapturing = false;
 
 // Lista de jogos populares para detecção
 const GAME_PROCESSES = {
   windows: [
     'csgo.exe', 'valorant.exe', 'league of legends.exe', 'javaw.exe',
     'rocketleague.exe', 'fortnite.exe', 'overwatch.exe', 'apex.exe',
-    'minecraft.exe', 'gta5.exe', 'cyberpunk2077.exe', 'rdr2.exe'
+    'minecraft.exe', 'gta5.exe', 'cyberpunk2077.exe', 'rdr2.exe',
+    'steam.exe', 'epicgameslauncher.exe'
   ],
   mac: [
     'Counter-Strike', 'Valorant', 'League of Legends', 'Minecraft',
@@ -35,14 +36,15 @@ function detectGames() {
   let command = '';
   
   if (platform === 'win32') {
-    command = 'tasklist /FI "IMAGENAME eq ' + GAME_PROCESSES.windows.join('" or IMAGENAME eq "') + '" /FO CSV /NH';
+    const gameList = GAME_PROCESSES.windows.map(g => `IMAGENAME eq "${g}"`).join(' or ');
+    command = `tasklist /FI "${gameList}" /FO CSV /NH`;
   } else if (platform === 'darwin') {
     command = 'ps aux | grep -E "' + GAME_PROCESSES.mac.join('|') + '" | grep -v grep';
   } else {
     command = 'ps aux | grep -E "' + GAME_PROCESSES.linux.join('|') + '" | grep -v grep';
   }
   
-  exec(command, (error, stdout) => {
+  exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
     if (error) {
       console.log('Nenhum jogo detectado ou erro na detecção');
       return;
@@ -90,22 +92,47 @@ function updateGameStatus(gameName) {
   }
 }
 
-// Função para capturar áudio do sistema (Windows)
+// Função para capturar áudio do sistema usando PowerShell (Windows)
 function captureSystemAudioWindows() {
   return new Promise((resolve, reject) => {
-    // Usando o módulo nativo ou script PowerShell para capturar áudio
+    // Script PowerShell para capturar áudio do sistema via WASAPI
     const psScript = `
       Add-Type -AssemblyName System.Speech
-      $recording = New-Object System.Speech.AudioFormat
-      # Captura de áudio do sistema via WASAPI
-      # Implementação simplificada - em produção use bibliotecas nativas
+      Add-Type -AssemblyName System.Windows.Forms
+      
+      # Usando AudioEndpointVolume do Windows
+      $type = [Type]::GetTypeFromCLSID('{E77F2B8A-0A8A-4F4C-B8C5-4F3B0F5D9A6B}')
+      $device = [System.Runtime.InteropServices.Marshal]::CreateWrapperOfType([System.Activator]::CreateInstance($type), $type)
+      
+      # Captura de áudio do sistema
+      $audioCapture = New-Object -ComObject 'Audio.AudioCapture'
+      
+      # Configuração básica
+      $audioCapture.Format = 'PCM'
+      $audioCapture.SampleRate = 44100
+      $audioCapture.Channels = 2
+      $audioCapture.BitsPerSample = 16
+      
+      # Inicia captura
+      $audioCapture.Start()
+      
+      # Retorna dados
+      $audioCapture.Data
     `;
     
-    const psProcess = spawn('powershell', ['-Command', psScript]);
+    const psProcess = spawn('powershell', ['-NoProfile', '-Command', psScript]);
     let output = '';
     
     psProcess.stdout.on('data', (data) => {
       output += data.toString();
+      // Envia dados de áudio para o processo de renderização
+      if (mainWindow && isAudioCapturing) {
+        mainWindow.webContents.send('audio-capture-data', data.toString('base64'));
+      }
+    });
+    
+    psProcess.stderr.on('data', (data) => {
+      console.error('Erro no PowerShell:', data.toString());
     });
     
     psProcess.on('close', (code) => {
@@ -120,40 +147,42 @@ function captureSystemAudioWindows() {
   });
 }
 
-// Função para criar stream combinado de áudio e vídeo
-async function createCombinedStream(videoSource, audioStream) {
-  try {
-    // No Electron, podemos criar um stream customizado
-    const { webContents } = require('electron');
+// Função para capturar áudio no Mac/Linux
+function captureSystemAudioUnix() {
+  return new Promise((resolve, reject) => {
+    const platform = os.platform();
+    let command = '';
     
-    // Criar um stream de mídia combinado
-    // Esta é uma implementação simplificada - em produção use WebRTC nativo
+    if (platform === 'darwin') {
+      // Mac: usa osascript ou sox
+      command = 'sox -t coreaudio "System Audio" -t wav -b 16 -c 2 -r 44100 - 2>/dev/null';
+    } else {
+      // Linux: usa parec ou sox
+      command = 'parec --device=alsa_output.pci-0000_00_1b.0.analog-stereo.monitor --format=s16le --channels=2 --rate=44100';
+    }
     
-    // Obtém o stream de vídeo da fonte
-    const videoStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: videoSource.id,
-          minWidth: 1280,
-          maxWidth: 1920,
-          minHeight: 720,
-          maxHeight: 1080
-        }
+    const audioProcess = spawn('sh', ['-c', command]);
+    
+    audioProcess.stdout.on('data', (data) => {
+      if (mainWindow && isAudioCapturing) {
+        mainWindow.webContents.send('audio-capture-data', data.toString('base64'));
       }
     });
     
-    // Combina com o áudio do sistema
-    // Em produção, você usaria o módulo 'wrtc' para combinar streams
-    return {
-      video: videoStream,
-      audio: audioStream,
-      combined: null // Será implementado com wrtc
-    };
-  } catch (error) {
-    console.error('Erro ao criar stream combinado:', error);
-    throw error;
-  }
+    audioProcess.stderr.on('data', (data) => {
+      console.error('Erro na captura de áudio:', data.toString());
+    });
+    
+    audioProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve('Captura finalizada');
+      } else {
+        reject(new Error(`Erro na captura: código ${code}`));
+      }
+    });
+    
+    resolve(audioProcess);
+  });
 }
 
 // Criação da janela principal
@@ -188,6 +217,10 @@ function createWindow() {
     mainWindow = null;
     if (gameDetectionInterval) {
       clearInterval(gameDetectionInterval);
+    }
+    if (audioCaptureProcess) {
+      audioCaptureProcess.kill();
+      audioCaptureProcess = null;
     }
   });
 
@@ -227,7 +260,7 @@ function setupIpcHandlers() {
         command = 'ps aux | grep -E "csgo|valorant" | grep -v grep';
       }
       
-      exec(command, (error, stdout) => {
+      exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
         if (error || !stdout.trim()) {
           resolve({ success: false, games: [] });
           return;
@@ -245,44 +278,32 @@ function setupIpcHandlers() {
     });
   });
 
-  // Handler: Capturar áudio do sistema
+  // Handler: Iniciar captura de áudio
   ipcMain.handle('start-audio-capture', async (event, gameName) => {
     try {
+      if (isAudioCapturing) {
+        return { success: true, message: 'Áudio já está sendo capturado' };
+      }
+      
       const platform = os.platform();
+      isAudioCapturing = true;
       
       if (platform === 'win32') {
-        // Usa PowerShell para capturar áudio do sistema
-        const psScript = `
-          Add-Type -AssemblyName System.Speech
-          # Captura de áudio do sistema via WASAPI
-          # Em produção, use módulo nativo como 'node-audio-capture'
-        `;
-        
-        audioCaptureProcess = spawn('powershell', ['-Command', psScript]);
-        
-        audioCaptureProcess.stdout.on('data', (data) => {
-          // Envia dados de áudio para o processo de renderização
-          if (mainWindow) {
-            mainWindow.webContents.send('audio-capture-data', data.toString());
-          }
-        });
-        
-        audioCaptureProcess.on('error', (error) => {
-          console.error('Erro no processo de áudio:', error);
-          if (mainWindow) {
-            mainWindow.webContents.send('audio-capture-error', error.message);
-          }
-        });
-        
+        // Inicia captura com PowerShell
+        audioCaptureProcess = await captureSystemAudioWindows();
+        return { success: true, message: 'Captura de áudio iniciada' };
+      } else if (platform === 'darwin' || platform === 'linux') {
+        audioCaptureProcess = await captureSystemAudioUnix();
         return { success: true, message: 'Captura de áudio iniciada' };
       } else {
         return { 
           success: false, 
-          message: 'Captura de áudio do sistema suportada apenas no Windows' 
+          message: 'Sistema operacional não suportado para captura de áudio' 
         };
       }
     } catch (error) {
       console.error('Erro ao iniciar captura de áudio:', error);
+      isAudioCapturing = false;
       return { success: false, error: error.message };
     }
   });
@@ -293,6 +314,7 @@ function setupIpcHandlers() {
       if (audioCaptureProcess) {
         audioCaptureProcess.kill();
         audioCaptureProcess = null;
+        isAudioCapturing = false;
         return { success: true };
       }
       return { success: false, message: 'Nenhuma captura ativa' };
@@ -335,30 +357,14 @@ function setupIpcHandlers() {
         selectedSource = sources[0]; // Fallback para tela completa
       }
       
-      // Cria stream de captura
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: selectedSource.id,
-            minWidth: 640,
-            maxWidth: 1920,
-            minHeight: 480,
-            maxHeight: 1080
-          }
-        }
-      });
-      
-      // Retorna para o processo de renderização
+      // Retorna a fonte selecionada
       return {
         success: true,
         source: {
           id: selectedSource.id,
           name: selectedSource.name,
           thumbnail: selectedSource.thumbnail.toDataURL()
-        },
-        stream: stream
+        }
       };
     } catch (error) {
       console.error('Erro ao iniciar compartilhamento:', error);
@@ -378,7 +384,7 @@ function setupIpcHandlers() {
         command = 'ps aux | grep -E "csgo|valorant" | grep -v grep';
       }
       
-      exec(command, (error, stdout) => {
+      exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
         if (error || !stdout.trim()) {
           resolve({ success: false, game: null });
           return;
@@ -438,6 +444,12 @@ function setupMenu() {
         {
           label: 'GitHub',
           click: () => shell.openExternal('https://github.com/Felipe-M-Soares/mamacoVoip')
+        },
+        {
+          label: 'Sobre',
+          click: () => {
+            shell.openExternal('https://github.com/Felipe-M-Soares/mamacoVoip#readme');
+          }
         }
       ]
     }

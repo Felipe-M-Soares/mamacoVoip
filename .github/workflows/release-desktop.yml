@@ -36,26 +36,20 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
-      - name: Install build dependencies (Linux)
+      - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libx11-dev libxtst-dev libxss-dev
+          sudo apt-get install -y build-essential
 
-      - name: Install build dependencies (Mac)
+      - name: Install dependencies (Mac)
         if: runner.os == 'macOS'
         run: |
           brew install pkg-config
 
-      - name: Install build dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          npm install --global windows-build-tools
-
-      - name: Install dependencies
+      - name: Install npm dependencies
         run: |
           npm install --legacy-peer-deps
-          npm run rebuild
 
       - name: Build frontend
         run: npm run build

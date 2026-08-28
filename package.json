@@ -9,7 +9,12 @@
     "preview": "vite preview",
     "electron:start": "electron electron/main.cjs",
     "electron:build": "electron-builder",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron electron/main.cjs\""
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
+    "build:electron": "npm run build && npm run electron:build",
+    "postinstall": "electron-builder install-app-deps",
+    "rebuild": "electron-rebuild -f -w wrtc",
+    "fix-wrtc": "node scripts/fix-wrtc.js",
+    "dist": "npm run build:electron"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.4",
@@ -18,16 +23,19 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.3",
-    "tailwindcss": "^3.4.1"
+    "tailwindcss": "^3.4.1",
+    "wrtc": "^0.4.7"
   },
   "devDependencies": {
     "@types/node": "^20.11.16",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
+    "@types/wrtc": "^0.4.0",
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
     "electron": "^28.2.0",
     "electron-builder": "^24.9.1",
+    "electron-rebuild": "^3.2.9",
     "typescript": "^5.3.3",
     "vite": "^5.0.12",
     "wait-on": "^7.2.0"
@@ -42,7 +50,8 @@
       "dist/**/*",
       "electron/**/*",
       "build/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!node_modules/wrtc/build/Release/obj/**/*"
     ],
     "win": {
       "target": "nsis",

@@ -26,8 +26,6 @@ let audioCaptureProcess = null;
 let gameDetectionInterval = null;
 let currentGame = null;
 let isAudioCapturing = false;
-let peerConnection = null;
-let screenStream = null;
 
 // Configuração do WebRTC
 const rtcConfig = {
@@ -215,12 +213,6 @@ function createWindow() {
     if (audioCaptureProcess) {
       audioCaptureProcess.kill();
       audioCaptureProcess = null;
-    }
-    if (peerConnection) {
-      try {
-        peerConnection.close();
-      } catch (e) {}
-      peerConnection = null;
     }
   });
 

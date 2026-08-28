@@ -9,24 +9,18 @@
     "preview": "vite preview",
     "electron:start": "electron electron/main.cjs",
     "electron:build": "electron-builder",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
-    "build:native": "node-gyp rebuild",
-    "postinstall": "npm run build:native"
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron electron/main.cjs\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.4",
     "axios": "^1.6.7",
     "electron-updater": "^6.1.7",
-    "fluent-ffmpeg": "^2.1.2",
-    "obs-websocket-js": "^5.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.3",
-    "tailwindcss": "^3.4.1",
-    "wrtc": "^0.4.7"
+    "tailwindcss": "^3.4.1"
   },
   "devDependencies": {
-    "@types/fluent-ffmpeg": "^2.1.24",
     "@types/node": "^20.11.16",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
@@ -34,7 +28,6 @@
     "concurrently": "^8.2.2",
     "electron": "^28.2.0",
     "electron-builder": "^24.9.1",
-    "node-gyp": "^10.0.0",
     "typescript": "^5.3.3",
     "vite": "^5.0.12",
     "wait-on": "^7.2.0"
@@ -68,31 +61,5 @@
       "owner": "Felipe-M-Soares",
       "repo": "mamacoVoip"
     }
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.43.4",
-    "axios": "^1.6.7",
-    "electron-updater": "^6.1.7",
-    "fluent-ffmpeg": "^2.1.2",
-    "obs-websocket-js": "^5.0.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.3",
-    "tailwindcss": "^3.4.1",
-    "wrtc": "^0.4.7"
-  },
-  "devDependencies": {
-    "@types/fluent-ffmpeg": "^2.1.24",
-    "@types/node": "^20.11.16",
-    "@types/react": "^18.2.55",
-    "@types/react-dom": "^18.2.19",
-    "@vitejs/plugin-react": "^4.2.1",
-    "concurrently": "^8.2.2",
-    "electron": "^28.2.0",
-    "electron-builder": "^24.9.1",
-    "node-gyp": "^10.0.0",
-    "typescript": "^5.3.3",
-    "vite": "^5.0.12",
-    "wait-on": "^7.2.0"
   }
 }

@@ -4,10 +4,6 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.vscode/**'
 
 jobs:
   build:
@@ -36,20 +32,8 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential
-
-      - name: Install dependencies (Mac)
-        if: runner.os == 'macOS'
-        run: |
-          brew install pkg-config
-
-      - name: Install npm dependencies
-        run: |
-          npm install --legacy-peer-deps
+      - name: Install dependencies
+        run: npm install
 
       - name: Build frontend
         run: npm run build

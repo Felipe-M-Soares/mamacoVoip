@@ -52,9 +52,9 @@ jobs:
         run: |
           npm install --global windows-build-tools
 
-      - name: Install dependencies
+      - name: Install dependencies with legacy peer deps
         run: |
-          npm install
+          npm install --legacy-peer-deps
           npm run rebuild
 
       - name: Build frontend

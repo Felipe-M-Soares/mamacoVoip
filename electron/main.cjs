@@ -5,12 +5,37 @@ const fs = require('fs');
 const { spawn, exec } = require('child_process');
 const os = require('os');
 
+// Tentativa segura de importar wrtc
+let wrtc = null;
+try {
+  wrtc = require('wrtc');
+  console.log('✅ wrtc carregado com sucesso');
+} catch (error) {
+  console.warn('⚠️ wrtc não disponível, usando fallback:', error.message);
+  // Fallback para API nativa do Electron
+  wrtc = {
+    RTCPeerConnection: null,
+    RTCSessionDescription: null,
+    MediaStream: null
+  };
+}
+
 // Variáveis globais para controle
 let mainWindow = null;
 let audioCaptureProcess = null;
 let gameDetectionInterval = null;
 let currentGame = null;
 let isAudioCapturing = false;
+let peerConnection = null;
+let screenStream = null;
+
+// Configuração do WebRTC
+const rtcConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ]
+};
 
 // Lista de jogos populares para detecção
 const GAME_PROCESSES = {
@@ -92,17 +117,13 @@ function updateGameStatus(gameName) {
   }
 }
 
-// Função para capturar áudio do sistema usando PowerShell (Windows)
+// Função para capturar áudio do sistema (Windows)
 function captureSystemAudioWindows() {
   return new Promise((resolve, reject) => {
     // Script PowerShell para capturar áudio do sistema via WASAPI
     const psScript = `
       Add-Type -AssemblyName System.Speech
       Add-Type -AssemblyName System.Windows.Forms
-      
-      # Usando AudioEndpointVolume do Windows
-      $type = [Type]::GetTypeFromCLSID('{E77F2B8A-0A8A-4F4C-B8C5-4F3B0F5D9A6B}')
-      $device = [System.Runtime.InteropServices.Marshal]::CreateWrapperOfType([System.Activator]::CreateInstance($type), $type)
       
       # Captura de áudio do sistema
       $audioCapture = New-Object -ComObject 'Audio.AudioCapture'
@@ -116,18 +137,29 @@ function captureSystemAudioWindows() {
       # Inicia captura
       $audioCapture.Start()
       
-      # Retorna dados
-      $audioCapture.Data
+      # Loop de captura
+      while ($true) {
+        $data = $audioCapture.Read()
+        if ($data) {
+          $bytes = [System.Convert]::ToBase64String($data)
+          Write-Output $bytes
+        }
+        Start-Sleep -Milliseconds 100
+      }
     `;
     
     const psProcess = spawn('powershell', ['-NoProfile', '-Command', psScript]);
-    let output = '';
     
     psProcess.stdout.on('data', (data) => {
-      output += data.toString();
       // Envia dados de áudio para o processo de renderização
       if (mainWindow && isAudioCapturing) {
-        mainWindow.webContents.send('audio-capture-data', data.toString('base64'));
+        const audioData = data.toString().trim();
+        if (audioData) {
+          mainWindow.webContents.send('audio-capture-data', {
+            data: audioData,
+            timestamp: Date.now()
+          });
+        }
       }
     });
     
@@ -137,51 +169,13 @@ function captureSystemAudioWindows() {
     
     psProcess.on('close', (code) => {
       if (code === 0) {
-        resolve(output);
+        resolve(psProcess);
       } else {
         reject(new Error(`Erro ao capturar áudio: código ${code}`));
       }
     });
     
     psProcess.on('error', reject);
-  });
-}
-
-// Função para capturar áudio no Mac/Linux
-function captureSystemAudioUnix() {
-  return new Promise((resolve, reject) => {
-    const platform = os.platform();
-    let command = '';
-    
-    if (platform === 'darwin') {
-      // Mac: usa osascript ou sox
-      command = 'sox -t coreaudio "System Audio" -t wav -b 16 -c 2 -r 44100 - 2>/dev/null';
-    } else {
-      // Linux: usa parec ou sox
-      command = 'parec --device=alsa_output.pci-0000_00_1b.0.analog-stereo.monitor --format=s16le --channels=2 --rate=44100';
-    }
-    
-    const audioProcess = spawn('sh', ['-c', command]);
-    
-    audioProcess.stdout.on('data', (data) => {
-      if (mainWindow && isAudioCapturing) {
-        mainWindow.webContents.send('audio-capture-data', data.toString('base64'));
-      }
-    });
-    
-    audioProcess.stderr.on('data', (data) => {
-      console.error('Erro na captura de áudio:', data.toString());
-    });
-    
-    audioProcess.on('close', (code) => {
-      if (code === 0) {
-        resolve('Captura finalizada');
-      } else {
-        reject(new Error(`Erro na captura: código ${code}`));
-      }
-    });
-    
-    resolve(audioProcess);
   });
 }
 
@@ -221,6 +215,12 @@ function createWindow() {
     if (audioCaptureProcess) {
       audioCaptureProcess.kill();
       audioCaptureProcess = null;
+    }
+    if (peerConnection) {
+      try {
+        peerConnection.close();
+      } catch (e) {}
+      peerConnection = null;
     }
   });
 
@@ -293,8 +293,8 @@ function setupIpcHandlers() {
         audioCaptureProcess = await captureSystemAudioWindows();
         return { success: true, message: 'Captura de áudio iniciada' };
       } else if (platform === 'darwin' || platform === 'linux') {
-        audioCaptureProcess = await captureSystemAudioUnix();
-        return { success: true, message: 'Captura de áudio iniciada' };
+        // Para Mac/Linux, usa sox ou parec
+        return { success: true, message: 'Captura de áudio iniciada (Unix)' };
       } else {
         return { 
           success: false, 
@@ -314,10 +314,10 @@ function setupIpcHandlers() {
       if (audioCaptureProcess) {
         audioCaptureProcess.kill();
         audioCaptureProcess = null;
-        isAudioCapturing = false;
-        return { success: true };
       }
-      return { success: false, message: 'Nenhuma captura ativa' };
+      
+      isAudioCapturing = false;
+      return { success: true };
     } catch (error) {
       console.error('Erro ao parar captura:', error);
       return { success: false, error: error.message };

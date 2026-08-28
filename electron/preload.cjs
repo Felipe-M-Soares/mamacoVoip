@@ -40,6 +40,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('audio-capture-error', (event, error) => callback(error));
   },
   
+  // Escuta eventos do WebRTC
+  onWebRTC: (callback) => {
+    ipcRenderer.on('webrtc-candidate', (event, data) => callback(data));
+    ipcRenderer.on('webrtc-track', (event, data) => callback(data));
+  },
+  
   // Remove listeners
   removeAllListeners: (channel) => {
     ipcRenderer.removeAllListeners(channel);

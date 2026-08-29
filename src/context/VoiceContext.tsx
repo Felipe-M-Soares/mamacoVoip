@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { useAuth } from './AuthContext';
+import { AuthContext } from './AuthContext'; // ← Importa o contexto, não o hook
 import { useAudioSettings } from '../hooks/useAudioSettings';
 import { useScreenShareQuality } from '../hooks/useScreenShareQuality';
 import {
@@ -56,7 +56,10 @@ export const useVoice = () => {
 };
 
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  // 🔥 USA O CONTEXTO DIRETAMENTE
+  const authContext = useContext(AuthContext);
+  const user = authContext?.user || null;
+  
   const { selectedDeviceId, sensitivity } = useAudioSettings();
   const [isConnected, setIsConnected] = useState(false);
   const [users, setUsers] = useState<VoiceUser[]>([]);
@@ -121,7 +124,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const channelName = `realtime:voice:${channelId}`;
         const channel = supabase.current.channel(channelName);
 
-        // 🔥 TODOS OS CALLBACKS ANTES DO SUBSCRIBE
+        // TODOS OS CALLBACKS ANTES DO SUBSCRIBE
         channel
           .on('presence', { event: 'sync' }, () => {
             const state = channel.presenceState();
@@ -154,7 +157,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setUsers((prev) => prev.filter((u) => !left.some((l) => l.user_id === u.user_id)));
           })
           .on('broadcast', { event: 'audio' }, ({ payload }) => {
-            // Processar áudio recebido
             if (payload && payload.user_id !== user.id) {
               console.log('Áudio recebido de:', payload.user_id);
             }
@@ -166,7 +168,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             console.log('Screen share parado');
           });
 
-        // 🔥 SUBSCRIBE DEPOIS DE TODOS OS CALLBACKS
+        // SUBSCRIBE DEPOIS DE TODOS OS CALLBACKS
         channel.subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
             await channel.track({

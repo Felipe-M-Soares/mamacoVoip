@@ -1,7 +1,10 @@
 // Redução de ruído desativada temporariamente
 // import { NoiseSuppressor } from '@sapphi-red/web-noise-suppressor';
 
-// Exporta uma função vazia para não quebrar o app
+// Valor padrão para sensibilidade do microfone (0-100)
+export const DEFAULT_MIC_SENSITIVITY = 50;
+
+// Exporta funções vazias para não quebrar o app
 export function createNoiseSuppressor() {
   console.warn('Redução de ruído não disponível');
   return null;

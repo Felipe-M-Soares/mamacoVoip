@@ -1,6 +1,6 @@
 {
   "name": "mamaco-voip",
-  "version": "1.0.0",
+  "version": "1.0.151",
   "description": "Clone funcional do Discord com React e Electron",
   "main": "electron/main.cjs",
   "type": "module",

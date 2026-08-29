@@ -2,6 +2,7 @@
   "name": "mamaco-voip",
   "version": "1.0.0",
   "description": "Clone funcional do Discord com React e Electron",
+  "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
@@ -11,35 +12,32 @@
     "electron:build": "electron-builder",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
     "build:electron": "npm run build && npm run electron:build",
-    "build:native": "node-gyp rebuild",
-    "install:native": "node scripts/install-native.js",
-    "postinstall": "npm run install:native",
-    "dist": "npm run build:electron"
+    "clean": "rm -rf node_modules package-lock.json && npm install --legacy-peer-deps",
+    "dist": "npm run build:electron",
+    "postinstall": "echo 'Instalação concluída'"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.43.4",
-    "axios": "^1.6.7",
+    "@supabase/supabase-js": "^2.38.4",
+    "axios": "^1.6.2",
     "electron-updater": "^6.1.7",
-    "node-addon-api": "^7.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.3"
+    "react-router-dom": "^6.20.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.16",
-    "@types/react": "^18.2.55",
-    "@types/react-dom": "^18.2.19",
+    "@types/node": "^20.10.5",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.2",
-    "electron": "^28.2.0",
+    "electron": "^27.1.3",
     "electron-builder": "^24.9.1",
-    "node-gyp": "^10.0.0",
     "postcss": "^8.4.32",
-    "tailwindcss": "^3.4.1",
+    "tailwindcss": "^3.3.6",
     "typescript": "^5.3.3",
-    "vite": "^5.0.12",
-    "wait-on": "^7.2.0"
+    "vite": "^5.0.10",
+    "wait-on": "^7.0.1"
   },
   "build": {
     "appId": "com.mamaco.voip",
@@ -51,9 +49,7 @@
       "dist/**/*",
       "electron/**/*",
       "build/**/*",
-      "native/**/*",
-      "node_modules/**/*",
-      "!native/build/**/*"
+      "node_modules/**/*"
     ],
     "win": {
       "target": "nsis",

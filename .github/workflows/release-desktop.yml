@@ -27,20 +27,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          # 🔥 REMOVA A LINHA ABAIXO PARA NÃO USAR CACHE
-          # cache: 'npm'
       
-      - name: Clear npm cache (força limpeza)
+      - name: Clear npm cache
         run: npm cache clean --force
       
       - name: Install (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y build-essential
         
-      - name: Install dependencies (limpo)
+      - name: Install (Windows) - Remove pastas
+        if: runner.os == 'Windows'
+        run: |
+          Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+          Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
+          
+      - name: Install (Mac/Linux) - Remove pastas
+        if: runner.os != 'Windows'
         run: |
           rm -rf node_modules package-lock.json
-          npm install --legacy-peer-deps --no-package-lock
+          
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
         
       - name: Verifica versão do Tailwind
         run: npm list tailwindcss

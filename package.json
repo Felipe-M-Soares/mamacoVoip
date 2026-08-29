@@ -15,6 +15,7 @@
     "dist": "npm run build:electron"
   },
   "dependencies": {
+    "@sapphi-red/web-noise-suppressor": "^1.0.0",
     "@supabase/supabase-js": "^2.38.4",
     "@tailwindcss/vite": "^4.0.0-alpha.14",
     "axios": "^1.6.2",

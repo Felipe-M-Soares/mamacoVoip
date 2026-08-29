@@ -8,13 +8,18 @@ import {
   type NoiseSuppressor,
   createScreenAudioDenoiser,
   type ScreenAudioDenoiser,
-  MIN_MIC_SENSITIVITY,
-  MAX_MIC_SENSITIVITY,
 } from '../lib/noiseSuppression';
-import { takePendingGameShareHint } from '../lib/screenShareGameHint';
-import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture';
 
-// Tipos e constantes
+// Tipos
+interface VoiceUser {
+  user_id: string;
+  username: string;
+  avatar_url?: string;
+  is_muted: boolean;
+  is_deafened: boolean;
+  speaking: boolean;
+}
+
 interface VoiceContextType {
   joinVoiceChannel: (channelId: string, serverId: string) => Promise<void>;
   leaveVoiceChannel: () => Promise<void>;
@@ -32,15 +37,6 @@ interface VoiceContextType {
   isGameSharing: boolean;
   startGameShare: () => Promise<void>;
   stopGameShare: () => Promise<void>;
-}
-
-interface VoiceUser {
-  user_id: string;
-  username: string;
-  avatar_url?: string;
-  is_muted: boolean;
-  is_deafened: boolean;
-  speaking: boolean;
 }
 
 interface PresenceTrack {
@@ -61,7 +57,7 @@ export const useVoice = () => {
 
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const { selectedDeviceId, noiseSuppressionEnabled, sensitivity } = useAudioSettings();
+  const { selectedDeviceId, sensitivity } = useAudioSettings();
   const [isConnected, setIsConnected] = useState(false);
   const [users, setUsers] = useState<VoiceUser[]>([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -76,9 +72,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const noiseSuppressorRef = useRef<NoiseSuppressor | null>(null);
-  const screenAudioDenoiserRef = useRef<ScreenAudioDenoiser | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
-  const screenAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
   // Inicializa cliente Supabase
   useEffect(() => {
@@ -88,7 +82,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   }, []);
 
-  // 🔥 FUNÇÃO CORRIGIDA: joinVoiceChannel
+  // Join voice channel
   const joinVoiceChannel = useCallback(
     async (channelId: string, serverId: string) => {
       if (!user || !supabase.current) return;
@@ -100,7 +94,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           audio: {
             deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
             echoCancellation: { ideal: true },
-            noiseSuppression: { ideal: false }, // Desligado para evitar chiado
+            noiseSuppression: { ideal: false },
             autoGainControl: { ideal: false },
             sampleRate: { ideal: 48000 },
             channelCount: { ideal: 2 },
@@ -109,7 +103,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
         streamRef.current = stream;
 
-        // 2. Configura áudio (gain, noise suppression)
+        // 2. Configura áudio
         const audioCtx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
         audioContextRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(stream);
@@ -117,89 +111,68 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         gain.gain.value = sensitivity / 100;
         gainNodeRef.current = gain;
 
-        // Cria noise suppressor (mock se não disponível)
         const suppressor = createNoiseSuppressor();
         noiseSuppressorRef.current = suppressor;
 
-        // Conecta: source -> suppressor? -> gain -> destination
-        if (suppressor) {
-          // Se tiver suppressor, conecta através dele
-          // (implementação real dependeria da biblioteca)
-          source.connect(gain);
-        } else {
-          source.connect(gain);
-        }
+        source.connect(gain);
         gain.connect(audioCtx.destination);
 
         // 3. Cria canal do Supabase Realtime
         const channelName = `realtime:voice:${channelId}`;
         const channel = supabase.current.channel(channelName);
 
-        // 🔥 PARTE CRÍTICA: Adiciona TODOS os callbacks ANTES de subscribe
-
-        // Presence: sync
-        channel.on('presence', { event: 'sync' }, () => {
-          const state = channel.presenceState();
-          const usersList: VoiceUser[] = [];
-          Object.keys(state).forEach((key) => {
-            const presences = state[key] as PresenceTrack[];
-            presences.forEach((p) => {
-              usersList.push({
-                user_id: p.user_id,
-                username: p.username,
-                avatar_url: p.avatar_url,
-                is_muted: p.is_muted,
-                is_deafened: p.is_deafened,
-                speaking: false,
+        // 🔥 TODOS OS CALLBACKS ANTES DO SUBSCRIBE
+        channel
+          .on('presence', { event: 'sync' }, () => {
+            const state = channel.presenceState();
+            const usersList: VoiceUser[] = [];
+            Object.keys(state).forEach((key) => {
+              const presences = state[key] as PresenceTrack[];
+              presences.forEach((p) => {
+                usersList.push({
+                  user_id: p.user_id,
+                  username: p.username,
+                  avatar_url: p.avatar_url,
+                  is_muted: p.is_muted,
+                  is_deafened: p.is_deafened,
+                  speaking: false,
+                });
               });
             });
+            setUsers(usersList);
+          })
+          .on('presence', { event: 'join' }, ({ newPresences }) => {
+            const joined = newPresences as PresenceTrack[];
+            setUsers((prev) => {
+              const existing = new Set(prev.map((u) => u.user_id));
+              const toAdd = joined.filter((p) => !existing.has(p.user_id));
+              return [...prev, ...toAdd.map((p) => ({ ...p, speaking: false }))];
+            });
+          })
+          .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+            const left = leftPresences as PresenceTrack[];
+            setUsers((prev) => prev.filter((u) => !left.some((l) => l.user_id === u.user_id)));
+          })
+          .on('broadcast', { event: 'audio' }, ({ payload }) => {
+            // Processar áudio recebido
+            if (payload && payload.user_id !== user.id) {
+              console.log('Áudio recebido de:', payload.user_id);
+            }
+          })
+          .on('broadcast', { event: 'screen-share-start' }, ({ payload }) => {
+            console.log('Screen share iniciado por:', payload?.user_id);
+          })
+          .on('broadcast', { event: 'screen-share-stop' }, () => {
+            console.log('Screen share parado');
           });
-          setUsers(usersList);
-        });
 
-        // Presence: join
-        channel.on('presence', { event: 'join' }, ({ newPresences }) => {
-          const joined = newPresences as PresenceTrack[];
-          setUsers((prev) => {
-            const existing = new Set(prev.map((u) => u.user_id));
-            const toAdd = joined.filter((p) => !existing.has(p.user_id));
-            return [...prev, ...toAdd.map((p) => ({ ...p, speaking: false }))];
-          });
-        });
-
-        // Presence: leave
-        channel.on('presence', { event: 'leave' }, ({ leftPresences }) => {
-          const left = leftPresences as PresenceTrack[];
-          setUsers((prev) => prev.filter((u) => !left.some((l) => l.user_id === u.user_id)));
-        });
-
-        // Broadcast: audio (para receber áudio de outros)
-        channel.on('broadcast', { event: 'audio' }, ({ payload }) => {
-          // Processar áudio recebido
-          if (payload && payload.user_id !== user.id) {
-            // Reproduzir áudio (implementação simplificada)
-            console.log('Áudio recebido de:', payload.user_id);
-          }
-        });
-
-        // Broadcast: screen-share-start
-        channel.on('broadcast', { event: 'screen-share-start' }, ({ payload }) => {
-          // Atualizar UI
-        });
-
-        // Broadcast: screen-share-stop
-        channel.on('broadcast', { event: 'screen-share-stop' }, () => {
-          // Atualizar UI
-        });
-
-        // 🔥 AGORA SIM: subscribe
+        // 🔥 SUBSCRIBE DEPOIS DE TODOS OS CALLBACKS
         channel.subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
-            // Entra na sala (track presence)
             await channel.track({
               user_id: user.id,
-              username: user.username || 'Usuário',
-              avatar_url: user.avatar_url,
+              username: user.user_metadata?.username || 'Usuário',
+              avatar_url: user.user_metadata?.avatar_url,
               is_muted: isMuted,
               is_deafened: false,
             });
@@ -211,17 +184,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         channelRef.current = channel;
 
-        // 4. Inicia envio de áudio (via broadcast)
-        // Em produção, você usaria WebRTC para P2P, mas aqui um exemplo com broadcast
-        const sendAudioInterval = setInterval(() => {
+        // Intervalo para envio de áudio (simplificado)
+        const sendInterval = setInterval(() => {
           if (channelRef.current && !isMuted) {
-            // Captura dados de áudio do gain node e envia via broadcast
-            // Implementação real requer processamento de PCM
+            // Em produção, enviar áudio via WebRTC
           }
         }, 50);
-
-        // Guarda o intervalo para limpeza
-        (channel as any).__sendInterval = sendAudioInterval;
+        (channel as any).__sendInterval = sendInterval;
       } catch (error) {
         console.error('Erro ao entrar no canal de voz:', error);
         throw error;
@@ -230,23 +199,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [user, selectedDeviceId, sensitivity, isMuted, isConnected]
   );
 
-  // 🔥 FUNÇÃO CORRIGIDA: leaveVoiceChannel
+  // Leave voice channel
   const leaveVoiceChannel = useCallback(async () => {
     try {
-      // Limpa callbacks e unsubscribe
       if (channelRef.current) {
-        // Remove todos os listeners
         channelRef.current.off();
-        // Cancela subscribe
         await channelRef.current.unsubscribe();
-        // Limpa intervalo se existir
         if (channelRef.current.__sendInterval) {
           clearInterval(channelRef.current.__sendInterval);
         }
         channelRef.current = null;
       }
 
-      // Para streams de áudio
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -263,13 +227,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
 
       if (noiseSuppressorRef.current) {
-        noiseSuppressorRef.current.dispose();
+        noiseSuppressorRef.current.dispose?.();
         noiseSuppressorRef.current = null;
-      }
-
-      if (screenAudioDenoiserRef.current) {
-        screenAudioDenoiserRef.current.dispose();
-        screenAudioDenoiserRef.current = null;
       }
 
       setIsConnected(false);
@@ -281,16 +240,15 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // toggleMute
+  // Toggle mute
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const newMuted = !prev;
-      // Atualiza presença no canal
       if (channelRef.current && user) {
         channelRef.current.track({
           user_id: user.id,
-          username: user.username || 'Usuário',
-          avatar_url: user.avatar_url,
+          username: user.user_metadata?.username || 'Usuário',
+          avatar_url: user.user_metadata?.avatar_url,
           is_muted: newMuted,
           is_deafened: false,
         });
@@ -299,18 +257,15 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [user]);
 
-  // setMicrophoneVolume (via gain)
-  const setMicrophoneVolumeFn = useCallback(
-    (volume: number) => {
-      setMicrophoneVolume(volume);
-      if (gainNodeRef.current) {
-        gainNodeRef.current.gain.value = volume / 100;
-      }
-    },
-    []
-  );
+  // Set microphone volume
+  const setMicrophoneVolumeFn = useCallback((volume: number) => {
+    setMicrophoneVolume(volume);
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = volume / 100;
+    }
+  }, []);
 
-  // Funções de screen share (simplificadas)
+  // Screen share
   const startScreenShare = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -319,7 +274,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       screenStreamRef.current = stream;
       setIsScreenSharing(true);
-      // Transmitir via broadcast
       if (channelRef.current) {
         channelRef.current.send({
           type: 'broadcast',
@@ -348,17 +302,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [user]);
 
   const startGameShare = useCallback(async () => {
-    // Implementação de game share
-    console.log('Iniciando compartilhamento de jogo...');
     setIsGameSharing(true);
   }, []);
 
   const stopGameShare = useCallback(() => {
-    console.log('Parando compartilhamento de jogo...');
     setIsGameSharing(false);
   }, []);
 
-  // Cleanup ao desmontar
+  // Cleanup
   useEffect(() => {
     return () => {
       leaveVoiceChannel();

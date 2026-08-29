@@ -32,9 +32,6 @@ jobs:
         with:
           node-version: '24'
       
-      - name: Clear npm cache
-        run: npm cache clean --force
-      
       - name: Install (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y build-essential
@@ -42,10 +39,10 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
         
-      - name: Build
+      - name: Build frontend
         run: npm run build
         
-      - name: Build Electron
+      - name: Build Electron app
         run: npm run electron:build -- ${{ matrix.target }} --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,12 +59,22 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Get version from package.json
+        id: get-version
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+      
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
-      - uses: softprops/action-gh-release@v1
+          
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ github.run_number }}
+          tag_name: v${{ steps.get-version.outputs.VERSION }}
+          name: Release v${{ steps.get-version.outputs.VERSION }}
+          draft: false
+          prerelease: false
           files: |
             release-artifacts/**/*.exe
             release-artifacts/**/*.dmg

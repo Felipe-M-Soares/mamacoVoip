@@ -55,7 +55,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Mamaco Voip",
-      "allowUpgrades": true,
       "include": "build/installer.nsh"
     },
     "win": {

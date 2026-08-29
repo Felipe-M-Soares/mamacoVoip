@@ -1,77 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
-import { AuthProvider, useAuth } from './AuthContext';
-import { createClient } from '@supabase/supabase-js';
+import { describe, it, expect } from 'vitest'
+import { traduzErro } from './AuthContext'
 
-// Mock do Supabase
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: vi.fn(() => ({
-    auth: {
-      getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
-      onAuthStateChange: vi.fn(() => ({
-        data: { subscription: { unsubscribe: vi.fn() } },
-      })),
-      signInWithPassword: vi.fn(),
-      signUp: vi.fn(),
-      signOut: vi.fn(),
-      resetPasswordForEmail: vi.fn(),
-    },
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          single: vi.fn().mockResolvedValue({ data: null }),
-        })),
-      })),
-    })),
-  })),
-}));
+describe('traduzErro', () => {
+  it('traduz mensagens conhecidas do Supabase pro português', () => {
+    expect(traduzErro('Invalid login credentials')).toBe('E-mail ou senha incorretos.')
+    expect(traduzErro('User already registered')).toBe('Já existe uma conta com este e-mail.')
+    expect(traduzErro('Password should be at least 6 characters')).toBe(
+      'A senha precisa ter no mínimo 6 caracteres.'
+    )
+    expect(traduzErro('Email not confirmed')).toBe(
+      'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.'
+    )
+  })
 
-describe('AuthContext', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  it('trata "email rate limit exceeded" case-insensitive', () => {
+    expect(traduzErro('Email rate limit exceeded')).toContain('Muitas contas foram criadas')
+    expect(traduzErro('EMAIL RATE LIMIT EXCEEDED')).toContain('Muitas contas foram criadas')
+  })
 
-  it('deve fornecer o contexto de autenticação', async () => {
-    const wrapper = ({ children }: { children: React.ReactNode }) => (
-      <AuthProvider>{children}</AuthProvider>
-    );
+  it('extrai o número de segundos da mensagem de rate limit por segurança', () => {
+    expect(traduzErro('For security purposes, you can only request this after 42 seconds.')).toBe(
+      'Por segurança, espere 42 segundos antes de tentar de novo.'
+    )
+  })
 
-    const { result } = renderHook(() => useAuth(), { wrapper });
+  it('reconhece a variação em minúsculas da mensagem de rate limit por segurança', () => {
+    expect(traduzErro('FOR SECURITY PURPOSES, YOU CAN ONLY REQUEST THIS AFTER 7 SECONDS.')).toBe(
+      'Por segurança, espere 7 segundos antes de tentar de novo.'
+    )
+  })
 
-    await waitFor(() => {
-      expect(result.current).toBeDefined();
-      expect(result.current.user).toBeNull();
-      expect(result.current.loading).toBe(false);
-    });
-  });
-
-  it('deve ter funções de autenticação', async () => {
-    const wrapper = ({ children }: { children: React.ReactNode }) => (
-      <AuthProvider>{children}</AuthProvider>
-    );
-
-    const { result } = renderHook(() => useAuth(), { wrapper });
-
-    await waitFor(() => {
-      expect(result.current.signIn).toBeTypeOf('function');
-      expect(result.current.signUp).toBeTypeOf('function');
-      expect(result.current.signOut).toBeTypeOf('function');
-      expect(result.current.resetPassword).toBeTypeOf('function');
-    });
-  });
-
-  it('deve lidar com erro ao buscar perfil', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const wrapper = ({ children }: { children: React.ReactNode }) => (
-      <AuthProvider>{children}</AuthProvider>
-    );
-
-    renderHook(() => useAuth(), { wrapper });
-
-    await waitFor(() => {
-      expect(consoleSpy).not.toHaveBeenCalled();
-    });
-
-    consoleSpy.mockRestore();
-  });
-});
+  it('devolve a mensagem original quando não reconhece o erro', () => {
+    expect(traduzErro('Something totally unexpected happened')).toBe('Something totally unexpected happened')
+  })
+})

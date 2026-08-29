@@ -1,7 +1,7 @@
 {
   "name": "mamacos-voip",
   "private": true,
-  "version": "1.0.153",
+  "version": "1.0.0",
   "description": "Mamacos Voip — servidores, canais, chat em tempo real, voz e vídeo.",
   "author": "Felipe M. Soares <jogos.fms@hotmail.com>",
   "type": "module",
@@ -77,12 +77,11 @@
       "icon": "build/icon.png"
     },
     "nsis": {
-      "oneClick": false,
-      "perMachine": true,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "perMachine": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": false,
+      "deleteAppDataOnUninstall": true,
       "artifactName": "MamacosVoip-Setup.exe"
     },
     "mac": {

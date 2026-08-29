@@ -1,5 +1,4 @@
 !macro customHeader
-  ; Cabeçalho personalizado (opcional)
   !define MUI_HEADERIMAGE
   !define MUI_HEADERIMAGE_BITMAP "${NSISDIR}\Contrib\Graphics\Header\win.bmp"
 !macroend

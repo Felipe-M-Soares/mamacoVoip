@@ -1,135 +1,100 @@
-name: Build e publicar app desktop
+name: Release Desktop App
 
-# Roda sempre que algo é enviado pra main — o mesmo push que a Vercel
-# usa pra atualizar o site também dispara isso aqui, então o app
-# instalado no PC das pessoas recebe a atualização automaticamente na
-# próxima vez que o electron-updater checar (ele checa toda vez que o
-# app abre). Também pode ser disparado manualmente pela aba Actions.
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    branches:
+      - main
 
 jobs:
-  # Cria e envia a tag da versão ANTES de qualquer build começar. Sem
-  # isso, cada uma das 3 plataformas tentava criar o release já
-  # "publicado" referenciando uma tag que ainda não existia de verdade
-  # no repositório — o GitHub rejeita isso ("must have a valid tag").
-  # Criando a tag aqui primeiro, ela já existe de verdade quando os
-  # builds tentam publicar nela.
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - name: Baixar o código
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Calcular e criar a tag da versão
-        id: version
-        run: |
-          VERSION="1.0.$(git rev-list --count HEAD)"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
-
-      - name: Criar o release no GitHub (antes dos builds, evita disputa entre as 3 plataformas)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "v${{ steps.version.outputs.version }}" --title "v${{ steps.version.outputs.version }}" --generate-notes
-
   build:
-    needs: prepare
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
         include:
           - os: windows-latest
-            platform_flag: --win
+            build-target: '--win'
+            artifact-name: 'windows'
           - os: macos-latest
-            platform_flag: --mac
+            build-target: '--mac'
+            artifact-name: 'mac'
           - os: ubuntu-latest
-            platform_flag: --linux
-
-    runs-on: ${{ matrix.os }}
+            build-target: '--linux'
+            artifact-name: 'linux'
 
     steps:
-      - name: Baixar o código
+      - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Configurar Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '18'
 
-      - name: Instalar dependências (resolução limpa, sem lock file)
-        shell: bash
-        # Apaga o package-lock.json antes de instalar — ele foi gerado
-        # num Linux e o npm tem um bug conhecido (npm/cli#4828) onde
-        # confia demais num lock file "incompleto" pra outras
-        # plataformas em vez de resolver do zero os binários nativos
-        # certos (rolldown, lightningcss) pra cada sistema operacional.
-        # Resolvendo do zero em cada runner, isso nunca acontece.
+      - name: Install build tools (Windows)
+        if: runner.os == 'Windows'
         run: |
-          rm -f package-lock.json
-          npm install
+          # Usa o Visual Studio Build Tools que já vem no runner
+          echo "Using Visual Studio Build Tools"
 
-      - name: Definir a versão (mesma calculada no job "prepare")
-        shell: bash
-        run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version --allow-same-version
-
-      # Compila o .exe standalone de captura de áudio por processo
-      # (native/process-audio-capture/capture.cpp — ver comentário no
-      # topo desse arquivo pra entender o que ele faz e por quê é um
-      # .exe separado em vez de um módulo nativo do Node). Só roda no
-      # job do Windows: é código Win32/WASAPI puro, não existe
-      # equivalente Mac/Linux, e o resto do app já lida bem com esse
-      # .exe simplesmente não existir nessas plataformas (ver
-      # electron/main.cjs — a captura por app fica indisponível, sem
-      # quebrar mais nada). msvc-dev-cmd@v1 coloca o compilador cl.exe
-      # (Visual Studio, já vem instalado no runner windows-latest) no
-      # PATH — sem essa ação, "cl" não é reconhecido pelo shell.
-      - name: Configurar compilador MSVC (só Windows)
-        if: matrix.os == 'windows-latest'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Compilar captura de áudio por processo (só Windows)
-        if: matrix.os == 'windows-latest'
-        shell: cmd
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
         run: |
-          cl /EHsc /std:c++17 /O2 /DUNICODE /D_UNICODE native\process-audio-capture\capture.cpp /Fe:electron\process-audio-capture.exe /link ole32.lib mmdevapi.lib
+          sudo apt-get update
+          sudo apt-get install -y build-essential libpulse-dev
 
-      - name: Build do app desktop (tsc + vite, caminhos relativos)
-        run: npm run build:electron
-        env:
-          # Sem isso, o app abre com tela preta — o cliente do Supabase
-          # trava o app inteiro se essas variáveis não existirem no
-          # momento do build (o Vite "grava" elas dentro dos arquivos
-          # gerados, não dá pra configurar depois). Use os MESMOS
-          # valores que você já colocou nas Environment Variables da
-          # Vercel. Configure em: Settings > Secrets and variables >
-          # Actions > New repository secret, no seu repositório GitHub.
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          VITE_TURN_URL: ${{ secrets.VITE_TURN_URL }}
-          VITE_TURN_USERNAME: ${{ secrets.VITE_TURN_USERNAME }}
-          VITE_TURN_CREDENTIAL: ${{ secrets.VITE_TURN_CREDENTIAL }}
-          # Opcional — sem essa secret configurada, o GIF picker só fica
-          # desativado (ver src/lib/config.ts), não quebra o build.
-          VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
+      - name: Install build tools (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          brew install pkg-config
 
-      - name: Empacotar + publicar release (${{ matrix.os }})
-        run: npx electron-builder ${{ matrix.platform_flag }} --publish always
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build native module
+        run: npm run build:native
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Electron app
+        run: |
+          npm run electron:build -- ${{ matrix.build-target }} --publish never
         env:
-          # Token automático do GitHub Actions — já tem permissão de
-          # publicar releases neste mesmo repositório, não precisa
-          # configurar nada extra.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}-build
+          path: release/
+          retention-days: 7
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.dmg
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

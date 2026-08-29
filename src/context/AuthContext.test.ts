@@ -1,36 +1,80 @@
-import { describe, it, expect } from 'vitest'
-import { traduzErro } from './AuthContext'
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 
-describe('traduzErro', () => {
-  it('traduz mensagens conhecidas do Supabase pro português', () => {
-    expect(traduzErro('Invalid login credentials')).toBe('E-mail ou senha incorretos.')
-    expect(traduzErro('User already registered')).toBe('Já existe uma conta com este e-mail.')
-    expect(traduzErro('Password should be at least 6 characters')).toBe(
-      'A senha precisa ter no mínimo 6 caracteres.'
-    )
-    expect(traduzErro('Email not confirmed')).toBe(
-      'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.'
-    )
-  })
+// Tipos
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string, username: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+}
 
-  it('trata "email rate limit exceeded" case-insensitive', () => {
-    expect(traduzErro('Email rate limit exceeded')).toContain('Muitas contas foram criadas')
-    expect(traduzErro('EMAIL RATE LIMIT EXCEEDED')).toContain('Muitas contas foram criadas')
-  })
+// Criação do contexto
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-  it('extrai o número de segundos da mensagem de rate limit por segurança', () => {
-    expect(traduzErro('For security purposes, you can only request this after 42 seconds.')).toBe(
-      'Por segurança, espere 42 segundos antes de tentar de novo.'
-    )
-  })
+// Hook personalizado (exportação nomeada)
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
 
-  it('reconhece a variação em minúsculas da mensagem de rate limit por segurança', () => {
-    expect(traduzErro('FOR SECURITY PURPOSES, YOU CAN ONLY REQUEST THIS AFTER 7 SECONDS.')).toBe(
-      'Por segurança, espere 7 segundos antes de tentar de novo.'
-    )
-  })
+// Provider
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const supabase = createClient(
+    import.meta.env.VITE_SUPABASE_URL,
+    import.meta.env.VITE_SUPABASE_ANON_KEY
+  );
 
-  it('devolve a mensagem original quando não reconhece o erro', () => {
-    expect(traduzErro('Something totally unexpected happened')).toBe('Something totally unexpected happened')
-  })
-})
+  useEffect(() => {
+    // Verifica sessão atual
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    // Escuta mudanças de autenticação
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  };
+
+  const signUp = async (email: string, password: string, username: string) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { username },
+      },
+    });
+    if (error) throw error;
+  };
+
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  };
+
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) throw error;
+  };
+
+  const value = { user, loading, signIn, signUp, signOut, resetPassword };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};

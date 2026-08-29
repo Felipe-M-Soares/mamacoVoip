@@ -1,8 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 @import "tailwindcss";
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+
 /* ============================================================
    Tema padrão — "Vermelho" (identidade da marca Mamacos Voip).
    Tailwind v4 gera as classes utilitárias (bg-discord-blurple, etc.)

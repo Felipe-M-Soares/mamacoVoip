@@ -1,79 +1,60 @@
-// electron/main.cjs
 const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const os = require('os');
 
 let mainWindow = null;
-let nativeAudioCapture = null;
-let gameDetectionInterval = null;
+let audioProcess = null;
+let gameInterval = null;
 let currentGame = null;
-let isAudioCapturing = false;
-
-// Tenta carregar o módulo nativo
-let AudioCapture = null;
-try {
-  const nativePath = path.join(__dirname, '..', 'native', 'build', 'Release', 'audio_capture.node');
-  if (require('fs').existsSync(nativePath)) {
-    const nativeModule = require(nativePath);
-    AudioCapture = nativeModule.AudioCapture;
-    console.log('✅ Módulo nativo de áudio carregado');
-  }
-} catch (error) {
-  console.warn('⚠️ Módulo nativo não disponível:', error.message);
-}
+let isCapturing = false;
 
 // Lista de jogos
-const GAME_PROCESSES = {
+const GAMES = {
   windows: [
     'csgo.exe', 'valorant.exe', 'league of legends.exe', 'javaw.exe',
     'rocketleague.exe', 'fortnite.exe', 'overwatch.exe', 'apex.exe',
-    'minecraft.exe', 'gta5.exe', 'cyberpunk2077.exe', 'rdr2.exe'
+    'minecraft.exe', 'gta5.exe', 'cyberpunk2077.exe'
   ],
-  mac: [
-    'Counter-Strike', 'Valorant', 'League of Legends', 'Minecraft'
-  ],
-  linux: [
-    'csgo_linux', 'valorant', 'leagueoflegends', 'minecraft'
-  ]
+  mac: ['Counter-Strike', 'Valorant', 'League of Legends', 'Minecraft'],
+  linux: ['csgo_linux', 'valorant', 'leagueoflegends', 'minecraft']
 };
 
 // Detecta jogos
 function detectGames() {
   const platform = os.platform();
-  let command = '';
+  let cmd = '';
   
   if (platform === 'win32') {
-    const gameList = GAME_PROCESSES.windows.map(g => `IMAGENAME eq "${g}"`).join(' or ');
-    command = `tasklist /FI "${gameList}" /FO CSV /NH`;
-  } else if (platform === 'darwin') {
-    command = 'ps aux | grep -E "' + GAME_PROCESSES.mac.join('|') + '" | grep -v grep';
+    const list = GAMES.windows.map(g => `IMAGENAME eq "${g}"`).join(' or ');
+    cmd = `tasklist /FI "${list}" /FO CSV /NH`;
   } else {
-    command = 'ps aux | grep -E "' + GAME_PROCESSES.linux.join('|') + '" | grep -v grep';
+    cmd = `ps aux | grep -E "${GAMES[platform === 'darwin' ? 'mac' : 'linux'].join('|')}" | grep -v grep`;
   }
   
-  exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
-    if (error) return;
+  exec(cmd, (error, stdout) => {
+    if (error || !stdout.trim()) return;
     
-    const games = stdout.split('\n').filter(line => line.trim());
+    const games = stdout.split('\n').filter(l => l.trim());
     if (games.length > 0) {
-      const gameName = extractGameName(games[0]);
-      if (gameName && gameName !== currentGame) {
-        currentGame = gameName;
-        updateGameStatus(gameName);
+      const name = extractGameName(games[0]);
+      if (name && name !== currentGame) {
+        currentGame = name;
+        if (mainWindow) {
+          mainWindow.webContents.send('game-status', { game: name, playing: true });
+        }
       }
-    } else {
-      if (currentGame) {
-        currentGame = null;
-        updateGameStatus(null);
+    } else if (currentGame) {
+      currentGame = null;
+      if (mainWindow) {
+        mainWindow.webContents.send('game-status', { game: null, playing: false });
       }
     }
   });
 }
 
 function extractGameName(line) {
-  const platform = os.platform();
-  if (platform === 'win32') {
+  if (os.platform() === 'win32') {
     const match = line.match(/"([^"]+)"/);
     return match ? match[1].replace('.exe', '') : null;
   }
@@ -81,13 +62,52 @@ function extractGameName(line) {
   return parts[parts.length - 1] || null;
 }
 
-function updateGameStatus(gameName) {
-  if (mainWindow) {
-    mainWindow.webContents.send('game-status-update', {
-      game: gameName,
-      playing: !!gameName
+// Captura áudio do sistema (Windows)
+function captureAudioWindows() {
+  return new Promise((resolve, reject) => {
+    const script = `
+      $AudioCapture = New-Object -ComObject 'Audio.AudioCapture'
+      $AudioCapture.Format = 'PCM'
+      $AudioCapture.SampleRate = 44100
+      $AudioCapture.Channels = 2
+      $AudioCapture.BitsPerSample = 16
+      $AudioCapture.Start()
+      
+      while ($true) {
+        $data = $AudioCapture.Read()
+        if ($data) {
+          [System.Convert]::ToBase64String($data)
+        }
+        Start-Sleep -Milliseconds 50
+      }
+    `;
+    
+    const proc = spawn('powershell', ['-NoProfile', '-Command', script]);
+    
+    proc.stdout.on('data', (data) => {
+      if (mainWindow && isCapturing) {
+        const audio = data.toString().trim();
+        if (audio) {
+          mainWindow.webContents.send('audio-data', {
+            data: audio,
+            timestamp: Date.now()
+          });
+        }
+      }
     });
-  }
+    
+    proc.stderr.on('data', (data) => {
+      console.error('Audio error:', data.toString());
+    });
+    
+    proc.on('close', (code) => {
+      if (code === 0) resolve(proc);
+      else reject(new Error(`Audio capture failed: ${code}`));
+    });
+    
+    proc.on('error', reject);
+    resolve(proc);
+  });
 }
 
 function createWindow() {
@@ -109,111 +129,71 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-  });
-
+  mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.on('closed', () => {
     mainWindow = null;
-    if (gameDetectionInterval) clearInterval(gameDetectionInterval);
-    if (nativeAudioCapture) {
-      try { nativeAudioCapture.stop(); } catch(e) {}
-    }
+    if (gameInterval) clearInterval(gameInterval);
+    if (audioProcess) audioProcess.kill();
   });
 
   return mainWindow;
 }
 
-function setupIpcHandlers() {
-  // Detectar jogos
+function setupIpc() {
   ipcMain.handle('detect-games', async () => {
     return new Promise((resolve) => {
       const platform = os.platform();
-      let command = '';
+      let cmd = platform === 'win32' 
+        ? 'tasklist /FI "IMAGENAME eq csgo.exe" /FO CSV /NH'
+        : 'ps aux | grep -E "csgo|valorant" | grep -v grep';
       
-      if (platform === 'win32') {
-        command = 'tasklist /FI "IMAGENAME eq csgo.exe" /FO CSV /NH';
-      } else {
-        command = 'ps aux | grep -E "csgo|valorant" | grep -v grep';
-      }
-      
-      exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      exec(cmd, (error, stdout) => {
         if (error || !stdout.trim()) {
           resolve({ success: false, games: [] });
           return;
         }
-        
         const games = stdout.split('\n')
-          .filter(line => line.trim())
-          .map(line => {
-            const parts = line.trim().split(/\s+/);
-            return parts[parts.length - 1] || 'Jogo Desconhecido';
-          });
-        
+          .filter(l => l.trim())
+          .map(l => l.trim().split(/\s+/).pop() || 'Jogo');
         resolve({ success: true, games });
       });
     });
   });
 
-  // Iniciar captura de áudio nativa
-  ipcMain.handle('start-audio-capture', async (event, gameName) => {
+  ipcMain.handle('start-audio', async () => {
     try {
-      if (!AudioCapture) {
-        return { 
-          success: false, 
-          message: 'Módulo nativo não disponível. Use a versão web.' 
-        };
+      if (isCapturing) return { success: true };
+      
+      if (os.platform() === 'win32') {
+        audioProcess = await captureAudioWindows();
+        isCapturing = true;
+        return { success: true, message: 'Áudio capturado' };
       }
-
-      if (isAudioCapturing) {
-        return { success: true, message: 'Áudio já está capturando' };
-      }
-
-      // Cria instância do capturador nativo
-      nativeAudioCapture = new AudioCapture((data) => {
-        // Callback recebe dados de áudio
-        if (mainWindow && isAudioCapturing) {
-          mainWindow.webContents.send('audio-capture-data', {
-            data: data.toString('base64'),
-            timestamp: Date.now()
-          });
-        }
-      });
-
-      // Inicia captura
-      const started = nativeAudioCapture.start();
-      if (started) {
-        isAudioCapturing = true;
-        return { success: true, message: 'Captura de áudio nativa iniciada' };
-      } else {
-        return { success: false, message: 'Falha ao iniciar captura' };
-      }
+      
+      return { success: false, message: 'Apenas Windows suportado' };
     } catch (error) {
-      console.error('Erro:', error);
       return { success: false, error: error.message };
     }
   });
 
-  // Parar captura
-  ipcMain.handle('stop-audio-capture', async () => {
+  ipcMain.handle('stop-audio', async () => {
     try {
-      if (nativeAudioCapture) {
-        nativeAudioCapture.stop();
-        nativeAudioCapture = null;
+      if (audioProcess) {
+        audioProcess.kill();
+        audioProcess = null;
       }
-      isAudioCapturing = false;
+      isCapturing = false;
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }
   });
 
-  // Compartilhar tela com áudio
-  ipcMain.handle('start-screen-share-audio', async (event, { sourceId, gameName }) => {
+  ipcMain.handle('share-screen', async (event, { sourceId, gameName }) => {
     try {
       if (gameName) {
-        await ipcMain.handle('start-audio-capture', event, gameName);
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await ipcMain.handle('start-audio');
+        await new Promise(r => setTimeout(r, 500));
       }
       
       const sources = await desktopCapturer.getSources({
@@ -221,26 +201,18 @@ function setupIpcHandlers() {
         thumbnailSize: { width: 1280, height: 720 }
       });
       
-      let selectedSource;
-      if (sourceId) {
-        selectedSource = sources.find(s => s.id === sourceId);
-      } else if (gameName) {
-        selectedSource = sources.find(s => 
-          s.name.toLowerCase().includes(gameName.toLowerCase()) ||
-          gameName.toLowerCase().includes(s.name.toLowerCase())
-        );
-      }
+      let selected = sourceId 
+        ? sources.find(s => s.id === sourceId)
+        : sources.find(s => gameName && s.name.toLowerCase().includes(gameName.toLowerCase()));
       
-      if (!selectedSource) {
-        selectedSource = sources[0];
-      }
+      if (!selected) selected = sources[0];
       
       return {
         success: true,
         source: {
-          id: selectedSource.id,
-          name: selectedSource.name,
-          thumbnail: selectedSource.thumbnail.toDataURL()
+          id: selected.id,
+          name: selected.name,
+          thumbnail: selected.thumbnail.toDataURL()
         }
       };
     } catch (error) {
@@ -248,28 +220,22 @@ function setupIpcHandlers() {
     }
   });
 
-  // Obter jogo atual
-  ipcMain.handle('get-current-game', async () => {
+  ipcMain.handle('get-game', async () => {
     return new Promise((resolve) => {
       const platform = os.platform();
-      let command = '';
+      const cmd = platform === 'win32'
+        ? 'tasklist /FI "IMAGENAME eq csgo.exe" /FO CSV /NH'
+        : 'ps aux | grep -E "csgo|valorant" | grep -v grep';
       
-      if (platform === 'win32') {
-        command = 'tasklist /FI "IMAGENAME eq csgo.exe" /FO CSV /NH';
-      } else {
-        command = 'ps aux | grep -E "csgo|valorant" | grep -v grep';
-      }
-      
-      exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      exec(cmd, (error, stdout) => {
         if (error || !stdout.trim()) {
           resolve({ success: false, game: null });
           return;
         }
-        
-        const lines = stdout.split('\n').filter(line => line.trim());
+        const lines = stdout.split('\n').filter(l => l.trim());
         if (lines.length > 0) {
-          const gameName = extractGameName(lines[0]);
-          resolve({ success: true, game: gameName });
+          const name = extractGameName(lines[0]);
+          resolve({ success: true, game: name });
         } else {
           resolve({ success: false, game: null });
         }
@@ -280,21 +246,10 @@ function setupIpcHandlers() {
 
 app.whenReady().then(() => {
   createWindow();
-  setupIpcHandlers();
-  
-  gameDetectionInterval = setInterval(detectGames, 15000);
-  
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
+  setupIpc();
+  gameInterval = setInterval(detectGames, 15000);
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
-
-module.exports = { mainWindow };

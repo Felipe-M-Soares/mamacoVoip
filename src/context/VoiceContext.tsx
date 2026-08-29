@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { AuthContext } from './AuthContext'; // ← Importa o contexto, não o hook
+import { AuthContext } from './AuthContext';
 import { useAudioSettings } from '../hooks/useAudioSettings';
 import { useScreenShareQuality } from '../hooks/useScreenShareQuality';
 import {
@@ -47,7 +47,8 @@ interface PresenceTrack {
   is_deafened: boolean;
 }
 
-const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
+// 🔥 EXPORTA O CONTEXTO
+export const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
 export const useVoice = () => {
   const context = useContext(VoiceContext);
@@ -56,7 +57,6 @@ export const useVoice = () => {
 };
 
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // 🔥 USA O CONTEXTO DIRETAMENTE
   const authContext = useContext(AuthContext);
   const user = authContext?.user || null;
   
@@ -77,7 +77,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const noiseSuppressorRef = useRef<NoiseSuppressor | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
 
-  // Inicializa cliente Supabase
   useEffect(() => {
     supabase.current = createClient(
       import.meta.env.VITE_SUPABASE_URL,
@@ -85,14 +84,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   }, []);
 
-  // Join voice channel
   const joinVoiceChannel = useCallback(
     async (channelId: string, serverId: string) => {
       if (!user || !supabase.current) return;
       if (isConnected) await leaveVoiceChannel();
 
       try {
-        // 1. Obtém stream do microfone
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
@@ -106,7 +103,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
         streamRef.current = stream;
 
-        // 2. Configura áudio
         const audioCtx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
         audioContextRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(stream);
@@ -120,11 +116,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         source.connect(gain);
         gain.connect(audioCtx.destination);
 
-        // 3. Cria canal do Supabase Realtime
         const channelName = `realtime:voice:${channelId}`;
         const channel = supabase.current.channel(channelName);
 
-        // TODOS OS CALLBACKS ANTES DO SUBSCRIBE
         channel
           .on('presence', { event: 'sync' }, () => {
             const state = channel.presenceState();
@@ -168,7 +162,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             console.log('Screen share parado');
           });
 
-        // SUBSCRIBE DEPOIS DE TODOS OS CALLBACKS
         channel.subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
             await channel.track({
@@ -186,7 +179,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         channelRef.current = channel;
 
-        // Intervalo para envio de áudio (simplificado)
         const sendInterval = setInterval(() => {
           if (channelRef.current && !isMuted) {
             // Em produção, enviar áudio via WebRTC
@@ -201,7 +193,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [user, selectedDeviceId, sensitivity, isMuted, isConnected]
   );
 
-  // Leave voice channel
   const leaveVoiceChannel = useCallback(async () => {
     try {
       if (channelRef.current) {
@@ -242,7 +233,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Toggle mute
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const newMuted = !prev;
@@ -259,7 +249,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [user]);
 
-  // Set microphone volume
   const setMicrophoneVolumeFn = useCallback((volume: number) => {
     setMicrophoneVolume(volume);
     if (gainNodeRef.current) {
@@ -267,7 +256,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Screen share
   const startScreenShare = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -311,7 +299,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsGameSharing(false);
   }, []);
 
-  // Cleanup
   useEffect(() => {
     return () => {
       leaveVoiceChannel();

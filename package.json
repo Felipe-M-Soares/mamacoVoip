@@ -13,8 +13,7 @@
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
     "build:electron": "npm run build && npm run electron:build",
     "clean": "rm -rf node_modules package-lock.json && npm install --legacy-peer-deps",
-    "dist": "npm run build:electron",
-    "postinstall": "echo 'Instalação concluída'"
+    "dist": "npm run build:electron"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.38.4",

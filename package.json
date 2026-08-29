@@ -2,6 +2,7 @@
   "name": "mamaco-voip",
   "version": "1.0.153",
   "description": "Clone funcional do Discord com React e Electron",
+  "author": "Felipe M. Soares",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -54,8 +55,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Mamaco Voip",
-      "include": "build/installer.nsh"
+      "shortcutName": "Mamaco Voip"
     },
     "win": {
       "target": "nsis",

@@ -59,4 +59,19 @@ describe('AuthContext', () => {
       expect(result.current.resetPassword).toBeTypeOf('function');
     });
   });
+
+  it('deve lidar com erro ao buscar perfil', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <AuthProvider>{children}</AuthProvider>
+    );
+
+    renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => {
+      expect(consoleSpy).not.toHaveBeenCalled();
+    });
+
+    consoleSpy.mockRestore();
+  });
 });

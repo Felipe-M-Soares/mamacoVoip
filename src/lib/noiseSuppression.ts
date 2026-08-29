@@ -1,7 +1,9 @@
 // Redução de ruído desativada temporariamente
 // import { NoiseSuppressor } from '@sapphi-red/web-noise-suppressor';
 
-// Valor padrão para sensibilidade do microfone (0-100)
+// Constantes para sensibilidade do microfone
+export const MIN_MIC_SENSITIVITY = 0;
+export const MAX_MIC_SENSITIVITY = 100;
 export const DEFAULT_MIC_SENSITIVITY = 50;
 
 // Tipos para compatibilidade

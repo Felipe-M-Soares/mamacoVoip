@@ -2,8 +2,7 @@ name: Release Desktop App
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build:
@@ -13,84 +12,55 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
         include:
           - os: windows-latest
-            build-target: '--win'
-            artifact-name: 'windows'
+            target: '--win'
+            artifact: 'windows'
           - os: macos-latest
-            build-target: '--mac'
-            artifact-name: 'mac'
+            target: '--mac'
+            artifact: 'mac'
           - os: ubuntu-latest
-            build-target: '--linux'
-            artifact-name: 'linux'
+            target: '--linux'
+            artifact: 'linux'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
-
-      - name: Install build tools (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          # Usa o Visual Studio Build Tools que já vem no runner
-          echo "Using Visual Studio Build Tools"
-
-      - name: Install build tools (Linux)
+          
+      - name: Install (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libpulse-dev
-
-      - name: Install build tools (Mac)
-        if: runner.os == 'macOS'
-        run: |
-          brew install pkg-config
-
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+        
       - name: Install dependencies
-        run: npm install
-
-      - name: Build native module
-        run: npm run build:native
-
-      - name: Build frontend
+        run: npm install --legacy-peer-deps
+        
+      - name: Build
         run: npm run build
-
-      - name: Build Electron app
-        run: |
-          npm run electron:build -- ${{ matrix.build-target }} --publish never
+        
+      - name: Build Electron
+        run: npm run electron:build -- ${{ matrix.target }} --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+          
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact-name }}-build
+          name: ${{ matrix.artifact }}-build
           path: release/
           retention-days: 7
 
-  create-release:
+  release:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
-          draft: false
-          prerelease: false
           files: |
             release-artifacts/**/*.exe
             release-artifacts/**/*.dmg

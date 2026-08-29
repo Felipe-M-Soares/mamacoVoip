@@ -1,438 +1,62 @@
-import { createContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Session, User } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase'
-import { isElectron } from '../hooks/useGamePresence'
-import type { Profile, ProfileStatus } from '../types/database'
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+import { AuthProvider, useAuth } from './AuthContext';
+import { createClient } from '@supabase/supabase-js';
 
-// Esquema de URL customizado que o app desktop registra no sistema
-// operacional (ver "protocols" em package.json e o bloco grande no
-// topo de electron/main.cjs) — é o "endereço de volta" que o Google
-// usa pra devolver a pessoa pro app depois de aceitar o login, já que
-// um navegador comum não tem como abrir uma janela do Electron
-// diretamente. Só é usado dentro do app desktop; no navegador (site),
-// o próprio window.location.origin já funciona como redirecionamento.
-const GOOGLE_AUTH_REDIRECT_ELECTRON = 'mamacovoip://auth-callback'
-
-// mamacovoip:// é um esquema de URL REGISTRADO NO SISTEMA OPERACIONAL —
-// isso significa que, tecnicamente, QUALQUER site ou programa no
-// computador da pessoa pode "abrir" um link desses, não só o navegador
-// que a gente mesmo abriu no signInWithGoogle() abaixo. Sem alguma
-// forma de conferir "esse link realmente é resposta de um login que EU
-// pedi", alguém malicioso poderia forjar um link com token de UMA OUTRA
-// conta (a dele mesmo) e, se convencesse a vítima a clicar nele (num
-// site, e-mail, etc.), o app da vítima aceitaria e logaria ela sem
-// perceber na conta do golpista — um tipo de ataque conhecido (login
-// CSRF / session fixation via deep link customizado).
-//
-// A defesa: gera um código aleatório ANTES de abrir o navegador,
-// manda ele junto na URL de volta (?state=...), e só aceita o link que
-// chegar de volta se o código bater com o que a gente mesmo gerou —
-// um link forjado por fora nunca vai ter o código certo. Uso único
-// (apaga assim que usado) e expira sozinho depois de alguns minutos,
-// caso a pessoa desista no meio do caminho.
-let pendingGoogleAuthState: { value: string; expiresAt: number } | null = null
-const GOOGLE_AUTH_STATE_TTL_MS = 5 * 60 * 1000
-
-interface AuthContextValue {
-  session: Session | null
-  user: User | null
-  profile: Profile | null
-  loading: boolean
-  mfaPending: boolean
-  verifyMfaChallenge: (code: string) => Promise<{ error: string | null }>
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
-  signUp: (email: string, password: string, username: string) => Promise<{ error: string | null }>
-  signInWithGoogle: () => Promise<{ error: string | null }>
-  signOut: () => Promise<void>
-  refreshProfile: () => Promise<void>
-  updateProfile: (
-    updates: {
-      display_name?: string
-      custom_status?: string | null
-      playing?: string | null
-      profile_visibility?: 'everyone' | 'friends_only'
-      // Só aceitam `null` explícito aqui (não uma URL de verdade) — a URL
-      // de verdade só é setada internamente, depois de um upload bem
-      // sucedido logo abaixo. `null` é como a tela de edição pede pra
-      // REMOVER um banner/decoração já enviado, sem trocar por outro.
-      banner_url?: null
-      avatar_decoration_url?: null
+// Mock do Supabase
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(() => ({
+    auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+      onAuthStateChange: vi.fn(() => ({
+        data: { subscription: { unsubscribe: vi.fn() } },
+      })),
+      signInWithPassword: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
+      resetPasswordForEmail: vi.fn(),
     },
-    avatarFile?: File | null,
-    bannerFile?: File | null,
-    decorationFile?: File | null
-  ) => Promise<{ error: string | null }>
-  updateStatus: (status: ProfileStatus) => Promise<void>
-}
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          single: vi.fn().mockResolvedValue({ data: null }),
+        })),
+      })),
+    })),
+  })),
+}));
 
-export const AuthContext = createContext<AuthContextValue | undefined>(undefined)
+describe('AuthContext', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [mfaPending, setMfaPending] = useState(false)
+  it('deve fornecer o contexto de autenticação', async () => {
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <AuthProvider>{children}</AuthProvider>
+    );
 
-  // Capturado de forma síncrona (fora de qualquer efeito) porque o próprio
-  // cliente do Supabase pode "limpar" o hash da URL assim que processa a
-  // sessão — se a gente checar isso só dentro de um useEffect, pode já ser
-  // tarde demais.
-  const isEmailConfirmationRef = useRef(
-    typeof window !== 'undefined' &&
-      (window.location.hash.includes('type=signup') || window.location.hash.includes('type=email_change'))
-  )
+    const { result } = renderHook(() => useAuth(), { wrapper });
 
-  async function fetchProfile(userId: string) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
-    setProfile(data ?? null)
-  }
+    await waitFor(() => {
+      expect(result.current).toBeDefined();
+      expect(result.current.user).toBeNull();
+      expect(result.current.loading).toBe(false);
+    });
+  });
 
-  useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      // O link de confirmação de e-mail já vem com uma sessão válida
-      // embutida (pra funcionar o "detectSessionInUrl"). Só que não
-      // queremos logar a pessoa automaticamente nesse caso — a gente
-      // desloga na hora e manda pra tela de login com um aviso de sucesso.
-      if (isEmailConfirmationRef.current && session) {
-        await supabase.auth.signOut()
-        try {
-          sessionStorage.setItem('mamacos-email-confirmed', '1')
-        } catch {
-          // best-effort — se não der pra guardar a flag, só não mostra o aviso
-        }
-        window.history.replaceState(null, '', '/login')
-        isEmailConfirmationRef.current = false
-        setSession(null)
-        setProfile(null)
-        setLoading(false)
-        return
-      }
+  it('deve ter funções de autenticação', async () => {
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <AuthProvider>{children}</AuthProvider>
+    );
 
-      isEmailConfirmationRef.current = false
-      setSession(session)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-        checkMfaLevel()
-      }
-      setLoading(false)
-    })
+    const { result } = renderHook(() => useAuth(), { wrapper });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Ignora eventos disparados enquanto ainda estamos processando o
-      // caso de confirmação de e-mail acima, pra não piscar "logado" na tela
-      if (isEmailConfirmationRef.current) return
-
-      setSession(session)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-        checkMfaLevel()
-      } else {
-        setProfile(null)
-        setMfaPending(false)
-      }
-    })
-
-    return () => listener.subscription.unsubscribe()
-  }, [])
-
-  // Checa se a sessão está travada esperando o código do autenticador
-  // (aal1 = só senha, aal2 = senha + segundo fator já verificado).
-  // Alguém com 2FA ativado fica preso em "mfaPending" até completar o
-  // desafio — o app não deixa entrar antes disso.
-  async function checkMfaLevel() {
-    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
-    setMfaPending(Boolean(data && data.currentLevel === 'aal1' && data.nextLevel === 'aal2'))
-  }
-
-  async function verifyMfaChallenge(code: string): Promise<{ error: string | null }> {
-    const { data: factors } = await supabase.auth.mfa.listFactors()
-    const factor = factors?.totp?.[0]
-    if (!factor) return { error: 'Nenhum fator de autenticação encontrado' }
-
-    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code: code.trim() })
-    if (error) return { error: traduzErro(error.message) }
-
-    setMfaPending(false)
-    return { error: null }
-  }
-
-  // Segunda camada de proteção pro problema de "token expira enquanto
-  // a janela fica escondida" — mesmo com os timers não mais
-  // desacelerados (veja backgroundThrottling no processo principal),
-  // essa é uma garantia a mais: sempre que a janela volta a ficar
-  // visível (reaberta da bandeja, ou só voltando o foco), confirma que
-  // a sessão ainda é válida e renova se precisar, em vez de esperar o
-  // próximo ciclo natural de renovação.
-  useEffect(() => {
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') {
-        supabase.auth.getSession()
-      }
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [])
-
-  // Marca online ao logar / abrir o app. Só muda se o usuário estava
-  // "offline" — não sobrescreve um status manual (ausente/não perturbe).
-  //
-  // Fechar o app abruptamente (crash, sem internet, sem logout) ainda
-  // deixa essa coluna travada em "online" no banco — mas isso não é mais
-  // um problema pra quem VÊ o status de outra pessoa: o PresenceContext
-  // (src/context/PresenceContext.tsx) cruza esse valor com um canal de
-  // Realtime Presence, que reflete se o socket da pessoa está mesmo
-  // aberto agora, e o Avatar usa esse cruzamento pra decidir a bolinha —
-  // então mesmo com o banco desatualizado, ninguém mais vê alguém
-  // desconectado como "online".
-  useEffect(() => {
-    if (!session?.user) return
-
-    supabase
-      .from('profiles')
-      .select('status')
-      .eq('id', session.user.id)
-      .single()
-      .then(({ data }) => {
-        if (data && data.status === 'offline') {
-          supabase.from('profiles').update({ status: 'online' }).eq('id', session.user.id).then()
-        }
-      })
-  }, [session?.user])
-
-  async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return { error: error ? traduzErro(error.message) : null }
-  }
-
-  async function signUp(email: string, password: string, username: string) {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { username } },
-    })
-    return { error: error ? traduzErro(error.message) : null }
-  }
-
-  // No app desktop, não dá pra deixar o Supabase redirecionar a própria
-  // janela pro Google — a janela carrega arquivos locais (app://...),
-  // não um site de verdade, então "voltar" pra ela depois do Google não
-  // funcionaria. Em vez disso: pede a URL de autorização SEM navegar
-  // pra ela (skipBrowserRedirect), abre essa URL no navegador padrão do
-  // sistema (window.open aqui é interceptado no processo principal e
-  // redirecionado pro navegador — ver setWindowOpenHandler em
-  // electron/main.cjs), e espera o link de volta chegar pelo esquema
-  // customizado mamacovoip:// (capturado no listener de
-  // onGoogleAuthCallback logo abaixo).
-  //
-  // No navegador (site), o fluxo é o padrão do Supabase: a própria
-  // página é redirecionada pro Google e volta sozinha pro mesmo
-  // endereço, sem precisar de nada especial aqui.
-  async function signInWithGoogle(): Promise<{ error: string | null }> {
-    if (isElectron()) {
-      const state = crypto.randomUUID()
-      pendingGoogleAuthState = { value: state, expiresAt: Date.now() + GOOGLE_AUTH_STATE_TTL_MS }
-
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: `${GOOGLE_AUTH_REDIRECT_ELECTRON}?state=${state}`, skipBrowserRedirect: true },
-      })
-      if (error) {
-        pendingGoogleAuthState = null
-        return { error: traduzErro(error.message) }
-      }
-      if (data?.url) window.open(data.url, '_blank')
-      return { error: null }
-    }
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    })
-    return { error: error ? traduzErro(error.message) : null }
-  }
-
-  // Só existe dentro do app desktop (window.electronAPI) — é o outro
-  // lado do signInWithGoogle() acima: quando o link mamacovoip://
-  // chega de volta (ver electron/main.cjs), extrai o token da URL e
-  // efetiva a sessão. onAuthStateChange (já escutado lá em cima) cuida
-  // do resto (buscar perfil, etc.) automaticamente a partir daqui.
-  useEffect(() => {
-    if (!window.electronAPI?.onGoogleAuthCallback) return
-    return window.electronAPI.onGoogleAuthCallback(async (url) => {
-      try {
-        const hashIndex = url.indexOf('#')
-        const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url
-        const queryIndex = beforeHash.indexOf('?')
-        const stateFromLink =
-          queryIndex >= 0 ? new URLSearchParams(beforeHash.slice(queryIndex + 1)).get('state') : null
-
-        // Uso único — some com o código pendente já na primeira
-        // tentativa, bateu ou não (evita reaproveitar o mesmo código
-        // pra um segundo link forjado).
-        const pending = pendingGoogleAuthState
-        pendingGoogleAuthState = null
-
-        const isExpectedLogin = Boolean(
-          pending && pending.expiresAt >= Date.now() && stateFromLink && stateFromLink === pending.value
-        )
-        if (!isExpectedLogin) {
-          // Link não corresponde a um login que ESTE app pediu (código
-          // errado, ausente, ou expirado) — ignora silenciosamente em
-          // vez de logar a pessoa numa conta que pode não ser a dela.
-          // Ver o comentário grande acima sobre por que isso é
-          // necessário com um esquema de URL customizado.
-          return
-        }
-
-        const params = new URLSearchParams(hashIndex >= 0 ? url.slice(hashIndex + 1) : '')
-        const access_token = params.get('access_token')
-        const refresh_token = params.get('refresh_token')
-        if (access_token && refresh_token) {
-          await supabase.auth.setSession({ access_token, refresh_token })
-        }
-      } catch {
-        // best-effort — um link malformado não deve derrubar o app
-      }
-    })
-  }, [])
-
-  async function signOut() {
-    if (session?.user) {
-      await supabase.from('profiles').update({ status: 'offline' }).eq('id', session.user.id)
-    }
-    await supabase.auth.signOut()
-  }
-
-  async function refreshProfile() {
-    if (session?.user) await fetchProfile(session.user.id)
-  }
-
-  async function updateProfile(
-    updates: {
-      display_name?: string
-      custom_status?: string | null
-      playing?: string | null
-      profile_visibility?: 'everyone' | 'friends_only'
-      banner_url?: null
-      avatar_decoration_url?: null
-    },
-    avatarFile?: File | null,
-    bannerFile?: File | null,
-    decorationFile?: File | null
-  ) {
-    if (!session?.user) return { error: 'Não autenticado' }
-
-    const patch: {
-      display_name?: string
-      custom_status?: string | null
-      playing?: string | null
-      profile_visibility?: 'everyone' | 'friends_only'
-      avatar_url?: string
-      banner_url?: string | null
-      avatar_decoration_url?: string | null
-    } = { ...updates }
-
-    if (avatarFile) {
-      const ext = avatarFile.name.split('.').pop()
-      const path = `${session.user.id}/avatar-${Date.now()}.${ext}`
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, avatarFile, {
-        upsert: true,
-      })
-      if (uploadError) return { error: uploadError.message }
-      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-      patch.avatar_url = data.publicUrl
-    }
-
-    // Banner e decoração seguem o MESMO esquema do avatar (upload pro
-    // bucket próprio, path {user_id}/{tipo}-{timestamp}.ext — ver
-    // 007_profile_customization.sql) — só a URL enviada por último é que
-    // fica valendo, arquivos antigos não são apagados do Storage (mesmo
-    // comportamento que o avatar já tinha, por simplicidade).
-    if (bannerFile) {
-      const ext = bannerFile.name.split('.').pop()
-      const path = `${session.user.id}/banner-${Date.now()}.${ext}`
-      const { error: uploadError } = await supabase.storage.from('profile-banners').upload(path, bannerFile, {
-        upsert: true,
-      })
-      if (uploadError) return { error: uploadError.message }
-      const { data } = supabase.storage.from('profile-banners').getPublicUrl(path)
-      patch.banner_url = data.publicUrl
-    }
-
-    if (decorationFile) {
-      const ext = decorationFile.name.split('.').pop()
-      const path = `${session.user.id}/decoration-${Date.now()}.${ext}`
-      const { error: uploadError } = await supabase.storage
-        .from('avatar-decorations')
-        .upload(path, decorationFile, { upsert: true })
-      if (uploadError) return { error: uploadError.message }
-      const { data } = supabase.storage.from('avatar-decorations').getPublicUrl(path)
-      patch.avatar_decoration_url = data.publicUrl
-    }
-
-    const { error } = await supabase.from('profiles').update(patch).eq('id', session.user.id)
-    if (error) return { error: error.message }
-    await refreshProfile()
-    return { error: null }
-  }
-
-  async function updateStatus(status: ProfileStatus) {
-    if (!session?.user) return
-    await supabase.from('profiles').update({ status }).eq('id', session.user.id)
-    await refreshProfile()
-  }
-
-  return (
-    <AuthContext.Provider
-      value={{
-        session,
-        user: session?.user ?? null,
-        profile,
-        loading,
-        mfaPending,
-        verifyMfaChallenge,
-        signIn,
-        signUp,
-        signInWithGoogle,
-        signOut,
-        refreshProfile,
-        updateProfile,
-        updateStatus,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  )
-}
-
-// Mensagens de erro do Supabase Auth vêm em inglês — traduzimos as mais comuns
-export function traduzErro(message: string): string {
-  const mapa: Record<string, string> = {
-    'Invalid login credentials': 'E-mail ou senha incorretos.',
-    'User already registered': 'Já existe uma conta com este e-mail.',
-    'Password should be at least 6 characters': 'A senha precisa ter no mínimo 6 caracteres.',
-    'Email not confirmed': 'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.',
-    'Unable to validate email address: invalid format': 'Formato de e-mail inválido.',
-  }
-  if (mapa[message]) return mapa[message]
-
-  // Esses dois vêm com texto variável (número de segundos, etc.), então
-  // não dá pra bater exato no mapa acima — o Supabase limita quantos
-  // e-mails o PROJETO TODO pode enviar por hora quando não tem um
-  // provedor de e-mail próprio configurado (SMTP customizado), não é
-  // algo que dependa de código do app. Só quem administra o projeto no
-  // Supabase consegue aumentar isso de verdade (Authentication → Emails
-  // → SMTP Settings, configurando Resend/SendGrid/etc.) — aqui só dá
-  // pra deixar a mensagem clara em vez do texto em inglês.
-  if (/email rate limit exceeded/i.test(message)) {
-    return 'Muitas contas foram criadas em pouco tempo e o envio de e-mails atingiu o limite temporário do servidor. Aguarde um pouco e tente de novo — se continuar acontecendo, o administrador precisa configurar um provedor de e-mail próprio no Supabase.'
-  }
-  if (/for security purposes.*after \d+ seconds/i.test(message)) {
-    const segundos = message.match(/after (\d+) seconds/i)?.[1]
-    return segundos
-      ? `Por segurança, espere ${segundos} segundos antes de tentar de novo.`
-      : 'Por segurança, espere um pouco antes de tentar de novo.'
-  }
-
-  return message
-}
+    await waitFor(() => {
+      expect(result.current.signIn).toBeTypeOf('function');
+      expect(result.current.signUp).toBeTypeOf('function');
+      expect(result.current.signOut).toBeTypeOf('function');
+      expect(result.current.resetPassword).toBeTypeOf('function');
+    });
+  });
+});

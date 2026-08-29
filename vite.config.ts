@@ -17,7 +17,12 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
+  // REMOVA a configuração css.postcss e use isso:
   css: {
-    postcss: './postcss.config.cjs',
+    preprocessorOptions: {
+      css: {
+        // Configuração vazia para evitar conflitos
+      },
+    },
   },
 });

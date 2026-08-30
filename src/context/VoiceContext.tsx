@@ -178,7 +178,31 @@ async function applyVideoQualityConstraints(track: MediaStreamTrack, preset: Qua
 // caminho alternativo (getDisplayMedia, usando a MESMA fonte já
 // escolhida — ver pinFallbackShareSource/electron/main.cjs). Só desiste
 // de vez (e mostra o erro pra pessoa) se os DOIS caminhos falharem.
-async function captureScreenShareStream(opts?: { auto?: boolean }): Promise<MediaStream> {
+// BUG REAL — provável causa de "imagem da transmissão sai ruim mesmo
+// com Qualidade máxima selecionada": a captura inicial (getUserMedia
+// com a sintaxe antiga `mandatory: { chromeMediaSource: 'desktop' }`,
+// logo abaixo) não levava NENHUM limite de largura/altura/taxa de
+// quadros — só o `chromeMediaSourceId`. Sem esses limites explícitos,
+// o Chromium decide sozinho a resolução/taxa da captura, e o valor que
+// ele escolhe por padrão nesse caminho legado costuma ficar bem abaixo
+// da resolução nativa da tela (é um comportamento antigo e conhecido
+// desse mecanismo específico do Electron, documentado em várias
+// ferramentas de terceiros que passaram pelo mesmo problema). A
+// tentativa de corrigir isso DEPOIS, via `track.applyConstraints()` em
+// applyVideoQualityConstraints, não consegue "recuperar" detalhe que a
+// captura já descartou na hora — um `constrainable` de vídeo pode
+// PEDIR uma resolução maior, mas normalmente só reduz a partir do que
+// já foi capturado, nunca aumenta de volta; a falha desse ajuste fica
+// silenciosa (try/catch vazio ali), então nada avisa que a imagem
+// ficou presa na resolução baixa da captura inicial. A correção passa
+// o preset de qualidade JÁ na captura (mandatory.minWidth/maxWidth,
+// minHeight/maxHeight, minFrameRate/maxFrameRate) — mesma ideia da
+// Qualidade máxima (`capResolution: false`) já usar um teto bem
+// folgado (7680×4320) em vez de forçar um valor menor: aqui o "min"
+// baixo (1px) deixa o Chromium livre pra capturar na resolução NATIVA
+// da tela até esse teto generoso, e o "max" no preset "Desempenho"
+// realmente limita como pretendido.
+async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: boolean }): Promise<MediaStream> {
   if (!window.electronAPI) {
     throw new DOMException('Compartilhamento de tela só funciona no app desktop.', 'NotAllowedError')
   }
@@ -261,6 +285,12 @@ async function captureScreenShareStream(opts?: { auto?: boolean }): Promise<Medi
         mandatory: {
           chromeMediaSource: 'desktop',
           chromeMediaSourceId: sourceId,
+          minWidth: 1,
+          maxWidth: preset.width,
+          minHeight: 1,
+          maxHeight: preset.height,
+          minFrameRate: 1,
+          maxFrameRate: preset.frameRate,
         },
       },
     } as unknown as MediaStreamConstraints
@@ -2338,7 +2368,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // comentário grande em captureScreenShareStream acima pro
       // raciocínio completo. A qualidade (resolução/taxa de quadros)
       // continua sendo ajustada DEPOIS, na track já ativa.
-      const stream = await captureScreenShareStream(opts)
+      const stream = await captureScreenShareStream(preset, opts)
       // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
       // no atalho "Compartilhar seu jogo/janela" E caiu no caso de tela
       // cheia (sem janela própria pra detectar o fechamento sozinha) — ver
@@ -2616,7 +2646,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const preset = screenShareQualityRef.current
       // OITAVA RODADA: idem toggleScreenShare acima — ver
       // captureScreenShareStream.
-      const newStream = await captureScreenShareStream()
+      const newStream = await captureScreenShareStream(preset)
       // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
       // do picker DEPOIS do getDisplayMedia resolver.
       const gameShareHint = takePendingGameShareHint()

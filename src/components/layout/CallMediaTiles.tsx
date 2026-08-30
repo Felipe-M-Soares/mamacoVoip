@@ -40,6 +40,29 @@ export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sin
   }
 )
 
+// BUG REAL — provável causa de "gente que tá junto na call não se
+// ouve", principalmente em salas com mais gente: esta função criava um
+// `new AudioContext()" TODA VEZ que um <RemoteAudio> montava, ou seja,
+// UM CONTEXTO INTEIRO POR PARTICIPANTE remoto na tela (cada
+// AudioContext abre sua própria linha com o driver de áudio do
+// sistema). Em TODO o resto do app (analisador de nível em
+// VoiceContext.tsx, redutor de ruído do microfone e da transmissão em
+// noiseSuppression.ts) só existe UM AudioContext, reaproveitado —
+// esta era a única exceção. Alguns sistemas/versões de Chromium
+// degradam ou simplesmente param de processar áudio depois de um
+// punhado de contextos simultâneos abertos na mesma aba/janela — em
+// uma call com só 4-5 pessoas com vídeo/áudio ligados, isso já soma
+// vários contextos (1 por tile, mais os já existentes pro microfone e
+// pro medidor de nível), sem nenhum aviso ou erro visível: o áudio
+// remoto simplesmente para de tocar pra quem entrou por último (os
+// contextos mais recentes, geralmente os primeiros a serem
+// sufocados). A correção reaproveita um ÚNICO AudioContext
+// compartilhado entre todos os <RemoteAudio> montados ao mesmo tempo
+// (getSharedRemoteAudioContext logo abaixo) — cada instância só cria
+// seus PRÓPRIOS nós (source/gain) dentro dele e os desconecta ao
+// desmontar, sem nunca fechar o contexto em si (outras instâncias
+// podem continuar precisando dele).
+//
 // DÉCIMA OITAVA RODADA: "qualidade tá boa mas o volume dos participantes
 // tá baixo" — o problema real é que `<audio>.volume` só ATENUA (trava
 // em 1.0/100%, o próprio elemento recusa qualquer valor acima disso), e
@@ -53,6 +76,14 @@ export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sin
 // VoiceContext.tsx), não só atenuar. O elemento <audio> passa a tocar a
 // stream JÁ processada pelo GainNode (sempre a 100% nele mesmo — quem
 // manda no volume de verdade agora é o gain.value).
+let sharedRemoteAudioContext: AudioContext | null = null
+function getSharedRemoteAudioContext(): AudioContext {
+  if (!sharedRemoteAudioContext || sharedRemoteAudioContext.state === 'closed') {
+    sharedRemoteAudioContext = new AudioContext()
+  }
+  return sharedRemoteAudioContext
+}
+
 export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; sinkId?: string | null; volume: number }) {
   const ref = useRef<HTMLAudioElement>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -61,7 +92,7 @@ export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; s
 
   useEffect(() => {
     try {
-      const ctx = new AudioContext()
+      const ctx = getSharedRemoteAudioContext()
       const source = ctx.createMediaStreamSource(stream)
       const gain = ctx.createGain()
       const destination = ctx.createMediaStreamDestination()
@@ -98,11 +129,13 @@ export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; s
       } catch {
         // já desconectado — sem problema
       }
-      const ctx = audioContextRef.current
+      // NÃO fecha o AudioContext aqui — ele é COMPARTILHADO entre
+      // todos os <RemoteAudio> montados (ver getSharedRemoteAudioContext
+      // acima); fechar ao desmontar UM participante silenciaria todos
+      // os outros que ainda estão na tela.
       audioContextRef.current = null
       gainNodeRef.current = null
       sourceNodeRef.current = null
-      if (ctx) ctx.close().catch(() => {})
     }
   }, [stream])
   useEffect(() => {

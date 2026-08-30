@@ -274,6 +274,31 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
   if (!sourceId) {
     throw new DOMException('Compartilhamento cancelado.', 'NotAllowedError')
   }
+  // DÉCIMA NONA RODADA — bug real relatado: janela compartilha
+  // normalmente (áudio e vídeo bons), mas a tela CHEIA de um jogo (o
+  // card "Jogo"/"Tela cheia" quando o jogo roda em modo exclusivo, sem
+  // janela própria capturável — ver isGameDisplay acima) sempre falhava
+  // com "Invalid capture constraints (AbortError)". A diferença real
+  // entre os dois casos: uma JANELA tem um tamanho fixo e estável
+  // (o próprio Windows já reporta ela num tamanho conhecido), enquanto
+  // uma fonte de TELA CHEIA onde um jogo está rodando em modo exclusivo
+  // pode estar num modo de vídeo (resolução/taxa de atualização) que o
+  // Windows troca só PRA aquele jogo, diferente do modo "normal" do
+  // desktop — testei retirando só os limites mandatory de
+  // largura/altura/taxa de quadros (minWidth/maxWidth/minHeight/
+  // maxHeight/minFrameRate/maxFrameRate) desse pedido inicial quando a
+  // fonte é uma TELA (sourceId começa com "screen:") e o erro parou de
+  // acontecer — a captura de tela cheia claramente não tolera bem esses
+  // limites explícitos no modo de vídeo exclusivo de um jogo, mesmo
+  // sendo os MESMOS limites que uma janela aceita numa boa. Como
+  // applyVideoQualityConstraints (acima) já ajusta a qualidade DEPOIS,
+  // como best-effort, numa chamada totalmente separada, tirar esses
+  // limites daqui não perde a qualidade selecionada — só move o AJUSTE
+  // fino pra depois da captura já estar garantida, exatamente pro caso
+  // (tela cheia) onde pedir esses limites na hora certa de travar tudo.
+  // Pra JANELA continua pedindo os limites de cara — esse caminho nunca
+  // deu esse erro, então não tem motivo pra mexer nele.
+  const isScreenSource = sourceId.startsWith('screen:')
   try {
     // Sintaxe antiga de propósito (não é MediaTrackConstraints moderno) —
     // ver o comentário grande acima. `as unknown as` porque o TypeScript
@@ -282,16 +307,21 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
     const constraints = {
       audio: false,
       video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId,
-          minWidth: 1,
-          maxWidth: preset.width,
-          minHeight: 1,
-          maxHeight: preset.height,
-          minFrameRate: 1,
-          maxFrameRate: preset.frameRate,
-        },
+        mandatory: isScreenSource
+          ? {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId,
+            }
+          : {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId,
+              minWidth: 1,
+              maxWidth: preset.width,
+              minHeight: 1,
+              maxHeight: preset.height,
+              minFrameRate: 1,
+              maxFrameRate: preset.frameRate,
+            },
       },
     } as unknown as MediaStreamConstraints
     return await navigator.mediaDevices.getUserMedia(constraints)
@@ -1303,6 +1333,26 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const source = ctx.createMediaStreamSource(stream)
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
+      // BUG REAL relatado: o anel de "falando" demorava perceptivelmente
+      // pra acender assim que a pessoa começava a falar. Causa: o
+      // AnalyserNode, por padrão, usa smoothingTimeConstant = 0.8 — uma
+      // média móvel exponencial que mistura 80% do valor ANTERIOR com só
+      // 20% do valor novo a cada leitura. Isso é ótimo pra um
+      // visualizador de espectro (movimento suave), mas péssimo pra
+      // DETECÇÃO — partindo do silêncio (valor baixo) até a voz alta,
+      // são necessárias várias leituras seguidas só pra essa média subir
+      // até passar do limiar (SPEAKING_THRESHOLD), e como a leitura roda
+      // a cada 200ms (ver o setInterval mais abaixo), cada leitura extra
+      // necessária custa 200ms inteiros de atraso — na prática, quase
+      // 2 segundos até o anel acender de verdade. Zerando a suavização
+      // aqui, cada leitura reflete o nível de áudio REAL do instante
+      // (sem herança da leitura anterior), então o limiar é cruzado na
+      // primeira leitura que realmente tiver voz — sem atraso artificial
+      // nenhum na hora de ACENDER. (O "apagar" continua suave de
+      // propósito, através de SPEAKING_RELEASE_MS logo abaixo — sem
+      // suavização nenhuma ali, o anel piscaria a cada micro-pausa entre
+      // sílabas/palavras.)
+      analyser.smoothingTimeConstant = 0
       source.connect(analyser)
       analysersRef.current.set(key, analyser)
     } catch {
@@ -2835,7 +2885,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Detecção de fala: amostra o nível de áudio de cada analyser a cada 200ms
+  // Detecção de fala: amostra o nível de áudio de cada analyser a cada 100ms.
+  // Era 200ms — combinado com o smoothingTimeConstant zerado acima
+  // (ver setupAnalyser), 100ms deixa o pior caso de atraso pra ACENDER o
+  // anel de "falando" em torno de 100ms (imperceptível), em vez de até
+  // 200ms sozinho antes já seria bem menor que os ~2s de antes, mas
+  // ainda dava pra apertar mais sem custo nenhum de CPU perceptível.
   useEffect(() => {
     if (!connectedChannelId) return
     const buffer = new Uint8Array(256)
@@ -2856,7 +2911,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           })
         }
       })
-    }, 200)
+    }, 100)
     return () => clearInterval(interval)
   }, [connectedChannelId])
 

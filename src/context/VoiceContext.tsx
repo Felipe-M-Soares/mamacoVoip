@@ -299,32 +299,106 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
   // Pra JANELA continua pedindo os limites de cara — esse caminho nunca
   // deu esse erro, então não tem motivo pra mexer nele.
   const isScreenSource = sourceId.startsWith('screen:')
-  try {
-    // Sintaxe antiga de propósito (não é MediaTrackConstraints moderno) —
-    // ver o comentário grande acima. `as unknown as` porque o TypeScript
-    // do DOM não conhece mais esse formato "mandatory" (foi removido da
-    // documentação atual, mas o Electron/Chromium ainda aceita).
+  // VIGÉSIMA RODADA — bug relatado com print de tela: depois da correção
+  // anterior (tirar os limites de resolução/fps do pedido pra fontes de
+  // TELA), o erro mudou de "Invalid capture constraints (AbortError)"
+  // pra "Could not start video source (NotReadableError)" — acontecendo
+  // pra QUALQUER jogo em tela cheia, sempre. AbortError acontecia ANTES
+  // mesmo de tentar abrir o dispositivo de captura (rejeitava o pedido
+  // por causa dos limites); NotReadableError é DIFERENTE — o pedido em
+  // si foi aceito, mas o sistema operacional não conseguiu de fato abrir
+  // o dispositivo de captura pra essa fonte. É um erro conhecido e bem
+  // documentado (Chromium, Electron, e outras ferramentas de captura de
+  // tela como o próprio OBS passam pelo mesmo) que acontece
+  // especificamente com jogos em modo EXCLUSIVO de tela cheia — nesse
+  // modo, o jogo assume o controle direto da GPU pra desenhar a tela
+  // (sem passar pelo compositor normal do Windows), e o mecanismo de
+  // duplicação de tela do Windows (Desktop Duplication API, que o
+  // Chromium usa por baixo dos panos) pode falhar em abrir o dispositivo
+  // exatamente durante essa troca de modo — sobretudo logo depois de a
+  // pessoa alternar (alt-tab) pra fora do jogo pra escolher a fonte
+  // aqui, num instante em que a GPU ainda está no meio da troca. Sem
+  // acesso ao PC de quem relatou pra confirmar ao vivo, a única
+  // correção de código que dá pra fazer com segurança é tentar de novo
+  // automaticamente depois de uma pequena espera (a falha costuma ser
+  // BEM mais um problema de "o dispositivo não estava pronto ainda" do
+  // que "nunca vai funcionar") — sem isso, a pessoa precisava fechar o
+  // aviso e clicar em "Compartilhar tela" nulo de novo na mão pra ter
+  // a MESMA chance de dar certo na segunda tentativa.
+  const suggestedHwnd = payload.suggestion?.hwnd ?? null
+  async function attemptGetUserMedia(id: string, withResolutionLimits: boolean): Promise<MediaStream> {
     const constraints = {
       audio: false,
       video: {
-        mandatory: isScreenSource
+        mandatory: withResolutionLimits
           ? {
               chromeMediaSource: 'desktop',
-              chromeMediaSourceId: sourceId,
-            }
-          : {
-              chromeMediaSource: 'desktop',
-              chromeMediaSourceId: sourceId,
+              chromeMediaSourceId: id,
               minWidth: 1,
               maxWidth: preset.width,
               minHeight: 1,
               maxHeight: preset.height,
               minFrameRate: 1,
               maxFrameRate: preset.frameRate,
+            }
+          : {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: id,
             },
       },
     } as unknown as MediaStreamConstraints
+    // Sintaxe antiga de propósito (não é MediaTrackConstraints moderno) —
+    // ver o comentário grande acima. `as unknown as` porque o TypeScript
+    // do DOM não conhece mais esse formato "mandatory" (foi removido da
+    // documentação atual, mas o Electron/Chromium ainda aceita).
     return await navigator.mediaDevices.getUserMedia(constraints)
+  }
+  try {
+    try {
+      return await attemptGetUserMedia(sourceId, !isScreenSource)
+    } catch (err) {
+      // Só vale a pena tentar de novo pra NotReadableError numa fonte de
+      // TELA (o caso do jogo em tela cheia exclusiva) — pra qualquer
+      // outro erro (ex.: NotAllowedError de cancelamento) ou pra JANELA
+      // (nunca deu esse erro), tentar de novo não muda nada, só atrasa
+      // à toa até cair no plano B / mostrar o erro de verdade.
+      if (!isScreenSource || !(err instanceof Error) || err.name !== 'NotReadableError') throw err
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      try {
+        return await attemptGetUserMedia(sourceId, false)
+      } catch (retryErr) {
+        // VIGÉSIMA PRIMEIRA RODADA: se a captura de TELA continuar dando
+        // NotReadableError mesmo depois da espera, e o processo principal
+        // já sabe (via getGameWindowInfo, ver electron/main.cjs) qual é o
+        // HWND da própria janela do jogo — mesmo que essa janela NÃO
+        // apareça na lista normal de fontes (é exatamente por isso que a
+        // pessoa caiu no fallback de TELA CHEIA em vez de escolher a
+        // janela direto) — vale tentar capturar ela DIRETO pelo HWND,
+        // montando o id manualmente no MESMO formato que o desktopCapturer
+        // usa ("window:<hwnd>:0" — ver parseHwndFromSourceId em
+        // electron/main.cjs). Motivo pra isso ter chance de funcionar
+        // mesmo a janela não estando "listada": o filtro que decide o
+        // que aparece na lista (Chromium enumerando janelas visíveis e
+        // capturáveis) é mais restritivo do que o capturador de vídeo em
+        // si — o capturador de JANELA no Windows moderno (Windows
+        // Graphics Capture, que o Chromium usa por baixo para captura de
+        // janela) costuma lidar melhor com jogos em modo exclusivo do que
+        // a duplicação de TELA INTEIRA (Desktop Duplication API, usada
+        // pra fontes "screen:") — é basicamente a mesma técnica que apps
+        // como o Discord usam pra "Compartilhar uma janela" funcionar em
+        // jogos que a tela cheia normal não consegue. Só uma tentativa
+        // best-effort: se o HWND não existir de verdade (nunca foi
+        // encontrado) ou também falhar, cai pro plano B de sempre.
+        if (suggestedHwnd) {
+          try {
+            return await attemptGetUserMedia(`window:${suggestedHwnd}:0`, false)
+          } catch {
+            throw retryErr
+          }
+        }
+        throw retryErr
+      }
+    }
   } catch (primaryErr) {
     try {
       await window.electronAPI.pinFallbackShareSource(sourceId)
@@ -2677,7 +2751,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const parts = [detail, name && name !== 'Error' ? `(${name}${constraint ? `: ${constraint}` : ''})` : null].filter(
         Boolean
       )
-      setError(parts.length ? `Não foi possível compartilhar a tela: ${parts.join(' ')}` : 'Não foi possível compartilhar a tela.')
+      // VIGÉSIMA RODADA: NotReadableError em cima de uma fonte de TELA
+      // (mesmo depois da tentativa automática de novo, acima) quase
+      // sempre é o jogo estando em modo EXCLUSIVO de tela cheia (ver o
+      // comentário grande em captureScreenShareStream) — a pessoa não
+      // tem como adivinhar isso só pela mensagem técnica do navegador,
+      // então junto com o detalhe técnico (mantido pra quem for
+      // diagnosticar à distância) mostra também o motivo provável e a
+      // solução que resolve a mesma limitação no Discord/OBS/Zoom.
+      const likelyExclusiveFullscreen = name === 'NotReadableError'
+      const base = parts.length ? `Não foi possível compartilhar a tela: ${parts.join(' ')}` : 'Não foi possível compartilhar a tela.'
+      setError(
+        likelyExclusiveFullscreen
+          ? `${base} — o jogo provavelmente está em modo de tela cheia EXCLUSIVA. Troque pra "tela cheia sem bordas" (borderless) nas configurações de vídeo do jogo e tente compartilhar de novo.`
+          : base
+      )
     }
   }
 

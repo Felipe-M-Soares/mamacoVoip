@@ -38,7 +38,6 @@ import { armScreenShareChoice } from '../../lib/chooseScreenShareSource'
 export function ScreenSharePicker() {
   const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
   const [suggestion, setSuggestion] = useState<ScreenShareSuggestion | null>(null)
-  const [restoring, setRestoring] = useState(false)
 
   // OITAVA RODADA: em vez de escutar um evento que chega sozinho, agora
   // se inscreve na "caixa de correio" de screenSharePickerBridge.ts —
@@ -88,24 +87,16 @@ export function ScreenSharePicker() {
   // screenSharePickerBridge (VoiceContext.tsx continua esperando a MESMA
   // escolha final), só atualiza o estado local aqui com o que veio de
   // volta, já com a janela agora capturável de verdade.
-  async function handleRestoreAndRefresh() {
-    if (!suggestion?.hwnd || restoring) return
-    setRestoring(true)
-    try {
-      await window.electronAPI?.restoreGameWindow?.(suggestion.hwnd)
-      const payload = await window.electronAPI?.getScreenShareSources?.()
-      if (payload) {
-        setSources(payload.sources)
-        setSuggestion(payload.suggestion)
-      }
-    } catch {
-      // Best-effort — se der errado, a pessoa ainda vê o aviso normal
-      // do rodapé e pode restaurar na mão.
-    } finally {
-      setRestoring(false)
-    }
-  }
-
+  // TRIGÉSIMA SEGUNDA RODADA — removido a pedido o card vermelho de
+  // "Fulano está minimizado / Restaure a janela pra poder compartilhar
+  // ela" que aparecia aqui (handleRestoreAndRefresh e o estado
+  // `restoring` que só existiam pra esse card também saíram, sem uso
+  // nenhum). O comportamento agora: quando `looksMinimized` é true, a
+  // seção "Jogo"/"Sugestão" simplesmente não aparece (gameCard fica
+  // null nesse caso, já que não existe fonte capturável de verdade pra
+  // apontar) — a pessoa só vê as listas normais de "Tela cheia"/"Janela"
+  // embaixo, do jeito que já eram exibidas antes de qualquer detecção
+  // especial de jogo existir.
   function choose(id: string | null, viaGameShortcut?: { processNames: string[]; label: string }) {
     if (id) {
       armScreenShareChoice(id, confirmedSources, gameCard, suggestion, viaGameShortcut)
@@ -134,37 +125,14 @@ export function ScreenSharePicker() {
         </div>
 
         <div className="max-h-[55vh] overflow-y-auto pr-1 space-y-4">
-          {suggestion?.looksMinimized ? (
-            // Jogo cadastrado detectado rodando, mas minimizado — não tem
-            // fonte capturável pra oferecer (ver handleRestoreAndRefresh
-            // acima pro porquê), então mostra isso no lugar do card normal
-            // em vez de simplesmente sumir com a seção "Jogo".
+          {gameCard && suggestion && (
             <SourceSection title={gameCardTitle}>
-              <div className="col-span-2 sm:col-span-3 rounded-lg border-2 border-dashed border-discord-blurple/50 bg-discord-darker px-3 py-3 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm text-white truncate">{suggestion.label} está minimizado</p>
-                  <p className="text-[11px] text-discord-text-muted">Restaure a janela pra poder compartilhar ela</p>
-                </div>
-                <button
-                  onClick={handleRestoreAndRefresh}
-                  disabled={restoring}
-                  className="shrink-0 text-xs px-3 py-1.5 rounded btn-primary disabled:opacity-60"
-                >
-                  {restoring ? 'Restaurando...' : 'Restaurar e compartilhar'}
-                </button>
-              </div>
+              <SourceCard
+                source={gameCard}
+                highlighted
+                onClick={() => choose(gameCard.id, { processNames: suggestion.processNames, label: suggestion.label })}
+              />
             </SourceSection>
-          ) : (
-            gameCard &&
-            suggestion && (
-              <SourceSection title={gameCardTitle}>
-                <SourceCard
-                  source={gameCard}
-                  highlighted
-                  onClick={() => choose(gameCard.id, { processNames: suggestion.processNames, label: suggestion.label })}
-                />
-              </SourceSection>
-            )
           )}
           {screens.length > 0 && (
             <SourceSection title="Tela cheia">

@@ -94,6 +94,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('process-audio:error', handler)
     return () => ipcRenderer.removeListener('process-audio:error', handler)
   },
+  // Fallback de captura de tela via GDI puro (VIGÉSIMA TERCEIRA RODADA
+  // — ver o bloco grande em electron/main.cjs e
+  // native/screen-capture-gdi/capture.cpp pro esquema completo). Só
+  // usado como ÚLTIMO RECURSO, quando a captura normal de tela falha
+  // de verdade — ver useGdiScreenCaptureFallback em VoiceContext.tsx.
+  startScreenCaptureGdiFallback: (monitorIndex) => ipcRenderer.invoke('screen-capture-gdi:start', monitorIndex),
+  stopScreenCaptureGdiFallback: () => ipcRenderer.invoke('screen-capture-gdi:stop'),
+  onScreenCaptureGdiFormat: (callback) => {
+    const handler = (_event, format) => callback(format)
+    ipcRenderer.on('screen-capture-gdi:format', handler)
+    return () => ipcRenderer.removeListener('screen-capture-gdi:format', handler)
+  },
+  onScreenCaptureGdiFrame: (callback) => {
+    const handler = (_event, frame) => callback(frame)
+    ipcRenderer.on('screen-capture-gdi:frame', handler)
+    return () => ipcRenderer.removeListener('screen-capture-gdi:frame', handler)
+  },
+  onScreenCaptureGdiError: (callback) => {
+    const handler = (_event, message) => callback(message)
+    ipcRenderer.on('screen-capture-gdi:error', handler)
+    return () => ipcRenderer.removeListener('screen-capture-gdi:error', handler)
+  },
   // Login com Google — o processo principal manda pra cá a URL de
   // volta (mamacovoip://...) assim que o sistema operacional entrega o
   // link de callback depois da pessoa aceitar no navegador. Ver o

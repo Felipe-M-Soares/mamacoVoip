@@ -107,6 +107,20 @@ jobs:
         run: |
           cl /EHsc /std:c++17 /O2 /DUNICODE /D_UNICODE native\process-audio-capture\capture.cpp /Fe:electron\process-audio-capture.exe /link ole32.lib mmdevapi.lib
 
+      # VIGÉSIMA TERCEIRA RODADA — mesmo esquema do passo acima, pro
+      # novo fallback de captura de tela via GDI puro (ver o comentário
+      # grande no topo de native/screen-capture-gdi/capture.cpp pro
+      # motivo completo: DXGI/WebRTC falhando com NotReadableError em
+      # jogos de tela cheia com anti-cheat em placas AMD específicas,
+      # mesmo com Discord/OBS funcionando na mesma máquina). gdiplus.lib
+      # e gdi32.lib/user32.lib são as bibliotecas extras que esse
+      # arquivo usa além de ole32.lib (já necessária pro passo acima).
+      - name: Compilar fallback de captura de tela via GDI (só Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: |
+          cl /EHsc /std:c++17 /O2 /DUNICODE /D_UNICODE native\screen-capture-gdi\capture.cpp /Fe:electron\screen-capture-gdi.exe /link ole32.lib gdiplus.lib gdi32.lib user32.lib
+
       - name: Build do app desktop (tsc + vite, caminhos relativos)
         run: npm run build:electron
         env:

@@ -145,6 +145,19 @@ declare global {
       ) => () => void
       onProcessAudioChunk: (callback: (chunk: Uint8Array) => void) => () => void
       onProcessAudioError: (callback: (message: string) => void) => () => void
+      // Fallback de captura de tela via GDI puro (VIGÉSIMA TERCEIRA
+      // RODADA) — ver o bloco grande em electron/main.cjs e
+      // native/screen-capture-gdi/capture.cpp. Só usado como ÚLTIMO
+      // RECURSO, depois que a captura normal de tela (DXGI/WebRTC, com
+      // todos os fallbacks já existentes) já falhou de verdade — ver
+      // useGdiScreenCaptureFallback em VoiceContext.tsx.
+      // `startScreenCaptureGdiFallback` nunca lança: sempre devolve
+      // { ok, error? }, igual startProcessAudioCapture acima.
+      startScreenCaptureGdiFallback: (monitorIndex?: number) => Promise<{ ok: boolean; error?: string }>
+      stopScreenCaptureGdiFallback: () => Promise<void>
+      onScreenCaptureGdiFormat: (callback: (format: { width: number; height: number }) => void) => () => void
+      onScreenCaptureGdiFrame: (callback: (frame: Uint8Array) => void) => () => void
+      onScreenCaptureGdiError: (callback: (message: string) => void) => () => void
       // Login com Google — recebe a URL de callback (mamacovoip://...)
       // que o processo principal repassa assim que o sistema
       // operacional entrega o link de volta do navegador. Ver

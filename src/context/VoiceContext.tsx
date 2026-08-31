@@ -1830,7 +1830,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // (errado) uma suposta stream de webcam.
   function recomputeParticipant(peerId: string) {
     const streams = rawStreamsRef.current.get(peerId)
-    if (!streams || streams.size === 0) return
+    if (!streams || streams.size === 0) {
+      // TRIGÉSIMA PRIMEIRA RODADA — esse early return aqui é o suspeito
+      // nº1 do bug "quem entra depois não vê a tela": se o screen-meta
+      // chegar ANTES de qualquer track de vídeo/áudio desse peer ter
+      // chegado (bem provável — o meta viaja só pelo canal de sinalização,
+      // rápido, enquanto a conexão WebRTC de vídeo pode levar mais tempo
+      // pra negociar/conectar de verdade), essa chamada não faz NADA — só
+      // se autocorrige DEPOIS se e quando `pc.ontrack` chamar essa mesma
+      // função de novo (o que só acontece quando alguma track daquele
+      // peer realmente chega). Logando aqui pra confirmar se é isso
+      // mesmo que está acontecendo, ou se o problema é outro (a track
+      // nunca chega de verdade).
+      logDebug(`recomputeParticipant(${peerId}): nenhuma stream recebida ainda desse peer, nada a computar por enquanto`)
+      return
+    }
     const screenId = screenStreamIdsRef.current.get(peerId)
     const screenAudioId = screenAudioStreamIdsRef.current.get(peerId)
     let cameraStream: MediaStream | null = null
@@ -1842,6 +1856,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       else if (!cameraStream) cameraStream = s
     })
     const screenStream = screenVideoStream || screenAudioStream ? combineScreenStream(peerId, screenVideoStream, screenAudioStream) : null
+    logDebug(
+      `recomputeParticipant(${peerId}): streamIds recebidos=[${Array.from(streams.keys()).join(', ')}], screenId esperado=${screenId ?? null}, screenAudioId esperado=${screenAudioId ?? null} → screenStream=${screenStream ? 'ENCONTRADO' : 'nenhum'}, cameraStream=${cameraStream ? 'sim' : 'não'}`
+    )
     setParticipants((prev) => ({
       ...prev,
       [peerId]: {
@@ -2011,6 +2028,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
     pc.ontrack = (event) => {
       const [stream] = event.streams
+      logDebug(
+        `pc.ontrack de ${peerId}: kind=${event.track.kind}, streamId=${stream?.id ?? '(sem stream)'}`
+      )
       if (!rawStreamsRef.current.has(peerId)) rawStreamsRef.current.set(peerId, new Map())
       rawStreamsRef.current.get(peerId)!.set(stream.id, stream)
       recomputeParticipant(peerId)
@@ -2154,6 +2174,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           screenStreamId: string | null
           screenAudioStreamId?: string | null
         }
+        // TRIGÉSIMA PRIMEIRA RODADA — instrumentação adicionada depois de
+        // um relato de que o aperto de mão (rodada anterior) não
+        // resolveu 100%: até agora não existia NENHUM log do lado de
+        // quem RECEBE o screen-meta/as tracks — só do lado de quem
+        // TRANSMITE a captura. Sem isso, não dá pra saber se o problema
+        // é o meta não chegar, a track de vídeo nunca chegar, ou as duas
+        // coisas chegando mas em uma ordem/estado que
+        // recomputeParticipant não está lidando direito.
+        logDebug(
+          `screen-meta recebido de ${from}: screenStreamId=${screenStreamId}, screenAudioStreamId=${screenAudioStreamId ?? null}, streams já recebidas desse peer=${rawStreamsRef.current.get(from)?.size ?? 0}`
+        )
         if (screenStreamId) screenStreamIdsRef.current.set(from, screenStreamId)
         else screenStreamIdsRef.current.delete(from)
         if (screenAudioStreamId) screenAudioStreamIdsRef.current.set(from, screenAudioStreamId)
@@ -2182,7 +2213,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // como reforço adicional (não custa nada, cobre o caso raro de o
       // PRÓPRIO pedido se perder), mas agora não é mais a única linha
       // de defesa.
-      rt.on('broadcast', { event: 'screen-meta-request' }, () => {
+      rt.on('broadcast', { event: 'screen-meta-request' }, ({ payload }) => {
+        const { from } = payload as { from: string }
+        logDebug(
+          `screen-meta-request recebido de ${from} — ${screenStreamRef.current ? 'estou compartilhando, respondendo' : 'não estou compartilhando, ignorando'}`
+        )
         if (!screenStreamRef.current) return
         broadcastScreenMeta(screenStreamRef.current.id, screenAudioSourceStreamRef.current?.id ?? null)
       })
@@ -2286,6 +2321,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             // responder antes da nossa inscrição estar pronta pra
             // escutar, perdendo a resposta.
             rt.send({ type: 'broadcast', event: 'screen-meta-request', payload: { from: user.id } })
+            logDebug('join: pedido screen-meta-request enviado, esperando respostas de quem já estiver compartilhando')
             resolve()
           }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {

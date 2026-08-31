@@ -2545,7 +2545,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return
     }
     try {
-      const camStream = await navigator.mediaDevices.getUserMedia({ video: true })
+      // VIGÉSIMA QUARTA RODADA — ver StoredSettings.cameraId
+      // (useAudioSettings.ts) pro porquê: deixa escolher uma câmera
+      // virtual (ex.: "OBS Virtual Camera") em vez da webcam de
+      // verdade. `exact` faz falhar explicitamente se o dispositivo
+      // escolhido não existir mais (ex.: OBS fechado) em vez de cair
+      // silenciosamente na webcam padrão sem avisar ninguém.
+      const cameraId = audioSettingsRef.current.cameraId
+      const camStream = await navigator.mediaDevices.getUserMedia({
+        video: cameraId ? { deviceId: { exact: cameraId } } : true,
+      })
       const track = camStream.getVideoTracks()[0]
       localStreamRef.current?.addTrack(track)
       peersRef.current.forEach(({ pc }) => pc.addTrack(track, localStreamRef.current!))

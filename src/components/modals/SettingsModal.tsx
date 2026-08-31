@@ -654,6 +654,28 @@ function AudioTab() {
       </div>
 
       <div>
+        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Câmera</label>
+        <select
+          value={audio.cameraId ?? ''}
+          onChange={(e) => audio.setCameraId(e.target.value || null)}
+          className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm"
+        >
+          <option value="">Padrão do sistema</option>
+          {audio.cameras.map((c) => (
+            <option key={c.deviceId} value={c.deviceId}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        <p className="text-[11px] text-discord-text-muted mt-1.5">
+          Se você usa OBS (ou outro programa de captura) e liga a "Câmera Virtual" dele, pode escolher ela aqui — a
+          câmera do app passa a mostrar o que o OBS estiver capturando, em vez da sua webcam de verdade. Útil se o
+          compartilhamento de tela normal não funcionar bem com algum jogo específico, mas o OBS captura ele sem
+          problema.
+        </p>
+      </div>
+
+      <div>
         <p className="text-xs font-bold uppercase text-discord-text-muted tracking-wide mb-2">
           Processamento de voz
         </p>

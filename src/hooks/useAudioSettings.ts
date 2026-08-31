@@ -11,6 +11,21 @@ const STORAGE_KEY = 'mamacos-audio-settings'
 interface StoredSettings {
   micId: string | null
   speakerId: string | null
+  // VIGÉSIMA QUARTA RODADA — pedido explícito: "quero o mesmo esquema
+  // do OBS que transmite fielmente o jogo". Em vez de escrever um
+  // capturador nativo próprio via Windows Graphics Capture (a mesma
+  // tecnologia do OBS, mas que exige interoperação COM/WinRT em C++ —
+  // bem mais arriscada de acertar sem um Windows de verdade pra testar
+  // do que qualquer coisa feita até aqui), o caminho de baixo risco:
+  // deixar a pessoa escolher a "OBS Virtual Camera" (ou qualquer outra
+  // câmera virtual de um app de captura de tela) como fonte de vídeo da
+  // câmera comum do app. Como o OBS já é confirmado funcionando na
+  // máquina da pessoa, a Câmera Virtual dele entrega EXATAMENTE a
+  // mesma captura fiel que já funciona lá — só passando pelo caminho de
+  // vídeo mais simples e testado do app (getUserMedia comum, o mesmo
+  // que a webcam de verdade usa), sem nenhum código novo arriscado.
+  // null = usa a câmera padrão do sistema (comportamento de antes).
+  cameraId: string | null
   echoCancellation: boolean
   noiseSuppression: boolean
   autoGainControl: boolean
@@ -45,6 +60,7 @@ interface StoredSettings {
 const DEFAULTS: StoredSettings = {
   micId: null,
   speakerId: null,
+  cameraId: null,
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true,
@@ -75,6 +91,9 @@ export function useAudioSettings() {
   const [settings, setSettings] = useState<StoredSettings>(loadSettings)
   const [microphones, setMicrophones] = useState<AudioDeviceOption[]>([])
   const [speakers, setSpeakers] = useState<AudioDeviceOption[]>([])
+  // VIGÉSIMA QUARTA RODADA — ver StoredSettings.cameraId acima pro
+  // porquê (deixar escolher a "OBS Virtual Camera" como fonte de vídeo).
+  const [cameras, setCameras] = useState<AudioDeviceOption[]>([])
   const [permissionGranted, setPermissionGranted] = useState(false)
   const [supportsOutputSelection, setSupportsOutputSelection] = useState(false)
 
@@ -88,8 +107,12 @@ export function useAudioSettings() {
       const outs = devices
         .filter((d) => d.kind === 'audiooutput')
         .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Alto-falante ${i + 1}` }))
+      const cams = devices
+        .filter((d) => d.kind === 'videoinput')
+        .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Câmera ${i + 1}` }))
       setMicrophones(mics)
       setSpeakers(outs)
+      setCameras(cams)
       setPermissionGranted(mics.some((m) => !m.label.startsWith('Microfone ')))
       setSupportsOutputSelection(outs.length > 0 && typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype)
     } catch {
@@ -129,6 +152,9 @@ export function useAudioSettings() {
   }
   function setSpeakerId(id: string | null) {
     persist({ ...settings, speakerId: id })
+  }
+  function setCameraId(id: string | null) {
+    persist({ ...settings, cameraId: id })
   }
   function setEchoCancellation(v: boolean) {
     persist({ ...settings, echoCancellation: v })
@@ -198,6 +224,7 @@ export function useAudioSettings() {
   return {
     micId: settings.micId,
     speakerId: settings.speakerId,
+    cameraId: settings.cameraId,
     echoCancellation: settings.echoCancellation,
     noiseSuppression: settings.noiseSuppression,
     autoGainControl: settings.autoGainControl,
@@ -206,12 +233,14 @@ export function useAudioSettings() {
     screenAudioNoiseSuppression: settings.screenAudioNoiseSuppression,
     microphones,
     speakers,
+    cameras,
     permissionGranted,
     supportsOutputSelection,
     requestPermission,
     refreshDevices,
     setMicId,
     setSpeakerId,
+    setCameraId,
     setEchoCancellation,
     setNoiseSuppression,
     setAutoGainControl,

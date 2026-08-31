@@ -2161,6 +2161,32 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         recomputeParticipant(from)
       })
 
+      // VIGÉSIMA NONA RODADA — bug relatado de novo: quem entra na call
+      // enquanto alguém já está compartilhando tela ainda não via a
+      // transmissão. A correção anterior (ver o comentário grande mais
+      // abaixo, perto de `resendScreenMeta`) reenviava o screen-meta por
+      // TEMPO (na hora, +1.5s, +4s) — um jeito de adivinhar quando a
+      // inscrição de quem chegou já estaria pronta pra receber, sem
+      // confirmação nenhuma de que realmente estava. Isso é
+      // fundamentalmente frágil: em conexões mais lentas pra fechar a
+      // inscrição no canal, nem 4 segundos são garantia suficiente.
+      //
+      // A correção de verdade é um aperto de mão: em vez de quem está
+      // TRANSMITINDO adivinhar quando reenviar, quem ACABOU DE ENTRAR
+      // avisa explicitamente "já estou pronto, alguém está
+      // compartilhando?" assim que a própria inscrição no canal é
+      // confirmada (ver `rt.subscribe` mais abaixo) — nesse momento já
+      // é garantido que dá pra RECEBER broadcast (é a própria definição
+      // do status 'SUBSCRIBED'). Quem estiver transmitindo responde na
+      // hora, sem depender de timing nenhum. Mantém o reenvio por tempo
+      // como reforço adicional (não custa nada, cobre o caso raro de o
+      // PRÓPRIO pedido se perder), mas agora não é mais a única linha
+      // de defesa.
+      rt.on('broadcast', { event: 'screen-meta-request' }, () => {
+        if (!screenStreamRef.current) return
+        broadcastScreenMeta(screenStreamRef.current.id, screenAudioSourceStreamRef.current?.id ?? null)
+      })
+
       // Alguém tocou um som do soundboard — toca a mesma URL aqui
       // também. `broadcast: { self: false }` (config do canal, logo
       // acima) já garante que quem tocou o som não recebe o próprio
@@ -2227,25 +2253,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // DÉCIMA SEXTA RODADA — bug relatado: quem entra na call
           // enquanto alguém já está compartilhando tela não vê a
           // transmissão, a menos que a pessoa pare e comece de novo.
-          // Esse broadcast aqui é a ÚNICA vez que a sala reenvia
-          // screen-meta pra quem acabou de chegar (a mensagem original,
-          // de quando a transmissão começou, não fica guardada em
-          // lugar nenhum — broadcast não tem histórico). É
-          // "fire-and-forget", sem confirmação de entrega: o Supabase
-          // Realtime pode descartar uma mensagem de broadcast mandada
-          // bem no instante em que alguém acabou de entrar no canal — o
-          // socket do recém-chegado já aparece no presence (por isso
-          // `hasNewPeer` fica true e a gente tenta mandar), mas o lado
-          // de RECEBER broadcast desse mesmo socket pode ainda não
-          // estar 100% pronto um instante depois da inscrição, e
-          // nenhum erro chega até aqui pra avisar que isso aconteceu.
-          // Reiniciar a transmissão sempre "conserta" porque manda um
-          // broadcast novo bem mais tarde, quando a conexão já assentou
-          // de sobra. Em vez de confiar numa mensagem só, reenvia mais
-          // duas vezes nos segundos seguintes — não tem custo nenhum
-          // reenviar (quem recebe só sobrescreve com o mesmo valor e
-          // recalcula o participante de novo), e cobre a janela inteira
-          // em que esse tipo de perda costuma acontecer.
+          //
+          // VIGÉSIMA NONA RODADA: a correção de verdade pra esse bug
+          // agora é o pedido explícito que quem entra manda assim que
+          // termina de se inscrever no canal (ver 'screen-meta-request'
+          // e o `rt.send` logo depois de 'SUBSCRIBED', mais acima) — ele
+          // não depende de adivinhar timing nenhum. Isso aqui embaixo
+          // (reenviar por tempo: na hora, +1.5s, +4s) vira só um REFORÇO
+          // adicional, não a única linha de defesa como era antes — cobre
+          // o caso raro de o PRÓPRIO pedido (ou a resposta a ele) se
+          // perder no meio do caminho. Sem custo nenhum manter: quem
+          // recebe só sobrescreve com o mesmo valor.
           const resendScreenMeta = () => {
             if (!screenStreamRef.current) return
             broadcastScreenMeta(screenStreamRef.current.id, screenAudioSourceStreamRef.current?.id ?? null)
@@ -2260,6 +2278,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         rt.subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
             await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
+            // VIGÉSIMA NONA RODADA — ver o comentário grande em
+            // 'screen-meta-request' acima. Só dá pra mandar esse pedido
+            // AGORA (não antes) porque 'SUBSCRIBED' é a garantia de que
+            // já dá pra RECEBER broadcast desse canal — mandado mais
+            // cedo, corria o risco de quem estiver compartilhando
+            // responder antes da nossa inscrição estar pronta pra
+            // escutar, perdendo a resposta.
+            rt.send({ type: 'broadcast', event: 'screen-meta-request', payload: { from: user.id } })
             resolve()
           }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -2623,8 +2649,34 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       localStreamRef.current?.addTrack(track)
       peersRef.current.forEach(({ pc }) => pc.addTrack(track, localStreamRef.current!))
       setVideoEnabled(true)
-    } catch {
-      setError('Não foi possível acessar a câmera.')
+    } catch (err) {
+      // TRIGÉSIMA RODADA — "Não foi possível acessar a câmera" sozinho,
+      // sem mais detalhe nenhum, é inútil pra diagnosticar à distância
+      // (é literalmente a MESMA mensagem pra "câmera virtual do OBS
+      // fechada", "outro programa já está usando a câmera" e "permissão
+      // negada" — três causas com soluções completamente diferentes).
+      // Loga o erro de verdade (nome + mensagem) e, quando o nome dá pra
+      // reconhecer, mostra uma mensagem específica o suficiente pra
+      // apontar a causa provável sem precisar abrir o log.
+      const name = err instanceof Error ? err.name : String(err)
+      const message = err instanceof Error ? err.message : ''
+      logDebug(`toggleVideo: getUserMedia falhou (cameraId=${audioSettingsRef.current.cameraId ?? '(padrão)'}) — ${name}: ${message}`)
+      const usingCustomCamera = Boolean(audioSettingsRef.current.cameraId)
+      if ((name === 'OverconstrainedError' || name === 'NotFoundError') && usingCustomCamera) {
+        setError(
+          'A câmera escolhida nas Configurações não foi encontrada — se for uma câmera virtual (ex.: OBS), confirme que o programa está aberto e a câmera virtual está ativa.'
+        )
+      } else if (name === 'NotReadableError') {
+        setError(
+          usingCustomCamera
+            ? 'Não foi possível abrir a câmera escolhida — ela pode estar sendo usada por outro programa, ou a captura de tela associada a ela (ex.: OBS) pode não estar realmente ativa no momento.'
+            : 'Não foi possível abrir a câmera — ela pode estar sendo usada por outro programa no momento.'
+        )
+      } else if (name === 'NotAllowedError') {
+        setError('Permissão de câmera negada. Habilite o acesso à câmera nas configurações do Windows/navegador e tente de novo.')
+      } else {
+        setError(`Não foi possível acessar a câmera${message ? `: ${message}` : '.'}`)
+      }
     }
   }
 

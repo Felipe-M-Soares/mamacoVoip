@@ -23,6 +23,37 @@ if (!gotSingleInstanceLock) {
   return
 }
 
+// VIGÉSIMA SEGUNDA RODADA — relatado com razão: "mas o OBS e o Discord
+// capturam esses jogos tranquilamente". Isso é verdade, e joga por
+// terra a explicação de que tela cheia exclusiva com anti-cheat SEMPRE
+// quebra a duplicação de tela — se fosse uma regra dura do Windows, o
+// Display Capture do OBS (que usa a MESMA API de duplicação de tela,
+// DXGI Output Duplication) também falharia sempre, e não falha. A
+// diferença real está em QUEM implementa a captura: o Discord e o OBS
+// têm pipeline de captura PRÓPRIO, escrito à mão em C++ direto contra
+// as APIs do Windows, com lógica de recuperação pra exatamente esses
+// casos de borda (ex.: reconstruir a interface de duplicação quando o
+// Windows invalida ela num troca de modo de vídeo — erro
+// DXGI_ERROR_ACCESS_LOST, bem documentado). Este app, até agora, usa o
+// capturador EMBUTIDO do Chromium (via desktopCapturer/getUserMedia) —
+// que existe há mais tempo mas historicamente é menos "blindado" contra
+// esse tipo de caso de borda especificamente.
+//
+// O Chromium também tem, mais recente, um capturador alternativo
+// baseado em Windows Graphics Capture (WGC — a mesma tecnologia por
+// trás do Xbox Game Bar, que lida melhor com jogos em modo exclusivo do
+// que a duplicação de tela clássica), mas ele fica atrás de feature
+// flags desligadas por padrão nessa versão do Electron/Chromium. Essa
+// troca de linha de comando pede pro Chromium usar esse capturador
+// alternativo pra tela E janela, tanto pra captura em si quanto pra
+// gerar a miniatura na lista de fontes. É experimental (o nome exato
+// dessas flags já mudou de versão pra versão do Chromium ao longo do
+// tempo, sem garantia de que essa é a atual pra essa build específica)
+// e SEGURO tentar de qualquer forma: se o nome não bater com nada que
+// essa versão reconheça, o Chromium simplesmente ignora — não quebra
+// nada que já funciona (janela normal continua exatamente igual).
+app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer')
+
 // Login com Google — o navegador do sistema não tem como abrir uma
 // janela do Electron diretamente, então o "endereço de volta" pro app
 // depois da pessoa aceitar no Google é um esquema de URL customizado
@@ -1396,33 +1427,14 @@ function createTray(win) {
       },
     },
     { type: 'separator' },
-    // DÉCIMA QUARTA RODADA: caminho pro DevTools que NÃO depende de
-    // atalho de teclado nenhum — Ctrl+Shift+I (ver before-input-event
-    // acima) pode simplesmente não chegar ao webContents dependendo de
-    // como o Windows/launcher entrega as teclas pra essa janela
-    // específica (relatado: "não tem como usar teclas de atalho"). Um
-    // clique no ícone da bandeja sempre funciona, independente de foco
-    // ou de captura de teclado.
-    {
-      label: 'Ferramentas do desenvolvedor',
-      click: () => {
-        win.show()
-        win.focus()
-        win.webContents.toggleDevTools()
-      },
-    },
-    // Caminho AINDA mais simples que o DevTools pro mesmo diagnóstico —
-    // ver o log em arquivo (appendDebugLog) perto do topo do arquivo:
-    // só abre a pasta onde o mamacos-debug.log fica, pra abrir ele num
-    // Bloco de Notas qualquer, sem precisar entender nada de DevTools/
-    // Console.
-    {
-      label: 'Abrir pasta de logs',
-      click: () => {
-        shell.showItemInFolder(debugLogPath)
-      },
-    },
-    { type: 'separator' },
+    // "Ferramentas do desenvolvedor" e "Abrir pasta de logs" (que
+    // ficavam aqui, entre os dois separadores) foram removidas do menu
+    // da bandeja a pedido — quem quiser esses caminhos de diagnóstico
+    // ainda consegue: Ctrl+Shift+I (ver before-input-event mais acima)
+    // continua abrindo o DevTools, e o arquivo mamacos-debug.log (ver
+    // debugLogPath/appendDebugLog perto do topo do arquivo) continua
+    // sendo escrito normalmente na pasta de dados do app — só não tem
+    // mais atalho direto pra pasta dele aqui no menu.
     {
       label: 'Sair',
       click: () => {
@@ -1961,13 +1973,15 @@ app.whenReady().then(() => {
   }
 
   // DÉCIMA QUARTA RODADA: além do before-input-event na janela principal
-  // (que só dispara se ELA estiver com foco) e do item no menu da
-  // bandeja (ver createTray acima), registra Ctrl+Shift+I também como
-  // atalho GLOBAL — funciona mesmo com outra janela em foco (relatado:
-  // "não tem como usar teclas de atalho do console", possivelmente
-  // porque o jogo ainda estava em foco na hora de tentar). Três
-  // caminhos independentes pro mesmo lugar — só precisa UM deles
-  // funcionar no ambiente da pessoa.
+  // Além do atalho de teclado normal (Ctrl+Shift+I, só dentro da janela
+  // do app — ver before-input-event mais acima, que só dispara se ELA
+  // estiver com foco), registra Ctrl+Shift+I também como atalho GLOBAL —
+  // funciona mesmo com outra janela em foco (relatado: "não tem como
+  // usar teclas de atalho do console", possivelmente porque o jogo ainda
+  // estava em foco na hora de tentar). O item equivalente no menu da
+  // bandeja foi removido a pedido (ver createTray acima) — esse atalho
+  // de teclado continua sendo o caminho pra abrir o DevTools quando
+  // precisar diagnosticar algo.
   const devToolsRegistered = globalShortcut.register('Control+Shift+I', () => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     mainWindow.show()

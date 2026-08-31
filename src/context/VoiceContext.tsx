@@ -362,6 +362,8 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
       // outro erro (ex.: NotAllowedError de cancelamento) ou pra JANELA
       // (nunca deu esse erro), tentar de novo não muda nada, só atrasa
       // à toa até cair no plano B / mostrar o erro de verdade.
+      const errName = err instanceof Error ? err.name : String(err)
+      logDebug(`captureScreenShareStream: 1ª tentativa falhou (sourceId=${sourceId}, isScreenSource=${isScreenSource}) — ${errName}`)
       if (!isScreenSource || !(err instanceof Error) || err.name !== 'NotReadableError') throw err
       await new Promise((resolve) => setTimeout(resolve, 700))
       try {
@@ -389,10 +391,18 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
         // jogos que a tela cheia normal não consegue. Só uma tentativa
         // best-effort: se o HWND não existir de verdade (nunca foi
         // encontrado) ou também falhar, cai pro plano B de sempre.
+        const retryErrName = retryErr instanceof Error ? retryErr.name : String(retryErr)
+        logDebug(
+          `captureScreenShareStream: 2ª tentativa (sem espera de 700ms) também falhou — ${retryErrName}. suggestedHwnd=${suggestedHwnd}`
+        )
         if (suggestedHwnd) {
           try {
-            return await attemptGetUserMedia(`window:${suggestedHwnd}:0`, false)
-          } catch {
+            const result = await attemptGetUserMedia(`window:${suggestedHwnd}:0`, false)
+            logDebug('captureScreenShareStream: 3ª tentativa (window:<hwnd>:0) funcionou')
+            return result
+          } catch (hwndErr) {
+            const hwndErrName = hwndErr instanceof Error ? hwndErr.name : String(hwndErr)
+            logDebug(`captureScreenShareStream: 3ª tentativa (window:<hwnd>:0) também falhou — ${hwndErrName}`)
             throw retryErr
           }
         }

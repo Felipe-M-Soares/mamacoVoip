@@ -475,14 +475,24 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
     try {
       return await attemptGetUserMedia(sourceId, !isScreenSource)
     } catch (err) {
-      // Só vale a pena tentar de novo pra NotReadableError numa fonte de
-      // TELA (o caso do jogo em tela cheia exclusiva) — pra qualquer
-      // outro erro (ex.: NotAllowedError de cancelamento) ou pra JANELA
-      // (nunca deu esse erro), tentar de novo não muda nada, só atrasa
-      // à toa até cair no plano B / mostrar o erro de verdade.
+      // VIGÉSIMA OITAVA RODADA — bug real encontrado com o log de
+      // diagnóstico: Rainbow Six Siege deu esse MESMO erro numa fonte de
+      // JANELA (sourceId="window:...", não "screen:..."), e a condição
+      // abaixo (herdada da correção anterior) só tentava de novo quando
+      // `isScreenSource` era true — pra fonte de JANELA, o erro sempre
+      // pulava direto pro final sem tentar NADA de tudo que já foi
+      // implementado (espera+retry, plano B, fallback GDI). Fazia
+      // sentido quando o problema parecia ser específico de TELA CHEIA
+      // exclusiva (sem janela capturável) — mas depois da correção do
+      // "está minimizado" (rodada anterior), esse mesmo jogo passou a
+      // aparecer com uma janela capturável de verdade, e é justamente
+      // ESSA captura que está falhando com o mesmo erro de driver AMD
+      // de sempre. NotReadableError não escolhe se é janela ou tela —
+      // os dois caminhos passam pela MESMA parte da API do Windows por
+      // baixo. Por isso a condição agora vale pros dois tipos de fonte.
       const errName = err instanceof Error ? err.name : String(err)
       logDebug(`captureScreenShareStream: 1ª tentativa falhou (sourceId=${sourceId}, isScreenSource=${isScreenSource}) — ${errName}`)
-      if (!isScreenSource || !(err instanceof Error) || err.name !== 'NotReadableError') throw err
+      if (!(err instanceof Error) || err.name !== 'NotReadableError') throw err
       await new Promise((resolve) => setTimeout(resolve, 700))
       try {
         return await attemptGetUserMedia(sourceId, false)
@@ -513,7 +523,12 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
         logDebug(
           `captureScreenShareStream: 2ª tentativa (sem espera de 700ms) também falhou — ${retryErrName}. suggestedHwnd=${suggestedHwnd}`
         )
-        if (suggestedHwnd) {
+        if (suggestedHwnd && `window:${suggestedHwnd}:0` !== sourceId) {
+          // (VIGÉSIMA OITAVA RODADA: só vale tentar isso se for um id
+          // DIFERENTE do que já falhou duas vezes — quando a fonte
+          // original já era essa mesma janela, repetir o idêntico pedido
+          // uma terceira vez não muda nada, só atrasa à toa até cair no
+          // plano B de verdade logo abaixo.)
           try {
             const result = await attemptGetUserMedia(`window:${suggestedHwnd}:0`, false)
             logDebug('captureScreenShareStream: 3ª tentativa (window:<hwnd>:0) funcionou')
@@ -569,26 +584,23 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
         })
       return await Promise.race([displayMediaPromise, timeout])
     } catch (fallbackErr) {
-      // VIGÉSIMA TERCEIRA RODADA: os dois caminhos "de verdade"
-      // (DXGI/WebRTC, tanto via getUserMedia quanto via getDisplayMedia)
-      // falharam. Pra fonte de TELA especificamente — o caso de jogo em
-      // tela cheia, que é onde esse tipo de falha de driver acontece —
-      // ainda vale tentar o fallback via GDI puro (ver
-      // captureGdiFallbackStream acima) antes de desistir de vez.
-      // Best-effort: se ele TAMBÉM falhar (ou não existir nessa
-      // instalação), relança o erro do caminho PRINCIPAL de sempre —
-      // a mensagem dele costuma ser mais específica pra quem for
-      // diagnosticar.
-      if (isScreenSource) {
-        try {
-          logDebug('captureScreenShareStream: caminhos DXGI/WebRTC falharam, tentando fallback GDI...')
-          const gdiStream = await captureGdiFallbackStream(0)
-          logDebug('captureScreenShareStream: fallback GDI funcionou')
-          return gdiStream
-        } catch (gdiErr) {
-          const gdiErrName = gdiErr instanceof Error ? gdiErr.name : String(gdiErr)
-          logDebug(`captureScreenShareStream: fallback GDI também falhou — ${gdiErrName}`)
-        }
+      // VIGÉSIMA OITAVA RODADA: antes só entrava aqui pra fonte de TELA
+      // (`isScreenSource`) — ver o comentário grande lá em cima sobre o
+      // log real do Rainbow Six Siege mostrar esse MESMO erro numa fonte
+      // de JANELA. GDI puro (BitBlt) captura a TELA TODA de qualquer
+      // jeito (não tem como pedir "só essa janela" nele — ver
+      // native/screen-capture-gdi/capture.cpp), então serve igual de
+      // fallback pras duas situações: se o jogo em janela ocupa a tela
+      // inteira (o normal pra jogo em primeiro plano), o resultado
+      // visual pra quem está assistindo é o mesmo de qualquer forma.
+      try {
+        logDebug('captureScreenShareStream: caminhos DXGI/WebRTC falharam, tentando fallback GDI...')
+        const gdiStream = await captureGdiFallbackStream(0)
+        logDebug('captureScreenShareStream: fallback GDI funcionou')
+        return gdiStream
+      } catch (gdiErr) {
+        const gdiErrName = gdiErr instanceof Error ? gdiErr.name : String(gdiErr)
+        logDebug(`captureScreenShareStream: fallback GDI também falhou — ${gdiErrName}`)
       }
       void fallbackErr
       // Os caminhos falharam — relança o erro do caminho PRINCIPAL
@@ -1868,6 +1880,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // mesma coisa que a latência durante a conversa, mas melhora o
       // "demora pra pegar" que você comentou antes).
       iceCandidatePoolSize: 4,
+      // VIGÉSIMA SÉTIMA RODADA — revisão pedida especificamente sobre
+      // ping/latência. O resto da configuração de baixa latência já
+      // existia (playoutDelayHint=0, prioridade alta pro áudio, bitrate
+      // do microfone). Faltava isto: `max-bundle` consolida ÁUDIO e
+      // VÍDEO (quando tem) num único transporte de rede em vez de um
+      // pra cada, e `rtcpMuxPolicy: 'require'` exige multiplexar RTP e
+      // RTCP juntos — as duas coisas juntas reduzem quantos candidatos
+      // de conexão (ICE) precisam ser testados até achar um caminho que
+      // funcione, o que acelera especificamente o TEMPO DE CONECTAR a
+      // call (não a latência de cada pacote de voz já em andamento,
+      // essa já estava no ponto). É uma prática padrão, recomendada
+      // pelas próprias specs do WebRTC, sem trade-off conhecido.
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
     })
     const peerState: PeerState = { pc, makingOffer: false, polite }
     peersRef.current.set(peerId, peerState)

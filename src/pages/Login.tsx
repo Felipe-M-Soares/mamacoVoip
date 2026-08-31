@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { DESKTOP_DOWNLOAD_URL } from '../lib/config'
 import { GoogleSignInButton } from '../components/ui/GoogleSignInButton'
+import { MobileDownloadBanner } from '../components/ui/MobileDownloadBanner'
 
 export function Login() {
   const { signIn } = useAuth()
@@ -65,6 +66,7 @@ export function Login() {
       />
 
       <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 border border-white/5">
+        <MobileDownloadBanner />
         <div className="flex justify-center mb-5">
           <img src="/logo.png" alt="Mamacos Voip" className="w-24 h-24 rounded-full object-cover brand-glow" />
         </div>

@@ -3,6 +3,7 @@ import { Avatar } from '../ui/Avatar'
 import { VideoTile, RemoteAudio } from './CallMediaTiles'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
+import { isNativeMobileApp } from '../../lib/platform'
 import { useVoice } from '../../hooks/useVoice'
 import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
@@ -910,15 +911,41 @@ export function VoiceChannelView({
 
             <button
               onClick={() => voice.toggleScreenShare()}
-              title={voice.screenSharing ? 'Parar compartilhamento' : 'Compartilhar tela'}
-              aria-label={voice.screenSharing ? 'Parar compartilhamento' : 'Compartilhar tela'}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors ${
+              disabled={voice.screenShareConnecting}
+              hidden={isNativeMobileApp()}
+              title={
+                voice.screenShareConnecting
+                  ? 'Conectando...'
+                  : voice.screenSharing
+                    ? 'Parar compartilhamento'
+                    : 'Compartilhar tela'
+              }
+              aria-label={
+                voice.screenShareConnecting
+                  ? 'Conectando...'
+                  : voice.screenSharing
+                    ? 'Parar compartilhamento'
+                    : 'Compartilhar tela'
+              }
+              className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors disabled:opacity-60 disabled:cursor-wait ${
                 voice.screenSharing ? 'bg-discord-blurple text-white' : 'bg-discord-lighter text-discord-text hover:bg-discord-darker'
               }`}
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
-              </svg>
+              {voice.screenShareConnecting ? (
+                // VIGÉSIMA QUINTA RODADA — ver screenShareConnecting em
+                // VoiceContext.tsx: a cadeia de tentativas de captura
+                // (retry, HWND, plano B, fallback GDI) pode levar vários
+                // segundos no pior caso. Sem isso, o botão parecia
+                // travado/sem reação nesse tempo todo.
+                <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 animate-spin">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25" />
+                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                  <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
+                </svg>
+              )}
             </button>
 
             {/* Só aparece DURANTE uma transmissão — troca a janela/tela

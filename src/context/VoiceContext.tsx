@@ -538,10 +538,36 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
       // algum motivo. Sem esse prazo, a pessoa ficaria esperando pra
       // sempre sem erro nenhum na tela — pior do que só mostrar o erro do
       // caminho principal.
+      const displayMediaPromise = navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      // VIGÉSIMA QUINTA RODADA — vazamento pequeno encontrado na revisão
+      // geral: se o PRAZO (abaixo) vence a corrida, a Promise de
+      // getDisplayMedia não é cancelada — ela continua correndo por trás
+      // e, se resolver DEPOIS, a stream dela nunca era parada (ninguém
+      // mais tinha referência pra chamar `.stop()`), deixando o
+      // indicador de "compartilhando tela" do Windows aceso à toa. A
+      // flag `timedOut` (setada de forma SÍNCRONA dentro do próprio
+      // callback do setTimeout, antes do reject) é o jeito seguro de
+      // saber, quando esse .then() rodar mais tarde, se ele está
+      // chegando ATRASADO (aí sim limpa) ou se é o caminho normal de
+      // SUCESSO (aí não mexe em nada — `timedOut` ainda seria `false`
+      // nesse caso, porque o timeout nem chegou a disparar).
+      let timedOut = false
       const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new DOMException('Tempo esgotado no plano B de captura.', 'TimeoutError')), 6000)
+        setTimeout(() => {
+          timedOut = true
+          reject(new DOMException('Tempo esgotado no plano B de captura.', 'TimeoutError'))
+        }, 6000)
       )
-      return await Promise.race([navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }), timeout])
+      displayMediaPromise
+        .then((lateStream) => {
+          if (!timedOut) return // caminho normal — a mesma stream já está sendo devolvida/usada, não mexe
+          logDebug('captureScreenShareStream: plano B (getDisplayMedia) resolveu tarde demais, encerrando sozinho')
+          lateStream.getTracks().forEach((t) => t.stop())
+        })
+        .catch(() => {
+          // Perdeu a corrida E também rejeitou — nada a limpar.
+        })
+      return await Promise.race([displayMediaPromise, timeout])
     } catch (fallbackErr) {
       // VIGÉSIMA TERCEIRA RODADA: os dois caminhos "de verdade"
       // (DXGI/WebRTC, tanto via getUserMedia quanto via getDisplayMedia)
@@ -655,6 +681,7 @@ interface VoiceContextValue {
   toggleDeafen: () => void
   videoEnabled: boolean
   screenSharing: boolean
+  screenShareConnecting: boolean
   localScreenStream: MediaStream | null
   speaking: boolean
   // serverId é null pra uma chamada de voz em DM/grupo (não existe
@@ -737,6 +764,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const mutedRef = useRef(false)
   const [videoEnabled, setVideoEnabled] = useState(false)
   const [screenSharing, setScreenSharing] = useState(false)
+  // VIGÉSIMA QUINTA RODADA — falha real encontrada na revisão geral: a
+  // cadeia de tentativas de captura de tela (retry com espera de 700ms,
+  // tentativa por HWND, plano B via getDisplayMedia com até 6s de
+  // prazo, e por fim o fallback GDI, que espera até 4s pelo primeiro
+  // quadro) pode levar bem mais de 10 segundos no pior caso antes de
+  // finalmente funcionar OU mostrar um erro — e não existia NENHUM
+  // indicador visual desse tempo todo: o botão "Compartilhar tela"
+  // simplesmente não fazia nada visível, parecendo travado. Esse estado
+  // deixa a UI (ver VoiceChannelView.tsx) mostrar "Conectando..." com um
+  // spinner enquanto isso acontece, em vez de silêncio total.
+  const [screenShareConnecting, setScreenShareConnecting] = useState(false)
   const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null)
 
   // Push-to-talk: quando ativado, o microfone fica DESLIGADO por
@@ -2645,6 +2683,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       stopScreenShareState()
       return
     }
+    setScreenShareConnecting(true)
     try {
       const preset = screenShareQualityRef.current
       // OITAVA RODADA: getDisplayMedia() foi abandonado — ver o
@@ -2925,6 +2964,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           ? `${base} — o jogo provavelmente está em modo de tela cheia EXCLUSIVA. Troque pra "tela cheia sem bordas" (borderless) nas configurações de vídeo do jogo e tente compartilhar de novo.`
           : base
       )
+    } finally {
+      setScreenShareConnecting(false)
     }
   }
 
@@ -2939,6 +2980,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // pra quem está assistindo, diferente de um stop+start completo.
   async function switchScreenShareSource() {
     if (!screenSharing || !screenStreamRef.current) return
+    setScreenShareConnecting(true)
     try {
       const preset = screenShareQualityRef.current
       // OITAVA RODADA: idem toggleScreenShare acima — ver
@@ -3129,6 +3171,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Cancelou o seletor, ou algo deu errado — mantém a transmissão
       // ATUAL rodando normalmente, sem interromper nada por causa de uma
       // troca que não deu certo.
+    } finally {
+      setScreenShareConnecting(false)
     }
   }
 
@@ -3180,6 +3224,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         toggleDeafen,
         videoEnabled,
         screenSharing,
+        screenShareConnecting,
         localScreenStream,
         speaking,
         join,

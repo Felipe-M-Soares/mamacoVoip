@@ -632,6 +632,7 @@ function Find-MamacosGameWindow($names) {
   $bestArea = 0
   $bestTitle = ''
   $bestPid = 0
+  $bestShowCmd = 1
   $hwnd = [MamacosScan]::GetTopWindow([IntPtr]::Zero)
   while ($hwnd -ne [IntPtr]::Zero) {
     if ($targetPids.Count -gt 0 -and [MamacosScan]::IsWindowVisible($hwnd)) {
@@ -651,6 +652,7 @@ function Find-MamacosGameWindow($names) {
               $bestArea = $area
               $bestHwnd = $hwnd
               $bestPid = $procId
+              $bestShowCmd = $wp.showCmd
               $sb = New-Object System.Text.StringBuilder 512
               [MamacosScan]::GetWindowText($hwnd, $sb, 512) | Out-Null
               $bestTitle = $sb.ToString()
@@ -670,7 +672,15 @@ function Find-MamacosGameWindow($names) {
     # bounds "de quando estava restaurada" (rcNormalPosition) mesmo com o
     # jogo minimizado agora, então esse achado continua valendo mesmo
     # nesse estado — só faltava o HWND pra dar pra agir sobre ele.
-    return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $bestTitle; pid = $bestPid; hwnd = $bestHwnd.ToInt64() }
+    #
+    # VIGÉSIMA QUINTA RODADA: inclui showCmd também — é o sinal CERTO de
+    # "está minimizado de verdade" (showCmd 2 = SW_SHOWMINIMIZED),
+    # diferente de tentar adivinhar isso indiretamente (jeito antigo, que
+    # tinha um problema real: jogo em TELA CHEIA EXCLUSIVA dá o mesmo
+    # sinal indireto de "nenhuma janela capturável" que um jogo
+    # minimizado de verdade — GetWindowPlacement, ao contrário disso,
+    # sabe a diferença exata sem chute nenhum).
+    return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $bestTitle; pid = $bestPid; hwnd = $bestHwnd.ToInt64(); showCmd = $bestShowCmd }
   }
   return $null
 }
@@ -949,6 +959,14 @@ function getGameWindowInfo(processNames) {
         // screen-share:restore-window abaixo e Restore-MamacosWindow no
         // SCANNER_SCRIPT.
         hwnd: typeof r.hwnd === 'number' && r.hwnd > 0 ? r.hwnd : null,
+        // VIGÉSIMA QUINTA RODADA — sinal CERTO de "minimizado de
+        // verdade" (showCmd 2 = SW_SHOWMINIMIZED, vindo direto do
+        // GetWindowPlacement do Windows — ver Find-MamacosGameWindow no
+        // SCANNER_SCRIPT), em vez do jeito antigo de adivinhar isso
+        // indiretamente (que confundia minimizado com tela cheia
+        // exclusiva, já que as duas dão o mesmo sinal indireto de
+        // "nenhuma janela capturável pra esse PID").
+        isMinimized: r.showCmd === 2,
       })
     })
   })
@@ -1680,23 +1698,41 @@ app.whenReady().then(() => {
           .filter((s) => s.id.startsWith('window:'))
           .map((s) => [s.id, hwndPidMap.get(parseHwndFromSourceId(s.id)) ?? titlePidMap.get(s.name) ?? null])
       )
-      // DÉCIMA OITAVA RODADA: "compartilhamento de tela não reconhece
-      // tela minimizada" — desktopCapturer.getSources() (o próprio
-      // Chromium) EXCLUI janelas minimizadas da lista, sempre, pra
-      // qualquer programa de captura, não só o nosso (ver o aviso já
-      // existente no rodapé do ScreenSharePicker.tsx). Isso detecta esse
-      // caso especificamente pro jogo CADASTRADO sugerido: se
-      // getGameWindowInfo achou o processo (então ele está rodando) mas
-      // NENHUMA fonte do tipo "window" bate com o PID dele, é sinal forte
-      // de que a janela existe mas está minimizada (ou, mais raro,
-      // também não capturável por outro motivo) — nesse caso o
-      // ScreenSharePicker.tsx pode oferecer "Restaurar e compartilhar"
-      // em vez de simplesmente não mostrar nada pra escolher.
+      // VIGÉSIMA QUINTA RODADA — bug real relatado com print de tela:
+      // Rainbow Six Siege rodando em TELA CHEIA EXCLUSIVA (não
+      // minimizado de verdade — a pessoa estava jogando) aparecia como
+      // "está minimizado, restaure a janela" mesmo assim. A causa
+      // original: um jogo em modo exclusivo de verdade tem o MESMO sinal
+      // INDIRETO que um jogo minimizado — GetGameWindowInfo acha o
+      // HWND/PID dele, mas NENHUMA fonte do tipo "window" bate com esse
+      // PID (seja porque está minimizado OU porque está em tela cheia
+      // exclusiva — indistinguíveis só com esse sinal indireto).
+      //
+      // Uma correção anterior tentou resolver isso condicionando à
+      // existência de um fallback de tela (gameDisplayId) — só que essa
+      // condição sozinha criou um bug NOVO: como esse fallback quase
+      // sempre acaba resolvido de um jeito ou de outro (ver os vários
+      // "if (!gameDisplayId ...)" acima, incluindo o de ÚLTIMO caso que
+      // cai pro monitor principal sempre que há um jogo conhecido),
+      // "está minimizado" parava de aparecer até pra jogos GENUINAMENTE
+      // minimizados. Precisava do sinal DIRETO, não de uma dedução.
+      //
+      // Esse sinal direto existe: GetWindowPlacement (ver
+      // Find-MamacosGameWindow no SCANNER_SCRIPT) já devolve showCmd,
+      // que diz exatamente se a janela está minimizada de verdade
+      // (SW_SHOWMINIMIZED) — sem precisar adivinhar nada a partir de
+      // fontes de tela disponíveis ou não. Ver getGameWindowInfo acima
+      // (windowInfo.isMinimized).
       const gameWindowHwnd = windowInfo?.hwnd ?? null
       const hasCapturableGameWindow =
         gameWindowPid !== null &&
         sources.some((s) => s.id.startsWith('window:') && resolvedPidBySourceId.get(s.id) === gameWindowPid)
-      const looksMinimized = isKnownGame && gameWindowHwnd !== null && gameWindowPid !== null && !hasCapturableGameWindow
+      const looksMinimized =
+        isKnownGame &&
+        gameWindowHwnd !== null &&
+        gameWindowPid !== null &&
+        !hasCapturableGameWindow &&
+        windowInfo?.isMinimized === true
 
       // OITAVA RODADA: devolve o payload DIRETO como retorno do
       // ipcMain.handle (em vez de mandar por webContents.send pra um

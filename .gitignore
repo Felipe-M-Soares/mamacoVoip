@@ -12,6 +12,18 @@ dist
 dist-ssr
 *.local
 
+# VIGÉSIMA SEXTA RODADA — app mobile (Capacitor). A pasta android/ EM SI
+# entra no controle de versão normalmente (é a convenção do próprio
+# Capacitor — diferente do node_modules, não é gerada do zero cada vez,
+# tem código nativo de verdade que pode precisar de ajuste manual) — só
+# os artefatos de BUILD dela (gerados pelo Gradle a cada compilação,
+# nunca precisam ser versionados) ficam de fora.
+android/app/build
+android/.gradle
+android/local.properties
+android/app/src/main/assets/public
+android/app/src/main/assets/capacitor.config.json
+
 # Variáveis de ambiente (nunca commitar chaves)
 .env
 .env.local

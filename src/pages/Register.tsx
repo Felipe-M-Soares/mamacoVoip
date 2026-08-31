@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { GoogleSignInButton } from '../components/ui/GoogleSignInButton'
+import { MobileDownloadBanner } from '../components/ui/MobileDownloadBanner'
 
 function GlowBackdrop() {
   return (
@@ -87,6 +88,7 @@ export function Register() {
     <div className="min-h-full bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
       <GlowBackdrop />
       <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 border border-white/5">
+        <MobileDownloadBanner />
         <div className="flex justify-center mb-5">
           <img src="/logo.png" alt="Mamacos Voip" className="w-24 h-24 rounded-full object-cover brand-glow" />
         </div>

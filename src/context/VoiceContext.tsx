@@ -202,38 +202,38 @@ async function applyVideoQualityConstraints(track: MediaStreamTrack, preset: Qua
 // baixo (1px) deixa o Chromium livre pra capturar na resolução NATIVA
 // da tela até esse teto generoso, e o "max" no preset "Desempenho"
 // realmente limita como pretendido.
-// VIGÉSIMA TERCEIRA RODADA — último recurso quando a captura de tela
-// "de verdade" (DXGI/WebRTC, com todos os fallbacks anteriores — ver o
-// comentário grande em captureScreenShareStream logo abaixo) falha por
-// completo numa fonte de TELA. Relatado com detalhe: numa placa AMD
-// (RX 9060 XT) específica, TODO jogo de tela cheia com anti-cheat
-// (Valorant, Fortnite, R6, CS2) dava "Could not start video source
-// (NotReadableError)" mesmo depois de todas as tentativas — e a pessoa
-// confirmou que Discord e OBS capturam esses MESMOS jogos sem problema
-// na MESMA máquina. Isso aponta pra um problema BEM específico dessa
-// combinação hardware/driver com a parte DXGI da captura de tela — não
-// com o jogo, o anti-cheat, ou a tela cheia em si (ver o comentário
-// grande em native/screen-capture-gdi/capture.cpp pro raciocínio
-// completo e as limitações conhecidas dessa abordagem).
-//
-// Em vez de tentar capturar via DXGI (Chromium/WebRTC) de novo, chama o
-// processo principal pra abrir screen-capture-gdi.exe — um capturador
-// de tela via GDI puro (a tecnologia de captura mais antiga do
-// Windows, sem NENHUMA dependência de DXGI), que manda quadros já
-// comprimidos em JPEG por IPC. Aqui do lado do renderer, cada quadro é
-// desenhado num <canvas> escondido (nunca inserido no DOM — só existe
-// em memória) e `canvas.captureStream()` gera a MediaStreamTrack de
-// vídeo de verdade, que dali em diante se comporta EXATAMENTE como
-// qualquer outra track de vídeo pro resto do app (WebRTC não sabe nem
-// precisa saber a origem dela).
-async function captureGdiFallbackStream(monitorIndex: number): Promise<MediaStream> {
-  if (!window.electronAPI?.startScreenCaptureGdiFallback) {
-    throw new DOMException('Fallback de captura de tela indisponível nesta instalação.', 'NotSupportedError')
+// TRIGÉSIMA TERCEIRA RODADA — generalizado pra aceitar os dois motores
+// nativos de fallback (WGC e GDI, ver os respectivos capture.cpp) em
+// vez de só o GDI — eles falam o MESMO protocolo binário, só mudam qual
+// .exe é chamado e quais métodos do electronAPI usar. `kind` decide
+// isso. Chamado como último recurso quando a captura de tela "de
+// verdade" (DXGI/WebRTC) falha por completo numa fonte de TELA — ver o
+// comentário grande em captureScreenShareStream logo abaixo pro
+// raciocínio completo de cada caso.
+async function captureNativeFallbackStream(kind: 'wgc' | 'gdi', monitorIndex: number): Promise<MediaStream> {
+  const api =
+    kind === 'wgc'
+      ? {
+          start: window.electronAPI?.startScreenCaptureWgcFallback,
+          stop: window.electronAPI?.stopScreenCaptureWgcFallback,
+          onFormat: window.electronAPI?.onScreenCaptureWgcFormat,
+          onFrame: window.electronAPI?.onScreenCaptureWgcFrame,
+          onError: window.electronAPI?.onScreenCaptureWgcError,
+        }
+      : {
+          start: window.electronAPI?.startScreenCaptureGdiFallback,
+          stop: window.electronAPI?.stopScreenCaptureGdiFallback,
+          onFormat: window.electronAPI?.onScreenCaptureGdiFormat,
+          onFrame: window.electronAPI?.onScreenCaptureGdiFrame,
+          onError: window.electronAPI?.onScreenCaptureGdiError,
+        }
+  if (!api.start || !api.stop || !api.onFormat || !api.onFrame || !api.onError) {
+    throw new DOMException(`Fallback de captura de tela (${kind}) indisponível nesta instalação.`, 'NotSupportedError')
   }
-  const startResult = await window.electronAPI.startScreenCaptureGdiFallback(monitorIndex)
+  const startResult = await api.start(monitorIndex)
   if (!startResult?.ok) {
     throw new DOMException(
-      startResult?.error || 'Não foi possível iniciar o fallback de captura de tela.',
+      startResult?.error || `Não foi possível iniciar o fallback de captura de tela (${kind}).`,
       'NotReadableError'
     )
   }
@@ -243,25 +243,24 @@ async function captureGdiFallbackStream(monitorIndex: number): Promise<MediaStre
   let ready = false
   // Solta (não desenha) um quadro novo se o anterior ainda estiver
   // sendo decodificado — createImageBitmap é assíncrono, e sem essa
-  // trava os quadros chegando continuamente (a cada ~42ms, ver
-  // capture.cpp) empilhariam atraso crescente em vez de simplesmente
-  // ficar um pouco mais devagar que o ideal.
+  // trava os quadros chegando continuamente empilhariam atraso
+  // crescente em vez de simplesmente ficar um pouco mais devagar que o
+  // ideal.
   let decoding = false
   let cleanedUp = false
 
-  const unsubFormat = window.electronAPI.onScreenCaptureGdiFormat(({ width, height }) => {
+  const unsubFormat = api.onFormat(({ width, height }) => {
     canvas.width = width
     canvas.height = height
     ready = true
   })
-  const unsubFrame = window.electronAPI.onScreenCaptureGdiFrame((frame) => {
+  const unsubFrame = api.onFrame((frame) => {
     if (!ready || !ctx || decoding) return
     decoding = true
-    // `frame` chega como Uint8Array (ver preload.cjs/onScreenCaptureGdiFrame)
-    // — pode ser uma VIEW sobre um ArrayBuffer maior (dependendo de como o
-    // Electron desserializa o Buffer do lado do main), então `.slice()`
-    // (que copia só os bytes desse frame, respeitando byteOffset/length)
-    // é o jeito seguro de virar um ArrayBuffer isolado pro Blob — usar
+    // `frame` chega como Uint8Array (ver preload.cjs) — pode ser uma
+    // VIEW sobre um ArrayBuffer maior, então `.slice()` (que copia só
+    // os bytes desse frame, respeitando byteOffset/length) é o jeito
+    // seguro de virar um ArrayBuffer isolado pro Blob — usar
     // `frame.buffer` direto arriscaria pegar bytes de OUTROS frames
     // vizinhos no mesmo buffer.
     createImageBitmap(new Blob([frame.slice().buffer], { type: 'image/jpeg' }))
@@ -277,8 +276,8 @@ async function captureGdiFallbackStream(monitorIndex: number): Promise<MediaStre
         decoding = false
       })
   })
-  const unsubError = window.electronAPI.onScreenCaptureGdiError((message) => {
-    logDebug(`captureGdiFallbackStream: erro reportado pelo screen-capture-gdi.exe — ${message}`)
+  const unsubError = api.onError((message) => {
+    logDebug(`captureNativeFallbackStream(${kind}): erro reportado pelo capturador nativo — ${message}`)
   })
 
   function cleanup() {
@@ -287,7 +286,7 @@ async function captureGdiFallbackStream(monitorIndex: number): Promise<MediaStre
     unsubFormat()
     unsubFrame()
     unsubError()
-    window.electronAPI?.stopScreenCaptureGdiFallback().catch(() => {})
+    api.stop?.().catch(() => {})
   }
 
   // Espera o primeiro quadro chegar (até 4s) antes de devolver a
@@ -301,10 +300,13 @@ async function captureGdiFallbackStream(monitorIndex: number): Promise<MediaStre
   }
   if (!ready) {
     cleanup()
-    throw new DOMException('O fallback de captura de tela não chegou a produzir nenhum quadro.', 'NotReadableError')
+    throw new DOMException(`O fallback de captura de tela (${kind}) não chegou a produzir nenhum quadro.`, 'NotReadableError')
   }
 
-  const stream = canvas.captureStream(24)
+  // WGC já é acelerado por GPU e não sofre da mesma limitação de custo
+  // de CPU do GDI puro — usa uma taxa de quadros mais alta, mais perto
+  // do que a captura normal entregaria.
+  const stream = canvas.captureStream(kind === 'wgc' ? 30 : 24)
   const [videoTrack] = stream.getVideoTracks()
   // Encadeia a limpeza (encerrar o .exe, tirar os listeners de IPC) no
   // MESMO `.stop()` que o resto do app já chama normalmente quando o
@@ -587,20 +589,37 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
       // VIGÉSIMA OITAVA RODADA: antes só entrava aqui pra fonte de TELA
       // (`isScreenSource`) — ver o comentário grande lá em cima sobre o
       // log real do Rainbow Six Siege mostrar esse MESMO erro numa fonte
-      // de JANELA. GDI puro (BitBlt) captura a TELA TODA de qualquer
-      // jeito (não tem como pedir "só essa janela" nele — ver
-      // native/screen-capture-gdi/capture.cpp), então serve igual de
-      // fallback pras duas situações: se o jogo em janela ocupa a tela
-      // inteira (o normal pra jogo em primeiro plano), o resultado
-      // visual pra quem está assistindo é o mesmo de qualquer forma.
+      // de JANELA. Nem WGC nem GDI conseguem pedir "só essa janela" (os
+      // dois capturam o MONITOR inteiro — ver os respectivos capture.cpp),
+      // então servem igual de fallback pras duas situações: se o jogo em
+      // janela ocupa a tela inteira (o normal pra jogo em primeiro
+      // plano), o resultado visual pra quem está assistindo é o mesmo de
+      // qualquer forma.
+      //
+      // TRIGÉSIMA TERCEIRA RODADA — WGC tentado ANTES do GDI: ele é a
+      // única das duas técnicas que realmente enxerga um jogo em tela
+      // cheia EXCLUSIVA de verdade (não depende do compositor do Windows
+      // estar ativo, ao contrário de GDI e da própria captura normal —
+      // ver o comentário grande em native/screen-capture-wgc/capture.cpp).
+      // GDI continua como ÚLTIMO recurso final, pros casos que WGC não
+      // cobrir (Windows mais antigo que a versão 1903, GPU sem suporte a
+      // Direct3D 11, etc.).
       try {
-        logDebug('captureScreenShareStream: caminhos DXGI/WebRTC falharam, tentando fallback GDI...')
-        const gdiStream = await captureGdiFallbackStream(0)
-        logDebug('captureScreenShareStream: fallback GDI funcionou')
-        return gdiStream
-      } catch (gdiErr) {
-        const gdiErrName = gdiErr instanceof Error ? gdiErr.name : String(gdiErr)
-        logDebug(`captureScreenShareStream: fallback GDI também falhou — ${gdiErrName}`)
+        logDebug('captureScreenShareStream: caminhos DXGI/WebRTC falharam, tentando fallback WGC...')
+        const wgcStream = await captureNativeFallbackStream('wgc', 0)
+        logDebug('captureScreenShareStream: fallback WGC funcionou')
+        return wgcStream
+      } catch (wgcErr) {
+        const wgcErrName = wgcErr instanceof Error ? wgcErr.name : String(wgcErr)
+        logDebug(`captureScreenShareStream: fallback WGC falhou — ${wgcErrName}, tentando fallback GDI...`)
+        try {
+          const gdiStream = await captureNativeFallbackStream('gdi', 0)
+          logDebug('captureScreenShareStream: fallback GDI funcionou')
+          return gdiStream
+        } catch (gdiErr) {
+          const gdiErrName = gdiErr instanceof Error ? gdiErr.name : String(gdiErr)
+          logDebug(`captureScreenShareStream: fallback GDI também falhou — ${gdiErrName}`)
+        }
       }
       void fallbackErr
       // Os caminhos falharam — relança o erro do caminho PRINCIPAL

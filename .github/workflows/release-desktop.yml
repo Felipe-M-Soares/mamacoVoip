@@ -121,6 +121,21 @@ jobs:
         run: |
           cl /EHsc /std:c++17 /O2 /DUNICODE /D_UNICODE native\screen-capture-gdi\capture.cpp /Fe:electron\screen-capture-gdi.exe /link ole32.lib gdiplus.lib gdi32.lib user32.lib
 
+      # TRIGÉSIMA TERCEIRA RODADA — mesmo esquema dos dois passos acima,
+      # pro novo capturador via Windows Graphics Capture (ver o
+      # comentário grande no topo de native/screen-capture-wgc/capture.cpp
+      # pro motivo completo: é a única técnica que enxerga de verdade um
+      # jogo em tela cheia EXCLUSIVA, sem depender de nenhum outro
+      # programa aberto). windowsapp.lib é a biblioteca de projeção do
+      # C++/WinRT (interoperação com a API moderna do Windows) — d3d11.lib
+      # e dxgi.lib são as de Direct3D 11, usadas pra ler os quadros
+      # capturados como pixels de verdade.
+      - name: Compilar fallback de captura de tela via WGC (só Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: |
+          cl /EHsc /std:c++17 /O2 /DUNICODE /D_UNICODE native\screen-capture-wgc\capture.cpp /Fe:electron\screen-capture-wgc.exe /link ole32.lib gdiplus.lib gdi32.lib user32.lib d3d11.lib dxgi.lib windowsapp.lib
+
       - name: Build do app desktop (tsc + vite, caminhos relativos)
         run: npm run build:electron
         env:

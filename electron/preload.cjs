@@ -99,6 +99,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // native/screen-capture-gdi/capture.cpp pro esquema completo). Só
   // usado como ÚLTIMO RECURSO, quando a captura normal de tela falha
   // de verdade — ver useGdiScreenCaptureFallback em VoiceContext.tsx.
+  // Fallbacks de captura de tela nativos (WGC + GDI — VIGÉSIMA TERCEIRA
+  // e TRIGÉSIMA TERCEIRA RODADAS, ver os comentários grandes em
+  // electron/main.cjs e nos respectivos capture.cpp). WGC é tentado
+  // primeiro (melhor qualidade, funciona com jogo em tela cheia
+  // exclusiva); GDI é o último recurso final — ver
+  // captureNativeFallbackStream em VoiceContext.tsx.
+  startScreenCaptureWgcFallback: (monitorIndex) => ipcRenderer.invoke('screen-capture-wgc:start', monitorIndex),
+  stopScreenCaptureWgcFallback: () => ipcRenderer.invoke('screen-capture-wgc:stop'),
+  onScreenCaptureWgcFormat: (callback) => {
+    const handler = (_event, format) => callback(format)
+    ipcRenderer.on('screen-capture-wgc:format', handler)
+    return () => ipcRenderer.removeListener('screen-capture-wgc:format', handler)
+  },
+  onScreenCaptureWgcFrame: (callback) => {
+    const handler = (_event, frame) => callback(frame)
+    ipcRenderer.on('screen-capture-wgc:frame', handler)
+    return () => ipcRenderer.removeListener('screen-capture-wgc:frame', handler)
+  },
+  onScreenCaptureWgcError: (callback) => {
+    const handler = (_event, message) => callback(message)
+    ipcRenderer.on('screen-capture-wgc:error', handler)
+    return () => ipcRenderer.removeListener('screen-capture-wgc:error', handler)
+  },
   startScreenCaptureGdiFallback: (monitorIndex) => ipcRenderer.invoke('screen-capture-gdi:start', monitorIndex),
   stopScreenCaptureGdiFallback: () => ipcRenderer.invoke('screen-capture-gdi:stop'),
   onScreenCaptureGdiFormat: (callback) => {

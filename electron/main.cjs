@@ -2233,153 +2233,163 @@ app.whenReady().then(() => {
   ipcMain.handle('process-audio:stop', () => stopProcessAudioCapture())
 
   // ============================================================
-  // Fallback de captura de tela via GDI puro (VIGÉSIMA TERCEIRA RODADA
-  // — ver o comentário grande em native/screen-capture-gdi/capture.cpp
-  // pro raciocínio completo: DXGI/WebRTC dando "Could not start video
-  // source (NotReadableError)" em jogos de tela cheia com anti-cheat,
-  // numa placa AMD específica, mesmo com Discord e OBS conseguindo
-  // capturar os MESMOS jogos na MESMA máquina — sinal de que o
-  // problema está na captura DXGI dessa combinação de hardware/driver,
-  // não em nada que o app controle). Só chamado pelo renderer (ver
-  // useGdiScreenCaptureFallback em VoiceContext.tsx) depois que TODAS
-  // as tentativas normais de captura de tela já falharam — nunca é o
-  // caminho padrão, é estritamente ÚLTIMO RECURSO.
-  let screenCaptureGdiProc = null
-  let screenCaptureGdiHeaderBuffer = Buffer.alloc(0)
-  let screenCaptureGdiHeaderParsed = false
-  // Depois do cabeçalho, cada quadro é [4 bytes de tamanho][tamanho
-  // bytes de JPEG] — diferente do áudio (fluxo contínuo sem separação
-  // nenhuma entre amostras), aqui É PRECISO respeitar o limite de cada
-  // quadro: colar dois JPEGs sem separação não abriria como imagem
-  // nenhuma do lado do renderer. Esse buffer acumula bytes até ter
-  // quadro(s) COMPLETO(s) pra repassar.
-  let screenCaptureGdiFrameBuffer = Buffer.alloc(0)
+  // Fallbacks de captura de tela nativos (VIGÉSIMA TERCEIRA e TRIGÉSIMA
+  // TERCEIRA RODADAS — ver os comentários grandes em
+  // native/screen-capture-gdi/capture.cpp e
+  // native/screen-capture-wgc/capture.cpp pro raciocínio completo de
+  // cada um). Os dois falam o MESMO protocolo binário pelo stdout
+  // (cabeçalho de 16 bytes + quadros JPEG com tamanho na frente), então
+  // em vez de duplicar toda a lógica de spawn/parse/IPC pra cada um (o
+  // que já tinha acontecido uma vez, quando só existia o GDI),
+  // generalizei numa fábrica — `createNativeFrameCaptureChannel` monta
+  // um canal completo (start/stop, com o parsing e os eventos de IPC)
+  // a partir só do nome do .exe e do prefixo dos eventos.
+  //
+  // Ordem de prioridade das tentativas (ver captureScreenShareStream em
+  // VoiceContext.tsx): WGC primeiro (acelerado por GPU, funciona mesmo
+  // com o compositor do Windows fora do ar — é o único dos dois que
+  // realmente vê um jogo em tela cheia exclusiva de verdade), GDI só
+  // como último recurso final (mais garantido de existir/funcionar em
+  // qualquer Windows, mas não resolve o caso de tela cheia exclusiva —
+  // serve mais pra outros tipos de falha de driver).
+  function createNativeFrameCaptureChannel(channelPrefix, exeFileName, expectedMagic) {
+    let proc = null
+    let headerBuffer = Buffer.alloc(0)
+    let headerParsed = false
+    // Depois do cabeçalho, cada quadro é [4 bytes de tamanho][tamanho
+    // bytes de JPEG] — diferente do áudio (fluxo contínuo sem separação
+    // nenhuma entre amostras), aqui É PRECISO respeitar o limite de cada
+    // quadro: colar dois JPEGs sem separação não abriria como imagem
+    // nenhuma do lado do renderer. Esse buffer acumula bytes até ter
+    // quadro(s) COMPLETO(s) pra repassar.
+    let frameBuffer = Buffer.alloc(0)
+    const HEADER_SIZE = 16
 
-  const SCREEN_CAPTURE_GDI_HEADER_SIZE = 16
+    function resolveExePath() {
+      // Mesmo truque do resolveProcessAudioCaptureExePath (o .exe
+      // precisa estar fora do .asar pra rodar de dentro do pacote final).
+      const packagedPath = path.join(__dirname, exeFileName)
+      return packagedPath.replace('app.asar', 'app.asar.unpacked')
+    }
 
-  function resolveScreenCaptureGdiExePath() {
-    // Mesmo truque do resolveProcessAudioCaptureExePath acima (o .exe
-    // precisa estar fora do .asar pra rodar de dentro do pacote final).
-    const packagedPath = path.join(__dirname, 'screen-capture-gdi.exe')
-    return packagedPath.replace('app.asar', 'app.asar.unpacked')
-  }
+    function stop() {
+      headerBuffer = Buffer.alloc(0)
+      headerParsed = false
+      frameBuffer = Buffer.alloc(0)
+      if (proc) {
+        try {
+          proc.kill()
+        } catch {
+          // já pode ter morrido sozinho — sem problema
+        }
+        proc = null
+      }
+    }
 
-  function stopScreenCaptureGdi() {
-    screenCaptureGdiHeaderBuffer = Buffer.alloc(0)
-    screenCaptureGdiHeaderParsed = false
-    screenCaptureGdiFrameBuffer = Buffer.alloc(0)
-    if (screenCaptureGdiProc) {
+    function drainFrames() {
+      // Consome quantos quadros completos já estiverem no buffer — pode
+      // ser mais de um por evento 'data' se o SO entregar vários chunks
+      // de uma vez — cada um vira um evento `${channelPrefix}:frame`
+      // separado pro renderer.
+      while (frameBuffer.length >= 4) {
+        const frameSize = frameBuffer.readUInt32LE(0)
+        if (frameBuffer.length < 4 + frameSize) break // quadro ainda incompleto, espera mais dados
+        const frame = frameBuffer.subarray(4, 4 + frameSize)
+        mainWindow?.webContents.send(`${channelPrefix}:frame`, Buffer.from(frame))
+        frameBuffer = frameBuffer.subarray(4 + frameSize)
+      }
+    }
+
+    function start(monitorIndex) {
+      stop()
+      appendDebugLog('main', `${channelPrefix}: pedido (monitorIndex=${monitorIndex})`)
+      if (process.platform !== 'win32') {
+        return { ok: false, error: `${channelPrefix} só existe no Windows.` }
+      }
+      const exePath = resolveExePath()
+      if (!require('node:fs').existsSync(exePath)) {
+        appendDebugLog('main', `${channelPrefix}: exe não encontrado em ${exePath}`)
+        return { ok: false, error: `${exeFileName} não encontrado nesta instalação (build sem esse componente).` }
+      }
       try {
-        screenCaptureGdiProc.kill()
-      } catch {
-        // já pode ter morrido sozinho — sem problema
-      }
-      screenCaptureGdiProc = null
-    }
-  }
+        const args = Number.isFinite(monitorIndex) && monitorIndex > 0 ? [String(Math.trunc(monitorIndex))] : []
+        const child = spawn(exePath, args, { windowsHide: true })
+        proc = child
+        appendDebugLog('main', `${channelPrefix}: spawn ok (exe=${exePath}, args=${JSON.stringify(args)})`)
 
-  function drainScreenCaptureGdiFrames() {
-    // Consome quantos quadros completos já estiverem no buffer — pode
-    // ser mais de um por evento 'data' se o SO entregar vários chunks
-    // de uma vez — cada um vira um evento 'screen-capture-gdi:frame'
-    // separado pro renderer.
-    while (screenCaptureGdiFrameBuffer.length >= 4) {
-      const frameSize = screenCaptureGdiFrameBuffer.readUInt32LE(0)
-      if (screenCaptureGdiFrameBuffer.length < 4 + frameSize) break // quadro ainda incompleto, espera mais dados
-      const frame = screenCaptureGdiFrameBuffer.subarray(4, 4 + frameSize)
-      mainWindow?.webContents.send('screen-capture-gdi:frame', Buffer.from(frame))
-      screenCaptureGdiFrameBuffer = screenCaptureGdiFrameBuffer.subarray(4 + frameSize)
-    }
-  }
+        child.stdout.on('data', (chunk) => {
+          if (!headerParsed) {
+            headerBuffer = Buffer.concat([headerBuffer, chunk])
+            if (headerBuffer.length < HEADER_SIZE) return
+            const header = headerBuffer.subarray(0, HEADER_SIZE)
+            frameBuffer = Buffer.from(headerBuffer.subarray(HEADER_SIZE))
+            headerBuffer = Buffer.alloc(0)
+            headerParsed = true
 
-  function startScreenCaptureGdi(monitorIndex) {
-    stopScreenCaptureGdi()
-    appendDebugLog('main', `startScreenCaptureGdi: pedido (monitorIndex=${monitorIndex})`)
-    if (process.platform !== 'win32') {
-      return { ok: false, error: 'Fallback de captura de tela via GDI só existe no Windows.' }
-    }
-    const exePath = resolveScreenCaptureGdiExePath()
-    if (!require('node:fs').existsSync(exePath)) {
-      appendDebugLog('main', `startScreenCaptureGdi: exe não encontrado em ${exePath}`)
-      return {
-        ok: false,
-        error: 'screen-capture-gdi.exe não encontrado nesta instalação (build sem esse componente).',
-      }
-    }
-    try {
-      const args = Number.isFinite(monitorIndex) && monitorIndex > 0 ? [String(Math.trunc(monitorIndex))] : []
-      const proc = spawn(exePath, args, { windowsHide: true })
-      screenCaptureGdiProc = proc
-      appendDebugLog('main', `startScreenCaptureGdi: spawn ok (exe=${exePath}, args=${JSON.stringify(args)})`)
-
-      proc.stdout.on('data', (chunk) => {
-        if (!screenCaptureGdiHeaderParsed) {
-          screenCaptureGdiHeaderBuffer = Buffer.concat([screenCaptureGdiHeaderBuffer, chunk])
-          if (screenCaptureGdiHeaderBuffer.length < SCREEN_CAPTURE_GDI_HEADER_SIZE) return
-          const header = screenCaptureGdiHeaderBuffer.subarray(0, SCREEN_CAPTURE_GDI_HEADER_SIZE)
-          screenCaptureGdiFrameBuffer = Buffer.from(screenCaptureGdiHeaderBuffer.subarray(SCREEN_CAPTURE_GDI_HEADER_SIZE))
-          screenCaptureGdiHeaderBuffer = Buffer.alloc(0)
-          screenCaptureGdiHeaderParsed = true
-
-          const magic = header.readUInt32LE(0)
-          if (magic !== 0x4d434746) {
-            appendDebugLog('main', `startScreenCaptureGdi: cabeçalho com magic inesperado (0x${magic.toString(16)})`)
-            mainWindow?.webContents.send('screen-capture-gdi:error', 'Formato de cabeçalho inesperado.')
-            stopScreenCaptureGdi()
+            const magic = header.readUInt32LE(0)
+            if (magic !== expectedMagic) {
+              appendDebugLog('main', `${channelPrefix}: cabeçalho com magic inesperado (0x${magic.toString(16)})`)
+              mainWindow?.webContents.send(`${channelPrefix}:error`, 'Formato de cabeçalho inesperado.')
+              stop()
+              return
+            }
+            const width = header.readUInt32LE(4)
+            const height = header.readUInt32LE(8)
+            appendDebugLog('main', `${channelPrefix}: formato confirmado (${width}x${height})`)
+            mainWindow?.webContents.send(`${channelPrefix}:format`, { width, height })
+            drainFrames()
             return
           }
-          const width = header.readUInt32LE(4)
-          const height = header.readUInt32LE(8)
-          appendDebugLog('main', `startScreenCaptureGdi: formato confirmado (${width}x${height})`)
-          mainWindow?.webContents.send('screen-capture-gdi:format', { width, height })
-          drainScreenCaptureGdiFrames()
-          return
-        }
-        screenCaptureGdiFrameBuffer = Buffer.concat([screenCaptureGdiFrameBuffer, chunk])
-        drainScreenCaptureGdiFrames()
-      })
+          frameBuffer = Buffer.concat([frameBuffer, chunk])
+          drainFrames()
+        })
 
-      // stderr é só texto de diagnóstico (ver capture.cpp) — mesmo
-      // esquema do process-audio-capture.exe: repassa linhas "ERROR..."
-      // pro renderer, "STATUS..." só vai pro log em arquivo.
-      let stderrBuffer = ''
-      proc.stderr?.on('data', (chunk) => {
-        stderrBuffer += chunk.toString('utf8')
-        let newlineIndex
-        while ((newlineIndex = stderrBuffer.indexOf('\n')) >= 0) {
-          const line = stderrBuffer.slice(0, newlineIndex).trim()
-          stderrBuffer = stderrBuffer.slice(newlineIndex + 1)
-          if (line.startsWith('ERROR')) {
-            appendDebugLog('main', `startScreenCaptureGdi: capture.cpp reportou erro — ${line}`)
-            mainWindow?.webContents.send('screen-capture-gdi:error', line.replace(/^ERROR\s*/, ''))
-          } else if (line.startsWith('STATUS')) {
-            appendDebugLog('main', `startScreenCaptureGdi: ${line}`)
+        // stderr é só texto de diagnóstico (ver capture.cpp) — mesmo
+        // esquema do process-audio-capture.exe: repassa linhas "ERROR..."
+        // pro renderer, "STATUS..." só vai pro log em arquivo.
+        let stderrBuffer = ''
+        child.stderr?.on('data', (chunk) => {
+          stderrBuffer += chunk.toString('utf8')
+          let newlineIndex
+          while ((newlineIndex = stderrBuffer.indexOf('\n')) >= 0) {
+            const line = stderrBuffer.slice(0, newlineIndex).trim()
+            stderrBuffer = stderrBuffer.slice(newlineIndex + 1)
+            if (line.startsWith('ERROR')) {
+              appendDebugLog('main', `${channelPrefix}: reportou erro — ${line}`)
+              mainWindow?.webContents.send(`${channelPrefix}:error`, line.replace(/^ERROR\s*/, ''))
+            } else if (line.startsWith('STATUS')) {
+              appendDebugLog('main', `${channelPrefix}: ${line}`)
+            }
           }
-        }
-      })
+        })
 
-      proc.on('error', (err) => {
-        appendDebugLog('main', `startScreenCaptureGdi: evento 'error' do processo — ${err?.message}`)
-        mainWindow?.webContents.send(
-          'screen-capture-gdi:error',
-          err?.message || 'Falha ao iniciar o fallback de captura de tela.'
-        )
-        screenCaptureGdiProc = null
-      })
-      proc.on('exit', (code, signal) => {
-        appendDebugLog('main', `startScreenCaptureGdi: processo encerrou (code=${code}, signal=${signal})`)
-        if (screenCaptureGdiProc === proc) screenCaptureGdiProc = null
-      })
+        child.on('error', (err) => {
+          appendDebugLog('main', `${channelPrefix}: evento 'error' do processo — ${err?.message}`)
+          mainWindow?.webContents.send(`${channelPrefix}:error`, err?.message || 'Falha ao iniciar a captura.')
+          if (proc === child) proc = null
+        })
+        child.on('exit', (code, signal) => {
+          appendDebugLog('main', `${channelPrefix}: processo encerrou (code=${code}, signal=${signal})`)
+          if (proc === child) proc = null
+        })
 
-      return { ok: true }
-    } catch (err) {
-      appendDebugLog('main', `startScreenCaptureGdi: exceção ao dar spawn — ${err?.message}`)
-      return { ok: false, error: err?.message || 'Falha desconhecida ao iniciar o fallback de captura de tela.' }
+        return { ok: true }
+      } catch (err) {
+        appendDebugLog('main', `${channelPrefix}: exceção ao dar spawn — ${err?.message}`)
+        return { ok: false, error: err?.message || 'Falha desconhecida ao iniciar a captura.' }
+      }
     }
+
+    return { start, stop }
   }
 
-  ipcMain.handle('screen-capture-gdi:start', (_event, monitorIndex) => startScreenCaptureGdi(monitorIndex))
-  ipcMain.handle('screen-capture-gdi:stop', () => stopScreenCaptureGdi())
+  const wgcCapture = createNativeFrameCaptureChannel('screen-capture-wgc', 'screen-capture-wgc.exe', 0x4d435747)
+  const gdiCapture = createNativeFrameCaptureChannel('screen-capture-gdi', 'screen-capture-gdi.exe', 0x4d434746)
+
+  ipcMain.handle('screen-capture-wgc:start', (_event, monitorIndex) => wgcCapture.start(monitorIndex))
+  ipcMain.handle('screen-capture-wgc:stop', () => wgcCapture.stop())
+  ipcMain.handle('screen-capture-gdi:start', (_event, monitorIndex) => gdiCapture.start(monitorIndex))
+  ipcMain.handle('screen-capture-gdi:stop', () => gdiCapture.stop())
 
   // Ver o bloco grande "DÉCIMA QUARTA RODADA" perto do topo do arquivo —
   // deixa o RENDERER (VoiceContext.tsx) escrever no mesmo arquivo de log
@@ -2474,9 +2484,10 @@ app.whenReady().then(() => {
     // (captura de áudio por processo).
     killScanner()
     stopProcessAudioCapture()
-    // Idem pro screen-capture-gdi.exe (fallback de captura de tela) —
+    // Idem pros dois .exe de fallback de captura de tela (WGC e GDI) —
     // ver o bloco grande logo acima.
-    stopScreenCaptureGdi()
+    wgcCapture.stop()
+    gdiCapture.stop()
   })
   // -------------------------------------------------------------------
 

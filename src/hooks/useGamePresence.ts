@@ -153,6 +153,11 @@ declare global {
       // useGdiScreenCaptureFallback em VoiceContext.tsx.
       // `startScreenCaptureGdiFallback` nunca lança: sempre devolve
       // { ok, error? }, igual startProcessAudioCapture acima.
+      startScreenCaptureWgcFallback: (monitorIndex?: number) => Promise<{ ok: boolean; error?: string }>
+      stopScreenCaptureWgcFallback: () => Promise<void>
+      onScreenCaptureWgcFormat: (callback: (format: { width: number; height: number }) => void) => () => void
+      onScreenCaptureWgcFrame: (callback: (frame: Uint8Array) => void) => () => void
+      onScreenCaptureWgcError: (callback: (message: string) => void) => () => void
       startScreenCaptureGdiFallback: (monitorIndex?: number) => Promise<{ ok: boolean; error?: string }>
       stopScreenCaptureGdiFallback: () => Promise<void>
       onScreenCaptureGdiFormat: (callback: (format: { width: number; height: number }) => void) => () => void

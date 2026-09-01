@@ -1,5 +1,20 @@
 // screen-capture-wgc.exe
-// ============================================================
+//
+// TRIGÉSIMA QUARTA RODADA — corrigindo dois erros reais de compilação
+// (log do GitHub Actions):
+//
+// 1. "STL1011: The /await compiler option, <experimental/coroutine>...
+//    are deprecated". Motivo: os cabeçalhos do C++/WinRT (winrt/base.h)
+//    puxam <experimental/coroutine> pra dar suporte a `co_await` — só
+//    que este arquivo NUNCA usa `co_await` (todas as chamadas aqui são
+//    síncronas/bloqueantes de propósito, pra ficar parecido com o estilo
+//    do resto do projeto), e versões mais novas do compilador da
+//    Microsoft (a que rodou no runner) tratam esse cabeçalho antigo como
+//    erro definitivo, não só aviso. A macro abaixo — documentada pela
+//    própria Microsoft pra exatamente esse cenário — silencia isso sem
+//    precisar reescrever nada com coroutines de verdade.
+#define _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+
 // Ferramenta de linha de comando standalone (mesmo padrão de
 // native/process-audio-capture/capture.cpp e
 // native/screen-capture-gdi/capture.cpp — ver o comentário grande no
@@ -319,7 +334,16 @@ int wmain(int argc, wchar_t* argv[]) {
     // thread de pool dele mesmo.
     HANDLE frameEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     auto revoker = framePool.FrameArrived(
-        winrt::auto_revoke, [frameEvent](Direct3D11CaptureFramePool const&, IInspectable const&) {
+        winrt::auto_revoke,
+        [frameEvent](Direct3D11CaptureFramePool const&, winrt::Windows::Foundation::IInspectable const&) {
+          // TRIGÉSIMA QUARTA RODADA: qualificado por completo
+          // (winrt::Windows::Foundation::IInspectable) — sem isso dava
+          // erro de compilação "'IInspectable': ambiguous symbol", porque
+          // o `using namespace winrt::Windows::Foundation;` (topo do
+          // arquivo) e o cabeçalho de interoperação do Windows SDK (que
+          // declara o ::IInspectable "cru", do COM clássico) definem
+          // dois tipos DIFERENTES com esse mesmo nome — sem dizer qual
+          // dos dois, o compilador não tem como adivinhar sozinho.
           SetEvent(frameEvent);
         });
 

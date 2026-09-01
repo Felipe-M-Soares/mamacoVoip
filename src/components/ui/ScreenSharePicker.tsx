@@ -128,10 +128,30 @@ export function ScreenSharePicker() {
           {gameCard && suggestion && (
             <SourceSection title={gameCardTitle}>
               <SourceCard
-                source={gameCard}
+                // TRIGÉSIMA QUINTA RODADA — bug relatado: esse card é
+                // exatamente o mesmo que o atalho da notificação usa,
+                // mas mostrava o nome genérico da fonte ("Tela cheia")
+                // e uma miniatura congelada/errada (o Windows não
+                // consegue gerar preview de verdade de um jogo em tela
+                // cheia exclusiva — é a mesma limitação de sempre) —
+                // sem NENHUMA pista visual de que aquilo representa o
+                // jogo, dava pra pessoa não confiar/não notar que já
+                // dava pra compartilhar por ali, achando que só a
+                // notificação automática funcionava. Sobrescrevendo o
+                // nome exibido pelo nome de verdade do jogo
+                // (suggestion.label, ex.: "Rainbow Six Siege") deixa
+                // claro o que aquele card é, mesmo com a miniatura
+                // ainda sendo só um placeholder.
+                source={{ ...gameCard, name: suggestion.label }}
                 highlighted
                 onClick={() => choose(gameCard.id, { processNames: suggestion.processNames, label: suggestion.label })}
               />
+              {gameCard.type === 'screen' && (
+                <p className="col-span-2 sm:col-span-3 text-[10px] text-discord-text-muted -mt-2">
+                  A miniatura pode não corresponder ao jogo (o Windows não gera preview de tela cheia exclusiva) — clicar
+                  aqui compartilha o jogo de verdade mesmo assim.
+                </p>
+              )}
             </SourceSection>
           )}
           {screens.length > 0 && (

@@ -214,6 +214,36 @@ function isAllowedNavigation(url) {
   }
 }
 
+// TRIGÉSIMA SEXTA RODADA — falha de segurança real encontrada numa
+// revisão geral: `shell.openExternal(url)` (usado logo abaixo, pros
+// dois casos de "isso não é navegação dentro do app, abre no
+// navegador/programa padrão do sistema") estava sendo chamado pra
+// QUALQUER protocolo, sem checagem nenhuma antes. Isso importa porque
+// esse `url` pode vir de um link que OUTRA PESSOA colou numa mensagem
+// de chat, num convite, ou em qualquer texto que o app renderiza como
+// link clicável — não é um dado confiável. `shell.openExternal` só
+// deveria ser usado pra abrir coisas que fazem sentido abrir num
+// navegador (http/https) ou cliente de e-mail (mailto) — outros
+// protocolos (file:, ou handlers registrados no Windows por outros
+// programas instalados) podem disparar comportamento do sistema
+// operacional bem além de "abrir uma página", que é o único
+// comportamento que a pessoa espera ao clicar um link dentro de um
+// app de chat. Essa é a mitigação recomendada pela própria
+// documentação de segurança do Electron pra esse padrão exato.
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:'])
+function openExternalSafely(url) {
+  try {
+    const parsed = new URL(url)
+    if (!ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol)) {
+      appendDebugLog('main', `openExternalSafely: bloqueado protocolo não permitido (${parsed.protocol}) — url=${url}`)
+      return
+    }
+    shell.openExternal(url)
+  } catch {
+    // URL malformada — nem tenta abrir
+  }
+}
+
 // Lista de processos conhecidos mapeados pro nome bonito que aparece
 // no status ("Jogando X"). Detecção é por nome de processo em
 // execução — funciona bem no Windows (onde a maioria dos jogos roda);
@@ -1400,14 +1430,14 @@ function createWindow() {
   win.webContents.on('will-navigate', (event, url) => {
     if (!isAllowedNavigation(url)) {
       event.preventDefault()
-      shell.openExternal(url)
+      openExternalSafely(url)
     }
   })
 
   // Links externos (ex: um convite colado em outro app) abrem no
   // navegador padrão do sistema, não dentro da janela do app
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    openExternalSafely(url)
     return { action: 'deny' }
   })
 

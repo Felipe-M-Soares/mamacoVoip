@@ -112,11 +112,18 @@ describe('armScreenShareChoice', () => {
     expect(takePendingAppAudioPid()).toEqual({ pid: 9999, isWindowChoice: true })
   })
 
-  it('NÃO deixa recado de fechamento automático quando o gameCard é uma JANELA (já fecha sozinha)', () => {
+  it('deixa o recado de fechamento automático mesmo quando o gameCard é uma JANELA (pode cair no fallback WGC/GDI, que não fecha sozinho)', () => {
+    // TRIGÉSIMA SEXTA RODADA: antes disso, uma JANELA não deixava esse
+    // recado (a suposição era "ela já dispara onended sozinha ao
+    // fechar") — só que isso deixou de ser verdade sempre que essa
+    // captura de janela falha e cai num fallback nativo (WGC/GDI, que
+    // captura o MONITOR inteiro via canvas, sem nenhum vínculo com o
+    // ciclo de vida daquela janela específica). Ver o comentário grande
+    // em armScreenShareChoice.
     const gameCardAsWindow: ScreenShareSource = { ...windowSource, id: 'window-1' }
     const viaGameShortcut = { processNames: suggestion.processNames, label: suggestion.label }
     armScreenShareChoice('window-1', sources, gameCardAsWindow, suggestion, viaGameShortcut)
-    expect(takePendingGameShareHint()).toBeNull()
+    expect(takePendingGameShareHint()).toEqual(viaGameShortcut)
   })
 
   it('não quebra quando window.electronAPI não existe (fora do Electron)', () => {

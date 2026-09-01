@@ -2287,16 +2287,33 @@ app.whenReady().then(() => {
     }
 
     function drainFrames() {
-      // Consome quantos quadros completos já estiverem no buffer — pode
-      // ser mais de um por evento 'data' se o SO entregar vários chunks
-      // de uma vez — cada um vira um evento `${channelPrefix}:frame`
-      // separado pro renderer.
+      // TRIGÉSIMA QUINTA RODADA — bug relatado (com o WGC funcionando de
+      // verdade agora, mostrando o jogo em vez da "foto congelada" de
+      // antes): vídeo com ~3 segundos de atraso, sempre atrás do tempo
+      // real. Antes desta correção, se MAIS de um quadro completo se
+      // acumulasse no buffer entre uma leitura e outra (qualquer soluço
+      // momentâneo no processo principal — ex.: o resto do app fazendo
+      // outra coisa na mesma thread JS por um instante), TODOS eles eram
+      // mandados pro renderer em sequência, mais velho primeiro — em vez
+      // de descartar os antigos (que já não representam mais o "agora")
+      // e mandar só o mais recente. Isso é exatamente o tipo de acúmulo
+      // que gera "vídeo alguns segundos atrasado e nunca alcança o
+      // presente": cada soluço pequeno empilha atraso permanente, que só
+      // cresce com o tempo, nunca diminui sozinho. Já existia essa
+      // mesma proteção (manter só o quadro MAIS RECENTE) dentro da
+      // própria captura em C++ (ver o loop principal em
+      // native/screen-capture-wgc/capture.cpp) — só faltava replicar
+      // aqui também, nesta outra ponta do cano (processo principal →
+      // renderer), que é onde esse acúmulo específico podia acontecer.
+      let latestFrame = null
       while (frameBuffer.length >= 4) {
         const frameSize = frameBuffer.readUInt32LE(0)
         if (frameBuffer.length < 4 + frameSize) break // quadro ainda incompleto, espera mais dados
-        const frame = frameBuffer.subarray(4, 4 + frameSize)
-        mainWindow?.webContents.send(`${channelPrefix}:frame`, Buffer.from(frame))
+        latestFrame = frameBuffer.subarray(4, 4 + frameSize)
         frameBuffer = frameBuffer.subarray(4 + frameSize)
+      }
+      if (latestFrame) {
+        mainWindow?.webContents.send(`${channelPrefix}:frame`, Buffer.from(latestFrame))
       }
     }
 

@@ -1,6 +1,20 @@
 import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+import {
+  ConnectionQuality as LiveKitConnectionQuality,
+  Room,
+  RoomEvent,
+  Track,
+  type LocalAudioTrack,
+  type LocalTrackPublication,
+  type LocalVideoTrack,
+  type Participant,
+  type RemoteParticipant,
+  type RemoteTrack,
+  type RemoteTrackPublication,
+} from 'livekit-client'
 import { supabase } from '../lib/supabase'
+import { fetchLiveKitToken } from '../lib/livekit'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
 import { useScreenShareQuality, type QualityPreset } from '../hooks/useScreenShareQuality'
@@ -10,7 +24,6 @@ import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
 import { armScreenShareChoice } from '../lib/chooseScreenShareSource'
 import { PcmStreamPlayer } from '../lib/pcmStreamPlayer'
-import { preferStereoOpusForTrack } from '../lib/sdpStereo'
 import {
   playConnectSound,
   playDisconnectSound,
@@ -20,16 +33,24 @@ import {
   playUserLeaveSound,
 } from '../lib/sounds'
 
-// Apenas STUN público está configurado neste ambiente. Um servidor TURN
-// de verdade (coturn ou um serviço pago) precisa ser implantado à parte
-// em produção — sem ele, peers atrás de NAT simétrico/restritivo podem
-// não conseguir se conectar diretamente. Isso é uma limitação de
-// infraestrutura, não do código de sinalização.
-// TURN server opcional (retransmissão) — usado como reforço quando a
-// conexão direta entre duas pessoas não é boa o suficiente. Configura
-// via variáveis de ambiente (VITE_TURN_URL / VITE_TURN_USERNAME /
-// VITE_TURN_CREDENTIAL) — se não estiverem definidas, o app funciona
-// normal só com STUN, exatamente como já funcionava antes.
+// TRIGÉSIMA QUARTA RODADA — troca de motor de transmissão: o mesh manual
+// de RTCPeerConnection (um por peer, sinalização própria via broadcast
+// do Supabase Realtime — oferta/resposta/ICE, "aperto de mão" de
+// polite/impolite peer, reconciliação manual de qual stream é tela via
+// `screen-meta`) foi substituído por um SFU de verdade (LiveKit, ver
+// lib/livekit.ts e o `Room` usado logo abaixo). Cada participante manda
+// a própria mídia UMA vez pro servidor LiveKit, que redistribui pra
+// todo mundo — antes, cada participante mandava N cópias (uma por peer
+// na sala), então o upload de quem estava numa call de 6-7 pessoas já
+// tinha virado o gargalo real. O LiveKit também resolve nativamente,
+// sem nenhum acordo próprio, qual track é microfone/câmera/tela (ver
+// Track.Source usado mais abaixo) — isso elimina de vez a reconciliação
+// manual que existia aqui antes (o antigo `screen-meta`/
+// `screen-meta-request`, `combineScreenStream`, `recomputeParticipant`).
+//
+// STUN/TURN não precisam mais ser configurados aqui — o próprio servidor
+// LiveKit cuida disso (ICE/TURN do lado dele, incluso tanto no LiveKit
+// Cloud quanto numa instalação própria com um TURN configurado nela).
 // DÉCIMA QUARTA RODADA: log em arquivo (ver window.electronAPI.logDebug
 // em electron/preload.cjs e appendDebugLog em electron/main.cjs) além do
 // console.error normal — existe especificamente pra diagnóstico à
@@ -44,19 +65,16 @@ function logDebug(message: string) {
   window.electronAPI?.logDebug?.(message)
 }
 
-const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined
-const turnUsername = import.meta.env.VITE_TURN_USERNAME as string | undefined
-const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined
-
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  ...(turnUrl && turnUsername && turnCredential
-    ? [{ urls: turnUrl, username: turnUsername, credential: turnCredential }]
-    : []),
-]
-
-const MAX_PARTICIPANTS = 8
+// Antes disso, MAX_PARTICIPANTS (8) era uma proteção real: cada pessoa
+// numa call mesh manda sua própria mídia pra CADA outro peer, então o
+// upload de todo mundo cresce junto com o tamanho da sala — 8 já era o
+// ponto onde isso começava a doer em conexões domésticas comuns. Com o
+// SFU (ver comentário grande acima), cada participante manda sua mídia
+// só UMA vez, não importa quantas pessoas estejam ouvindo — o valor
+// aqui virou só o teto usado pra exibição "X/Y conectados" (ver
+// VoiceChannelView.tsx), bem mais generoso agora que a limitação real
+// de banda do lado de quem fala deixou de existir.
+const MAX_PARTICIPANTS = 50
 
 // Bitrate do MICROFONE (voz). O Opus pra voz mono já fica praticamente
 // transparente (indistinguível do original) por volta de 96-128kbps —
@@ -661,21 +679,6 @@ async function getUserMediaWithRetry(constraints: MediaStreamConstraints, attemp
   }
   throw lastError
 }
-const SPEAKING_THRESHOLD = 12
-// Fala normal tem pausas curtas entre sílabas/palavras onde o nível de
-// áudio cai abaixo do limiar por uma fração de segundo — sem isso, o
-// indicador de "falando" (anel ao redor do avatar) piscava
-// rapidamente ligando/desligando a cada uma dessas pausas, em vez de
-// ficar aceso de forma contínua enquanto a pessoa fala. "Liga" na hora
-// (assim que passa do limiar) mas só "desliga" depois de ficar
-// SPEAKING_RELEASE_MS sem nenhuma amostra acima do limiar.
-const SPEAKING_RELEASE_MS = 500
-
-interface PeerState {
-  pc: RTCPeerConnection
-  makingOffer: boolean
-  polite: boolean
-}
 
 export interface VoiceParticipant {
   userId: string
@@ -684,21 +687,27 @@ export interface VoiceParticipant {
   speaking: boolean
 }
 
-interface SignalPayload {
-  from: string
-  to: string
-  description?: RTCSessionDescriptionInit
-  candidate?: RTCIceCandidateInit
-}
+// TRIGÉSIMA QUARTA RODADA — antes disso era um número em milissegundos
+// (round-trip real medido via pc.getStats() da conexão P2P com aquela
+// pessoa especificamente). Isso deixou de fazer sentido depois da troca
+// pro LiveKit (SFU): ninguém conecta mais direto com ninguém, todo mundo
+// fala só com o servidor LiveKit — não existe mais uma "latência até
+// fulano" de verdade pra medir, só a latência de cada um até o servidor.
+// O LiveKit expõe isso como uma classificação (excelente/boa/ruim/
+// perdida), não um número de ida-e-volta — ver ConnectionQualityChanged
+// em VoiceProvider abaixo.
+export type VoiceConnectionQuality = 'excellent' | 'good' | 'poor' | 'lost'
 
 interface VoiceContextValue {
   connectedChannelId: string | null
   connectedChannelName: string | null
   joiningChannelId: string | null
   connectedAt: number | null
-  // Latência REAL da chamada de voz (peer a peer) — diferente do ping
-  // do banco de dados. userId -> milissegundos de ida-e-volta.
-  connectionQuality: Record<string, number>
+  connectionQuality: Record<string, VoiceConnectionQuality>
+  // Qualidade da SUA PRÓPRIA conexão com o servidor de voz (LiveKit) —
+  // diferente de `connectionQuality` acima, que é sobre cada OUTRO
+  // participante. `null` fora de uma call.
+  localConnectionQuality: VoiceConnectionQuality | null
   connectedServerId: string | null
   connecting: boolean
   error: string | null
@@ -787,7 +796,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [joiningChannelId, setJoiningChannelId] = useState<string | null>(null)
   const [connectedServerId, setConnectedServerId] = useState<string | null>(null)
   const [connectedAt, setConnectedAt] = useState<number | null>(null)
-  const [connectionQuality, setConnectionQuality] = useState<Record<string, number>>({})
+  const [connectionQuality, setConnectionQuality] = useState<Record<string, VoiceConnectionQuality>>({})
+  const [localConnectionQuality, setLocalConnectionQuality] = useState<VoiceConnectionQuality | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [participants, setParticipants] = useState<Record<string, VoiceParticipant>>({})
@@ -1103,7 +1113,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   userIdRef.current = user?.id ?? null
 
   const connectedRef = useRef(false)
-  const hasSyncedRef = useRef(false)
   const channelUserLimitRef = useRef(0)
   // Horário (relativo, só usado pra ORDENAR) em que essa pessoa mandou o
   // próprio `track()` de presença ao entrar no canal — ver o comentário
@@ -1111,10 +1120,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // resolve a corrida de "duas pessoas entram ao mesmo tempo quando só
   // sobra 1 vaga".
   const joinedAtRef = useRef(0)
-  const realtimeRef = useRef<RealtimeChannel | null>(null)
+  const presenceRef = useRef<RealtimeChannel | null>(null)
   // DÉCIMA NONA RODADA — bug relatado: "sair de uma sala e voltar buga,
   // mostra que você está sozinho mesmo tendo gente". Causa: leave()
-  // sempre zerou connectedRef/realtimeRef NA HORA (bom pra UI reagir
+  // sempre zerou connectedRef/presenceRef NA HORA (bom pra UI reagir
   // sem esperar rede nenhuma), mas o desligamento de verdade do canal
   // Realtime anterior (untrack() + removeChannel(), os dois assíncronos,
   // um round-trip até o servidor) continuava rodando em segundo plano.
@@ -1130,42 +1139,33 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // "sair" (isso continua instantâneo), só atrasa uma reentrada rápida
   // no MESMO canal até a saída anterior estar de fato confirmada.
   const leaveTeardownRef = useRef<Promise<void> | null>(null)
-  const peersRef = useRef<Map<string, PeerState>>(new Map())
+  // Sala do LiveKit (SFU) — substitui o Map de RTCPeerConnection por
+  // peer que existia antes (peersRef). Toda a mídia de/para os outros
+  // participantes passa por este objeto único.
+  const roomRef = useRef<Room | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
-  // ID da track de ÁUDIO da transmissão de tela (som de jogo/sistema)
-  // enquanto uma transmissão COM áudio estiver rolando — `null` fora
-  // disso (sem transmissão, ou transmissão só de vídeo). Usado só pra
-  // saber qual seção do SDP forçar estéreo (ver sdpStereo.ts e
-  // setLocalDescriptionPreferringStereo abaixo) — o microfone continua
-  // de fora de propósito, então precisa desse ID pra saber ONDE mexer
-  // sem afetar a voz.
-  const screenAudioTrackIdRef = useRef<string | null>(null)
-  // DÉCIMA QUINTA RODADA — a MediaStream (não só a track) que carrega o
-  // áudio da transmissão de tela ATUAL, seja qual for a origem (captura
-  // por processo via appAudioPlayerRef.current.stream, ou áudio de
-  // sistema via `new MediaStream([systemAudioTrack])` em
-  // toggleScreenShare/switchScreenShareSource). Guardar essa referência
-  // aqui — em vez de deixar createPeerConnection construir uma
-  // MediaStream NOVA a cada peer que entra depois (como acontecia antes)
-  // — garante que o .id enviado a todo mundo via broadcastScreenMeta seja
-  // sempre O MESMO, não importa quantos peers já existiam ou entraram
-  // depois: sem isso, cada `new MediaStream([track])` gerava um id
-  // diferente, e o broadcast (que é um só, pra sala toda) só podia
-  // acertar quem recebesse por último.
-  const screenAudioSourceStreamRef = useRef<MediaStream | null>(null)
+  // Publicações ativas no LiveKit — referência direta a cada uma delas
+  // é o que permite trocar o conteúdo (replaceTrack, igual o
+  // RTCRtpSender.replaceTrack de antes) ou encerrar (unpublishTrack) sem
+  // precisar procurar em nenhum Map por peer — o LiveKit já cuida de
+  // replicar cada publicação pra todo mundo na sala sozinho.
+  const micPublicationRef = useRef<LocalTrackPublication | null>(null)
+  const cameraPublicationRef = useRef<LocalTrackPublication | null>(null)
+  const screenVideoPublicationRef = useRef<LocalTrackPublication | null>(null)
+  const screenAudioPublicationRef = useRef<LocalTrackPublication | null>(null)
   // DÉCIMA SÉTIMA RODADA — igual applyNoiseSuppression faz pro
   // microfone (ver mais abaixo), mas pro áudio da TRANSMISSÃO (ver
   // createScreenAudioDenoiser em lib/noiseSuppression.ts, e o
   // comentário grande lá pro porquê). `screenAudioDenoiserRef` é a
   // instância WASM ativa; `screenAudioOutputTrackRef` é a track que
-  // REALMENTE está sendo mandada pros peers agora (já filtrada, quando
+  // REALMENTE está sendo mandada pro LiveKit agora (já filtrada, quando
   // o filtro funcionou — a bruta, se ele falhar) — existe pra
   // substituir `appAudioTrackRef.current ?? systemAudioTrackRef.current`
   // em todo lugar que precisa saber "qual track está no ar", já que
   // agora essas duas passaram a guardar só a captura BRUTA (usada pra
   // parar o processo nativo/o loopback quando a transmissão termina ou
-  // troca de fonte), não mais a track de verdade enviada por WebRTC.
+  // troca de fonte), não mais a track de verdade publicada.
   const screenAudioDenoiserRef = useRef<ScreenAudioDenoiser | null>(null)
   const screenAudioOutputTrackRef = useRef<MediaStreamTrack | null>(null)
   // A track de áudio dentro de `localStreamRef` passa a ser a track JÁ
@@ -1189,70 +1189,32 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     noiseFloorDbRef.current = null
     lastAppliedThresholdDbRef.current = null
   }
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const analysersRef = useRef<Map<string, AnalyserNode>>(new Map())
-  // Última vez (timestamp) que cada participante ficou acima do limiar
-  // de fala — usado pra suavizar a detecção (ver o useEffect "Detecção
-  // de fala" mais abaixo).
-  const lastAboveThresholdRef = useRef<Map<string, number>>(new Map())
-  // Cada peer pode mandar mais de uma MediaStream (mic/câmera + tela).
-  // Em vez de adivinhar qual é qual pela ordem de chegada (frágil e foi
-  // a causa do compartilhamento de tela não aparecer pros outros),
-  // guardamos toda stream recebida aqui e usamos o mapeamento explícito
-  // vindo do broadcast 'screen-meta' pra saber qual stream.id é a tela.
-  const rawStreamsRef = useRef<Map<string, Map<string, MediaStream>>>(new Map())
-  const screenStreamIdsRef = useRef<Map<string, string>>(new Map())
-  // DÉCIMA QUINTA RODADA — o áudio da transmissão de tela (som do
-  // jogo/sistema, capturado à parte — ver appAudioTrackRef/
-  // systemAudioTrackRef) sempre viajou numa MediaStream SEPARADA da de
-  // vídeo (audioSourceStream, com .id próprio, diferente do stream.id de
-  // screenStreamRef.current). O broadcast 'screen-meta' avisava só o
-  // stream.id do VÍDEO — o lado que recebe nunca tinha como saber que
-  // aquela outra stream de áudio que chegou também era da tela
-  // compartilhada, e ela caía direto no `else if (!cameraStream)` de
-  // recomputeParticipant, sendo tratada (errado) como se fosse
-  // webcam. Resultado: screenStream nunca tinha uma track de áudio pra
-  // NINGUÉM que estivesse assistindo, não importa o quão bem a captura
-  // local tivesse funcionado — a causa raiz de "transmissão muda pros
-  // outros". Este par de Maps é o espelho, do lado de quem recebe, do
-  // screenAudioSourceStreamRef abaixo: guarda qual stream.id (por peer)
-  // é o ÁUDIO da tela, e o resultado combinado (vídeo+áudio) já pronto
-  // pra não recriar a MediaStream toda vez que uma nova track chega (ver
-  // combineScreenStream mais abaixo).
-  const screenAudioStreamIdsRef = useRef<Map<string, string>>(new Map())
-  const combinedScreenStreamsRef = useRef<
-    Map<string, { stream: MediaStream; videoTrackId: string | null; audioTrackId: string | null }>
+  // TRIGÉSIMA QUARTA RODADA — antes disso existia um AudioContext +
+  // AnalyserNode por participante (local incluído), lidos por polling
+  // (ver o useEffect "Detecção de fala" mais abaixo) só pra decidir
+  // quando acender o anel de "falando". O LiveKit já faz essa mesma
+  // detecção nativamente (nos dois lados: no seu áudio antes de mandar,
+  // e no áudio de cada participante remoto já recebido) e expõe o
+  // resultado pronto via RoomEvent.ActiveSpeakersChanged — usado direto
+  // em vez de reimplementar a mesma coisa aqui.
+  //
+  // Cada peer pode publicar mais de uma track (mic/câmera + tela) — o
+  // LiveKit já marca nativamente a origem de cada uma (Track.Source),
+  // então basta guardar a track mais recente de cada origem por
+  // participante pra montar as duas MediaStreams combinadas que o resto
+  // do app espera (cameraStream = mic+câmera, screenStream = vídeo+áudio
+  // da tela — ver recomputeParticipant mais abaixo). Isso substitui o
+  // antigo `rawStreamsRef` + o broadcast `screen-meta` que existia só
+  // pra adivinhar, do lado de quem recebe, qual stream era a tela.
+  const remoteTracksRef = useRef<Map<string, Map<Track.Source, MediaStreamTrack>>>(new Map())
+  const combinedStreamsRef = useRef<
+    Map<string, { camera: MediaStream | null; screen: MediaStream | null; trackIds: string }>
   >(new Map())
   // Cancela a inscrição em onWatchedProcessExited usada pra auto-parar o
   // compartilhamento de TELA CHEIA quando o jogo/app fecha (ver
   // screenShareGameHint.ts e toggleScreenShare abaixo). Só existe
   // enquanto uma captura desse tipo específico está ativa.
   const gameShareWatchRef = useRef<(() => void) | null>(null)
-  // Vigia de foco do jogo (mitigação do vazamento em "compartilhar tela
-  // cheia" — ver electron/main.cjs). Guarda, por peer, o RTCRtpSender da
-  // track de VÍDEO da tela (não o áudio) — é nele que trocamos a track de
-  // verdade por uma "cortina" preta quando a pessoa alterna pra fora do
-  // jogo, e de volta quando ela volta. Sem guardar por peer, teríamos que
-  // procurar o sender certo em cada pc de novo a cada troca de foco.
-  const screenSendersRef = useRef<Map<string, RTCRtpSender>>(new Map())
-  // DÉCIMA RODADA — bug real achado revendo com calma createPeerConnection:
-  // o áudio da transmissão de tela (captura por processo OU áudio de
-  // sistema — ver appAudioTrackRef/systemAudioTrackRef abaixo) vive FORA
-  // de screenStreamRef.current desde a QUINTA RODADA (vídeo e áudio viraram
-  // duas chamadas independentes). createPeerConnection só replicava
-  // screenStreamRef.current (só vídeo) pra quem entra na call DEPOIS que a
-  // transmissão já começou — a track de áudio nunca era adicionada a essa
-  // conexão nova. Resultado: qualquer pessoa que entrasse no canal DEPOIS
-  // de alguém já estar compartilhando tela recebia o vídeo perfeitamente,
-  // mas NUNCA o áudio daquela transmissão — do ponto de vista de quem
-  // entrou depois, era exatamente "compartilhamento de tela sem som",
-  // mesmo com a captura de áudio funcionando perfeitamente do lado de
-  // quem compartilha. Este Map (paralelo a screenSendersRef acima) guarda
-  // o RTCRtpSender de ÁUDIO da transmissão por peer, pra createPeerConnection
-  // saber que precisa adicionar essa track também pra gente nova, e pra
-  // switchScreenShareSource/toggleScreenShare conseguirem reaproveitar o
-  // mesmo sender ao trocar de fonte sem precisar reconstruir do zero.
-  const audioSendersRef = useRef<Map<string, RTCRtpSender>>(new Map())
   const foregroundWatchUnsubRef = useRef<(() => void) | null>(null)
   // Track "cortina" — um frame preto único (via canvas.captureStream),
   // criada sob demanda e reaproveitada enquanto durar o compartilhamento
@@ -1554,37 +1516,35 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setError(
         'A captura de áudio só deste app parou (o jogo/app foi fechado?) e não consegui recuperar com áudio de sistema — a transmissão continua sem som (o vídeo continua normal).'
       )
-      screenAudioTrackIdRef.current = null
-      screenAudioOutputTrackRef.current = null
-      screenAudioSourceStreamRef.current = null
       teardownScreenAudioDenoiser()
-      audioSendersRef.current.forEach((sender) => {
-        sender.replaceTrack(null).catch(() => {})
-      })
-      // DÉCIMA SÉTIMA RODADA: avisa a sala que a transmissão ficou sem
-      // áudio agora — sem isso, quem já tinha recebido um screenAudioStreamId
-      // anterior ficaria com o mapeamento antigo (apontando pra uma
-      // stream que não existe mais), em vez de simplesmente não ter
-      // áudio nenhum.
-      if (screenStreamRef.current) broadcastScreenMeta(screenStreamRef.current.id, null)
+      // Despublica de vez — o LiveKit não tem um equivalente de
+      // "replaceTrack(null)" pra deixar uma publicação existente sem
+      // conteúdo, então a forma certa de "ficar sem áudio" é remover a
+      // publicação por completo.
+      if (screenAudioPublicationRef.current?.track) {
+        roomRef.current?.localParticipant.unpublishTrack(screenAudioPublicationRef.current.track)
+      }
+      screenAudioPublicationRef.current = null
+      screenAudioOutputTrackRef.current = null
       return
     }
     systemAudioTrackRef.current = systemAudioTrack
     // DÉCIMA SÉTIMA RODADA: idem toggleScreenShare/switchScreenShareSource
     // — passa a track de recuperação pelo mesmo redutor de ruído da
-    // transmissão antes de mandar pros peers, e reanuncia o novo
-    // screenAudioStreamId (mudou — é uma MediaStream nova) pra sala,
-    // senão quem já estava assistindo ficaria com o mapeamento antigo
-    // (da fonte de áudio que acabou de morrer) e o áudio recuperado
-    // cairia de novo como se fosse webcam.
+    // transmissão antes de publicar.
     const prepared = await prepareScreenAudioForSending(systemAudioTrack)
-    screenAudioTrackIdRef.current = prepared.track.id
     screenAudioOutputTrackRef.current = prepared.track
-    screenAudioSourceStreamRef.current = prepared.stream
-    audioSendersRef.current.forEach((sender) => {
-      sender.replaceTrack(prepared.track).catch(() => {})
-    })
-    if (screenStreamRef.current) broadcastScreenMeta(screenStreamRef.current.id, prepared.stream.id)
+    if (screenAudioPublicationRef.current?.track) {
+      await (screenAudioPublicationRef.current.track as LocalAudioTrack).replaceTrack(prepared.track, true)
+    } else if (roomRef.current) {
+      screenAudioPublicationRef.current = await roomRef.current.localParticipant.publishTrack(prepared.track, {
+        name: 'screen-audio',
+        source: Track.Source.ScreenShareAudio,
+        audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
+        forceStereo: true,
+        dtx: false,
+      })
+    }
     setError(
       'A captura de áudio só deste app parou (o jogo/app foi fechado?) — a transmissão passou a usar o áudio de todo o sistema automaticamente.'
     )
@@ -1614,44 +1574,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     return track
   }
 
-  function ensureAudioContext() {
-    if (!audioContextRef.current) audioContextRef.current = new AudioContext()
-    return audioContextRef.current
-  }
-
-  function setupAnalyser(key: string, stream: MediaStream) {
-    if (stream.getAudioTracks().length === 0) return
-    try {
-      const ctx = ensureAudioContext()
-      const source = ctx.createMediaStreamSource(stream)
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
-      // BUG REAL relatado: o anel de "falando" demorava perceptivelmente
-      // pra acender assim que a pessoa começava a falar. Causa: o
-      // AnalyserNode, por padrão, usa smoothingTimeConstant = 0.8 — uma
-      // média móvel exponencial que mistura 80% do valor ANTERIOR com só
-      // 20% do valor novo a cada leitura. Isso é ótimo pra um
-      // visualizador de espectro (movimento suave), mas péssimo pra
-      // DETECÇÃO — partindo do silêncio (valor baixo) até a voz alta,
-      // são necessárias várias leituras seguidas só pra essa média subir
-      // até passar do limiar (SPEAKING_THRESHOLD), e como a leitura roda
-      // a cada 200ms (ver o setInterval mais abaixo), cada leitura extra
-      // necessária custa 200ms inteiros de atraso — na prática, quase
-      // 2 segundos até o anel acender de verdade. Zerando a suavização
-      // aqui, cada leitura reflete o nível de áudio REAL do instante
-      // (sem herança da leitura anterior), então o limiar é cruzado na
-      // primeira leitura que realmente tiver voz — sem atraso artificial
-      // nenhum na hora de ACENDER. (O "apagar" continua suave de
-      // propósito, através de SPEAKING_RELEASE_MS logo abaixo — sem
-      // suavização nenhuma ali, o anel piscaria a cada micro-pausa entre
-      // sílabas/palavras.)
-      analyser.smoothingTimeConstant = 0
-      source.connect(analyser)
-      analysersRef.current.set(key, analyser)
-    } catch {
-      // getUserMedia/AudioContext podem falhar em navegadores sem suporte — degrada graciosamente
-    }
-  }
+  // TRIGÉSIMA QUARTA RODADA — ensureAudioContext/setupAnalyser (o
+  // AudioContext + AnalyserNode por participante usado só pra detectar
+  // quem está falando) foram removidos: o LiveKit já faz essa mesma
+  // detecção nativamente e entrega o resultado pronto via
+  // RoomEvent.ActiveSpeakersChanged (ver attachRoomEvents acima).
 
   // Aplica o RNNoise (se a pessoa tiver a redução de ruído ligada nas
   // configurações) na track BRUTA recém-capturada, devolvendo a track
@@ -1752,37 +1679,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     screenAudioDenoiserRef.current = null
   }
 
-  function sendSignal(to: string, data: { description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }) {
-    const from = userIdRef.current
-    if (!realtimeRef.current || !from) return
-    realtimeRef.current.send({ type: 'broadcast', event: 'rtc', payload: { from, to, ...data } })
-  }
-
-  // Avisa todo mundo no canal (broadcast, não é dirigido a um peer
-  // específico) qual é o stream.id da MINHA tela compartilhada agora —
-  // ou null quando paro. É esse aviso explícito que os outros usam pra
-  // saber, com certeza, qual das minhas streams é a tela.
-  //
-  // DÉCIMA QUINTA RODADA: agora também carrega o stream.id do ÁUDIO da
-  // transmissão (screenAudioStreamId), quando tiver — ver o comentário
-  // grande em screenAudioStreamIdsRef acima pro porquê disso ser
-  // necessário (sem isso, o áudio nunca chegava marcado como "da tela"
-  // do lado de quem recebe). `null` cobre tanto "ainda não resolvi o
-  // áudio" (chamada inicial, só com o vídeo) quanto "essa transmissão não
-  // tem áudio mesmo".
-  function broadcastScreenMeta(screenStreamId: string | null, screenAudioStreamId: string | null = null) {
-    const from = userIdRef.current
-    if (!realtimeRef.current || !from) return
-    realtimeRef.current.send({
-      type: 'broadcast',
-      event: 'screen-meta',
-      payload: { from, screenStreamId, screenAudioStreamId },
-    })
-  }
-
   // Toca um efeito do soundboard localmente — igual o Discord, o áudio
   // é reproduzido direto pelo alto-falante de cada um (não é misturado
-  // no microfone/WebRTC). Usa o volume PRÓPRIO do soundboard
+  // no microfone/mídia publicada). Usa o volume PRÓPRIO do soundboard
   // (soundboardVolume), não o volume geral da call — cada pessoa que
   // ESCUTA controla o quanto os efeitos tocam pra ela, sem depender de
   // quem enviou o som.
@@ -1803,331 +1702,182 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // pra tocarem a mesma URL aí também — cada um busca e reproduz
   // localmente, em vez de misturar no stream de voz (senão quem está
   // ouvindo o eco do RNNoise/gate ouviria o som distorcido/cortado).
+  // Continua indo pelo canal Realtime do Supabase (ver joinPresenceChannel
+  // logo abaixo) — o LiveKit também tem um jeito de mandar dados
+  // (publishData), mas trocar isso não traria nenhum benefício aqui e só
+  // aumentaria o escopo da migração sem necessidade.
   function playSoundboardSound(url: string) {
     playLocalSoundboardAudio(url)
     const from = userIdRef.current
-    if (realtimeRef.current && from) {
-      realtimeRef.current.send({ type: 'broadcast', event: 'soundboard-play', payload: { from, url } })
+    if (presenceRef.current && from) {
+      presenceRef.current.send({ type: 'broadcast', event: 'soundboard-play', payload: { from, url } })
     }
   }
 
-  // DÉCIMA QUINTA RODADA — combina a stream de VÍDEO da tela com a stream
-  // de ÁUDIO da tela (duas MediaStreams distintas do lado de quem
-  // compartilha — ver screenAudioSourceStreamRef) numa única MediaStream
-  // pronta pra UI tocar (<video>/<audio> só entendem uma stream por vez
-  // pra exibir os dois juntos com controle de volume). Memoiza por peer
-  // (videoTrackId/audioTrackId) pra não recriar a MediaStream — e com
-  // ela, reiniciar o elemento <video> que depende da identidade do
-  // objeto — toda vez que `recomputeParticipant` roda de novo (ex.: cada
-  // `ontrack`) sem a track de vídeo ou de áudio ter mudado de verdade.
-  // Quando só uma das duas existir (o caso mais comum: uma track chega
-  // antes da outra), usa a própria stream original em vez de criar uma
-  // combinada só com uma track — assim que a outra chegar, essa função
-  // roda de novo e monta a combinada de verdade.
-  function combineScreenStream(peerId: string, videoStream: MediaStream | null, audioStream: MediaStream | null): MediaStream {
-    const videoTrack = videoStream?.getVideoTracks()[0] ?? null
-    const audioTrack = audioStream?.getAudioTracks()[0] ?? null
-    const videoTrackId = videoTrack?.id ?? null
-    const audioTrackId = audioTrack?.id ?? null
-    const cached = combinedScreenStreamsRef.current.get(peerId)
-    if (cached && cached.videoTrackId === videoTrackId && cached.audioTrackId === audioTrackId) {
-      return cached.stream
-    }
-    const combined = videoTrack && audioTrack ? new MediaStream([videoTrack, audioTrack]) : (videoStream ?? audioStream)!
-    combinedScreenStreamsRef.current.set(peerId, { stream: combined, videoTrackId, audioTrackId })
-    return combined
-  }
+  // TRIGÉSIMA QUARTA RODADA — recalcula cameraStream/screenStream de um
+  // participante remoto a partir das tracks mais recentes recebidas dele
+  // por origem (Track.Source, ver remoteTracksRef acima). Isso substitui
+  // de vez o antigo combineScreenStream + recomputeParticipant (que
+  // dependiam de adivinhar, via um broadcast próprio, qual stream.id era
+  // a tela) — o LiveKit já entrega essa informação pronta em cada
+  // publicação, então não existe mais ambiguidade nenhuma pra resolver
+  // aqui, só montar as duas MediaStreams combinadas que o resto do app
+  // (CallMediaTiles.tsx) já espera.
+  function recomputeParticipant(participantId: string) {
+    const tracks = remoteTracksRef.current.get(participantId)
+    if (!tracks) return
+    const micTrack = tracks.get(Track.Source.Microphone) ?? null
+    const cameraTrack = tracks.get(Track.Source.Camera) ?? null
+    const screenVideoTrack = tracks.get(Track.Source.ScreenShare) ?? null
+    const screenAudioTrack = tracks.get(Track.Source.ScreenShareAudio) ?? null
 
-  // Recalcula cameraStream/screenStream de um peer a partir de TODAS as
-  // streams já recebidas dele + o mapeamento de qual stream.id é tela
-  // (vindo do broadcast). Funciona não importa a ordem de chegada.
-  //
-  // DÉCIMA QUINTA RODADA: agora também reconhece a stream de ÁUDIO da
-  // tela (screenAudioId, vindo do mesmo broadcast — ver
-  // screenAudioStreamIdsRef acima) e a combina com a de vídeo em vez de
-  // deixá-la cair no `else if (!cameraStream)` de baixo, onde virava
-  // (errado) uma suposta stream de webcam.
-  function recomputeParticipant(peerId: string) {
-    const streams = rawStreamsRef.current.get(peerId)
-    if (!streams || streams.size === 0) {
-      // TRIGÉSIMA PRIMEIRA RODADA — esse early return aqui é o suspeito
-      // nº1 do bug "quem entra depois não vê a tela": se o screen-meta
-      // chegar ANTES de qualquer track de vídeo/áudio desse peer ter
-      // chegado (bem provável — o meta viaja só pelo canal de sinalização,
-      // rápido, enquanto a conexão WebRTC de vídeo pode levar mais tempo
-      // pra negociar/conectar de verdade), essa chamada não faz NADA — só
-      // se autocorrige DEPOIS se e quando `pc.ontrack` chamar essa mesma
-      // função de novo (o que só acontece quando alguma track daquele
-      // peer realmente chega). Logando aqui pra confirmar se é isso
-      // mesmo que está acontecendo, ou se o problema é outro (a track
-      // nunca chega de verdade).
-      logDebug(`recomputeParticipant(${peerId}): nenhuma stream recebida ainda desse peer, nada a computar por enquanto`)
-      return
-    }
-    const screenId = screenStreamIdsRef.current.get(peerId)
-    const screenAudioId = screenAudioStreamIdsRef.current.get(peerId)
-    let cameraStream: MediaStream | null = null
-    let screenVideoStream: MediaStream | null = null
-    let screenAudioStream: MediaStream | null = null
-    streams.forEach((s, id) => {
-      if (screenId && id === screenId) screenVideoStream = s
-      else if (screenAudioId && id === screenAudioId) screenAudioStream = s
-      else if (!cameraStream) cameraStream = s
-    })
-    const screenStream = screenVideoStream || screenAudioStream ? combineScreenStream(peerId, screenVideoStream, screenAudioStream) : null
-    logDebug(
-      `recomputeParticipant(${peerId}): streamIds recebidos=[${Array.from(streams.keys()).join(', ')}], screenId esperado=${screenId ?? null}, screenAudioId esperado=${screenAudioId ?? null} → screenStream=${screenStream ? 'ENCONTRADO' : 'nenhum'}, cameraStream=${cameraStream ? 'sim' : 'não'}`
-    )
+    // Memoiza pelos IDs das tracks atuais — sem isso, `recomputeParticipant`
+    // rodando de novo sem nada ter mudado de verdade criaria uma
+    // MediaStream NOVA a cada chamada, e com ela reiniciaria qualquer
+    // elemento <video>/<audio> que dependa da identidade do objeto (ver
+    // CallMediaTiles.tsx).
+    const trackIds = `${micTrack?.id ?? ''}|${cameraTrack?.id ?? ''}|${screenVideoTrack?.id ?? ''}|${screenAudioTrack?.id ?? ''}`
+    const cached = combinedStreamsRef.current.get(participantId)
+    if (cached && cached.trackIds === trackIds) return
+
+    // cameraStream carrega o áudio do MICROFONE (sempre, se a pessoa
+    // estiver com o mic publicado) + o vídeo da CÂMERA quando ligada —
+    // mantém o mesmo nome/formato que o resto do app (CallMediaTiles.tsx,
+    // VoiceChannelView.tsx) já espera, apesar do nome sugerir só vídeo:
+    // era assim mesmo antes da migração (a mesma MediaStream do
+    // getUserMedia carregava as duas).
+    const cameraTracks = [micTrack, cameraTrack].filter((t): t is MediaStreamTrack => Boolean(t))
+    const camera = cameraTracks.length > 0 ? new MediaStream(cameraTracks) : null
+
+    const screenTracks = [screenVideoTrack, screenAudioTrack].filter((t): t is MediaStreamTrack => Boolean(t))
+    const screen = screenTracks.length > 0 ? new MediaStream(screenTracks) : null
+
+    combinedStreamsRef.current.set(participantId, { camera, screen, trackIds })
     setParticipants((prev) => ({
       ...prev,
-      [peerId]: {
-        userId: peerId,
-        speaking: prev[peerId]?.speaking ?? false,
-        cameraStream,
-        screenStream,
+      [participantId]: {
+        userId: participantId,
+        speaking: prev[participantId]?.speaking ?? false,
+        cameraStream: camera,
+        screenStream: screen,
       },
     }))
   }
 
-  // Gera a oferta/resposta (offer/answer) igual o `pc.setLocalDescription()`
-  // "implícito" (sem argumento) fazia antes — só que passando pelo meio
-  // do caminho pra poder editar o SDP primeiro (forçar estéreo no áudio
-  // da transmissão de tela, se houver uma rolando — ver sdpStereo.ts).
-  // `kind` diz qual dos dois criar: 'offer' quando SOMOS quem está
-  // iniciando a renegociação (onnegotiationneeded), 'answer' quando
-  // estamos respondendo a uma oferta que acabamos de receber
-  // (handleSignal). O `pc.setLocalDescription()` sem argumento decide
-  // isso sozinho só olhando o estado atual — aqui precisamos decidir na
-  // mão porque geramos a descrição explicitamente ANTES de aplicar.
-  async function setLocalDescriptionPreferringStereo(pc: RTCPeerConnection, kind: 'offer' | 'answer') {
-    const description = kind === 'offer' ? await pc.createOffer() : await pc.createAnswer()
-    if (description.sdp && screenAudioTrackIdRef.current) {
-      description.sdp = preferStereoOpusForTrack(description.sdp, screenAudioTrackIdRef.current)
-    }
-    await pc.setLocalDescription(description)
+  function setRemoteTrack(participantId: string, source: Track.Source, track: MediaStreamTrack | null) {
+    if (!remoteTracksRef.current.has(participantId)) remoteTracksRef.current.set(participantId, new Map())
+    const tracks = remoteTracksRef.current.get(participantId)!
+    if (track) tracks.set(source, track)
+    else tracks.delete(source)
+    recomputeParticipant(participantId)
   }
 
-  function createPeerConnection(peerId: string, polite: boolean): RTCPeerConnection {
-    const pc = new RTCPeerConnection({
-      iceServers: ICE_SERVERS,
-      // Pré-coleta candidatos de conexão ANTES de precisar deles — sem
-      // isso, a busca só começa quando a chamada realmente começa a
-      // negociar, o que atrasa o tempo até a call conectar (não é a
-      // mesma coisa que a latência durante a conversa, mas melhora o
-      // "demora pra pegar" que você comentou antes).
-      iceCandidatePoolSize: 4,
-      // VIGÉSIMA SÉTIMA RODADA — revisão pedida especificamente sobre
-      // ping/latência. O resto da configuração de baixa latência já
-      // existia (playoutDelayHint=0, prioridade alta pro áudio, bitrate
-      // do microfone). Faltava isto: `max-bundle` consolida ÁUDIO e
-      // VÍDEO (quando tem) num único transporte de rede em vez de um
-      // pra cada, e `rtcpMuxPolicy: 'require'` exige multiplexar RTP e
-      // RTCP juntos — as duas coisas juntas reduzem quantos candidatos
-      // de conexão (ICE) precisam ser testados até achar um caminho que
-      // funcione, o que acelera especificamente o TEMPO DE CONECTAR a
-      // call (não a latência de cada pacote de voz já em andamento,
-      // essa já estava no ponto). É uma prática padrão, recomendada
-      // pelas próprias specs do WebRTC, sem trade-off conhecido.
-      bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require',
-    })
-    const peerState: PeerState = { pc, makingOffer: false, polite }
-    peersRef.current.set(peerId, peerState)
+  function mapConnectionQuality(quality: LiveKitConnectionQuality): VoiceConnectionQuality {
+    switch (quality) {
+      case LiveKitConnectionQuality.Excellent:
+        return 'excellent'
+      case LiveKitConnectionQuality.Good:
+        return 'good'
+      case LiveKitConnectionQuality.Poor:
+        return 'poor'
+      default:
+        return 'lost'
+    }
+  }
 
-    localStreamRef.current?.getTracks().forEach((track) => {
-      const sender = pc.addTrack(track, localStreamRef.current!)
-      if (track.kind === 'audio') {
-        const params = sender.getParameters()
-        params.encodings = params.encodings?.length ? params.encodings : [{}]
-        // O padrão do Opus fica bem baixo (~32kbps) — subindo pro teto
-        // real de voz mono (ver MIC_MAX_BITRATE acima), a voz fica bem
-        // mais nítida, por um custo de banda irrelevante (poucos KB/s a
-        // mais).
-        params.encodings[0].maxBitrate = MIC_MAX_BITRATE
-        // Marca o áudio como prioridade alta — quando a rede está
-        // congestionada (upload cheio, por exemplo), isso pede pro
-        // navegador tratar os pacotes de voz como mais urgentes do
-        // que outros tipos de tráfego (imagem/vídeo, por exemplo).
-        if ('priority' in params.encodings[0]) {
-          ;(params.encodings[0] as RTCRtpEncodingParameters & { priority?: string }).priority = 'high'
-        }
-        if ('networkPriority' in params.encodings[0]) {
-          ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: string }).networkPriority = 'high'
-        }
-        sender.setParameters(params).catch(() => {})
-      }
+  // Liga todos os eventos da sala do LiveKit numa conexão nova — chamado
+  // uma vez, dentro de join(), logo depois do `room.connect()`. Substitui
+  // de vez a sinalização manual que existia antes (handleSignal,
+  // createPeerConnection, ensurePeer, cleanupPeer): o LiveKit já entrega
+  // "fulano entrou", "fulano saiu", "chegou uma track nova de fulano" e
+  // "fulano está falando" prontos, sem precisar negociar nada na mão.
+  function attachRoomEvents(room: Room, myId: string) {
+    room.on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
+      if (participant.identity === myId) return
+      playUserJoinSound()
     })
-    if (screenStreamRef.current) {
-      // DÉCIMA SÉTIMA RODADA: usa getVideoTracks() aqui, não getTracks()
-      // — no Linux, o seletor NATIVO do sistema pode embutir uma track
-      // de ÁUDIO dentro do próprio screenStreamRef.current (ver o
-      // comentário grande em toggleScreenShare, "DÉCIMA PRIMEIRA
-      // RODADA"). Essa track de áudio agora SEMPRE passa pelo redutor de
-      // ruído da transmissão antes de ser enviada (ver
-      // prepareScreenAudioForSending) e SEMPRE é adicionada pelo bloco
-      // de screenAudioOutputTrackRef logo abaixo — se este laço aqui
-      // também mandasse a track crua embutida na stream, quem entrasse
-      // na call DEPOIS do compartilhamento já ter começado receberia
-      // ÁUDIO DUPLICADO (a crua E a filtrada, ao mesmo tempo) nesse
-      // caso específico do Linux.
-      screenStreamRef.current.getVideoTracks().forEach((track) => {
-        const sender = pc.addTrack(track, screenStreamRef.current!)
-        const params = sender.getParameters()
-        params.encodings = params.encodings?.length ? params.encodings : [{}]
-        // Antes isso usava um valor fixo (4Mbps) sem olhar a preferência
-        // de qualidade escolhida — então quem entrava na call DEPOIS que
-        // a transmissão já tinha começado recebia uma versão bem pior
-        // do que quem já estava lá antes, mesmo com "Qualidade máxima"
-        // selecionada. Usando a mesma referência que o início da
-        // transmissão usa, todo mundo recebe a qualidade certa.
-        const preset = screenShareQualityRef.current
-        params.encodings[0].maxBitrate = preset.maxBitrate
-        ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
-          preset.degradationPreference
-        sender.setParameters(params).catch(() => {})
-        screenSendersRef.current.set(peerId, sender)
-        // Se a pessoa já entrou no meio de um período "fora do jogo"
-        // (cortina ativa), essa nova conexão já começa recebendo a
-        // cortina, não o vídeo de verdade — senão vazaria justo pra
-        // quem acabou de entrar.
-        if (placeholderTrackRef.current) sender.replaceTrack(placeholderTrackRef.current).catch(() => {})
+
+    room.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+      remoteTracksRef.current.delete(participant.identity)
+      combinedStreamsRef.current.delete(participant.identity)
+      setParticipants((prev) => {
+        if (!(participant.identity in prev)) return prev
+        const next = { ...prev }
+        delete next[participant.identity]
+        return next
       })
-    }
-    // DÉCIMA RODADA: ver o comentário grande em audioSendersRef acima —
-    // esta é a correção de verdade do bug. A track de ÁUDIO da
-    // transmissão ativa (se tiver alguma tocando agora) não faz parte de
-    // screenStreamRef.current, então precisa ser adicionada aqui à parte
-    // pra quem está entrando na call agora, do mesmo jeito que
-    // toggleScreenShare/switchScreenShareSource já fazem pra quem já
-    // estava na call no momento em que a transmissão começou/trocou.
-    // DÉCIMA SÉTIMA RODADA: usa screenAudioOutputTrackRef — a track que
-    // REALMENTE está sendo enviada agora (já passou pelo redutor de
-    // ruído da transmissão, quando ele funcionou — ver
-    // prepareScreenAudioForSending) — em vez de
-    // `appAudioTrackRef.current ?? systemAudioTrackRef.current`, que
-    // agora guardam só a captura BRUTA (antes do filtro). Usar a bruta
-    // aqui mandaria áudio sem filtro só pra quem entra DEPOIS da
-    // transmissão já ter começado — inconsistente com quem já estava na
-    // call.
-    const activeScreenAudioTrack = screenAudioOutputTrackRef.current
-    if (activeScreenAudioTrack && activeScreenAudioTrack.readyState !== 'ended') {
-      // DÉCIMA QUINTA RODADA: usa screenAudioSourceStreamRef (a MESMA
-      // MediaStream, com o MESMO .id, que já foi anunciada via
-      // broadcastScreenMeta pra sala toda) em vez de construir uma
-      // `new MediaStream([...])` aqui — que antes gerava um .id
-      // DIFERENTE a cada peer que entrasse depois da transmissão já
-      // rolando, e o broadcast (um só, pra sala toda) só podia acertar
-      // um deles. O fallback só existe pra nunca ficar sem enviar áudio
-      // nenhum no caso (não deveria acontecer) dessa referência ainda
-      // não estar setada.
-      const audioSourceStream = screenAudioSourceStreamRef.current ?? new MediaStream([activeScreenAudioTrack])
-      const audioSender = pc.addTrack(activeScreenAudioTrack, audioSourceStream)
-      const audioParams = audioSender.getParameters()
-      audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
-      audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
-      audioSender.setParameters(audioParams).catch(() => {})
-      audioSendersRef.current.set(peerId, audioSender)
-    }
+      setConnectionQuality((prev) => {
+        if (!(participant.identity in prev)) return prev
+        const next = { ...prev }
+        delete next[participant.identity]
+        return next
+      })
+      playUserLeaveSound()
+    })
 
-    pc.onnegotiationneeded = async () => {
-      try {
-        peerState.makingOffer = true
-        await setLocalDescriptionPreferringStereo(pc, 'offer')
-        if (pc.localDescription) sendSignal(peerId, { description: pc.localDescription })
-      } catch (err) {
-        console.error('Erro ao negociar conexão de voz:', err)
-      } finally {
-        peerState.makingOffer = false
+    room.on(
+      RoomEvent.TrackSubscribed,
+      (track: RemoteTrack, _publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        logDebug(
+          `TrackSubscribed de ${participant.identity}: source=${track.source}, kind=${track.kind}`
+        )
+        setRemoteTrack(participant.identity, track.source, track.mediaStreamTrack)
       }
-    }
+    )
 
-    pc.onicecandidate = ({ candidate }) => {
-      if (candidate) sendSignal(peerId, { candidate: candidate.toJSON() })
-    }
-
-    pc.ontrack = (event) => {
-      const [stream] = event.streams
-      logDebug(
-        `pc.ontrack de ${peerId}: kind=${event.track.kind}, streamId=${stream?.id ?? '(sem stream)'}`
-      )
-      if (!rawStreamsRef.current.has(peerId)) rawStreamsRef.current.set(peerId, new Map())
-      rawStreamsRef.current.get(peerId)!.set(stream.id, stream)
-      recomputeParticipant(peerId)
-      if (!analysersRef.current.has(peerId)) setupAnalyser(peerId, stream)
-
-      // Pede pro navegador priorizar latência baixa em vez de suavidade
-      // contra oscilação de rede (jitter) — só pra áudio, já que voz é
-      // mais sensível a atraso do que a pequenos engasgos ocasionais.
-      // Isso não depende de nenhum servidor, é só uma configuração do
-      // próprio navegador — funciona de graça, sem custo nenhum.
-      if (event.track.kind === 'audio' && 'playoutDelayHint' in event.receiver) {
-        try {
-          ;(event.receiver as RTCRtpReceiver & { playoutDelayHint: number }).playoutDelayHint = 0
-        } catch {
-          // navegador sem suporte a esse ajuste — sem problema, só não aplica
-        }
+    room.on(
+      RoomEvent.TrackUnsubscribed,
+      (_track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        setRemoteTrack(participant.identity, publication.source, null)
       }
-    }
+    )
 
-    return pc
-  }
-
-  function ensurePeer(peerId: string): boolean {
-    if (peersRef.current.has(peerId) || !userIdRef.current) return false
-    if (peersRef.current.size >= MAX_PARTICIPANTS - 1) return false
-    createPeerConnection(peerId, userIdRef.current > peerId)
-    return true
-  }
-
-  const handleSignal = useCallback(async (payload: SignalPayload) => {
-    const myId = userIdRef.current
-    if (!myId || payload.to !== myId) return
-
-    const peerId = payload.from
-    if (!peersRef.current.has(peerId)) createPeerConnection(peerId, myId > peerId)
-    const peerState = peersRef.current.get(peerId)
-    if (!peerState) return
-    const { pc, polite } = peerState
-
-    try {
-      if (payload.description) {
-        const offerCollision =
-          payload.description.type === 'offer' && (peerState.makingOffer || pc.signalingState !== 'stable')
-        if (!polite && offerCollision) return
-
-        await pc.setRemoteDescription(payload.description)
-        if (payload.description.type === 'offer') {
-          await setLocalDescriptionPreferringStereo(pc, 'answer')
-          if (pc.localDescription) sendSignal(peerId, { description: pc.localDescription })
+    // Substitui o antigo polling de AnalyserNode por participante (ver o
+    // comentário grande em remoteTracksRef acima) — o LiveKit já faz essa
+    // detecção nativamente e manda a lista de quem está falando AGORA,
+    // sempre que ela muda (inclui o participante local também).
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+      const speakingIds = new Set(speakers.map((s) => s.identity))
+      setSpeaking(speakingIds.has(myId))
+      setParticipants((prev) => {
+        let changed = false
+        const next: typeof prev = { ...prev }
+        for (const id of Object.keys(next)) {
+          const isSpeaking = speakingIds.has(id)
+          if (next[id].speaking !== isSpeaking) {
+            next[id] = { ...next[id], speaking: isSpeaking }
+            changed = true
+          }
         }
-      } else if (payload.candidate) {
-        try {
-          await pc.addIceCandidate(payload.candidate)
-        } catch (err) {
-          if (!polite) throw err
+        return changed ? next : prev
+      })
+    })
+
+    // Ver VoiceConnectionQuality acima pro porquê disso não ser mais um
+    // número de latência em milissegundos — com um SFU, a única latência
+    // que faz sentido medir é a de cada um até o SERVIDOR, não "até
+    // fulano".
+    room.on(
+      RoomEvent.ConnectionQualityChanged,
+      (quality: LiveKitConnectionQuality, participant: Participant) => {
+        if (participant.identity === myId) {
+          setLocalConnectionQuality(mapConnectionQuality(quality))
+          return
         }
+        setConnectionQuality((prev) => ({ ...prev, [participant.identity]: mapConnectionQuality(quality) }))
       }
-    } catch (err) {
-      console.error('Erro de sinalização WebRTC:', err)
-    }
-  }, [])
+    )
 
-  function cleanupPeer(peerId: string) {
-    peersRef.current.get(peerId)?.pc.close()
-    peersRef.current.delete(peerId)
-    analysersRef.current.delete(peerId)
-    lastAboveThresholdRef.current.delete(peerId)
-    rawStreamsRef.current.delete(peerId)
-    screenStreamIdsRef.current.delete(peerId)
-    screenAudioStreamIdsRef.current.delete(peerId)
-    combinedScreenStreamsRef.current.delete(peerId)
-    screenSendersRef.current.delete(peerId)
-    audioSendersRef.current.delete(peerId)
-    setParticipants((prev) => {
-      if (!(peerId in prev)) return prev
-      const next = { ...prev }
-      delete next[peerId]
-      return next
+    room.on(RoomEvent.Disconnected, () => {
+      // Desconexão vinda do SERVIDOR (não de um leave() nosso — esse já
+      // chama room.disconnect() e limpa tudo por conta própria antes
+      // disso disparar) — ex.: LiveKit derrubou a sessão, ou a rede caiu
+      // de vez. Trata como uma saída normal pra não deixar a UI presa
+      // num estado "conectado" que não reflete mais a realidade.
+      if (connectedRef.current) {
+        setError('A conexão com o canal de voz caiu.')
+        leave()
+      }
     })
   }
 
@@ -2150,7 +1900,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setJoiningChannelId(channelId)
     setConnecting(true)
     setError(null)
-    hasSyncedRef.current = false
     channelUserLimitRef.current = 0
     joinedAtRef.current = Date.now()
 
@@ -2167,6 +1916,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setConnectedChannelName(options?.displayName ?? null)
     }
 
+    let room: Room | null = null
     try {
       const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
       const rawTrack = stream.getAudioTracks()[0]
@@ -2178,169 +1928,32 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       localStreamRef.current = stream
       mutedRef.current = false
       applyMicEnabledState(false)
-      setupAnalyser('local', stream)
 
+      // Canal Realtime do Supabase — hoje serve só pra DUAS coisas, bem
+      // mais simples do que antes: (1) anunciar "estou nesse canal de
+      // voz" pra sidebar conseguir mostrar quem está numa call sem
+      // precisar entrar nela (ver useVoicePresence.ts, que observa esse
+      // MESMO tópico de fora); (2) o broadcast do soundboard. Tudo o
+      // mais que esse canal fazia antes (sinalização WebRTC, meta de
+      // compartilhamento de tela, e a checagem de limite de vagas) foi
+      // pro LiveKit — a mídia em si nem passa mais por aqui, e o limite
+      // de vagas agora é checado do lado do SERVIDOR (ver
+      // supabase/functions/livekit-token), sem risco de corrida entre
+      // dois cliques quase simultâneos.
       const rt = supabase.channel(`voice:${channelId}`, {
         config: { broadcast: { self: false }, presence: { key: user.id } },
       })
-      realtimeRef.current = rt
+      presenceRef.current = rt
 
-      rt.on('broadcast', { event: 'rtc' }, ({ payload }) => handleSignal(payload as SignalPayload))
-
-      rt.on('broadcast', { event: 'screen-meta' }, ({ payload }) => {
-        const { from, screenStreamId, screenAudioStreamId } = payload as {
-          from: string
-          screenStreamId: string | null
-          screenAudioStreamId?: string | null
-        }
-        // TRIGÉSIMA PRIMEIRA RODADA — instrumentação adicionada depois de
-        // um relato de que o aperto de mão (rodada anterior) não
-        // resolveu 100%: até agora não existia NENHUM log do lado de
-        // quem RECEBE o screen-meta/as tracks — só do lado de quem
-        // TRANSMITE a captura. Sem isso, não dá pra saber se o problema
-        // é o meta não chegar, a track de vídeo nunca chegar, ou as duas
-        // coisas chegando mas em uma ordem/estado que
-        // recomputeParticipant não está lidando direito.
-        logDebug(
-          `screen-meta recebido de ${from}: screenStreamId=${screenStreamId}, screenAudioStreamId=${screenAudioStreamId ?? null}, streams já recebidas desse peer=${rawStreamsRef.current.get(from)?.size ?? 0}`
-        )
-        if (screenStreamId) screenStreamIdsRef.current.set(from, screenStreamId)
-        else screenStreamIdsRef.current.delete(from)
-        if (screenAudioStreamId) screenAudioStreamIdsRef.current.set(from, screenAudioStreamId)
-        else screenAudioStreamIdsRef.current.delete(from)
-        recomputeParticipant(from)
-      })
-
-      // VIGÉSIMA NONA RODADA — bug relatado de novo: quem entra na call
-      // enquanto alguém já está compartilhando tela ainda não via a
-      // transmissão. A correção anterior (ver o comentário grande mais
-      // abaixo, perto de `resendScreenMeta`) reenviava o screen-meta por
-      // TEMPO (na hora, +1.5s, +4s) — um jeito de adivinhar quando a
-      // inscrição de quem chegou já estaria pronta pra receber, sem
-      // confirmação nenhuma de que realmente estava. Isso é
-      // fundamentalmente frágil: em conexões mais lentas pra fechar a
-      // inscrição no canal, nem 4 segundos são garantia suficiente.
-      //
-      // A correção de verdade é um aperto de mão: em vez de quem está
-      // TRANSMITINDO adivinhar quando reenviar, quem ACABOU DE ENTRAR
-      // avisa explicitamente "já estou pronto, alguém está
-      // compartilhando?" assim que a própria inscrição no canal é
-      // confirmada (ver `rt.subscribe` mais abaixo) — nesse momento já
-      // é garantido que dá pra RECEBER broadcast (é a própria definição
-      // do status 'SUBSCRIBED'). Quem estiver transmitindo responde na
-      // hora, sem depender de timing nenhum. Mantém o reenvio por tempo
-      // como reforço adicional (não custa nada, cobre o caso raro de o
-      // PRÓPRIO pedido se perder), mas agora não é mais a única linha
-      // de defesa.
-      rt.on('broadcast', { event: 'screen-meta-request' }, ({ payload }) => {
-        const { from } = payload as { from: string }
-        logDebug(
-          `screen-meta-request recebido de ${from} — ${screenStreamRef.current ? 'estou compartilhando, respondendo' : 'não estou compartilhando, ignorando'}`
-        )
-        if (!screenStreamRef.current) return
-        broadcastScreenMeta(screenStreamRef.current.id, screenAudioSourceStreamRef.current?.id ?? null)
-      })
-
-      // Alguém tocou um som do soundboard — toca a mesma URL aqui
-      // também. `broadcast: { self: false }` (config do canal, logo
-      // acima) já garante que quem tocou o som não recebe o próprio
-      // broadcast de volta (evitaria tocar duas vezes pra quem clicou).
       rt.on('broadcast', { event: 'soundboard-play' }, ({ payload }) => {
         const { url } = payload as { from: string; url: string }
         playLocalSoundboardAudio(url)
-      })
-
-      rt.on('presence', { event: 'sync' }, () => {
-        const state = rt.presenceState() as Record<string, Array<{ user_id?: string; joined_at?: number }>>
-        const ids = Object.keys(state).filter((id) => id !== user.id)
-        const isFirstSync = !hasSyncedRef.current
-
-        // Limite de pessoas no canal — só checa na primeira sincronização
-        // (a entrada em si), pra não expulsar quem já está dentro se o
-        // limite for reduzido depois por um moderador.
-        //
-        // A contagem sozinha (`ids.length >= limite`) tinha uma corrida:
-        // se só sobra 1 vaga e DUAS pessoas clicam "entrar" quase ao
-        // mesmo tempo, as duas podem ver a mesma contagem (ainda sem o
-        // presence uma da outra) e as duas entram, estourando o limite.
-        // Em vez disso, cada cliente ordena TODO MUNDO (incluindo a si
-        // mesmo) pelo horário que cada um mandou seu próprio `track()`
-        // (`joined_at`) — como esse estado de presença é o mesmo pra
-        // todo mundo na sala, todo cliente calcula a MESMA ordem e chega
-        // na MESMA conclusão sobre quem ficou de fora, mesmo sem um
-        // servidor "árbitro" pra decidir.
-        if (isFirstSync && channelUserLimitRef.current > 0) {
-          const everyone = [{ id: user.id, joinedAt: joinedAtRef.current }, ...ids.map((id) => {
-            const entry = state[id]?.[0]
-            return { id, joinedAt: entry?.joined_at ?? 0 }
-          })]
-          everyone.sort((a, b) => a.joinedAt - b.joinedAt || a.id.localeCompare(b.id))
-          const myPosition = everyone.findIndex((e) => e.id === user.id)
-          if (myPosition >= channelUserLimitRef.current) {
-            setError('Esse canal de voz já está cheio.')
-            leave()
-            return
-          }
-        }
-
-        let hasNewPeer = false
-
-        ids.forEach((id) => {
-          const wasNew = ensurePeer(id)
-          if (wasNew) {
-            hasNewPeer = true
-            if (!isFirstSync) playUserJoinSound()
-          }
-        })
-        Array.from(peersRef.current.keys()).forEach((id) => {
-          if (!ids.includes(id)) {
-            cleanupPeer(id)
-            if (!isFirstSync) playUserLeaveSound()
-          }
-        })
-        hasSyncedRef.current = true
-
-        // Quem chega depois de eu já estar compartilhando tela perdeu o
-        // aviso original (broadcast não guarda histórico) — reenvia
-        // sempre que alguém novo aparece na sala.
-        if (hasNewPeer && screenStreamRef.current) {
-          // DÉCIMA SEXTA RODADA — bug relatado: quem entra na call
-          // enquanto alguém já está compartilhando tela não vê a
-          // transmissão, a menos que a pessoa pare e comece de novo.
-          //
-          // VIGÉSIMA NONA RODADA: a correção de verdade pra esse bug
-          // agora é o pedido explícito que quem entra manda assim que
-          // termina de se inscrever no canal (ver 'screen-meta-request'
-          // e o `rt.send` logo depois de 'SUBSCRIBED', mais acima) — ele
-          // não depende de adivinhar timing nenhum. Isso aqui embaixo
-          // (reenviar por tempo: na hora, +1.5s, +4s) vira só um REFORÇO
-          // adicional, não a única linha de defesa como era antes — cobre
-          // o caso raro de o PRÓPRIO pedido (ou a resposta a ele) se
-          // perder no meio do caminho. Sem custo nenhum manter: quem
-          // recebe só sobrescreve com o mesmo valor.
-          const resendScreenMeta = () => {
-            if (!screenStreamRef.current) return
-            broadcastScreenMeta(screenStreamRef.current.id, screenAudioSourceStreamRef.current?.id ?? null)
-          }
-          resendScreenMeta()
-          window.setTimeout(resendScreenMeta, 1500)
-          window.setTimeout(resendScreenMeta, 4000)
-        }
       })
 
       await new Promise<void>((resolve, reject) => {
         rt.subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
             await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
-            // VIGÉSIMA NONA RODADA — ver o comentário grande em
-            // 'screen-meta-request' acima. Só dá pra mandar esse pedido
-            // AGORA (não antes) porque 'SUBSCRIBED' é a garantia de que
-            // já dá pra RECEBER broadcast desse canal — mandado mais
-            // cedo, corria o risco de quem estiver compartilhando
-            // responder antes da nossa inscrição estar pronta pra
-            // escutar, perdendo a resposta.
-            rt.send({ type: 'broadcast', event: 'screen-meta-request', payload: { from: user.id } })
-            logDebug('join: pedido screen-meta-request enviado, esperando respostas de quem já estiver compartilhando')
             resolve()
           }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -2349,16 +1962,52 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         })
       })
 
+      // Conecta de verdade na sala do LiveKit (a mídia em si) — o token
+      // já vem com a checagem de limite de vagas feita do lado do
+      // servidor (ver supabase/functions/livekit-token); `RoomFullError`
+      // é o sinal específico disso, tratado no catch abaixo pra mostrar
+      // a mesma mensagem de antes ("Esse canal de voz já está cheio.").
+      const { token, url: livekitUrl } = await fetchLiveKitToken({
+        room: channelId,
+        name: options?.displayName,
+        userLimit: channelUserLimitRef.current,
+      })
+
+      room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+        publishDefaults: {
+          dtx: true,
+          red: true,
+        },
+      })
+      attachRoomEvents(room, user.id)
+      await room.connect(livekitUrl, token)
+      roomRef.current = room
+
+      // Publica o microfone (já tratado pelo RNNoise/gate — ver
+      // applyNoiseSuppression acima) e guarda a publicação, usada
+      // depois por toggleMute/changeMicrophone/refreshAudioConstraints
+      // pra trocar/mutar a track sem precisar procurar em lugar nenhum.
+      micPublicationRef.current = await room.localParticipant.publishTrack(processedTrack, {
+        name: 'microphone',
+        source: Track.Source.Microphone,
+        audioPreset: { maxBitrate: MIC_MAX_BITRATE },
+      })
+
       connectedRef.current = true
       setConnectedChannelId(channelId)
       setConnectedServerId(serverId)
       setConnectedAt(Date.now())
       playConnectSound()
     } catch (err) {
+      const isRoomFull = err instanceof Error && err.name === 'RoomFullError'
       setError(
-        err instanceof Error && err.name === 'NotAllowedError'
-          ? 'Permissão de microfone negada. Habilite o acesso ao microfone e tente de novo.'
-          : 'Não foi possível entrar no canal de voz.'
+        isRoomFull
+          ? 'Esse canal de voz já está cheio.'
+          : err instanceof Error && err.name === 'NotAllowedError'
+            ? 'Permissão de microfone negada. Habilite o acesso ao microfone e tente de novo.'
+            : 'Não foi possível entrar no canal de voz.'
       )
       localStreamRef.current?.getTracks().forEach((t) => t.stop())
       localStreamRef.current = null
@@ -2366,21 +2015,39 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       rawMicTrackRef.current = null
       noiseSuppressorRef.current?.destroy()
       noiseSuppressorRef.current = null
-      if (realtimeRef.current) {
-        supabase.removeChannel(realtimeRef.current)
-        realtimeRef.current = null
+      micPublicationRef.current = null
+      if (room) {
+        room.disconnect()
+        roomRef.current = null
+      }
+      if (presenceRef.current) {
+        supabase.removeChannel(presenceRef.current)
+        presenceRef.current = null
       }
     } finally {
       setConnecting(false)
       setJoiningChannelId(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, handleSignal])
+  }, [user])
 
   const leave = useCallback(() => {
     const wasConnected = connectedRef.current
-    peersRef.current.forEach((_, id) => cleanupPeer(id))
-    peersRef.current.clear()
+    if (roomRef.current) {
+      // Desconecta a sala do LiveKit — isso já para/despublica todas as
+      // tracks locais sozinho (mic, câmera, tela), mas paramos elas
+      // explicitamente também logo abaixo (idempotente, sem custo) pra
+      // garantir que o dispositivo físico (luzinha do mic/câmera) seja
+      // liberado mesmo se a desconexão em si falhar por algum motivo.
+      roomRef.current.disconnect()
+      roomRef.current = null
+    }
+    micPublicationRef.current = null
+    cameraPublicationRef.current = null
+    screenVideoPublicationRef.current = null
+    screenAudioPublicationRef.current = null
+    remoteTracksRef.current.clear()
+    combinedStreamsRef.current.clear()
     localStreamRef.current?.getTracks().forEach((t) => t.stop())
     localStreamRef.current = null
     // A track dentro de localStreamRef pode ser a SAÍDA do RNNoise, não
@@ -2397,10 +2064,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     gameShareWatchRef.current?.()
     gameShareWatchRef.current = null
     setLocalScreenStream(null)
-    analysersRef.current.clear()
-    lastAboveThresholdRef.current.clear()
-    if (realtimeRef.current) {
-      const channelToLeave = realtimeRef.current
+    if (presenceRef.current) {
+      const channelToLeave = presenceRef.current
       // Ver o comentário grande em leaveTeardownRef acima — o
       // desligamento de verdade (dois round-trips até o servidor) roda
       // em segundo plano, sem atrasar nada do que a UI mostra aqui
@@ -2423,9 +2088,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       teardown.finally(() => {
         if (leaveTeardownRef.current === teardown) leaveTeardownRef.current = null
       })
-      realtimeRef.current = null
+      presenceRef.current = null
     }
     setParticipants({})
+    setConnectionQuality({})
+    setLocalConnectionQuality(null)
     connectedRef.current = false
     setConnectedChannelId(null)
     setConnectedChannelName(null)
@@ -2454,29 +2121,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // --- Latência real da chamada (não confundir com o ping do banco de
-  // dados) — usa getStats() de cada conexão WebRTC ativa pra pegar o
-  // tempo de ida-e-volta de verdade, peer a peer, a cada 5s.
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (!connectedRef.current || peersRef.current.size === 0) return
-      const next: Record<string, number> = {}
-      for (const [peerId, { pc }] of peersRef.current) {
-        try {
-          const stats = await pc.getStats()
-          stats.forEach((report) => {
-            if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.currentRoundTripTime != null) {
-              next[peerId] = Math.round(report.currentRoundTripTime * 1000)
-            }
-          })
-        } catch {
-          // conexão pode ter caído nesse meio tempo — sem problema, só ignora
-        }
-      }
-      setConnectionQuality(next)
-    }, 5000)
-    return () => clearInterval(interval)
-  }, [])
+  // TRIGÉSIMA QUARTA RODADA — o polling de getStats() por peer que
+  // existia aqui foi removido: com o LiveKit, a qualidade de conexão de
+  // cada participante já chega pronta via RoomEvent.ConnectionQualityChanged
+  // (ligado em attachRoomEvents, dentro de join()) sempre que muda, sem
+  // precisar perguntar de 5 em 5 segundos.
 
   // --- Sensibilidade automática do microfone --------------------------
   // Só faz alguma coisa quando o modo é 'auto' (ver useAudioSettings.ts
@@ -2598,12 +2247,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
       localStreamRef.current?.addTrack(newTrack)
 
-      peersRef.current.forEach(({ pc }) => {
-        const sender = pc.getSenders().find((s) => s.track?.kind === 'audio')
-        sender?.replaceTrack(newTrack)
-      })
-
-      setupAnalyser('local', new MediaStream([newTrack]))
+      // `true` marca a track como "fornecida pelo usuário" pro LiveKit —
+      // ele não tenta gerenciar/recriar essa track sozinho (o que
+      // ignoraria todo o pipeline de RNNoise/gate acima), só a usa e
+      // troca no sender de verdade, exatamente como o antigo
+      // `sender.replaceTrack()` fazia em cada RTCPeerConnection.
+      const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
+      if (micTrack) await micTrack.replaceTrack(newTrack, true)
     } catch {
       setError('Não foi possível trocar de microfone.')
     }
@@ -2653,12 +2303,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
       localStreamRef.current?.addTrack(newTrack)
 
-      peersRef.current.forEach(({ pc }) => {
-        const sender = pc.getSenders().find((s) => s.track?.kind === 'audio')
-        sender?.replaceTrack(newTrack)
-      })
-
-      setupAnalyser('local', new MediaStream([newTrack]))
+      const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
+      if (micTrack) await micTrack.replaceTrack(newTrack, true)
     } catch {
       // se falhar, o microfone atual continua funcionando com as configs antigas
     }
@@ -2679,12 +2325,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (videoEnabled) {
       const track = localStreamRef.current?.getVideoTracks()[0]
       if (track) {
+        if (cameraPublicationRef.current) {
+          await roomRef.current?.localParticipant.unpublishTrack(track)
+          cameraPublicationRef.current = null
+        }
         track.stop()
         localStreamRef.current?.removeTrack(track)
-        peersRef.current.forEach(({ pc }) => {
-          const sender = pc.getSenders().find((s) => s.track === track)
-          if (sender) pc.removeTrack(sender)
-        })
       }
       setVideoEnabled(false)
       return
@@ -2702,7 +2348,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       })
       const track = camStream.getVideoTracks()[0]
       localStreamRef.current?.addTrack(track)
-      peersRef.current.forEach(({ pc }) => pc.addTrack(track, localStreamRef.current!))
+      if (roomRef.current) {
+        cameraPublicationRef.current = await roomRef.current.localParticipant.publishTrack(track, {
+          name: 'camera',
+          source: Track.Source.Camera,
+        })
+      }
       setVideoEnabled(true)
     } catch (err) {
       // TRIGÉSIMA RODADA — "Não foi possível acessar a câmera" sozinho,
@@ -2744,37 +2395,32 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // (indicador do sistema aceso, peers ainda recebendo frames) mesmo com
   // a UI já mostrando "parou".
   function stopScreenShareState() {
-    screenStreamRef.current?.getTracks().forEach((track) => {
-      track.stop()
-      peersRef.current.forEach(({ pc }) => {
-        const sender = pc.getSenders().find((s) => s.track === track)
-        if (sender) pc.removeTrack(sender)
-      })
-    })
+    if (screenVideoPublicationRef.current) {
+      const publishedTrack = screenVideoPublicationRef.current.track
+      if (publishedTrack) roomRef.current?.localParticipant.unpublishTrack(publishedTrack)
+      screenVideoPublicationRef.current = null
+    }
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop())
     gameShareWatchRef.current?.()
     gameShareWatchRef.current = null
     window.electronAPI?.stopWatchProcessExit?.().catch(() => {})
-    // DÉCIMA SÉTIMA RODADA: a track REALMENTE enviada pros peers (senders
-    // seguram essa, não mais a bruta — ver screenAudioOutputTrackRef, o
-    // porquê está no comentário grande na declaração dele) é a que
-    // precisa ser usada aqui pra achar e remover o sender certo — usar a
-    // bruta (appAudioTrackRef/systemAudioTrackRef) não bateria com
-    // `sender.track` desde que o redutor de ruído da transmissão passou
-    // a existir, e o sender ficaria "esquecido" (nunca removido).
-    if (screenAudioOutputTrackRef.current) {
-      const outputTrack = screenAudioOutputTrackRef.current
-      peersRef.current.forEach(({ pc }) => {
-        const sender = pc.getSenders().find((s) => s.track === outputTrack)
-        if (sender) pc.removeTrack(sender)
-      })
+    // DÉCIMA SÉTIMA RODADA: usa a publicação de áudio da tela diretamente
+    // (o LocalAudioTrack real que está publicado agora, mesmo que já
+    // tenha passado por replaceTrack várias vezes — ver
+    // switchScreenShareSource/recoverScreenShareAudioToSystem) em vez de
+    // tentar casar por referência de MediaStreamTrack.
+    if (screenAudioPublicationRef.current) {
+      const publishedTrack = screenAudioPublicationRef.current.track
+      if (publishedTrack) roomRef.current?.localParticipant.unpublishTrack(publishedTrack)
+      screenAudioPublicationRef.current = null
       screenAudioOutputTrackRef.current = null
     }
     teardownScreenAudioDenoiser()
     // A captura BRUTA (quando ativa) não faz parte de
     // screenStreamRef.current — vem de um MediaStream próprio dentro do
     // PcmStreamPlayer (ver startAppAudioCapture acima) — por isso
-    // precisa ser encerrada aqui à parte (o sender que a carregava,
-    // já filtrada, foi removido acima).
+    // precisa ser encerrada aqui à parte (a publicação que a carregava,
+    // já filtrada, foi removida acima).
     appAudioTrackRef.current = null
     stopAppAudioCapture()
     // QUINTA RODADA: mesma lógica acima, agora pro áudio de SISTEMA
@@ -2789,21 +2435,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       systemAudioTrackRef.current = null
     }
     screenStreamRef.current = null
-    screenAudioTrackIdRef.current = null
-    screenAudioSourceStreamRef.current = null
     setLocalScreenStream(null)
     setScreenSharing(false)
-    broadcastScreenMeta(null, null)
 
     // Desliga o vigia de foco do jogo (se estava ativo) e limpa tudo que
     // ele usava — senão o processo do PowerShell continuaria rodando à
-    // toa até a próxima call, e o Map de senders ficaria com entradas de
-    // uma transmissão que já acabou.
+    // toa até a próxima call.
     foregroundWatchUnsubRef.current?.()
     foregroundWatchUnsubRef.current = null
     window.electronAPI?.stopForegroundWatch?.().catch(() => {})
-    screenSendersRef.current.clear()
-    audioSendersRef.current.clear()
     realScreenVideoTrackRef.current = null
     if (placeholderTrackRef.current) {
       placeholderTrackRef.current.stop()
@@ -2844,10 +2484,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       logDebug(`toggleScreenShare: appAudioChoice=${JSON.stringify(appAudioChoice)}`)
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
-      // Avisa a sala ANTES de adicionar a track — o broadcast chega quase
-      // instantâneo, enquanto a renegociação WebRTC (oferta/resposta/ICE)
-      // leva alguns round-trips, então o aviso quase sempre chega primeiro.
-      broadcastScreenMeta(stream.id)
       const videoTrack = stream.getVideoTracks()[0]
       // Ajuste de qualidade best-effort, à parte — ver
       // applyVideoQualityConstraints acima. Não bloqueia nem arrisca a
@@ -2874,12 +2510,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // escolhida — evita duplicar captura à toa e evita cair no áudio
       // de sistema inteiro sem necessidade.
       let audioTrack: MediaStreamTrack | null = stream.getAudioTracks()[0] ?? null
-      let audioSourceStream: MediaStream = stream
       if (!audioTrack && appAudioPid) {
         const appAudioTrack = await startAppAudioCapture(appAudioPid)
         if (appAudioTrack) {
           audioTrack = appAudioTrack
-          audioSourceStream = appAudioPlayerRef.current?.stream ?? stream
           appAudioTrackRef.current = appAudioTrack
         }
       }
@@ -2887,7 +2521,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const systemAudioTrack = await captureSystemAudioTrack()
         if (systemAudioTrack) {
           audioTrack = systemAudioTrack
-          audioSourceStream = new MediaStream([systemAudioTrack])
           systemAudioTrackRef.current = systemAudioTrack
         }
       }
@@ -2904,24 +2537,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
       // DÉCIMA SÉTIMA RODADA: passa a track de áudio resolvida (seja
       // qual for a origem) pelo redutor de ruído da transmissão antes de
-      // mandar pra qualquer peer — ver prepareScreenAudioForSending /
-      // createScreenAudioDenoiser. `audioTrack`/`audioSourceStream`
-      // passam a apontar pra versão FILTRADA daqui em diante (o resto da
-      // função, incluindo o laço de peers logo abaixo, nem precisa saber
-      // que isso aconteceu).
+      // publicar no LiveKit — ver prepareScreenAudioForSending /
+      // createScreenAudioDenoiser. `audioTrack` passa a apontar pra
+      // versão FILTRADA daqui em diante.
       if (audioTrack) {
         const prepared = await prepareScreenAudioForSending(audioTrack)
         audioTrack = prepared.track
-        audioSourceStream = prepared.stream
       } else {
         teardownScreenAudioDenoiser()
       }
       screenAudioOutputTrackRef.current = audioTrack
-      // Guarda o ID pra próxima renegociação (seja a de agora mesmo, logo
-      // abaixo, seja uma futura — por exemplo quando outra pessoa entra
-      // na call no meio da transmissão) saber que ESSA é a track que
-      // precisa forçar estéreo no SDP (ver setLocalDescriptionPreferringStereo).
-      screenAudioTrackIdRef.current = audioTrack?.id ?? null
       // "motion" prioriza fluidez de movimento em vez de nitidez de
       // texto estático — melhor pra compartilhar jogo/vídeo do que a
       // opção padrão, que otimiza pra tela parada (documento, planilha)
@@ -2948,42 +2573,38 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
 
       realScreenVideoTrackRef.current = videoTrack
-      peersRef.current.forEach(({ pc }, peerId) => {
-        const sender = pc.addTrack(videoTrack, stream)
-        screenSendersRef.current.set(peerId, sender)
-        const params = sender.getParameters()
-        params.encodings = params.encodings?.length ? params.encodings : [{}]
-        params.encodings[0].maxBitrate = preset.maxBitrate
-        ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
-          preset.degradationPreference
-        sender.setParameters(params).catch(() => {
-          // alguns navegadores/drivers não suportam todos os campos — sem problema, segue com o padrão
+      if (roomRef.current) {
+        // Publica o vídeo da tela — `screenShareEncoding` é o
+        // equivalente, no LiveKit, do `params.encodings[0].maxBitrate` +
+        // `degradationPreference` que antes eram setados na mão em cada
+        // RTCRtpSender de cada peer (ver o comentário grande no preset
+        // em useScreenShareQuality.ts). Como o LiveKit é um SFU, isso é
+        // configurado UMA vez aqui — não precisa mais repetir por peer.
+        screenVideoPublicationRef.current = await roomRef.current.localParticipant.publishTrack(videoTrack, {
+          name: 'screen',
+          source: Track.Source.ScreenShare,
+          screenShareEncoding: {
+            maxBitrate: preset.maxBitrate,
+            maxFramerate: preset.frameRate,
+          },
+          degradationPreference: preset.degradationPreference,
+          simulcast: false,
         })
         if (audioTrack) {
-          // Mesmo ajuste do bloco de quem entra depois (createPeerConnection
-          // acima) — o áudio da transmissão precisa do PRÓPRIO teto de
-          // bitrate (128kbps, pensado pra som de jogo/música), não o
-          // preset de vídeo nem o padrão baixo do navegador.
-          const audioSender = pc.addTrack(audioTrack, audioSourceStream)
-          const audioParams = audioSender.getParameters()
-          audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
-          audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
-          audioSender.setParameters(audioParams).catch(() => {})
-          audioSendersRef.current.set(peerId, audioSender)
+          // Mesmo ajuste de antes — o áudio da transmissão precisa do
+          // PRÓPRIO teto de bitrate (pensado pra som de jogo/música,
+          // bem maior que o do microfone) e estéreo de verdade
+          // (forceStereo substitui o antigo SDP munging manual de
+          // sdpStereo.ts — o LiveKit já negocia isso nativamente).
+          screenAudioPublicationRef.current = await roomRef.current.localParticipant.publishTrack(audioTrack, {
+            name: 'screen-audio',
+            source: Track.Source.ScreenShareAudio,
+            audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
+            forceStereo: true,
+            dtx: false,
+          })
         }
-      })
-      // DÉCIMA QUINTA RODADA — guarda a MediaStream de áudio (pra
-      // createPeerConnection reaproveitar o MESMO .id com quem entrar
-      // depois — ver o comentário grande em screenAudioSourceStreamRef) e
-      // reenvia o broadcast agora com o .id do áudio, já resolvido. O
-      // broadcast lá em cima (logo depois de captureScreenShareStream)
-      // saiu só com o vídeo — nesse momento a captura de áudio ainda nem
-      // tinha começado — então esse segundo envio é o que finalmente
-      // avisa a sala que a stream de áudio X é a mesma tela; sem ele,
-      // recomputeParticipant nunca teria como saber disso e a track de
-      // áudio caía como se fosse webcam (o bug original desta rodada).
-      screenAudioSourceStreamRef.current = audioTrack ? audioSourceStream : null
-      broadcastScreenMeta(stream.id, audioTrack ? audioSourceStream.id : null)
+      }
       setScreenSharing(true)
 
       // Mitigação de vazamento pro caso "compartilhar seu jogo" em tela
@@ -3002,27 +2623,23 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             if (!started || !window.electronAPI) return
             foregroundWatchUnsubRef.current = window.electronAPI.onGameForegroundChanged((focused) => {
               const realTrack = realScreenVideoTrackRef.current
-              if (!realTrack) return
+              const publishedTrack = screenVideoPublicationRef.current?.track as LocalVideoTrack | undefined
+              if (!realTrack || !publishedTrack) return
               if (focused) {
-                // Voltou pro jogo — restaura o vídeo de verdade em todo
-                // mundo e descarta a cortina (não precisa mais dela até
-                // a próxima vez que a pessoa alternar pra fora).
-                screenSendersRef.current.forEach((sender) => {
-                  sender.replaceTrack(realTrack).catch(() => {})
-                })
+                // Voltou pro jogo — restaura o vídeo de verdade e descarta
+                // a cortina (não precisa mais dela até a próxima vez que a
+                // pessoa alternar pra fora).
+                publishedTrack.replaceTrack(realTrack, true).catch(() => {})
                 if (placeholderTrackRef.current) {
                   placeholderTrackRef.current.stop()
                   placeholderTrackRef.current = null
                 }
               } else {
-                // Saiu do jogo (alt-tab) — troca pela cortina em todo
-                // mundo antes que qualquer frame do resto da tela chegue
-                // a ser enviado.
+                // Saiu do jogo (alt-tab) — troca pela cortina antes que
+                // qualquer frame do resto da tela chegue a ser enviado.
                 if (!placeholderTrackRef.current) placeholderTrackRef.current = createPlaceholderVideoTrack()
                 const placeholder = placeholderTrackRef.current
-                screenSendersRef.current.forEach((sender) => {
-                  sender.replaceTrack(placeholder).catch(() => {})
-                })
+                publishedTrack.replaceTrack(placeholder, true).catch(() => {})
               }
             })
           })
@@ -3137,12 +2754,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // `newStream` já pode vir com a track de áudio embutida (seletor
       // nativo do sistema, ver captureScreenShareStream).
       let newAudioTrack: MediaStreamTrack | null = newStream.getAudioTracks()[0] ?? null
-      let audioSourceStream: MediaStream = newStream
       newVideoTrack.contentHint = 'motion'
 
       const oldVideoTrack = realScreenVideoTrackRef.current
-      const oldAudioTrackId = screenAudioTrackIdRef.current
-      const hadAudioBefore = Boolean(oldAudioTrackId)
 
       // Cancela o vigia de foco/fechamento da fonte ANTERIOR antes de
       // trocar — senão, se a fonte antiga fosse o caso especial "tela
@@ -3176,7 +2790,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const appAudioTrack = await startAppAudioCapture(appAudioPid)
         if (appAudioTrack) {
           newAudioTrack = appAudioTrack
-          audioSourceStream = appAudioPlayerRef.current?.stream ?? newStream
           appAudioTrackRef.current = appAudioTrack
         }
       }
@@ -3184,7 +2797,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const systemAudioTrack = await captureSystemAudioTrack()
         if (systemAudioTrack) {
           newAudioTrack = systemAudioTrack
-          audioSourceStream = new MediaStream([systemAudioTrack])
           systemAudioTrackRef.current = systemAudioTrack
         }
       }
@@ -3197,49 +2809,46 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
 
       // DÉCIMA SÉTIMA RODADA: idem toggleScreenShare acima — filtra a
-      // track de áudio da fonte NOVA antes de trocar nos peers.
+      // track de áudio da fonte NOVA antes de publicar.
       if (newAudioTrack) {
         const prepared = await prepareScreenAudioForSending(newAudioTrack)
         newAudioTrack = prepared.track
-        audioSourceStream = prepared.stream
       } else {
         teardownScreenAudioDenoiser()
       }
 
-      peersRef.current.forEach(({ pc }, peerId) => {
-        let audioHandled = false
-        pc.getSenders().forEach((sender) => {
-          if (sender.track === oldVideoTrack) {
-            sender.replaceTrack(newVideoTrack).catch(() => {})
-            const params = sender.getParameters()
-            params.encodings = params.encodings?.length ? params.encodings : [{}]
-            params.encodings[0].maxBitrate = preset.maxBitrate
-            ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference =
-              preset.degradationPreference
-            sender.setParameters(params).catch(() => {})
-          } else if (hadAudioBefore && sender.track?.id === oldAudioTrackId) {
-            // Troca o áudio também quando já existia um sender de áudio
-            // antes — inclusive pra REMOVER (replaceTrack(null)) se a
-            // nova escolha não tiver áudio (ex: trocou de "tela inteira
-            // com áudio do sistema" pra "só uma janela específica",
-            // que nunca tem essa opção).
-            sender.replaceTrack(newAudioTrack).catch(() => {})
-            audioHandled = true
-          }
-        })
+      // Troca só o CONTEÚDO da publicação já existente via replaceTrack —
+      // como isso não republica nem renegocia nada, não dispara nenhum
+      // piscar de "parou/começou de novo" pra quem está assistindo,
+      // exatamente como o replaceTrack em cada RTCRtpSender fazia antes.
+      const videoPublishedTrack = screenVideoPublicationRef.current?.track as LocalVideoTrack | undefined
+      if (videoPublishedTrack) {
+        await videoPublishedTrack.replaceTrack(newVideoTrack, true)
+      }
+
+      if (newAudioTrack && screenAudioPublicationRef.current?.track) {
+        // Já existia áudio publicado antes — só troca o conteúdo.
+        await (screenAudioPublicationRef.current.track as LocalAudioTrack).replaceTrack(newAudioTrack, true)
+      } else if (newAudioTrack && !screenAudioPublicationRef.current && roomRef.current) {
         // Ganhou áudio que não existia antes (ex: trocou de "só uma
         // janela" pra "tela inteira" com o áudio do sistema marcado) —
-        // isso sim precisa de um addTrack de verdade, o que dispara uma
-        // pequena renegociação só pra esse caso específico.
-        if (newAudioTrack && !hadAudioBefore && !audioHandled) {
-          const audioSender = pc.addTrack(newAudioTrack, audioSourceStream)
-          const audioParams = audioSender.getParameters()
-          audioParams.encodings = audioParams.encodings?.length ? audioParams.encodings : [{}]
-          audioParams.encodings[0].maxBitrate = SCREEN_SHARE_AUDIO_MAX_BITRATE
-          audioSender.setParameters(audioParams).catch(() => {})
-          audioSendersRef.current.set(peerId, audioSender)
-        }
-      })
+        // precisa de uma publicação nova.
+        screenAudioPublicationRef.current = await roomRef.current.localParticipant.publishTrack(newAudioTrack, {
+          name: 'screen-audio',
+          source: Track.Source.ScreenShareAudio,
+          audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
+          forceStereo: true,
+          dtx: false,
+        })
+      } else if (!newAudioTrack && screenAudioPublicationRef.current) {
+        // Perdeu o áudio que existia antes (ex: trocou de "tela inteira
+        // com áudio do sistema" pra "só uma janela específica", que nunca
+        // tem essa opção) — despublica de vez, replaceTrack(null) não é
+        // suportado pra remover uma publicação no LiveKit.
+        const oldAudioPublished = screenAudioPublicationRef.current.track
+        if (oldAudioPublished) roomRef.current?.localParticipant.unpublishTrack(oldAudioPublished)
+        screenAudioPublicationRef.current = null
+      }
 
       // Só agora encerra a captura ANTIGA de verdade (indicador do
       // sistema apaga, recursos liberados) — e limpa o onended dela
@@ -3251,17 +2860,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       screenStreamRef.current = newStream
       setLocalScreenStream(newStream)
       realScreenVideoTrackRef.current = newVideoTrack
-      screenAudioTrackIdRef.current = newAudioTrack?.id ?? null
       screenAudioOutputTrackRef.current = newAudioTrack
-      // DÉCIMA QUINTA RODADA — idem toggleScreenShare acima: guarda a
-      // stream de áudio da fonte NOVA (pra quem entrar depois reaproveitar
-      // o mesmo .id) e avisa a sala com os dois ids já resolvidos, não só
-      // o de vídeo.
-      screenAudioSourceStreamRef.current = newAudioTrack ? audioSourceStream : null
       newVideoTrack.onended = () => {
         stopScreenShareState()
       }
-      broadcastScreenMeta(newStream.id, newAudioTrack ? audioSourceStream.id : null)
 
       // Mesmo par de mitigações de "compartilhar seu jogo" em tela cheia
       // do toggleScreenShare acima, agora pra a fonte NOVA — ver os
@@ -3279,11 +2881,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             if (!started || !window.electronAPI) return
             foregroundWatchUnsubRef.current = window.electronAPI.onGameForegroundChanged((focused) => {
               const realTrack = realScreenVideoTrackRef.current
-              if (!realTrack) return
+              const publishedTrack = screenVideoPublicationRef.current?.track as LocalVideoTrack | undefined
+              if (!realTrack || !publishedTrack) return
               if (focused) {
-                screenSendersRef.current.forEach((sender) => {
-                  sender.replaceTrack(realTrack).catch(() => {})
-                })
+                publishedTrack.replaceTrack(realTrack, true).catch(() => {})
                 if (placeholderTrackRef.current) {
                   placeholderTrackRef.current.stop()
                   placeholderTrackRef.current = null
@@ -3291,9 +2892,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
               } else {
                 if (!placeholderTrackRef.current) placeholderTrackRef.current = createPlaceholderVideoTrack()
                 const placeholder = placeholderTrackRef.current
-                screenSendersRef.current.forEach((sender) => {
-                  sender.replaceTrack(placeholder).catch(() => {})
-                })
+                publishedTrack.replaceTrack(placeholder, true).catch(() => {})
               }
             })
           })
@@ -3309,35 +2908,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Detecção de fala: amostra o nível de áudio de cada analyser a cada 100ms.
-  // Era 200ms — combinado com o smoothingTimeConstant zerado acima
-  // (ver setupAnalyser), 100ms deixa o pior caso de atraso pra ACENDER o
-  // anel de "falando" em torno de 100ms (imperceptível), em vez de até
-  // 200ms sozinho antes já seria bem menor que os ~2s de antes, mas
-  // ainda dava pra apertar mais sem custo nenhum de CPU perceptível.
-  useEffect(() => {
-    if (!connectedChannelId) return
-    const buffer = new Uint8Array(256)
-    const interval = setInterval(() => {
-      const now = Date.now()
-      analysersRef.current.forEach((analyser, key) => {
-        analyser.getByteFrequencyData(buffer)
-        const avg = buffer.reduce((a, b) => a + b, 0) / buffer.length
-        if (avg > SPEAKING_THRESHOLD) lastAboveThresholdRef.current.set(key, now)
-        const lastAbove = lastAboveThresholdRef.current.get(key) ?? 0
-        const isSpeaking = now - lastAbove < SPEAKING_RELEASE_MS
-        if (key === 'local') {
-          setSpeaking((prev) => (prev !== isSpeaking ? isSpeaking : prev))
-        } else {
-          setParticipants((prev) => {
-            if (!prev[key] || prev[key].speaking === isSpeaking) return prev
-            return { ...prev, [key]: { ...prev[key], speaking: isSpeaking } }
-          })
-        }
-      })
-    }, 100)
-    return () => clearInterval(interval)
-  }, [connectedChannelId])
+  // TRIGÉSIMA QUARTA RODADA — o polling de "quem está falando" (analyser
+  // por participante, a cada 100ms) foi removido: já é tratado dentro de
+  // attachRoomEvents, via RoomEvent.ActiveSpeakersChanged, que o LiveKit
+  // dispara sozinho sempre que muda.
 
   return (
     <VoiceContext.Provider
@@ -3347,6 +2921,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         joiningChannelId,
         connectedAt,
         connectionQuality,
+        localConnectionQuality,
         connectedServerId,
         connecting,
         error,

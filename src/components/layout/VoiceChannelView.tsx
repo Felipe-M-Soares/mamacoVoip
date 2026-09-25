@@ -411,15 +411,21 @@ function ParticipantTile({
         {!isLocal && voice.connectionQuality[userId] !== undefined && (
           <span
             className={`text-[10px] font-mono font-normal ${
-              voice.connectionQuality[userId] < 100
+              voice.connectionQuality[userId] === 'excellent'
                 ? 'text-discord-green'
-                : voice.connectionQuality[userId] < 250
+                : voice.connectionQuality[userId] === 'good'
                   ? 'text-yellow-400'
                   : 'text-red-400'
             }`}
-            title="Latência real da chamada com essa pessoa"
+            title="Qualidade da conexão dessa pessoa com o servidor de voz"
           >
-            {voice.connectionQuality[userId]}ms
+            {voice.connectionQuality[userId] === 'excellent'
+              ? 'Ótima'
+              : voice.connectionQuality[userId] === 'good'
+                ? 'Boa'
+                : voice.connectionQuality[userId] === 'poor'
+                  ? 'Instável'
+                  : 'Perdida'}
           </span>
         )}
       </span>

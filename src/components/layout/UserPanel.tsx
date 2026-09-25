@@ -289,20 +289,39 @@ export function UserPanel() {
   const { profile, signOut, updateStatus } = useAuth()
   const voice = useVoice()
   const apiPingMs = useConnectionPing()
-  // Enquanto estiver numa call com pelo menos uma outra pessoa, prefere
-  // a latência REAL medida pela própria conexão de voz (voice.connectionQuality
-  // — round-trip de verdade até quem está na call, via WebRTC getStats(),
-  // já existia mas não tinha lugar nenhum na UI) em vez da latência até
-  // o servidor do banco de dados, que não tem relação com o atraso que
-  // você ouve na voz dos outros.
-  const callRttValues = Object.values(voice.connectionQuality)
-  const callRttMs =
-    voice.connectedChannelId && callRttValues.length > 0
-      ? Math.round(callRttValues.reduce((a, b) => a + b, 0) / callRttValues.length)
+  // TRIGÉSIMA QUARTA RODADA — antes disso, a call era mesh (P2P direto
+  // entre cada dupla de pessoas), então "latência da chamada" fazia
+  // sentido como uma média das idas-e-voltas reais medidas com cada
+  // peer (via WebRTC getStats()). Com o LiveKit (SFU), todo mundo fala
+  // só com o servidor — não existe mais "latência até fulano", só a SUA
+  // latência até o servidor de voz. `localConnectionQuality` (uma
+  // classificação: ótima/boa/instável/perdida, não mais um número em
+  // ms) é o que o LiveKit entrega — mapeada aqui pra um valor em ms
+  // aproximado só pra reaproveitar o mesmo ícone de barrinhas
+  // (WifiSignalIcon) sem precisar reescrevê-lo.
+  const callQualityMs: number | null =
+    voice.connectedChannelId && voice.localConnectionQuality
+      ? voice.localConnectionQuality === 'excellent'
+        ? 40
+        : voice.localConnectionQuality === 'good'
+          ? 150
+          : 350
       : null
-  const pingMs = callRttMs ?? apiPingMs
+  const pingMs = callQualityMs ?? apiPingMs
+  const callQualityLabel =
+    voice.localConnectionQuality === 'excellent'
+      ? 'Ótima'
+      : voice.localConnectionQuality === 'good'
+        ? 'Boa'
+        : voice.localConnectionQuality === 'poor'
+          ? 'Instável'
+          : 'Perdida'
   const pingLabel =
-    pingMs === null ? 'Medindo sua conexão...' : callRttMs !== null ? `${pingMs}ms de latência na chamada` : `${pingMs}ms até o servidor`
+    pingMs === null
+      ? 'Medindo sua conexão...'
+      : callQualityMs !== null
+        ? `Conexão com a chamada: ${callQualityLabel}`
+        : `${pingMs}ms até o servidor`
   const [menuOpen, setMenuOpen] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -328,7 +347,7 @@ export function UserPanel() {
       >
         <WifiSignalIcon pingMs={pingMs} size={12} />
         <span className="text-[10px] text-discord-text-muted truncate">
-          {pingMs === null ? 'Medindo conexão...' : `${pingMs}ms`}
+          {pingMs === null ? 'Medindo conexão...' : callQualityMs !== null ? callQualityLabel : `${pingMs}ms`}
         </span>
       </div>
 

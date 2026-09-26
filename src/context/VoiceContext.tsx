@@ -65,6 +65,34 @@ function logDebug(message: string) {
   window.electronAPI?.logDebug?.(message)
 }
 
+// TRIGÉSIMA NONA RODADA — bug relatado: em algum caso raro, entrar no
+// canal ficava preso em "Conectando..." PRA SEMPRE, sem erro nenhum
+// aparecer. Isso só acontece quando uma das etapas assíncronas (pedir
+// mic, assinar presença, pedir token, ou o handshake com o servidor do
+// LiveKit) nunca resolve E nunca rejeita — ex.: uma trava de firewall
+// que deixa a conexão "pendurada" em vez de recusar na hora. Sem
+// timeout nenhuma dessas trava indefinidamente e a Promise.all() de
+// join() nunca sai do ar. `withTimeout` dá um prazo máximo pra
+// qualquer promise: se não resolver a tempo, rejeita com uma mensagem
+// clara em vez de deixar o botão preso pro resto da sessão.
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Tempo esgotado (${label}). Verifique sua conexão com a internet e tente de novo.`))
+    }, ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
+}
+
 // Antes disso, MAX_PARTICIPANTS (8) era uma proteção real: cada pessoa
 // numa call mesh manda sua própria mídia pra CADA outro peer, então o
 // upload de todo mundo cresce junto com o tamanho da sala — 8 já era o
@@ -2113,28 +2141,55 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // dois (só precisam do channelId/user, que já temos) — rodando os
       // três ao mesmo tempo (Promise.all), o tempo total vira o do MAIS
       // LENTO dos três, não a soma de todos.
-      const micPromise = (async () => {
-        const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
-        const rawTrack = stream.getAudioTracks()[0]
-        const processedTrack = await applyNoiseSuppression(rawTrack)
-        if (processedTrack !== rawTrack) {
-          stream.removeTrack(rawTrack)
-          stream.addTrack(processedTrack)
-        }
-        return { stream, processedTrack }
-      })()
+      // TRIGÉSIMA NONA RODADA — bug relatado: depois das mudanças da
+      // rodada anterior, o botão ficava preso em "Conectando..." pra
+      // sempre, sem NENHUM erro aparecer — ou seja, uma das promises do
+      // Promise.all abaixo nunca resolve E nunca rejeita (se rejeitasse,
+      // cairia no catch e mostraria mensagem). Isso é impossível de
+      // diagnosticar só lendo o código (pode ser o mic preso esperando
+      // permissão, o Realtime nunca confirmando inscrição, ou o LiveKit
+      // nunca terminando o handshake) — por isso cada etapa abaixo agora
+      // grava no log de debug (mamacos-debug.log, em
+      // %APPDATA%/mamacos-voip no Windows) o exato momento em que
+      // começa e termina. Da próxima vez que travar, esse arquivo mostra
+      // exatamente qual etapa nunca imprimiu o "concluído" — é ela que
+      // está presa.
+      logDebug(`join(${channelId}): pedindo microfone...`)
+      const micPromise = withTimeout(
+        (async () => {
+          const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
+          logDebug(`join(${channelId}): microfone obtido, aplicando redução de ruído...`)
+          const rawTrack = stream.getAudioTracks()[0]
+          const processedTrack = await applyNoiseSuppression(rawTrack)
+          if (processedTrack !== rawTrack) {
+            stream.removeTrack(rawTrack)
+            stream.addTrack(processedTrack)
+          }
+          logDebug(`join(${channelId}): microfone pronto.`)
+          return { stream, processedTrack }
+        })(),
+        20_000,
+        'acesso ao microfone'
+      )
 
-      const presencePromise = new Promise<void>((resolve, reject) => {
-        rt.subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
-            resolve()
-          }
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            reject(new Error('Falha ao conectar ao canal de voz'))
-          }
-        })
-      })
+      logDebug(`join(${channelId}): inscrevendo no canal de presença...`)
+      const presencePromise = withTimeout(
+        new Promise<void>((resolve, reject) => {
+          rt.subscribe(async (status) => {
+            logDebug(`join(${channelId}): status do canal de presença = ${status}`)
+            if (status === 'SUBSCRIBED') {
+              await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
+              logDebug(`join(${channelId}): presença anunciada.`)
+              resolve()
+            }
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              reject(new Error('Falha ao conectar ao canal de voz'))
+            }
+          })
+        }),
+        15_000,
+        'canal de presença'
+      )
 
       // Conecta de verdade na sala do LiveKit (a mídia em si) — o token
       // já vem com a checagem de limite de vagas feita do lado do
@@ -2144,13 +2199,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Só pode montar esse pedido DEPOIS de `channelInfoPromise`
       // resolver (é ela quem preenche `channelUserLimitRef.current`) —
       // por isso o `.then()` em vez de entrar solto no Promise.all.
-      const tokenPromise = channelInfoPromise.then(() =>
-        fetchLiveKitToken({
-          room: channelId,
-          name: options?.displayName,
-          userLimit: channelUserLimitRef.current,
-        })
-      )
+      const tokenPromise = channelInfoPromise.then(() => {
+        logDebug(`join(${channelId}): info do canal ok, pedindo token do LiveKit...`)
+        return withTimeout(
+          fetchLiveKitToken({
+            room: channelId,
+            name: options?.displayName,
+            userLimit: channelUserLimitRef.current,
+          }),
+          15_000,
+          'pedido de token do LiveKit'
+        )
+      })
 
       const [{ stream, processedTrack }, , , { token, url: livekitUrl }] = await Promise.all([
         micPromise,
@@ -2158,6 +2218,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         channelInfoPromise,
         tokenPromise,
       ])
+      logDebug(`join(${channelId}): mic + presença + token todos prontos, conectando na sala LiveKit (${livekitUrl})...`)
 
       localStreamRef.current = stream
       mutedRef.current = false
@@ -2173,19 +2234,25 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         },
       })
       attachRoomEvents(room, user.id)
-      await room.connect(livekitUrl, token)
+      await withTimeout(room.connect(livekitUrl, token), 15_000, 'conexão com o servidor de voz')
       roomRef.current = room
+      logDebug(`join(${channelId}): conectado na sala LiveKit, publicando microfone...`)
 
       // Publica o microfone (já tratado pelo RNNoise/gate — ver
       // applyNoiseSuppression acima) e guarda a publicação, usada
       // depois por toggleMute/changeMicrophone/refreshAudioConstraints
       // pra trocar/mutar a track sem precisar procurar em lugar nenhum.
-      micPublicationRef.current = await room.localParticipant.publishTrack(processedTrack, {
-        name: 'microphone',
-        source: Track.Source.Microphone,
-        audioPreset: { maxBitrate: MIC_MAX_BITRATE },
-      })
+      micPublicationRef.current = await withTimeout(
+        room.localParticipant.publishTrack(processedTrack, {
+          name: 'microphone',
+          source: Track.Source.Microphone,
+          audioPreset: { maxBitrate: MIC_MAX_BITRATE },
+        }),
+        15_000,
+        'publicação do microfone'
+      )
       applyMicSenderPriority()
+      logDebug(`join(${channelId}): microfone publicado — entrada concluída.`)
 
       connectedRef.current = true
       setConnectedChannelId(channelId)

@@ -2120,6 +2120,36 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // de vagas agora é checado do lado do SERVIDOR (ver
       // supabase/functions/livekit-token), sem risco de corrida entre
       // dois cliques quase simultâneos.
+      //
+      // TRIGÉSIMA NONA RODADA — causa REAL do "Conectando..." preso pra
+      // sempre (achada depois de investigar o cliente Realtime por
+      // dentro): a barra lateral também se inscreve nesse MESMO tópico
+      // `voice:${channelId}` só pra mostrar "quem está na sala" sem
+      // entrar nela de verdade (ver useVoicePresence.ts). O cliente
+      // Realtime REAPROVEITA o mesmo objeto de canal pra tópicos iguais
+      // (`RealtimeClient.channel()`) — então `supabase.channel(topic)`
+      // aqui embaixo podia devolver o canal que a sidebar já tinha
+      // assinado. E chamar `.subscribe(callback)` numa conexão que já
+      // está entrando/entrou é um NO-OP SILENCIOSO no cliente da
+      // Supabase — sem erro, sem aviso, o `callback` novo (o nosso, que
+      // resolve a `presencePromise` abaixo) simplesmente nunca é
+      // chamado. Isso sempre foi um risco em teoria, mas a RODADA 37
+      // (que trocou a busca de nome/limite do canal por uma promise não
+      // esperada, pra rodar em paralelo) removeu sem querer o único
+      // `await` que existia ANTES desse ponto — era ele que dava tempo
+      // do React re-renderizar e a sidebar se desinscrever primeiro
+      // (via seu próprio efeito de limpeza). Sem aquele `await`, a
+      // sidebar podia ainda estar inscrita quando chegávamos aqui.
+      // Correção definitiva (não depende mais de timing/sorte): remove
+      // explicitamente qualquer canal já registrado sob esse tópico
+      // ANTES de criar o nosso — garante um canal 100% novo pra essa
+      // conexão de verdade, não importa se a sidebar ainda não teve
+      // tempo de se desinscrever.
+      const existingChannel = supabase.getChannels().find((c) => c.topic === `realtime:voice:${channelId}`)
+      if (existingChannel) {
+        logDebug(`join(${channelId}): removendo canal de presença duplicado (estado anterior: ${existingChannel.state})...`)
+        await supabase.removeChannel(existingChannel)
+      }
       const rt = supabase.channel(`voice:${channelId}`, {
         config: { broadcast: { self: false }, presence: { key: user.id } },
       })

@@ -3,7 +3,7 @@ import type { ScreenShareSource, ScreenShareSuggestion } from '../../hooks/useGa
 import { setPendingGameShareHint } from '../../lib/screenShareGameHint'
 import { setPendingAppAudioPid } from '../../lib/pendingAppAudioCapture'
 import { subscribeScreenSharePicker, resolveScreenSharePicker } from '../../lib/screenSharePickerBridge'
-import { QUALITY_PRESETS, loadQuality } from '../../hooks/useScreenShareQuality'
+import { loadQualityPreset } from '../../hooks/useScreenShareQuality'
 import { armScreenShareChoice } from '../../lib/chooseScreenShareSource'
 
 // Versão enxuta: só o essencial — as fontes agrupadas por categoria
@@ -69,7 +69,7 @@ export function ScreenSharePicker() {
   const screens = sources.filter((s) => s.type === 'screen' && s !== gameCard)
   const windows = sources.filter((s) => s.type === 'window' && s !== gameCard)
 
-  const currentQualityPreset = QUALITY_PRESETS[loadQuality()]
+  const currentQualityPreset = loadQualityPreset()
 
   // DÉCIMA QUARTA RODADA: a lógica de "qual PID usar pra essa escolha, e
   // qual recado deixar pro fechamento automático" (antes vivia só aqui,

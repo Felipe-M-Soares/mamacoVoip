@@ -77,7 +77,7 @@ export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sin
 // stream JÁ processada pelo GainNode (sempre a 100% nele mesmo — quem
 // manda no volume de verdade agora é o gain.value).
 let sharedRemoteAudioContext: AudioContext | null = null
-function getSharedRemoteAudioContext(): AudioContext {
+export function getSharedRemoteAudioContext(): AudioContext {
   if (!sharedRemoteAudioContext || sharedRemoteAudioContext.state === 'closed') {
     sharedRemoteAudioContext = new AudioContext()
   }

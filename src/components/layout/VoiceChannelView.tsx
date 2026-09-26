@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { VideoTile, RemoteAudio } from './CallMediaTiles'
 import { useAuth } from '../../hooks/useAuth'
@@ -22,17 +22,12 @@ import type { Channel, Profile, Role } from '../../types/database'
 
 // "Palco" de compartilhamentos de tela: divide o espaço certinho
 // dependendo de quantas pessoas estão compartilhando ao mesmo tempo.
-function ScreenShareAudio({ stream, volume }: { stream: MediaStream; volume: number }) {
-  const ref = useRef<HTMLAudioElement>(null)
-  useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream
-  }, [stream])
-  useEffect(() => {
-    if (ref.current) ref.current.volume = Math.max(0, Math.min(1, volume))
-  }, [volume])
-  if (stream.getAudioTracks().length === 0) return null
-  return <audio ref={ref} autoPlay />
-}
+// TRIGÉSIMA SÉTIMA RODADA — o áudio da transmissão agora reaproveita o
+// MESMO <RemoteAudio> (CallMediaTiles.tsx) usado pra voz/câmera, que já
+// tem o grafo de Web Audio (GainNode) capaz de REFORÇAR o volume acima
+// de 100% de verdade — antes, o áudio de uma transmissão de tela só
+// conseguia ser atenuado (o <audio>.volume nativo trava em 1.0), sem
+// jeito nenhum de compensar um jogo/app com o volume de saída baixo.
 
 function ScreenShareStage({
   shares,
@@ -115,7 +110,9 @@ function ScreenShareStage({
                 }}
               />
             )}
-            {!share.isLocal && <ScreenShareAudio stream={share.stream} volume={effectiveVolume} />}
+            {!share.isLocal && share.stream.getAudioTracks().length > 0 && (
+              <RemoteAudio stream={share.stream} volume={effectiveVolume} />
+            )}
             <span className="absolute bottom-1.5 left-2 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded flex items-center gap-1">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
                 <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
@@ -162,11 +159,12 @@ function ScreenShareStage({
                       <input
                         type="range"
                         min={0}
-                        max={100}
+                        max={200}
                         value={shareVolume}
                         onChange={(e) => voice.setScreenShareVolume(share.key, Number(e.target.value))}
                         className="w-full accent-discord-blurple"
                       />
+                      <p className="text-[9px] text-discord-text-muted/70 mt-1">Acima de 100% reforça o som (útil se o jogo/app estiver baixo).</p>
                     </div>
                   )}
                 </div>
@@ -982,20 +980,41 @@ export function VoiceChannelView({
                 <select> sem legenda nenhuma, fácil de nem notar que dava
                 pra escolher qualidade/fps. */}
             {!voice.screenSharing && (
-              <div className="flex flex-col items-start gap-0.5">
-                <span className="text-[9px] font-bold uppercase text-discord-text-muted px-1">
-                  Qualidade da transmissão
-                </span>
-                <select
-                  value={voice.screenShareQuality.quality}
-                  onChange={(e) => voice.screenShareQuality.setQuality(e.target.value as 'performance' | 'quality')}
-                  title="Qualidade e fps do compartilhamento de tela"
-                  aria-label="Qualidade e fps do compartilhamento de tela"
-                  className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none max-w-[190px] truncate"
-                >
-                  <option value="performance">Desempenho — 1080p, 30fps</option>
-                  <option value="quality">Qualidade máxima — resolução da sua tela, até 60fps</option>
-                </select>
+              <div className="flex items-end gap-1.5">
+                <div className="flex flex-col items-start gap-0.5">
+                  <span className="text-[9px] font-bold uppercase text-discord-text-muted px-1">Resolução</span>
+                  <select
+                    value={voice.screenShareQuality.resolution}
+                    onChange={(e) =>
+                      voice.screenShareQuality.setResolution(e.target.value as (typeof voice.screenShareQuality.resolutionOptions)[number]['value'])
+                    }
+                    title="Resolução do compartilhamento de tela"
+                    aria-label="Resolução do compartilhamento de tela"
+                    className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none max-w-[150px] truncate"
+                  >
+                    {voice.screenShareQuality.resolutionOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col items-start gap-0.5">
+                  <span className="text-[9px] font-bold uppercase text-discord-text-muted px-1">FPS</span>
+                  <select
+                    value={voice.screenShareQuality.frameRate}
+                    onChange={(e) => voice.screenShareQuality.setFrameRate(Number(e.target.value) as 15 | 30 | 60)}
+                    title="Taxa de quadros do compartilhamento de tela"
+                    aria-label="Taxa de quadros do compartilhamento de tela"
+                    className="bg-discord-lighter text-discord-text text-xs rounded-full px-3 py-2 outline-none"
+                  >
+                    {voice.screenShareQuality.frameRateOptions.map((fps) => (
+                      <option key={fps} value={fps}>
+                        {fps}fps
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             )}
 

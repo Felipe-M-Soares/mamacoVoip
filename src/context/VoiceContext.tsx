@@ -1097,7 +1097,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }
 
   function setScreenShareVolume(userId: string, volume: number) {
-    const clamped = Math.max(0, Math.min(100, volume))
+    // TRIGÉSIMA SÉTIMA RODADA — teto subiu de 100 pra 200, igual já
+    // valia pro volume de cada PARTICIPANTE (ver setParticipantVolume
+    // acima) — sem isso, uma transmissão com o som do jogo/app baixo
+    // não tinha jeito nenhum de ser reforçada, só atenuada.
+    const clamped = Math.max(0, Math.min(200, volume))
     setScreenShareVolumesState((prev) => {
       const next = { ...prev, [userId]: clamped }
       try {
@@ -1685,18 +1689,41 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // (soundboardVolume), não o volume geral da call — cada pessoa que
   // ESCUTA controla o quanto os efeitos tocam pra ela, sem depender de
   // quem enviou o som.
+  // TRIGÉSIMA SÉTIMA RODADA — bug relatado: mexer no slider de "Volume
+  // dos efeitos" enquanto um som JÁ estava tocando não tinha efeito
+  // nenhum nele (só valia pro PRÓXIMO som a tocar) — porque o volume só
+  // era lido uma vez, na hora de criar o elemento <audio>. Este Set
+  // guarda todo elemento de áudio de efeito sonoro ATIVO agora; o
+  // useEffect logo abaixo, que reage a mudanças em `soundboardVolume`,
+  // atualiza o `.volume` de todos eles em tempo real.
+  const activeSoundboardAudiosRef = useRef<Set<HTMLAudioElement>>(new Set())
+
   function playLocalSoundboardAudio(url: string) {
     try {
       const audio = new Audio(url)
       audio.volume = soundboardVolume / 100
+      activeSoundboardAudiosRef.current.add(audio)
+      const forget = () => activeSoundboardAudiosRef.current.delete(audio)
+      audio.addEventListener('ended', forget)
+      audio.addEventListener('error', forget)
       audio.play().catch(() => {
         // navegador pode bloquear play() sem interação recente — sem
         // problema, quem clicou no botão do som É a interação
+        forget()
       })
     } catch {
       // fonte de áudio inválida/indisponível — não deveria travar a call
     }
   }
+
+  // Ver o comentário grande em activeSoundboardAudiosRef acima — isso é
+  // o que faz o slider de "Volume dos efeitos" valer NA HORA pra som que
+  // já está tocando, não só pro próximo.
+  useEffect(() => {
+    activeSoundboardAudiosRef.current.forEach((audio) => {
+      audio.volume = soundboardVolume / 100
+    })
+  }, [soundboardVolume])
 
   // Toca o som pra MIM (na hora) e avisa todo mundo mais no canal de voz
   // pra tocarem a mesma URL aí também — cada um busca e reproduz
@@ -1770,6 +1797,40 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (track) tracks.set(source, track)
     else tracks.delete(source)
     recomputeParticipant(participantId)
+  }
+
+  // TRIGÉSIMA SEXTA RODADA — bug relatado: às vezes duas pessoas na
+  // call simplesmente não se ouviam. Causa provável: antes (mesh de
+  // RTCPeerConnection), o sender de ÁUDIO do microfone tinha
+  // `priority`/`networkPriority` = 'high' setado na mão em cada peer
+  // (ver o comentário grande que existia em createPeerConnection) —
+  // isso pede pro navegador tratar pacotes de voz como mais urgentes
+  // que outros tipos de tráfego (ex.: vídeo da transmissão de tela)
+  // quando o upload está congestionado. Na migração pro LiveKit isso
+  // ficou de fora sem querer — o TrackPublishOptions do LiveKit não
+  // tem um campo direto pra isso, mas a publicação AINDA usa um
+  // RTCRtpSender de verdade por baixo (exposto via `track.sender`),
+  // então dá pra aplicar o mesmo ajuste na mão, só que uma vez, aqui.
+  // Sem isso, numa call com transmissão de tela ativa e upload
+  // apertado, os pacotes de voz podiam ficar competindo com os de
+  // vídeo e chegando atrasados/perdidos — o que bate exatamente com
+  // "às vezes não se ouvem".
+  function applyMicSenderPriority() {
+    const sender = (micPublicationRef.current?.track as LocalAudioTrack | undefined)?.sender
+    if (!sender) return
+    try {
+      const params = sender.getParameters()
+      params.encodings = params.encodings?.length ? params.encodings : [{}]
+      if ('priority' in params.encodings[0]) {
+        ;(params.encodings[0] as RTCRtpEncodingParameters & { priority?: string }).priority = 'high'
+      }
+      if ('networkPriority' in params.encodings[0]) {
+        ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: string }).networkPriority = 'high'
+      }
+      sender.setParameters(params).catch(() => {})
+    } catch {
+      // navegador sem suporte a esse ajuste — sem problema, só não aplica
+    }
   }
 
   function mapConnectionQuality(quality: LiveKitConnectionQuality): VoiceConnectionQuality {
@@ -1918,17 +1979,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
     let room: Room | null = null
     try {
-      const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
-      const rawTrack = stream.getAudioTracks()[0]
-      const processedTrack = await applyNoiseSuppression(rawTrack)
-      if (processedTrack !== rawTrack) {
-        stream.removeTrack(rawTrack)
-        stream.addTrack(processedTrack)
-      }
-      localStreamRef.current = stream
-      mutedRef.current = false
-      applyMicEnabledState(false)
-
       // Canal Realtime do Supabase — hoje serve só pra DUAS coisas, bem
       // mais simples do que antes: (1) anunciar "estou nesse canal de
       // voz" pra sidebar conseguir mostrar quem está numa call sem
@@ -1950,7 +2000,29 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         playLocalSoundboardAudio(url)
       })
 
-      await new Promise<void>((resolve, reject) => {
+      // TRIGÉSIMA SÉTIMA RODADA — bug relatado: entrar num canal de voz
+      // sempre demorava uns bons 2-3 segundos, mesmo em conexões boas.
+      // Causa: pedir o microfone, assinar+anunciar presença no Realtime,
+      // e pedir o token de acesso do LiveKit rodavam em SÉRIE, um
+      // esperando o anterior terminar — cada um é uma ida-e-volta de
+      // rede própria (ou, no caso do mic, o carregamento do WASM do
+      // RNNoise na primeira vez), e o tempo total sentido era a SOMA
+      // dos três. Nenhum desses três depende do RESULTADO dos outros
+      // dois (só precisam do channelId/user, que já temos) — rodando os
+      // três ao mesmo tempo (Promise.all), o tempo total vira o do MAIS
+      // LENTO dos três, não a soma de todos.
+      const micPromise = (async () => {
+        const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
+        const rawTrack = stream.getAudioTracks()[0]
+        const processedTrack = await applyNoiseSuppression(rawTrack)
+        if (processedTrack !== rawTrack) {
+          stream.removeTrack(rawTrack)
+          stream.addTrack(processedTrack)
+        }
+        return { stream, processedTrack }
+      })()
+
+      const presencePromise = new Promise<void>((resolve, reject) => {
         rt.subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
             await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
@@ -1967,11 +2039,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // servidor (ver supabase/functions/livekit-token); `RoomFullError`
       // é o sinal específico disso, tratado no catch abaixo pra mostrar
       // a mesma mensagem de antes ("Esse canal de voz já está cheio.").
-      const { token, url: livekitUrl } = await fetchLiveKitToken({
+      const tokenPromise = fetchLiveKitToken({
         room: channelId,
         name: options?.displayName,
         userLimit: channelUserLimitRef.current,
       })
+
+      const [{ stream, processedTrack }, , { token, url: livekitUrl }] = await Promise.all([
+        micPromise,
+        presencePromise,
+        tokenPromise,
+      ])
+
+      localStreamRef.current = stream
+      mutedRef.current = false
+      applyMicEnabledState(false)
 
       room = new Room({
         adaptiveStream: true,
@@ -1994,6 +2076,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         source: Track.Source.Microphone,
         audioPreset: { maxBitrate: MIC_MAX_BITRATE },
       })
+      applyMicSenderPriority()
 
       connectedRef.current = true
       setConnectedChannelId(channelId)
@@ -2266,6 +2349,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // `sender.replaceTrack()` fazia em cada RTCPeerConnection.
       const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
       if (micTrack) await micTrack.replaceTrack(newTrack, true)
+      applyMicSenderPriority()
     } catch {
       setError('Não foi possível trocar de microfone.')
     }
@@ -2317,6 +2401,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
       if (micTrack) await micTrack.replaceTrack(newTrack, true)
+      applyMicSenderPriority()
     } catch {
       // se falhar, o microfone atual continua funcionando com as configs antigas
     }
@@ -2592,9 +2677,28 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // RTCRtpSender de cada peer (ver o comentário grande no preset
         // em useScreenShareQuality.ts). Como o LiveKit é um SFU, isso é
         // configurado UMA vez aqui — não precisa mais repetir por peer.
+        //
+        // TRIGÉSIMA SEXTA RODADA — bug relatado: compartilhar tela
+        // pesava/travava o JOGO em si, não só a qualidade pra quem
+        // assiste. Causa provável: sem `videoCodec` explícito, o
+        // navegador/Electron escolhe o codec sozinho — e o padrão
+        // (VP8) só tem encoder por SOFTWARE na maioria dos sistemas
+        // (sem aceleração de GPU), disputando a CPU diretamente com o
+        // jogo. H.264 já tem encoder por HARDWARE na maioria das
+        // placas de vídeo (Intel Quick Sync, NVENC da Nvidia, VCE da
+        // AMD) — pedindo ele explicitamente, o Chromium usa esse
+        // caminho acelerado por GPU quando disponível, tirando quase
+        // todo esse trabalho da CPU (que o jogo continua usando à
+        // vontade). `backupCodec: false` evita que o LiveKit publique
+        // uma SEGUNDA versão da transmissão codificada num codec
+        // alternativo "por garantia" — sem isso, em alguns casos o
+        // navegador acaba codificando duas vezes ao mesmo tempo, o
+        // dobro de trabalho de CPU/GPU à toa.
         screenVideoPublicationRef.current = await roomRef.current.localParticipant.publishTrack(videoTrack, {
           name: 'screen',
           source: Track.Source.ScreenShare,
+          videoCodec: 'h264',
+          backupCodec: false,
           screenShareEncoding: {
             maxBitrate: preset.maxBitrate,
             maxFramerate: preset.frameRate,

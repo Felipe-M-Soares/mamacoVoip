@@ -2002,12 +2002,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       playConnectSound()
     } catch (err) {
       const isRoomFull = err instanceof Error && err.name === 'RoomFullError'
+      const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      logDebug(`join(${channelId}): falhou — ${detail}`)
       setError(
         isRoomFull
           ? 'Esse canal de voz já está cheio.'
           : err instanceof Error && err.name === 'NotAllowedError'
             ? 'Permissão de microfone negada. Habilite o acesso ao microfone e tente de novo.'
-            : 'Não foi possível entrar no canal de voz.'
+            // TRIGÉSIMA QUINTA RODADA — antes disso, QUALQUER falha ao
+            // conectar no LiveKit (secret faltando, função não
+            // publicada, servidor fora do ar) caía sempre nesta mesma
+            // mensagem genérica, obrigando quem está diagnosticando a
+            // abrir o DevTools/log pra descobrir o motivo real. Agora
+            // mostra a mensagem de erro de verdade (ver
+            // extractFunctionErrorMessage em lib/livekit.ts, que já lê o
+            // corpo da resposta da Edge Function) direto na tela.
+            : err instanceof Error && err.message
+              ? err.message
+              : 'Não foi possível entrar no canal de voz.'
       )
       localStreamRef.current?.getTracks().forEach((t) => t.stop())
       localStreamRef.current = null

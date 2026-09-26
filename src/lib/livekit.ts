@@ -1,3 +1,4 @@
+import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 
 // Sala/transmissão de voz e vídeo migrou de um mesh manual de
@@ -23,6 +24,23 @@ export interface LiveKitTokenResult {
   url: string
 }
 
+// Extrai a mensagem de erro REAL que a Edge Function mandou (o corpo
+// JSON `{ error: "..." }`, definido em supabase/functions/livekit-token)
+// em vez de deixar só um "Edge Function returned a non-2xx status code"
+// genérico — isso é o que torna um problema de configuração (secret
+// faltando, função não publicada, LiveKit fora do ar) diagnosticável
+// pela mensagem de erro sozinha, sem precisar abrir o DevTools.
+async function extractFunctionErrorMessage(error: unknown): Promise<string | null> {
+  if (!(error instanceof FunctionsHttpError)) return null
+  try {
+    const body = await error.context.clone().json()
+    if (body && typeof body.error === 'string') return body.error
+  } catch {
+    // corpo não era JSON, ou já foi consumido — sem problema, cai no genérico
+  }
+  return null
+}
+
 // Pede um token de acesso pra uma sala específica (o `channelId`, igual
 // já era usado como tópico do canal Realtime de sinalização antes —
 // mantém a mesma convenção de nomes de sala, sem precisar mudar nada
@@ -40,7 +58,13 @@ export async function fetchLiveKitToken(params: {
     { body: params }
   )
   if (error) {
-    throw new Error('Não foi possível conectar ao servidor de voz.')
+    const detail = await extractFunctionErrorMessage(error)
+    if (detail === 'A sala está cheia.') {
+      const full = new Error(detail)
+      full.name = 'RoomFullError'
+      throw full
+    }
+    throw new Error(detail || `Não foi possível conectar ao servidor de voz (${error.message}).`)
   }
   if (!data || !data.token || !data.url) {
     if (data?.code === 'room_full') {

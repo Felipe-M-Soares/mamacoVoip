@@ -165,14 +165,31 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
       {tab === 'perfil' && (
         <div className="space-y-4">
           <div className="flex flex-col items-center gap-1.5">
+            {/* TRIGÉSIMA OITAVA RODADA — mesmo tratamento aplicado ao
+                ícone de servidor: sem foto, mostra um ícone de imagem
+                (em vez de "Enviar foto" espremido dentro do círculo) e
+                o rótulo fica fora, embaixo; com foto, hover mostra
+                overlay escuro com lápis + "Trocar". */}
             <button
               onClick={() => avatarInputRef.current?.click()}
-              className="w-20 h-20 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors"
+              className="relative w-20 h-20 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted/60 flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors group"
             >
               {avatarPreview ? (
-                <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
+                <>
+                  <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
+                  <span className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-white">
+                      <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                    </svg>
+                    <span className="text-[10px] font-medium text-white">Trocar</span>
+                  </span>
+                </>
               ) : (
-                <span className="text-xs text-discord-text-muted text-center px-2">Enviar foto</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7 text-discord-text-muted group-hover:text-discord-blurple transition-colors">
+                  <rect x="3" y="3" width="18" height="18" rx="3" />
+                  <circle cx="8.5" cy="9.5" r="1.5" />
+                  <path d="M21 15l-5-5-9 9" />
+                </svg>
               )}
             </button>
             <input
@@ -182,6 +199,9 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
               className="hidden"
               onChange={handleAvatarChange}
             />
+            {!avatarPreview && (
+              <p className="text-xs font-medium text-discord-text-muted text-center">Enviar foto</p>
+            )}
             <p className="text-[11px] text-discord-text-muted text-center max-w-[280px]">{AVATAR_HELP}</p>
             {avatarError && <p className="text-xs text-red-400">{avatarError}</p>}
           </div>

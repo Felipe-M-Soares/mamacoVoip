@@ -98,18 +98,35 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
           </p>
 
           <div className="flex flex-col items-center gap-2">
+            {/* TRIGÉSIMA OITAVA RODADA — bug relatado: esse botão de ícone
+                ficava muito apertado, com "Enviar / ícone" quebrado em
+                texto minúsculo dentro do círculo tracejado — visual
+                confuso e amador. Troca: quando não tem imagem, mostra um
+                ícone de imagem (mais legível que texto picotado) e o
+                rótulo "Adicionar ícone" fica FORA do círculo, embaixo,
+                com espaço de sobra. Quando já tem imagem, o hover mostra
+                uma sobreposição escura com ícone de lápis + "Trocar",
+                igual ao padrão usado no avatar do EditProfileModal. */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="relative w-24 h-24 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors group"
+              className="relative w-24 h-24 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted/60 flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors group"
             >
               {iconPreview ? (
-                <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover" />
+                <>
+                  <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover" />
+                  <span className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-white">
+                      <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                    </svg>
+                    <span className="text-[10px] font-medium text-white">Trocar</span>
+                  </span>
+                </>
               ) : (
-                <span className="text-[11px] text-discord-text-muted text-center px-3 leading-snug">
-                  Enviar
-                  <br />
-                  ícone
-                </span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8 text-discord-text-muted group-hover:text-discord-blurple transition-colors">
+                  <rect x="3" y="3" width="18" height="18" rx="3" />
+                  <circle cx="8.5" cy="9.5" r="1.5" />
+                  <path d="M21 15l-5-5-9 9" />
+                </svg>
               )}
               {/* Selo de "editar" no canto — mesma linguagem visual que a
                   troca de avatar/banner usa em EditProfileModal, deixa
@@ -121,6 +138,9 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
               </span>
             </button>
             <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleIconChange} />
+            {!iconPreview && (
+              <p className="text-xs font-medium text-discord-text-muted text-center">Adicionar ícone</p>
+            )}
             <p className="text-[11px] text-discord-text-muted text-center">
               PNG, JPG, WEBP ou GIF animado — até 5MB. Recomendado: imagem quadrada.
             </p>

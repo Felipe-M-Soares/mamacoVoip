@@ -4,6 +4,15 @@
   <meta charset="UTF-8" />
   <title>Mamacos Voip — Overlay</title>
   <style>
+    /* TRIGÉSIMA OITAVA RODADA — pedido: deixar a sobreposição igual ao
+       Discord (só a imagem + nome do usuário, piscando conforme
+       detecção de voz), em vez do "card" com fundo/lista de antes.
+       Cada participante agora é uma bolha solta (avatar circular com
+       nome numa etiqueta escura embaixo), sem painel/fundo por trás —
+       só aparece o que precisa aparecer por cima do jogo. O anel ao
+       redor do avatar pulsa (animação de escala + brilho) enquanto a
+       pessoa está falando, igual ao efeito do Discord, em vez de só um
+       contorno estático como era antes. */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
       background: transparent;
@@ -14,87 +23,107 @@
     }
     #panel {
       display: none;
-      background: rgba(10, 10, 11, 0.85);
-      backdrop-filter: blur(4px);
-      border: 1px solid rgba(224, 32, 27, 0.4);
-      border-radius: 12px;
-      padding: 10px 12px;
-      max-width: 260px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-    }
-    #channel-name {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      color: #a3a1a5;
-      margin-bottom: 8px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      flex-direction: column;
+      gap: 10px;
+      padding: 6px;
     }
     .participant {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 3px 4px;
-      border-radius: 6px;
-      transition: box-shadow 0.15s;
+      width: fit-content;
     }
-    .participant.speaking {
-      box-shadow: 0 0 0 2px #e0201b;
+    .avatar-wrap {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+    }
+    .avatar-ring {
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px rgba(35, 165, 90, 0);
+      transition: box-shadow 0.12s ease-out;
+    }
+    .participant.speaking .avatar-ring {
+      box-shadow: 0 0 0 3px #23a55a, 0 0 12px 2px rgba(35, 165, 90, 0.65);
+      animation: pulse 1.1s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.06); }
     }
     .avatar {
-      width: 22px;
-      height: 22px;
+      position: relative;
+      width: 40px;
+      height: 40px;
       border-radius: 50%;
       background: #e0201b;
       color: white;
-      font-size: 10px;
+      font-size: 15px;
       font-weight: 700;
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
       overflow: hidden;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
     }
     .avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .name {
+    .mic-off-badge {
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #ef4444;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid rgba(0, 0, 0, 0.55);
+    }
+    .mic-off-badge svg { width: 9px; height: 9px; fill: white; }
+    .name-tag {
       font-size: 12px;
-      color: #f3efee;
+      font-weight: 600;
+      color: #f3f3f3;
+      background: rgba(0, 0, 0, 0.55);
+      padding: 3px 8px;
+      border-radius: 6px;
       white-space: nowrap;
+      max-width: 160px;
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-    .muted-icon {
-      margin-left: auto;
-      color: #ef4444;
-      flex-shrink: 0;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     }
   </style>
 </head>
 <body>
-  <div id="panel">
-    <div id="channel-name">Não conectado</div>
-    <div id="participants"></div>
-  </div>
+  <div id="panel"></div>
 
   <script>
     const panel = document.getElementById('panel')
-    const channelNameEl = document.getElementById('channel-name')
-    const participantsEl = document.getElementById('participants')
+
+    const MIC_OFF_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 11a1 1 0 0 0-1 1 6 6 0 0 1-9.8 4.66l-1.43 1.43A8 8 0 0 0 12 20a8 8 0 0 0 8-8 1 1 0 0 0-1-1zM4.41 2.86 2.86 4.41l4.2 4.2V11a5 5 0 0 0 8.4 3.67l1.49 1.49A7 7 0 0 1 5 11a1 1 0 0 0-2 0 9 9 0 0 0 8 8.94V22h2v-2.06a8.96 8.96 0 0 0 3.32-1.2l2.27 2.27 1.55-1.55L4.41 2.86zM12 15a3 3 0 0 0 2.83-2L9.17 7.34A3 3 0 0 0 9 8v4a3 3 0 0 0 3 3zM12 2a3 3 0 0 0-3 3v.28l6 6V5a3 3 0 0 0-3-3z"/></svg>`
 
     function render(state) {
       if (!state || !state.connected) {
         panel.style.display = 'none'
         return
       }
-      panel.style.display = 'block'
-      channelNameEl.textContent = state.channelName || 'Conectado'
-      participantsEl.innerHTML = ''
+      panel.style.display = 'flex'
+      panel.innerHTML = ''
       for (const p of state.participants || []) {
         const row = document.createElement('div')
-        row.className = 'participant' + (p.speaking ? ' speaking' : '')
+        row.className = 'participant' + (p.speaking && !p.muted ? ' speaking' : '')
+
+        const avatarWrap = document.createElement('div')
+        avatarWrap.className = 'avatar-wrap'
+
+        const ring = document.createElement('div')
+        ring.className = 'avatar-ring'
+        avatarWrap.appendChild(ring)
 
         const avatar = document.createElement('div')
         avatar.className = 'avatar'
@@ -105,22 +134,22 @@
         } else {
           avatar.textContent = (p.name || '?').slice(0, 1).toUpperCase()
         }
-
-        const name = document.createElement('div')
-        name.className = 'name'
-        name.textContent = p.name || '...'
-
-        row.appendChild(avatar)
-        row.appendChild(name)
+        avatarWrap.appendChild(avatar)
 
         if (p.muted) {
-          const muteIcon = document.createElement('span')
-          muteIcon.className = 'muted-icon'
-          muteIcon.textContent = '🔇'
-          row.appendChild(muteIcon)
+          const badge = document.createElement('div')
+          badge.className = 'mic-off-badge'
+          badge.innerHTML = MIC_OFF_SVG
+          avatarWrap.appendChild(badge)
         }
 
-        participantsEl.appendChild(row)
+        const nameTag = document.createElement('div')
+        nameTag.className = 'name-tag'
+        nameTag.textContent = p.name || '...'
+
+        row.appendChild(avatarWrap)
+        row.appendChild(nameTag)
+        panel.appendChild(row)
       }
     }
 

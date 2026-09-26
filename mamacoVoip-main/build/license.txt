@@ -1,0 +1,43 @@
+MAMACOS VOIP — TERMO DE INSTALAÇÃO E USO
+
+Ao continuar esta instalação, você concorda com os Termos de Uso e a
+Política de Privacidade do Mamacos Voip, e reconhece que:
+
+1. PERMISSÕES DO APLICATIVO
+
+O Mamacos Voip pode solicitar acesso a:
+  - Microfone (obrigatório para chamadas de voz)
+  - Câmera (opcional, apenas quando você ativar o vídeo)
+  - Compartilhamento de tela (opcional, apenas quando você ativar)
+  - Notificações do sistema (opcional)
+
+Nenhuma chamada de voz ou vídeo é gravada ou armazenada pelo Mamacos
+Voip — a comunicação acontece diretamente entre os participantes
+(peer-to-peer). O microfone e a câmera só são ativados quando você,
+explicitamente, entra em uma chamada.
+
+2. DETECÇÃO DE JOGOS (OPCIONAL)
+
+O aplicativo verifica periodicamente quais processos estão em
+execução no seu computador, comparando com uma lista de jogos
+conhecidos, apenas para exibir "Jogando X" no seu status. Nenhuma
+outra informação sobre processos em execução é coletada ou enviada.
+
+3. DADOS COLETADOS
+
+Consulte a Política de Privacidade completa para o detalhamento de
+quais dados são coletados, por quê, e quais são os seus direitos:
+https://mamaco-voip.vercel.app/privacidade
+
+4. TERMOS DE USO
+
+Consulte os Termos de Uso completos em:
+https://mamaco-voip.vercel.app/termos
+
+5. IDADE MÍNIMA
+
+O uso do Mamacos Voip requer idade mínima de 13 anos. Entre 13 e 18
+anos, o uso deve ser autorizado por um responsável legal.
+
+Ao clicar em "Concordo" abaixo, você confirma que leu e concorda com
+os termos acima e com os documentos completos referenciados.

@@ -1280,9 +1280,14 @@ let overlayVisible = false
 // exclusiva — mesma limitação técnica do compartilhamento de tela,
 // sem solução sem uma ferramenta bem mais arriscada (hook de DirectX).
 function createOverlayWindow() {
+  // TRIGÉSIMA OITAVA RODADA — altura aumentada (200 → 420): o visual
+  // novo (bolhas soltas empilhadas, ver overlay.html) ocupa mais altura
+  // por pessoa do que o card compacto de antes, então com o tamanho
+  // antigo os participantes do fim da lista ficavam cortados fora da
+  // janela em calls com mais gente.
   const overlay = new BrowserWindow({
-    width: 280,
-    height: 200,
+    width: 220,
+    height: 420,
     x: 40,
     y: 40,
     frame: false,

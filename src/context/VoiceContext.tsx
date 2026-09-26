@@ -1193,6 +1193,84 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     noiseFloorDbRef.current = null
     lastAppliedThresholdDbRef.current = null
   }
+  // TRIGÉSIMA OITAVA RODADA — detecção de fala LOCAL, só pro próprio
+  // usuário (ver o comentário grande em cima de
+  // `room.on(RoomEvent.ActiveSpeakersChanged...)` pro porquê: aquele
+  // evento vem do SERVIDOR, com um ciclo de rede de atraso, perceptível
+  // demais pra quem está olhando o próprio anel/luz de "falando"). Mede
+  // o volume do MICROFONE já tratado (pós-RNNoise/gate — o mesmo que é
+  // publicado) direto com um AnalyserNode, sem depender de rede nenhuma.
+  const localSpeakingAudioContextRef = useRef<AudioContext | null>(null)
+  const localSpeakingAnalyserRef = useRef<AnalyserNode | null>(null)
+  const localSpeakingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const localSpeakingLastAboveRef = useRef(false)
+  const LOCAL_SPEAKING_THRESHOLD = 12
+  const LOCAL_SPEAKING_RELEASE_MS = 300
+  const LOCAL_SPEAKING_POLL_MS = 60
+
+  function teardownLocalSpeakingDetection() {
+    if (localSpeakingIntervalRef.current !== null) {
+      clearInterval(localSpeakingIntervalRef.current)
+      localSpeakingIntervalRef.current = null
+    }
+    localSpeakingAnalyserRef.current = null
+    if (localSpeakingAudioContextRef.current) {
+      localSpeakingAudioContextRef.current.close().catch(() => {})
+      localSpeakingAudioContextRef.current = null
+    }
+    localSpeakingLastAboveRef.current = false
+  }
+
+  function setupLocalSpeakingDetection(stream: MediaStream) {
+    teardownLocalSpeakingDetection()
+    const audioTrack = stream.getAudioTracks()[0]
+    if (!audioTrack) return
+    try {
+      const audioContext = new AudioContext()
+      const source = audioContext.createMediaStreamSource(new MediaStream([audioTrack]))
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 512
+      analyser.smoothingTimeConstant = 0
+      source.connect(analyser)
+      localSpeakingAudioContextRef.current = audioContext
+      localSpeakingAnalyserRef.current = analyser
+
+      const data = new Uint8Array(analyser.frequencyBinCount)
+      let lastAboveAt = 0
+      localSpeakingIntervalRef.current = setInterval(() => {
+        // Se o mic está mutado (mute manual ou "solta pra falar" sem
+        // segurar a tecla), a track continua entregando áudio pro
+        // AnalyserNode mesmo sem publicar nada — sem checar isso aqui,
+        // a luz continuaria acendendo mesmo mutado.
+        if (mutedRef.current) {
+          if (localSpeakingLastAboveRef.current) {
+            localSpeakingLastAboveRef.current = false
+            setSpeaking(false)
+          }
+          return
+        }
+        analyser.getByteFrequencyData(data)
+        let sum = 0
+        for (let i = 0; i < data.length; i++) sum += data[i]
+        const avg = sum / data.length
+        const now = Date.now()
+        if (avg > LOCAL_SPEAKING_THRESHOLD) {
+          lastAboveAt = now
+          if (!localSpeakingLastAboveRef.current) {
+            localSpeakingLastAboveRef.current = true
+            setSpeaking(true)
+          }
+        } else if (localSpeakingLastAboveRef.current && now - lastAboveAt > LOCAL_SPEAKING_RELEASE_MS) {
+          localSpeakingLastAboveRef.current = false
+          setSpeaking(false)
+        }
+      }, LOCAL_SPEAKING_POLL_MS)
+    } catch {
+      // Best-effort — se o navegador/ambiente não deixar criar o
+      // AudioContext por algum motivo, a luz local simplesmente não
+      // acende (mas a chamada em si continua funcionando normalmente).
+    }
+  }
   // TRIGÉSIMA QUARTA RODADA — antes disso existia um AudioContext +
   // AnalyserNode por participante (local incluído), lidos por polling
   // (ver o useEffect "Detecção de fala" mais abaixo) só pra decidir
@@ -1896,10 +1974,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // Substitui o antigo polling de AnalyserNode por participante (ver o
     // comentário grande em remoteTracksRef acima) — o LiveKit já faz essa
     // detecção nativamente e manda a lista de quem está falando AGORA,
-    // sempre que ela muda (inclui o participante local também).
+    // sempre que ela muda.
+    //
+    // TRIGÉSIMA OITAVA RODADA — bug relatado: a "luz" de quem está
+    // falando demorava pra acender pro PRÓPRIO usuário. Causa: esse
+    // evento do LiveKit é calculado em cima do áudio que já chegou no
+    // servidor (viaja rede até lá, servidor processa, e só então volta
+    // o aviso pra todo mundo, incluindo quem falou) — um ciclo de rede
+    // inteiro de atraso, perceptível mesmo em conexão boa. Pros
+    // participantes REMOTOS não tem jeito melhor (a única forma de saber
+    // se o outro está falando é o servidor avisar), mas pro usuário
+    // LOCAL dá pra medir o próprio microfone na hora, sem esperar
+    // ninguém — é o que `setupLocalSpeakingDetection` faz mais abaixo,
+    // lendo o volume direto do AnalyserNode local. Por isso aqui ignora
+    // `myId`: o estado do usuário local passa a ser controlado só por
+    // aquela detecção local (instantânea), nunca mais por este evento
+    // de rede (que ficaria brigando com ela e reintroduzindo o atraso).
     room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
       const speakingIds = new Set(speakers.map((s) => s.identity))
-      setSpeaking(speakingIds.has(myId))
       setParticipants((prev) => {
         let changed = false
         const next: typeof prev = { ...prev }
@@ -1964,18 +2056,28 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     channelUserLimitRef.current = 0
     joinedAtRef.current = Date.now()
 
-    // Chamada em DM/grupo (serverId null) não tem linha na tabela
-    // channels pra buscar — nome e limite vêm de `options` (o valor já
-    // resolvido do lado de quem chamou join(), ex.: nome da outra
-    // pessoa na DM ou nome do grupo).
-    if (serverId) {
-      const { data: channelRow } = await supabase.from('channels').select('user_limit, name').eq('id', channelId).single()
-      channelUserLimitRef.current = channelRow?.user_limit ?? 0
-      setConnectedChannelName(channelRow?.name ?? null)
-    } else {
-      channelUserLimitRef.current = options?.userLimit ?? 0
-      setConnectedChannelName(options?.displayName ?? null)
-    }
+    // TRIGÉSIMA OITAVA RODADA — bug relatado: mesmo depois de paralelizar
+    // mic/presença/token (RODADA 37), ainda sobravam uns bons segundos de
+    // espera antes de tudo isso começar, porque essa busca de nome/limite
+    // do canal (só existe quando serverId != null — DM/grupo já recebe
+    // tudo pronto em `options`) rodava sozinha, em SÉRIE, ANTES do
+    // Promise.all de baixo — o próprio Promise.all só começava depois
+    // dela terminar. Ela vira mais uma promise resolvida em paralelo com
+    // o mic e a presença; a única coisa que realmente PRECISA esperar
+    // ela terminar é o pedido do token do LiveKit (precisa do userLimit
+    // pra mandar pra Edge Function), então esse pedido é encadeado com
+    // `.then()` em cima dela em vez de simplesmente ser mais uma entrada
+    // solta no Promise.all.
+    const channelInfoPromise = (async () => {
+      if (serverId) {
+        const { data: channelRow } = await supabase.from('channels').select('user_limit, name').eq('id', channelId).single()
+        channelUserLimitRef.current = channelRow?.user_limit ?? 0
+        setConnectedChannelName(channelRow?.name ?? null)
+      } else {
+        channelUserLimitRef.current = options?.userLimit ?? 0
+        setConnectedChannelName(options?.displayName ?? null)
+      }
+    })()
 
     let room: Room | null = null
     try {
@@ -2039,21 +2141,28 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // servidor (ver supabase/functions/livekit-token); `RoomFullError`
       // é o sinal específico disso, tratado no catch abaixo pra mostrar
       // a mesma mensagem de antes ("Esse canal de voz já está cheio.").
-      const tokenPromise = fetchLiveKitToken({
-        room: channelId,
-        name: options?.displayName,
-        userLimit: channelUserLimitRef.current,
-      })
+      // Só pode montar esse pedido DEPOIS de `channelInfoPromise`
+      // resolver (é ela quem preenche `channelUserLimitRef.current`) —
+      // por isso o `.then()` em vez de entrar solto no Promise.all.
+      const tokenPromise = channelInfoPromise.then(() =>
+        fetchLiveKitToken({
+          room: channelId,
+          name: options?.displayName,
+          userLimit: channelUserLimitRef.current,
+        })
+      )
 
-      const [{ stream, processedTrack }, , { token, url: livekitUrl }] = await Promise.all([
+      const [{ stream, processedTrack }, , , { token, url: livekitUrl }] = await Promise.all([
         micPromise,
         presencePromise,
+        channelInfoPromise,
         tokenPromise,
       ])
 
       localStreamRef.current = stream
       mutedRef.current = false
       applyMicEnabledState(false)
+      setupLocalSpeakingDetection(stream)
 
       room = new Room({
         adaptiveStream: true,
@@ -2104,6 +2213,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
               ? err.message
               : 'Não foi possível entrar no canal de voz.'
       )
+      teardownLocalSpeakingDetection()
       localStreamRef.current?.getTracks().forEach((t) => t.stop())
       localStreamRef.current = null
       rawMicTrackRef.current?.stop()
@@ -2143,6 +2253,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     screenAudioPublicationRef.current = null
     remoteTracksRef.current.clear()
     combinedStreamsRef.current.clear()
+    teardownLocalSpeakingDetection()
     localStreamRef.current?.getTracks().forEach((t) => t.stop())
     localStreamRef.current = null
     // A track dentro de localStreamRef pode ser a SAÍDA do RNNoise, não
@@ -2341,6 +2452,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         localStreamRef.current?.removeTrack(oldTrack)
       }
       localStreamRef.current?.addTrack(newTrack)
+      // A troca de dispositivo cria uma track NOVA — o AnalyserNode da
+      // detecção local de fala (ver setupLocalSpeakingDetection) fica
+      // conectado na track antiga, que parou; sem reconectar aqui, a luz
+      // de "falando" simplesmente para de acender depois de trocar de mic.
+      if (localStreamRef.current) setupLocalSpeakingDetection(localStreamRef.current)
 
       // `true` marca a track como "fornecida pelo usuário" pro LiveKit —
       // ele não tenta gerenciar/recriar essa track sozinho (o que
@@ -2398,6 +2514,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         localStreamRef.current?.removeTrack(oldTrack)
       }
       localStreamRef.current?.addTrack(newTrack)
+      // Mesmo motivo do changeMicrophone acima: track nova, precisa
+      // reconectar o AnalyserNode da detecção local de fala nela.
+      if (localStreamRef.current) setupLocalSpeakingDetection(localStreamRef.current)
 
       const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
       if (micTrack) await micTrack.replaceTrack(newTrack, true)
@@ -2414,6 +2533,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     mutedRef.current = newMuted
     setMuted(newMuted)
     applyMicEnabledState(pushToTalkActive)
+    // TRIGÉSIMA OITAVA RODADA — bug relatado: clicar em mutar às vezes
+    // não fazia efeito nenhum pra quem está ouvindo. Antes disso, o
+    // mute só mexia direto em `track.enabled` — o LiveKit nunca ficava
+    // sabendo que a track tinha sido mutada "por fora" da própria API
+    // dele, então o próprio bookkeeping interno dele (isMuted) continuava
+    // achando que a track estava ativa, e podia reaplicar esse estado
+    // (ex.: numa reconexão) e desfazer o mute sem avisar ninguém. Chamar
+    // `.mute()/.unmute()` da PRÓPRIA publicação usa o canal oficial —
+    // atualiza o mesmo `track.enabled` por baixo, mas também avisa o
+    // servidor (silencia de vez do lado do SFU) e mantém o bookkeeping
+    // do LiveKit sincronizado com a realidade.
+    const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
+    if (micTrack) {
+      if (newMuted) micTrack.mute().catch(() => {})
+      else micTrack.unmute().catch(() => {})
+    }
     if (newMuted) playMuteSound()
     else playUnmuteSound()
   }
@@ -2694,32 +2829,45 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // alternativo "por garantia" — sem isso, em alguns casos o
         // navegador acaba codificando duas vezes ao mesmo tempo, o
         // dobro de trabalho de CPU/GPU à toa.
-        screenVideoPublicationRef.current = await roomRef.current.localParticipant.publishTrack(videoTrack, {
-          name: 'screen',
-          source: Track.Source.ScreenShare,
-          videoCodec: 'h264',
-          backupCodec: false,
-          screenShareEncoding: {
-            maxBitrate: preset.maxBitrate,
-            maxFramerate: preset.frameRate,
-          },
-          degradationPreference: preset.degradationPreference,
-          simulcast: false,
-        })
-        if (audioTrack) {
+        // TRIGÉSIMA OITAVA RODADA — bug relatado: a janela de
+        // compartilhamento demorava pra aparecer pros outros depois de
+        // clicar em transmitir. Causa: vídeo e áudio da tela eram
+        // publicados em SÉRIE (um `await` esperando o outro terminar) —
+        // igual ao mic/presença/token corrigido na RODADA 37, cada
+        // `publishTrack` é uma negociação própria com o servidor
+        // (ida-e-volta de rede), e nenhum dos dois depende do resultado
+        // do outro. Rodando os dois ao mesmo tempo com Promise.all, o
+        // tempo total vira o do mais lento dos dois, não a soma.
+        const [videoPublication, audioPublication] = await Promise.all([
+          roomRef.current.localParticipant.publishTrack(videoTrack, {
+            name: 'screen',
+            source: Track.Source.ScreenShare,
+            videoCodec: 'h264',
+            backupCodec: false,
+            screenShareEncoding: {
+              maxBitrate: preset.maxBitrate,
+              maxFramerate: preset.frameRate,
+            },
+            degradationPreference: preset.degradationPreference,
+            simulcast: false,
+          }),
           // Mesmo ajuste de antes — o áudio da transmissão precisa do
           // PRÓPRIO teto de bitrate (pensado pra som de jogo/música,
           // bem maior que o do microfone) e estéreo de verdade
           // (forceStereo substitui o antigo SDP munging manual de
           // sdpStereo.ts — o LiveKit já negocia isso nativamente).
-          screenAudioPublicationRef.current = await roomRef.current.localParticipant.publishTrack(audioTrack, {
-            name: 'screen-audio',
-            source: Track.Source.ScreenShareAudio,
-            audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
-            forceStereo: true,
-            dtx: false,
-          })
-        }
+          audioTrack
+            ? roomRef.current.localParticipant.publishTrack(audioTrack, {
+                name: 'screen-audio',
+                source: Track.Source.ScreenShareAudio,
+                audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
+                forceStereo: true,
+                dtx: false,
+              })
+            : Promise.resolve(null),
+        ])
+        screenVideoPublicationRef.current = videoPublication
+        if (audioPublication) screenAudioPublicationRef.current = audioPublication
       }
       setScreenSharing(true)
 

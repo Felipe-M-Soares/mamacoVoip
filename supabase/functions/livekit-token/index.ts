@@ -71,6 +71,36 @@ Deno.serve(async (req: Request) => {
     // um nome absurdamente grande ou vazio.
     if (room.length > 200) throw new Error('Nome da sala inválido.')
 
+    // TRIGÉSIMA NONA RODADA — bug de segurança CRÍTICO achado em
+    // auditoria: até aqui, QUALQUER usuário autenticado que soubesse
+    // (ou adivinhasse) o UUID de um canal de voz — inclusive alguém
+    // EXPULSO/BANIDO daquele servidor, ou um estranho que nunca fez
+    // parte da conversa — conseguia um token válido pra entrar na
+    // chamada. A função validava QUEM é o usuário (identity = user.id
+    // verificado, nunca confiando no cliente), mas nunca checava se
+    // esse usuário tem o DIREITO de estar naquela sala específica.
+    //
+    // Correção: antes de emitir qualquer token, confirma que `room`
+    // corresponde a um canal de servidor, grupo ou DM ao qual esse
+    // usuário realmente pertence — reaproveitando a MESMA Row Level
+    // Security que já protege essas tabelas no resto do app (o
+    // `supabase` client aqui usa o JWT do próprio usuário, não a
+    // service role, então cada SELECT abaixo já passa pela RLS de
+    // verdade: se a linha não vier, é porque a RLS escondeu — usuário
+    // não é membro do servidor daquele canal, ou não é
+    // membro/participante daquele grupo/DM, incluindo o caso de ter
+    // sido expulso/banido, que já remove a membership em
+    // `server_members`). Sem duplicar a lógica de permissão em dois
+    // lugares — a fonte de verdade continua sendo a RLS do banco.
+    const [{ data: channelRow }, { data: groupRow }, { data: dmRow }] = await Promise.all([
+      supabase.from('channels').select('id').eq('id', room).maybeSingle(),
+      supabase.from('group_conversations').select('id').eq('id', room).maybeSingle(),
+      supabase.from('dm_conversations').select('id').eq('id', room).maybeSingle(),
+    ])
+    if (!channelRow && !groupRow && !dmRow) {
+      return jsonResponse({ error: 'Você não tem acesso a essa sala de voz.', code: 'not_authorized' }, 403)
+    }
+
     const livekitUrl = Deno.env.get('LIVEKIT_URL')
     const apiKey = Deno.env.get('LIVEKIT_API_KEY')
     const apiSecret = Deno.env.get('LIVEKIT_API_SECRET')

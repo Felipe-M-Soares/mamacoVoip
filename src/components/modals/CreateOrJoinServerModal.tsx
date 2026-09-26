@@ -41,13 +41,18 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
       return
     }
     setLoading(true)
-    const { error } = await createServer(name.trim(), iconFile, description.trim() || null)
+    const { error, warning } = await createServer(name.trim(), iconFile, description.trim() || null)
     setLoading(false)
     if (error) {
       setError(error)
       return
     }
     onClose()
+    // O servidor em si foi criado com sucesso — só o ícone falhou ao
+    // salvar (ver comentário grande em ServersContext.tsx). Não vale a
+    // pena travar a criação por isso, mas também não pode desaparecer
+    // sem avisar ninguém (era exatamente esse o bug).
+    if (warning) window.alert(warning)
   }
 
   async function handleJoin() {

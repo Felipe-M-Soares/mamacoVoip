@@ -13,6 +13,7 @@ import { DMChatArea } from '../components/layout/DMChatArea'
 import { UserProfileModal } from '../components/modals/UserProfileModal'
 import { OnboardingModal, useOnboarding } from '../components/modals/OnboardingModal'
 import { DMCallOverlay } from '../components/layout/DMCallOverlay'
+import { VoiceCallAudio } from '../components/layout/VoiceCallAudio'
 import { EditProfileModal } from '../components/modals/EditProfileModal'
 import { QuickSwitcher } from '../components/modals/QuickSwitcher'
 import { KeyboardShortcutsModal } from '../components/modals/KeyboardShortcutsModal'
@@ -493,6 +494,7 @@ function MainLayoutInner() {
         }}
       />
 
+      <VoiceCallAudio />
       <GameDetectedToast />
       <OverlayStateSync />
       <AutoIdleStatus />

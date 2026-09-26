@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
-import { VideoTile, RemoteAudio } from './CallMediaTiles'
+import { VideoTile } from './CallMediaTiles'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { isNativeMobileApp } from '../../lib/platform'
@@ -16,18 +16,21 @@ import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { VoiceParticipant } from '../../context/VoiceContext'
 import type { Channel, Profile, Role } from '../../types/database'
 
-// VideoTile/RemoteAudio agora moram em CallMediaTiles.tsx (arquivo
-// pequeno, compartilhado com DMCallOverlay.tsx) — ver o comentário lá
-// pra saber por quê (tem a ver com esse arquivo aqui ser lazy-loaded).
+// VideoTile mora em CallMediaTiles.tsx (arquivo pequeno, compartilhado
+// com DMCallOverlay.tsx) — ver o comentário lá pra saber por quê (tem
+// a ver com esse arquivo aqui ser lazy-loaded).
+//
+// TRIGÉSIMA NONA RODADA — o áudio da call inteira (voz de todo mundo +
+// som de toda transmissão de tela) saiu completamente deste arquivo e
+// foi pro VoiceCallAudio.tsx, montado direto em MainLayout.tsx fora do
+// ciclo de vida de "canal que você está olhando agora" — ver o
+// comentário grande lá pro motivo (navegar pra outro canal SEM sair da
+// call não pode mais parar o áudio). Este arquivo cuida só da parte
+// VISUAL (vídeo, botões, sliders de volume que ALTERAM o volume
+// guardado em VoiceContext, mas não tocam áudio nenhum sozinhos).
 
 // "Palco" de compartilhamentos de tela: divide o espaço certinho
 // dependendo de quantas pessoas estão compartilhando ao mesmo tempo.
-// TRIGÉSIMA SÉTIMA RODADA — o áudio da transmissão agora reaproveita o
-// MESMO <RemoteAudio> (CallMediaTiles.tsx) usado pra voz/câmera, que já
-// tem o grafo de Web Audio (GainNode) capaz de REFORÇAR o volume acima
-// de 100% de verdade — antes, o áudio de uma transmissão de tela só
-// conseguia ser atenuado (o <audio>.volume nativo trava em 1.0), sem
-// jeito nenhum de compensar um jogo/app com o volume de saída baixo.
 
 function ScreenShareStage({
   shares,
@@ -74,7 +77,6 @@ function ScreenShareStage({
         const hasAudio = share.stream.getAudioTracks().length > 0
         const shareVolume = voice.getScreenShareVolume(share.key)
         const isMuted = shareVolume === 0
-        const effectiveVolume = (voice.masterVolume / 100) * (shareVolume / 100)
 
         return (
           <div
@@ -110,9 +112,9 @@ function ScreenShareStage({
                 }}
               />
             )}
-            {!share.isLocal && share.stream.getAudioTracks().length > 0 && (
-              <RemoteAudio stream={share.stream} volume={effectiveVolume} />
-            )}
+            {/* O áudio dessa transmissão toca via VoiceCallAudio.tsx (montado
+                fora daqui, sempre ativo — ver o comentário grande no topo
+                deste arquivo) — aqui só o vídeo e os controles. */}
             <span className="absolute bottom-1.5 left-2 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded flex items-center gap-1">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
                 <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
@@ -272,7 +274,6 @@ function ParticipantTile({
   const speaking = data?.speaking ?? false
   const hasCameraVideo = isLocal ? localVideoEnabled : Boolean(data?.cameraStream?.getVideoTracks().length)
   const participantVolume = isLocal ? 100 : voice.getParticipantVolume(userId)
-  const effectiveVolume = (voice.masterVolume / 100) * (participantVolume / 100)
 
   const volumeButton = !isLocal && (
     <div
@@ -322,9 +323,9 @@ function ParticipantTile({
     </div>
   )
 
-  const audioEl = !isLocal && data?.cameraStream && (
-    <RemoteAudio stream={data.cameraStream} sinkId={sinkId} volume={effectiveVolume} />
-  )
+  // O áudio (mic/câmera) deste participante toca via VoiceCallAudio.tsx,
+  // montado fora daqui e sempre ativo — ver o comentário grande no topo
+  // do arquivo. Este componente só cuida do vídeo/controles visuais.
 
   const myRoleIds = new Set(userRoleIds ?? [])
   const menuItems = [
@@ -368,7 +369,6 @@ function ParticipantTile({
           }`}
         >
           <Avatar name={name} avatarUrl={avatarUrl} decorationUrl={decorationUrl} size={48} />
-          {audioEl}
         </div>
         <span className="text-[10px] text-discord-text truncate max-w-full">{isLocal ? 'Você' : name}</span>
         {volumeButton}
@@ -402,7 +402,6 @@ function ParticipantTile({
           <Avatar name={name} avatarUrl={avatarUrl} decorationUrl={decorationUrl} size={64} />
         </div>
       )}
-      {audioEl}
       <span className="absolute bottom-1.5 left-2 text-sm font-medium text-white bg-black/50 px-1.5 py-0.5 rounded flex items-center gap-1.5">
         {name}
         {isLocal && ' (você)'}

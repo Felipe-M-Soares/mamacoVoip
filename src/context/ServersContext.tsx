@@ -12,7 +12,7 @@ interface ServersContextValue {
     name: string,
     iconFile?: File | null,
     description?: string | null
-  ) => Promise<{ error: string | null; server?: Server }>
+  ) => Promise<{ error: string | null; warning?: string | null; server?: Server }>
   updateServer: (
     serverId: string,
     updates: {
@@ -118,7 +118,7 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     name: string,
     iconFile?: File | null,
     description?: string | null
-  ): Promise<{ error: string | null; server?: Server }> {
+  ): Promise<{ error: string | null; warning?: string | null; server?: Server }> {
     if (!user) return { error: 'Não autenticado' }
 
     const { data: server, error } = await supabase
@@ -137,16 +137,29 @@ export function ServersProvider({ children }: { children: ReactNode }) {
       return { error: (error?.message ?? 'Erro ao criar servidor') + debugInfo }
     }
 
+    let iconWarning: string | null = null
     if (iconFile) {
       const { error: uploadError, url: iconUrl } = await uploadServerImage(server.id, iconFile, 'icon')
       if (!uploadError && iconUrl) {
-        await supabase.from('servers').update({ icon_url: iconUrl }).eq('id', server.id)
-        server.icon_url = iconUrl
+        // TRIGÉSIMA NONA RODADA — bug relatado em auditoria: o resultado
+        // desse `.update()` nunca era checado — se ele falhasse (RLS,
+        // rede), o servidor ficava criado SEM ícone, mas `server.icon_url`
+        // já tinha sido marcado como se tivesse funcionado (otimista
+        // demais), sem avisar ninguém. Agora, se o update falhar, volta
+        // um aviso pra quem chamou em vez de fingir que deu certo.
+        const { error: updateError } = await supabase.from('servers').update({ icon_url: iconUrl }).eq('id', server.id)
+        if (updateError) {
+          iconWarning = 'Servidor criado, mas não foi possível salvar o ícone. Tente trocá-lo de novo nas configurações.'
+        } else {
+          server.icon_url = iconUrl
+        }
+      } else if (uploadError) {
+        iconWarning = 'Servidor criado, mas não foi possível enviar o ícone. Tente trocá-lo de novo nas configurações.'
       }
     }
 
     await refresh()
-    return { error: null, server }
+    return { error: null, warning: iconWarning, server }
   }
 
   async function updateServer(

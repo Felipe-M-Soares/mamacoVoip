@@ -2098,9 +2098,27 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // solta no Promise.all.
     const channelInfoPromise = (async () => {
       if (serverId) {
-        const { data: channelRow } = await supabase.from('channels').select('user_limit, name').eq('id', channelId).single()
-        channelUserLimitRef.current = channelRow?.user_limit ?? 0
-        setConnectedChannelName(channelRow?.name ?? null)
+        // TRIGÉSIMA NONA RODADA — antes, o erro dessa consulta era
+        // ignorado (`const { data } = await ...`, sem checar `error`).
+        // Se a RLS bloqueasse (ex.: canal de um servidor de onde você
+        // acabou de ser expulso/banido, mas a UI ainda não atualizou),
+        // isso silenciosamente seguia com limite 0/nome nulo — e só ia
+        // falhar de verdade lá na frente, ao pedir o token do LiveKit
+        // (que agora TAMBÉM reforça essa checagem, ver
+        // supabase/functions/livekit-token/index.ts). Melhor falhar
+        // JÁ AQUI, com uma mensagem clara, em vez de gastar tempo
+        // pedindo microfone pra uma entrada que vai ser recusada de
+        // qualquer jeito.
+        const { data: channelRow, error: channelErr } = await supabase
+          .from('channels')
+          .select('user_limit, name')
+          .eq('id', channelId)
+          .single()
+        if (channelErr || !channelRow) {
+          throw new Error('Você não tem mais acesso a esse canal de voz.')
+        }
+        channelUserLimitRef.current = channelRow.user_limit ?? 0
+        setConnectedChannelName(channelRow.name ?? null)
       } else {
         channelUserLimitRef.current = options?.userLimit ?? 0
         setConnectedChannelName(options?.displayName ?? null)
@@ -2137,28 +2155,33 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // (que trocou a busca de nome/limite do canal por uma promise não
       // esperada, pra rodar em paralelo) removeu sem querer o único
       // `await` que existia ANTES desse ponto — era ele que dava tempo
-      // do React re-renderizar e a sidebar se desinscrever primeiro
-      // (via seu próprio efeito de limpeza). Sem aquele `await`, a
-      // sidebar podia ainda estar inscrita quando chegávamos aqui.
-      // Correção definitiva (não depende mais de timing/sorte): remove
-      // explicitamente qualquer canal já registrado sob esse tópico
-      // ANTES de criar o nosso — garante um canal 100% novo pra essa
-      // conexão de verdade, não importa se a sidebar ainda não teve
-      // tempo de se desinscrever.
-      const existingChannel = supabase.getChannels().find((c) => c.topic === `realtime:voice:${channelId}`)
-      if (existingChannel) {
-        logDebug(`join(${channelId}): removendo canal de presença duplicado (estado anterior: ${existingChannel.state})...`)
-        await supabase.removeChannel(existingChannel)
-      }
-      const rt = supabase.channel(`voice:${channelId}`, {
-        config: { broadcast: { self: false }, presence: { key: user.id } },
-      })
-      presenceRef.current = rt
-
-      rt.on('broadcast', { event: 'soundboard-play' }, ({ payload }) => {
-        const { url } = payload as { from: string; url: string }
-        playLocalSoundboardAudio(url)
-      })
+      // do React re-renderizar e a sidebar se desinscrever primeiro.
+      //
+      // QUADRAGÉSIMA RODADA — a primeira correção (remover o canal
+      // duplicado ANTES de criar o nosso, esperando a confirmação)
+      // FUNCIONAVA, mas deixou a entrada mais lenta: como a sidebar
+      // observa todo canal de voz visível, essa colisão acontece quase
+      // sempre, e remover um canal espera uma ida-e-volta de rede
+      // própria — isso rodava sozinho, ANTES de tudo o mais (mic,
+      // token), somando ao tempo total em vez de sobrepor.
+      //
+      // (Cheguei a tentar REAPROVEITAR o canal da sidebar em vez de
+      // remover — zero ida-e-volta extra — mas isso quebra a presença
+      // de verdade: a "key" de presença de um canal é fixada na
+      // criação/subscribe e vale pra QUALQUER `.track()` feito nele
+      // depois; o canal da sidebar usa uma key `observer-...` aleatória
+      // — se a gente reaproveitasse ele, nossa própria presença ficaria
+      // registrada sob essa key de observador, e todo mundo que
+      // filtra "observer-..." pra não contar como gente de verdade na
+      // sala (ver useVoicePresence.ts) deixaria de nos ver como
+      // conectados. Então tem que ser um canal NOVO, com nossa própria
+      // key (`user.id`) — sem meio-termo aí.)
+      //
+      // A correção agora é só de ORDEM: a remoção + recriação do canal
+      // vira parte da PRÓPRIA `presencePromise` (ver mais abaixo),
+      // entrando no MESMO Promise.all que já espera o mic e o token —
+      // roda ao mesmo tempo que eles, não mais sozinha antes de tudo.
+      const topic = `voice:${channelId}`
 
       // TRIGÉSIMA SÉTIMA RODADA — bug relatado: entrar num canal de voz
       // sempre demorava uns bons 2-3 segundos, mesmo em conexões boas.
@@ -2204,19 +2227,42 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       logDebug(`join(${channelId}): inscrevendo no canal de presença...`)
       const presencePromise = withTimeout(
-        new Promise<void>((resolve, reject) => {
-          rt.subscribe(async (status) => {
-            logDebug(`join(${channelId}): status do canal de presença = ${status}`)
-            if (status === 'SUBSCRIBED') {
-              await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
-              logDebug(`join(${channelId}): presença anunciada.`)
-              resolve()
-            }
-            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-              reject(new Error('Falha ao conectar ao canal de voz'))
-            }
+        (async () => {
+          // Remove qualquer canal já registrado sob esse tópico (quase
+          // sempre o observador da sidebar, ver useVoicePresence.ts)
+          // ANTES de criar o nosso — precisa ser um canal 100% novo,
+          // com nossa própria key de presença (ver comentário grande
+          // acima pro motivo de não dar pra só reaproveitar). Isso roda
+          // dentro do Promise.all lá embaixo, ao mesmo tempo que o mic
+          // e o token — não é mais um passo sozinho antes de tudo.
+          const existingChannel = supabase.getChannels().find((c) => c.topic === `realtime:${topic}`)
+          if (existingChannel && existingChannel.state !== 'closed') {
+            logDebug(`join(${channelId}): removendo canal de presença duplicado (estado anterior: ${existingChannel.state})...`)
+            await supabase.removeChannel(existingChannel)
+          }
+          const rt = supabase.channel(topic, {
+            config: { broadcast: { self: false }, presence: { key: user.id } },
           })
-        }),
+          presenceRef.current = rt
+          rt.on('broadcast', { event: 'soundboard-play' }, ({ payload }) => {
+            const { url } = payload as { from: string; url: string }
+            playLocalSoundboardAudio(url)
+          })
+
+          await new Promise<void>((resolve, reject) => {
+            rt.subscribe(async (status) => {
+              logDebug(`join(${channelId}): status do canal de presença = ${status}`)
+              if (status === 'SUBSCRIBED') {
+                await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
+                logDebug(`join(${channelId}): presença anunciada.`)
+                resolve()
+              }
+              if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                reject(new Error('Falha ao conectar ao canal de voz'))
+              }
+            })
+          })
+        })(),
         15_000,
         'canal de presença'
       )

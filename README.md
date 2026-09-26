@@ -9,7 +9,9 @@ identidade visual própria, app desktop instalável e configurações de áudio.
 
 - **Frontend**: React 19, Vite, TypeScript, Tailwind CSS v4, React Router
 - **Backend**: Supabase (Postgres com Row Level Security, Auth, Storage, Realtime)
-- **Voz/vídeo**: WebRTC nativo (mesh P2P), sinalizado via Supabase Realtime
+- **Voz/vídeo**: LiveKit (SFU) — cada participante publica sua mídia uma
+  única vez pro servidor, que replica pra todo mundo; token de acesso
+  emitido por uma Edge Function do Supabase (ver `supabase/functions/livekit-token`)
 
 ## Setup rápido
 
@@ -19,8 +21,9 @@ cp .env.example .env   # preencha com as chaves do seu projeto Supabase
 ```
 
 No **SQL Editor** do seu projeto Supabase, rode as migrations em ordem
-(`supabase/migrations/001_...` até `007_...`). Veja `supabase/README.md`
-para detalhes de cada uma e das configurações de Auth necessárias.
+(`supabase/migrations/001_...` até `012_...` — ou o arquivo único
+consolidado, se você tiver um). Veja `supabase/README.md` para detalhes de
+cada uma e das configurações de Auth necessárias.
 
 ```bash
 npm run dev       # desenvolvimento
@@ -38,7 +41,7 @@ npm run build     # build de produção (saída em dist/)
 | **5 — Chat** | Mensagens em tempo real, editar, excluir, responder, reações, upload de arquivos, menções |
 | **6 — Usuários** | Perfil editável, avatar, status (online/ausente/não perturbe/invisível), amigos, DMs, bloqueio |
 | **7 — Administração** | Cargos com permissões granulares e hierarquia, expulsar, banir, silenciar, log de moderação |
-| **8 — Voz** | WebRTC real (mesh P2P) via sinalização no Supabase Realtime: microfone, câmera, compartilhamento de tela, detecção de fala |
+| **8 — Voz** | LiveKit (SFU real, token emitido por Edge Function): microfone, câmera, compartilhamento de tela, detecção de fala, controle de volume por participante |
 | **9 — Finalização** | Notificações do navegador, busca de mensagens, configurações, responsividade, PWA, otimização de bundle |
 
 ## Estrutura do projeto
@@ -58,16 +61,19 @@ src/
   types/            # tipos do banco (Database) e dos modelos
 
 supabase/
-  migrations/       # 001 a 007, na ordem que devem ser executadas
+  migrations/       # 001 a 012, na ordem que devem ser executadas
+  functions/        # Edge Functions (livekit-token, link-preview)
   README.md         # como aplicar as migrations e configurar o Auth
 ```
 
 ## Limitações conhecidas (documentadas, não escondidas)
 
-- **TURN não configurado**: só STUN público está disponível neste ambiente.
-  Chamadas de voz atrás de NAT restritivo podem falhar em produção sem um
-  servidor TURN real (coturn ou serviço pago).
-- **Voz é mesh P2P**, não SFU — funciona bem até ~8 pessoas por canal.
+- **Voz depende de um servidor LiveKit configurado** (`LIVEKIT_URL`,
+  `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` nas secrets da Edge Function —
+  ver `supabase/README.md`). Sem isso, entrar num canal de voz falha com
+  uma mensagem explicando o que falta configurar. TURN/NAT traversal é
+  responsabilidade do próprio servidor LiveKit escolhido (LiveKit Cloud já
+  inclui; auto-hospedado precisa configurar TURN separadamente).
 - **Notificações** só disparam para conversas com uma aba/subscription já
   aberta (não é push de verdade — exigiria Web Push + Service Worker com
   VAPID keys).

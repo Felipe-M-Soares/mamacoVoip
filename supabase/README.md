@@ -1,7 +1,9 @@
 # Migrations do Mamacos Voip
 
-São **5 arquivos**, em `migrations/`. Rode todos eles, em ordem
-(001 → 005), no SQL Editor do Supabase.
+São **11 arquivos**, em `migrations/` (001 a 012, sem o 006 — nunca
+existiu). Rode todos eles, em ordem, no SQL Editor do Supabase. Se
+preferir rodar tudo de uma vez, use o arquivo único consolidado
+(`mamacoVoip_setup_completo.sql`, se você tiver recebido um).
 
 | Arquivo | Conteúdo |
 |---|---|
@@ -10,19 +12,20 @@ São **5 arquivos**, em `migrations/`. Rode todos eles, em ordem
 | `003_social.sql` | Amizades, bloqueios, DM 1-pra-1, DM em grupo |
 | `004_roles_moderation.sql` | Cargos, permissões, banimentos, log de moderação |
 | `005_extras.sql` | Emoji customizado, threads, eventos do servidor |
+| `007_server_members_realtime.sql` | Corrige Realtime de membros do servidor |
+| `008_profile_asset_size.sql` | Limite de tamanho de assets de perfil |
+| `009_dm_unhide_on_recreate.sql` | Corrige DM escondida reaparecer ao recriar |
+| `010_google_oauth_profile.sql` | Perfil automático ao entrar com Google |
+| `011_security_hardening.sql` | Correções de segurança (RLS, permissões órfãs, funções `security definer`) |
+| `012_content_reports.sql` | Sistema de denúncias |
 
 ## Pode rodar de novo sem medo
 
-Todos os 5 arquivos são **seguros de rodar quantas vezes quiser**,
-mesmo se seu banco já tiver tudo aplicado — cada `CREATE TABLE`,
-`CREATE INDEX` e `CREATE TRIGGER` verifica se já existe antes de
-criar de novo. Se aparecer algum aviso de "já existe" no meio do
-caminho, é normal, não é erro.
-
-Isso significa que, daqui pra frente, sempre que eu adicionar uma
-funcionalidade nova, a mudança entra direto num desses 5 arquivos
-(no lugar que já existe) — nunca mais vai aparecer um `006`, `007`,
-etc. Só roda os 5 de novo e pronto.
+Todos os arquivos são **seguros de rodar quantas vezes quiser**, mesmo
+se seu banco já tiver tudo aplicado — cada `CREATE TABLE`, `CREATE
+INDEX` e `CREATE TRIGGER` verifica se já existe antes de criar de
+novo. Se aparecer algum aviso de "já existe" no meio do caminho, é
+normal, não é erro.
 
 ## Voz e vídeo (LiveKit)
 
@@ -55,3 +58,29 @@ supabase secrets set LIVEKIT_API_SECRET=seu-api-secret
 
 Não precisa configurar nada no cliente (`.env`) — a URL do LiveKit
 vem embutida no token que a função devolve.
+
+## Impedir que o Supabase pause (plano grátis)
+
+O plano grátis do Supabase pausa o projeto sozinho depois de um tempo
+sem atividade real de API — e um projeto pausado derruba o app inteiro
+até alguém entrar no dashboard e reativar na mão. Tem dois esquemas
+prontos pra evitar isso, use um ou os dois juntos (são independentes):
+
+**Opção 1 — dentro do próprio Supabase (`keepalive.sql`).** O banco se
+auto-pinga sozinho, sem depender de nada externo, via `pg_cron` +
+`pg_net`. Abra `supabase/keepalive.sql`, troque os dois placeholders
+(URL do projeto e anon key — os dois já estão no seu `.env`) pelos seus
+valores reais, e rode o arquivo inteiro no SQL Editor. Verifique depois
+com `select * from cron.job;`.
+
+**Opção 2 — GitHub Actions (`.github/workflows/supabase-keepalive.yml`).**
+Roda nos servidores do GitHub em vez de dentro do banco — útil como
+segunda camada, já que continua funcionando mesmo se o projeto já
+tiver pausado por algum outro motivo (o pg_cron para junto com o
+banco pausado; isso aqui não). Precisa só cadastrar dois secrets no
+repositório (`SUPABASE_URL` e `SUPABASE_ANON_KEY`, mesmos valores do
+`.env`) — ver o comentário no topo do arquivo do workflow pro passo a
+passo.
+
+Os dois rodam a cada 3 dias — bem dentro da janela de 7 dias de
+inatividade que causaria a pausa, com folga mesmo se um ciclo falhar.

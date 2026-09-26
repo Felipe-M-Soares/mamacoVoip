@@ -115,18 +115,23 @@ marcados com ⚠️ são limitações conhecidas e documentadas, não omissões.
 
 ## 10. API / Edge Functions
 
-Este projeto não usa Edge Functions — toda a lógica de backend vive em
-funções PostgreSQL (`security definer`) chamadas via RPC, que herdam a
-identidade do usuário autenticado automaticamente (`auth.uid()`).
+A maior parte da lógica de backend vive em funções PostgreSQL (`security
+definer`) chamadas via RPC, que herdam a identidade do usuário autenticado
+automaticamente (`auth.uid()`). Duas coisas, porém, PRECISAM rodar fora do
+banco (segredos que nunca podem chegar no cliente) e viraram Edge
+Functions (`supabase/functions/`): `livekit-token` (emite o token de
+acesso à chamada de voz, mantendo a API key/secret do LiveKit só no
+servidor) e `link-preview` (busca metadados de links compartilhados no
+chat sem expor a máquina do usuário que enviou o link).
 
 | Item | Status | Onde |
 |---|---|---|
-| Validar autenticação | ✅ | Toda função de negócio confere `auth.uid()` |
-| Validar autorização | ✅ | `has_permission()` / checagens de dono em cada função |
-| Validar parâmetros | ✅ | Constraints de banco (`check`) + validação de existência (ex: cargo/servidor não encontrado) |
-| Rate limiting | ✅ | Nível de mensagens (seção 4); não há rate limit genérico de chamadas RPC |
+| Validar autenticação | ✅ | RPC: `auth.uid()`. Edge Functions: `supabase.auth.getUser()` a partir do JWT do header `Authorization` — nunca confia em nada vindo do corpo da requisição |
+| Validar autorização | ✅ | RPC: `has_permission()` / checagens de dono. `livekit-token`: confirma que o usuário é membro do servidor/participante do grupo/DM daquela sala (reaproveitando a mesma RLS das tabelas, ver o comentário na função) antes de emitir o token — corrigido na TRIGÉSIMA NONA RODADA após auditoria encontrar essa checagem faltando |
+| Validar parâmetros | ✅ | Constraints de banco (`check`) + validação de existência; `livekit-token` valida tamanho/tipo do nome da sala |
+| Rate limiting | ✅ | Nível de mensagens (seção 4); não há rate limit genérico de chamadas RPC nem das Edge Functions |
 | Logs | ✅ | `moderation_logs` para ações administrativas |
-| Tratamento seguro de erros | ✅ | `raise exception` com mensagens em português, sem vazar detalhes internos |
+| Tratamento seguro de erros | ✅ | `raise exception`/respostas JSON com mensagens em português, sem vazar detalhes internos (chave de API do LiveKit nunca aparece em nenhuma resposta) |
 | Nunca retornar informações internas do servidor | ✅ | Mesma resposta acima |
 
 ---

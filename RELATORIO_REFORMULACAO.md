@@ -14,8 +14,9 @@ de teste novos), build web e build Electron funcionando.
    - Redirect URLs: só `https://mamaco-voip.vercel.app/**` e `mamacovoip://auth-callback**`.
 4. **Storage:** conferir se o bucket `soundboard` não tem políticas antigas mais permissivas que as novas `soundboard_objects_*`.
 5. **CSP (`vercel.json`):** se seu LiveKit não for `*.livekit.cloud`, acrescente o domínio em `connect-src`.
-6. `npm install` (entraram as fontes auto-hospedadas `@fontsource-variable/inter` e `sora`).
-7. **Teste manual** antes de soltar: entrar/sair de canal de voz, compartilhar tela, rolar mensagens antigas,
+6. **Commite o novo `package-lock.json`.** Ele agora é completo (binários de Windows/Mac/Linux) e o workflow de release usa `npm ci`. O jeito antigo (apagar o lock e rodar `npm install`) passou a quebrar no CI com `Cannot read properties of null (reading 'edgesOut')`, um bug do npm ao resolver as versões mais novas do registro — acontecia também com o projeto original.
+7. `npm install` (entraram as fontes auto-hospedadas `@fontsource-variable/inter` e `sora`).
+8. **Teste manual** antes de soltar: entrar/sair de canal de voz, compartilhar tela, rolar mensagens antigas,
    presença online e "digitando…". São os pontos de maior risco sem teste automatizado.
 
 **Mudança de comportamento:** quem tem 2FA ativo agora precisa digitar o código antes de o banco responder qualquer

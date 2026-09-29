@@ -63,7 +63,7 @@ export function PinnedMessagesPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-[300] bg-black/50 backdrop-blur-[2px] flex justify-end animate-fade-in" onClick={onClose}>
+    <div className="fixed inset-0 z-[300] bg-black/60 flex justify-end animate-fade-in" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"

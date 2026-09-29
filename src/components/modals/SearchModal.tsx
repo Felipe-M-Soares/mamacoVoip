@@ -5,6 +5,7 @@ import { Toggle } from '../ui/Toggle'
 import { supabase } from '../../lib/supabase'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useServers } from '../../hooks/useServers'
+import { useAdultContent } from '../../hooks/useAdultContent'
 import type { Channel, Message, Profile, Server } from '../../types/database'
 
 interface ParsedQuery {
@@ -72,6 +73,7 @@ export function SearchModal({
 }) {
   const { members } = useServerMembers(serverId)
   const { servers } = useServers()
+  const adultContent = useAdultContent()
   const [query, setQuery] = useState('')
   const [crossServer, setCrossServer] = useState(false)
   const [results, setResults] = useState<Message[]>([])
@@ -185,6 +187,14 @@ export function SearchModal({
       const authorIds = [...new Set(list.map((m) => m.author_id))]
       const { data: profileRows } = await supabase.from('profiles').select('*').in('id', authorIds)
       setExtraProfilesById(Object.fromEntries((profileRows ?? []).map((p) => [p.id, p])))
+    }
+
+    // Mensagens de canais +18 só aparecem na busca pra quem confirmou a
+    // idade e deixou "Mostrar conteúdo +18" ligado — senão a busca
+    // furaria o portão de idade do canal.
+    if (!(adultContent.verified && adultContent.showAdult)) {
+      const nsfwChannelIds = new Set(searchableChannels.filter((c) => c.is_nsfw).map((c) => c.id))
+      if (nsfwChannelIds.size > 0) list = list.filter((m) => !nsfwChannelIds.has(m.channel_id))
     }
 
     setResults(list)

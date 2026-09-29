@@ -4,7 +4,7 @@ import { VideoTile } from './CallMediaTiles'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { isNativeMobileApp } from '../../lib/platform'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceConnectionQuality, useVoiceCore, useVoiceSpeaking, type VoiceParticipantInfo } from '../../hooks/useVoice'
 import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -13,7 +13,6 @@ import { InviteFriendsModal } from '../modals/InviteFriendsModal'
 import { SoundboardPanel } from '../ui/SoundboardPanel'
 import { SettingsModal } from '../modals/SettingsModal'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
-import type { VoiceParticipant } from '../../context/VoiceContext'
 import type { Channel, Profile, Role } from '../../types/database'
 
 // VideoTile mora em CallMediaTiles.tsx (arquivo pequeno, compartilhado
@@ -39,7 +38,7 @@ function ScreenShareStage({
   shares: { key: string; name: string; stream: MediaStream; isLocal: boolean }[]
   onHide: (key: string) => void
 }) {
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const [openVolumeFor, setOpenVolumeFor] = useState<string | null>(null)
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
   const cols = shares.length <= 1 ? 1 : shares.length <= 2 ? 2 : shares.length <= 4 ? 2 : 3
@@ -294,14 +293,13 @@ function ParticipantTile({
   onInvite,
   selfMuted = false,
   selfDeafened = false,
-  selfSpeaking = false,
 }: {
   userId: string
   name: string
   username?: string
   avatarUrl?: string | null
   decorationUrl?: string | null
-  data: VoiceParticipant | undefined
+  data: VoiceParticipantInfo | undefined
   isLocal: boolean
   localVideoEnabled?: boolean
   sinkId?: string | null
@@ -320,13 +318,16 @@ function ParticipantTile({
   // próprio usuário (o LiveKit não expõe isso dos outros aqui).
   selfMuted?: boolean
   selfDeafened?: boolean
-  selfSpeaking?: boolean
 }) {
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
   const [videoHiddenLocally, setVideoHiddenLocally] = useState(false)
   const { menuState, openMenu, closeMenu } = useContextMenuState()
-  const speaking = data?.speaking ?? selfSpeaking
+  // Lidos direto do store de atividade: só ESTE tile re-renderiza quando
+  // a pessoa começa/para de falar (antes a tela da call inteira — e o app
+  // todo — era redesenhada a cada mudança).
+  const speaking = useVoiceSpeaking(userId)
+  const peerQuality = useVoiceConnectionQuality(isLocal ? null : userId)
   const hasCameraVideo = isLocal ? localVideoEnabled : Boolean(data?.cameraStream?.getVideoTracks().length)
   const participantVolume = isLocal ? 100 : voice.getParticipantVolume(userId)
 
@@ -486,22 +487,22 @@ function ParticipantTile({
           {name}
           {isLocal && ' (você)'}
         </span>
-        {!isLocal && voice.connectionQuality[userId] !== undefined && (
+        {!isLocal && peerQuality !== undefined && (
           <span
             className={`text-[10px] font-semibold uppercase tracking-wide shrink-0 ${
-              voice.connectionQuality[userId] === 'excellent'
+              peerQuality === 'excellent'
                 ? 'text-discord-green'
-                : voice.connectionQuality[userId] === 'good'
+                : peerQuality === 'good'
                   ? 'text-yellow-400'
                   : 'text-red-400'
             }`}
             title="Qualidade da conexão dessa pessoa com o servidor de voz"
           >
-            {voice.connectionQuality[userId] === 'excellent'
+            {peerQuality === 'excellent'
               ? 'Ótima'
-              : voice.connectionQuality[userId] === 'good'
+              : peerQuality === 'good'
                 ? 'Boa'
-                : voice.connectionQuality[userId] === 'poor'
+                : peerQuality === 'poor'
                   ? 'Instável'
                   : 'Perdida'}
           </span>
@@ -540,7 +541,7 @@ export function VoiceChannelView({
 }) {
   const { profile } = useAuth()
   const { members } = useServerMembers(serverId)
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const { permissions, kickMember, banMember } = useModeration(serverId)
   const { roles, rolesForUser, assignRole, removeRole } = useRoles(serverId)
   const { sendRequest } = useFriends()
@@ -795,7 +796,6 @@ export function VoiceChannelView({
                     compact
                     selfMuted={!voice.pushToTalkEnabled && voice.muted}
                     selfDeafened={deafened}
-                    selfSpeaking={voice.speaking}
                   />
                 )}
                 {Object.entries(voice.participants)
@@ -857,7 +857,6 @@ export function VoiceChannelView({
                     localVideoEnabled={voice.videoEnabled}
                     selfMuted={!voice.pushToTalkEnabled && voice.muted}
                     selfDeafened={deafened}
-                    selfSpeaking={voice.speaking}
                   />
                 )}
                 {Object.entries(voice.participants)

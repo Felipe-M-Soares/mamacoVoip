@@ -73,7 +73,7 @@ function ServerIcon({
       onMouseLeave={onMouseLeave}
     >
       <span
-        className={`absolute -left-3 top-1/2 -translate-y-1/2 w-1 rounded-r-full transition-all duration-200 ${
+        className={`absolute -left-3 top-1/2 -translate-y-1/2 w-1 rounded-r-full transition-all duration-150 ${
           active ? 'h-9 bg-brand-gradient' : unread ? 'h-2 bg-discord-text' : 'h-0 bg-discord-text group-hover:h-4'
         }`}
       />
@@ -83,7 +83,7 @@ function ServerIcon({
         style={!iconUrl && variant === 'server' ? { background: gradient } : undefined}
         aria-label={name}
         aria-current={active ? 'page' : undefined}
-        className={`w-12 h-12 flex items-center justify-center font-display font-semibold text-white text-[15px] transition-all duration-200 overflow-hidden
+        className={`w-12 h-12 flex items-center justify-center font-display font-semibold text-white text-[15px] transition-all duration-150 overflow-hidden
           ${active ? 'rounded-[16px] ring-2 ring-discord-blurple/70 ring-offset-2 ring-offset-discord-darker' : 'rounded-[18px] hover:rounded-[14px] hover:-translate-y-px'}
           ${variant === 'server' && !iconUrl ? (active ? '' : 'saturate-[.85] hover:saturate-100') : variant === 'add' ? '' : active ? 'bg-discord-lighter' : 'bg-discord-lighter/70 hover:bg-discord-lighter'}
           ${variant === 'add' ? 'text-2xl font-light text-discord-text-muted border border-dashed border-white/15 hover:border-discord-green hover:text-discord-green hover:bg-discord-green/10' : ''}

@@ -1,7 +1,7 @@
 # Migrations do Mamacos Voip
 
-São **12 arquivos**, em `migrations/` (001 a 013, sem o 006 — nunca
-existiu). Rode todos eles, em ordem, no SQL Editor do Supabase. Se
+São os arquivos em `migrations/` (001 a 015 — o 006 nunca existiu).
+Rode todos eles, em ordem, no SQL Editor do Supabase. Se
 preferir rodar tudo de uma vez, use o arquivo único consolidado
 (`mamacoVoip_setup_completo.sql`, se você tiver recebido um).
 
@@ -19,6 +19,8 @@ preferir rodar tudo de uma vez, use o arquivo único consolidado
 | `011_security_hardening.sql` | Correções de segurança (RLS, permissões órfãs, funções `security definer`) |
 | `012_content_reports.sql` | Sistema de denúncias |
 | `013_audit_fixes.sql` | Auditoria de segurança: 2FA cobrado no banco, bloqueio de mover/forjar mensagens, grupos de DM fechados, hierarquia de cargos, convites fortes, validação de perfil/URLs, Storage, limites anti-flood e índices |
+| `014_move_members.sql` | Mover membros entre canais de voz (arrastar estilo Discord): permissão `move_members`, tabela `voice_move_requests` (Realtime, só o alvo lê), RPC `move_voice_member` (valida permissão, hierarquia, canal de voz e acesso) e ação `member_moved` no log de moderação |
+| `015_nsfw_channels.sql` | Canais com restrição de idade (+18): `channels.is_nsfw` e `profiles.age_verified_adult_at` (confirmação de idade, carimbada com a hora do servidor) |
 
 ### Depois de rodar a 013
 
@@ -32,6 +34,27 @@ preferir rodar tudo de uma vez, use o arquivo único consolidado
   valendo.
 - Se aparecer o aviso "Existem usernames repetidos ignorando
   maiúsculas", resolva as duplicatas e rode a 013 de novo.
+
+### Depois de rodar a 015
+
+- Em **Editar canal** (canais de texto) aparece "Canal +18 (restrição
+  de idade)". Quem abre um canal marcado vê um aviso de idade antes do
+  conteúdo; a confirmação fica no perfil e pode ser revogada em
+  Configurações › Privacidade.
+- O seletor de GIF usa `rating=r` **só** nesses canais (é o máximo que
+  a API da GIPHY oferece — ela não tem pornografia explícita). Em
+  canais comuns e DMs continua `pg-13`.
+- Antes de rodar a 015 o app continua funcionando: o selo/aviso só
+  aparece quando a coluna existe.
+
+### Depois de rodar a 014
+
+- Aparece a permissão **Mover membros** nos cargos (dono e
+  `administrator` já podem). Arrastar alguém na lista de voz da barra
+  lateral (ou botão direito → "Mover para…") chama `move_voice_member`;
+  o app da pessoa movida escuta `voice_move_requests` e troca de sala
+  sozinho. Confira em **Database → Publications** que
+  `voice_move_requests` está em `supabase_realtime`.
 
 ## Pode rodar de novo sem medo
 

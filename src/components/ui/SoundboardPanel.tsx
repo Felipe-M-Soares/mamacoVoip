@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useModeration } from '../../hooks/useModeration'
 import { useSoundboard } from '../../hooks/useSoundboard'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore } from '../../hooks/useVoice'
 import { decodeAudioFile, trimAudioBufferToWav, MAX_SOUND_SECONDS } from '../../lib/audioTrim'
 import type { SoundboardSound } from '../../types/database'
 
@@ -17,7 +17,7 @@ import type { SoundboardSound } from '../../types/database'
 export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClose: () => void }) {
   const { user } = useAuth()
   const { permissions } = useModeration(serverId)
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const soundboard = useSoundboard(serverId)
   const [search, setSearch] = useState('')
   const [pendingFile, setPendingFile] = useState<File | null>(null)
@@ -164,7 +164,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
 
   return (
     <div
-      className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-4 animate-fade-in"
+      className="fixed inset-0 z-[300] bg-black/70 flex items-end sm:items-center justify-center p-4 animate-fade-in"
       onClick={onClose}
     >
       <div

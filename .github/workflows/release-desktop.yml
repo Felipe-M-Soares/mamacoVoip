@@ -192,6 +192,31 @@ jobs:
           # configurar nada extra.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Pacote para a Microsoft Store (MSIX/APPX) — o único jeito GRÁTIS de
+      # acabar com o aviso "O Windows protegeu o computador" (SmartScreen):
+      # a Microsoft assina o pacote depois de aprovar na Store. Só roda
+      # quando as variáveis do Partner Center estão configuradas no
+      # repositório (Settings > Secrets and variables > Actions > Variables):
+      #   MS_STORE_IDENTITY_NAME  (Package/Identity/Name)
+      #   MS_STORE_PUBLISHER      (Package/Identity/Publisher, "CN=...")
+      # O arquivo sai como artefato do workflow — você envia ele no
+      # Partner Center. Não vai pro release (não é pra instalar direto).
+      - name: Empacotar para a Microsoft Store (só Windows, opcional)
+        if: matrix.os == 'windows-latest' && vars.MS_STORE_IDENTITY_NAME != '' && vars.MS_STORE_PUBLISHER != ''
+        shell: bash
+        run: >
+          npx electron-builder --win appx --x64 --publish never
+          -c.appx.identityName="${{ vars.MS_STORE_IDENTITY_NAME }}"
+          -c.appx.publisher="${{ vars.MS_STORE_PUBLISHER }}"
+
+      - name: Guardar pacote da Store como artefato
+        if: matrix.os == 'windows-latest' && vars.MS_STORE_IDENTITY_NAME != '' && vars.MS_STORE_PUBLISHER != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mamacos-voip-microsoft-store
+          path: release/*.appx
+          if-no-files-found: error
+
   # AUDITORIA: publica o rascunho criado em "prepare" — só depois que os
   # builds terminaram E o instalador do Windows + latest.yml (o manifesto
   # que o auto-updater lê) já estão anexados. Roda mesmo se o build de

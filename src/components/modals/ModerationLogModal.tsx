@@ -15,6 +15,7 @@ const ACTION_LABELS: Record<string, string> = {
   role_assigned: 'atribuiu um cargo a',
   role_removed: 'removeu um cargo de',
   message_deleted: 'excluiu uma mensagem de',
+  member_moved: 'moveu',
 }
 
 function formatLog(log: LogWithProfiles): string {
@@ -25,6 +26,11 @@ function formatLog(log: LogWithProfiles): string {
   if (log.action === 'role_created' || log.action === 'role_deleted') {
     const name = (log.metadata as { name?: string } | null)?.name
     return `${actorName} ${verb} "${name ?? '?'}"`
+  }
+  if (log.action === 'member_moved') {
+    const channelName = (log.metadata as { to_channel_name?: string } | null)?.to_channel_name
+    const who = targetName ?? 'alguém'
+    return channelName ? `${actorName} ${verb} ${who} para #${channelName}` : `${actorName} ${verb} ${who} de canal de voz`
   }
   return targetName ? `${actorName} ${verb} ${targetName}` : `${actorName} ${verb}`
 }

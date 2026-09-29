@@ -129,7 +129,7 @@ export function ScreenSharePicker() {
 
   return (
     <div
-      className="fixed inset-0 z-[400] bg-black/70 backdrop-blur-[2px] flex items-center justify-center p-4 animate-fade-in"
+      className="fixed inset-0 z-[400] bg-black/75 flex items-center justify-center p-4 animate-fade-in"
       onClick={() => choose(null)}
     >
       <div

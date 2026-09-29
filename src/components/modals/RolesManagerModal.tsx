@@ -15,6 +15,7 @@ const PERMISSION_LABELS: Record<Permission, string> = {
   ban_members: 'Banir membros',
   timeout_members: 'Silenciar membros (timeout)',
   view_audit_log: 'Ver registro de moderação',
+  move_members: 'Mover membros',
 }
 
 const PRESET_COLORS = ['#99aab5', '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6', '#e91e63']

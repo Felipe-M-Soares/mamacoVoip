@@ -1,4 +1,5 @@
-import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useMemo, useRef, useState } from 'react'
+import { lazyComponent } from '../modals/lazyModal'
 import { MessageList } from '../chat/MessageList'
 import { MessageComposer } from '../chat/MessageComposer'
 import { useMessages } from '../../hooks/useMessages'
@@ -9,15 +10,17 @@ import { useTypingIndicator } from '../../hooks/useTypingIndicator'
 import { useServerEmojis } from '../../hooks/useServerEmojis'
 import { useChannelThreads } from '../../hooks/useChannelThreads'
 import { useRoles } from '../../hooks/useRoles'
+import { useAdultContent } from '../../hooks/useAdultContent'
+import { shouldGateAdultChannel } from '../../lib/adultContent'
 import type { Channel, Message, Server, Profile, Thread } from '../../types/database'
 
 // Painéis/modais que só aparecem sob demanda — carregados só quando abertos,
 // fora do pacote inicial do app.
-const SearchModal = lazy(() => import('../modals/SearchModal').then((m) => ({ default: m.SearchModal })))
-const PinnedMessagesPanel = lazy(() => import('../chat/PinnedMessagesPanel').then((m) => ({ default: m.PinnedMessagesPanel })))
-const ThreadPanel = lazy(() => import('./ThreadPanel').then((m) => ({ default: m.ThreadPanel })))
-const ForwardMessageModal = lazy(() => import('../modals/ForwardMessageModal').then((m) => ({ default: m.ForwardMessageModal })))
-const ReportModal = lazy(() => import('../modals/ReportModal').then((m) => ({ default: m.ReportModal })))
+const SearchModal = lazyComponent(() => import('../modals/SearchModal').then((m) => m.SearchModal))
+const PinnedMessagesPanel = lazyComponent(() => import('../chat/PinnedMessagesPanel').then((m) => m.PinnedMessagesPanel))
+const ThreadPanel = lazyComponent(() => import('./ThreadPanel').then((m) => m.ThreadPanel))
+const ForwardMessageModal = lazyComponent(() => import('../modals/ForwardMessageModal').then((m) => m.ForwardMessageModal))
+const ReportModal = lazyComponent(() => import('../modals/ReportModal').then((m) => m.ReportModal))
 
 export function ChatArea({
   channel,
@@ -62,7 +65,19 @@ export function ChatArea({
   const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null)
   const [reportingMessageId, setReportingMessageId] = useState<string | null>(null)
   const [revealedSpoilerChannelId, setRevealedSpoilerChannelId] = useState<string | null>(null)
-  const isSpoilerHidden = channel.is_spoiler && revealedSpoilerChannelId !== channel.id
+  // Canal +18 (migration 015): portão de idade por cima do conteúdo, no
+  // mesmo padrão visual do aviso de spoiler. Confirmar grava no perfil
+  // (e localmente); com "Mostrar conteúdo +18" desligado nas
+  // Configurações, o portão volta a cada visita.
+  const adultContent = useAdultContent()
+  const [revealedAdultChannelId, setRevealedAdultChannelId] = useState<string | null>(null)
+  const isAdultGated = shouldGateAdultChannel({
+    isNsfw: !!channel.is_nsfw,
+    verified: adultContent.verified,
+    showAdult: adultContent.showAdult,
+    revealedThisVisit: revealedAdultChannelId === channel.id,
+  })
+  const isSpoilerHidden = !isAdultGated && channel.is_spoiler && revealedSpoilerChannelId !== channel.id
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleJumpToMessage = useCallback((messageId: string) => {
@@ -113,6 +128,7 @@ export function ChatArea({
     setSelectionMode(false)
     setSelectedMessageIds(new Set())
     setShowPinned(false)
+    setRevealedAdultChannelId(null)
   }
 
   const toggleSelectMessage = useCallback((messageId: string) => {
@@ -190,6 +206,14 @@ export function ChatArea({
           </svg>
         </span>
         <h2 className="font-display font-semibold text-[15px] text-white shrink-0 truncate max-w-[40%]">{channel.name}</h2>
+        {channel.is_nsfw && (
+          <span
+            title="Canal com restrição de idade (+18)"
+            className="chip !text-rose-300 !bg-rose-500/10 !border-rose-500/25 shrink-0 tabular-nums"
+          >
+            +18
+          </span>
+        )}
         {channel.slowmode_seconds > 0 && (
           <span
             title={`Modo lento: ${channel.slowmode_seconds}s entre mensagens`}
@@ -262,7 +286,52 @@ export function ChatArea({
         </div>
       </header>
 
-      {isSpoilerHidden ? (
+      {isAdultGated ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 relative overflow-hidden">
+          <div className="absolute inset-0 backdrop-blur-2xl bg-discord-channels/70" />
+          <div
+            role="alertdialog"
+            aria-labelledby="adult-gate-title"
+            aria-describedby="adult-gate-desc"
+            className="relative z-10 flex flex-col items-center gap-3 text-center px-6 py-8 max-w-sm surface-elevated rounded-2xl animate-pop-in"
+          >
+            <span className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/25 flex items-center justify-center font-display font-bold text-lg text-rose-300 tabular-nums" aria-hidden="true">
+              +18
+            </span>
+            <p id="adult-gate-title" className="font-display text-white font-semibold">Canal com restrição de idade</p>
+            <p id="adult-gate-desc" className="text-sm text-discord-text-muted -mt-1">
+              Este canal tem conteúdo adulto. Você confirma que tem 18 anos ou mais?
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
+              <button
+                onClick={() => {
+                  // Leva pro primeiro canal de texto comum do servidor; se
+                  // não houver, o conteúdo simplesmente continua oculto.
+                  const fallback = channels.find(
+                    (c) => c.server_id === server.id && c.type === 'text' && !c.is_nsfw && c.id !== channel.id
+                  )
+                  if (fallback) onJumpToChannel(fallback)
+                }}
+                className="h-10 px-5 btn-secondary text-sm"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={() => {
+                  setRevealedAdultChannelId(channel.id)
+                  void adultContent.confirmAdult()
+                }}
+                className="h-10 px-5 btn-primary text-sm"
+              >
+                Sou maior de 18, continuar
+              </button>
+            </div>
+            <p className="text-[11.5px] text-discord-text-muted leading-snug">
+              Dá pra rever essa escolha em Configurações › Privacidade.
+            </p>
+          </div>
+        </div>
+      ) : isSpoilerHidden ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 relative overflow-hidden">
           <div className="absolute inset-0 backdrop-blur-2xl bg-discord-channels/70" />
           <div className="relative z-10 flex flex-col items-center gap-3 text-center px-6 py-8 max-w-sm surface-elevated rounded-2xl animate-pop-in">
@@ -355,6 +424,7 @@ export function ChatArea({
         onCancelReply={() => setReplyingTo(null)}
         onSend={handleSend}
         onTyping={notifyTyping}
+        adultGifs={!!channel.is_nsfw}
       />
 
       <Suspense fallback={null}>
@@ -413,7 +483,9 @@ export function ChatArea({
             <ForwardMessageModal
               message={msg}
               author={profilesById[msg.author_id]}
-              channels={channels.filter((c) => c.server_id === server.id)}
+              // De um canal +18, só dá pra encaminhar pra outro canal +18
+              // (o conteúdo adulto não vaza pros canais comuns).
+              channels={channels.filter((c) => c.server_id === server.id && (!channel.is_nsfw || c.is_nsfw))}
               serverId={server.id}
               onClose={() => setForwardingMessageId(null)}
             />

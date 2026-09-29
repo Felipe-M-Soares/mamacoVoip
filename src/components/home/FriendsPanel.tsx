@@ -5,7 +5,7 @@ import { useFriends } from '../../context/FriendsContext'
 import { useConversations } from '../../hooks/useConversations'
 import { useOnlineIds } from '../../hooks/usePresence'
 import { useAuth } from '../../hooks/useAuth'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore } from '../../hooks/useVoice'
 import { useServers } from '../../hooks/useServers'
 import { supabase } from '../../lib/supabase'
 import { buildInviteMessage } from '../../lib/inviteMessage'
@@ -354,7 +354,7 @@ function FriendGrid({
   onRemove: (userId: string) => void
 }) {
   const { user } = useAuth()
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const { servers, createInvite } = useServers()
   const { openConversationWith } = useConversations()
   const { menuState, openMenu, closeMenu } = useContextMenuState()

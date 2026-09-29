@@ -52,7 +52,18 @@ if (!gotSingleInstanceLock) {
 // e SEGURO tentar de qualquer forma: se o nome não bater com nada que
 // essa versão reconheça, o Chromium simplesmente ignora — não quebra
 // nada que já funciona (janela normal continua exatamente igual).
-app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer')
+//
+// CORREÇÃO (crash ao compartilhar a TELA INTEIRA): o capturador WGC do
+// Chromium pra TELA (WebRtcAllowWgcScreenCapturer) saiu — ele é
+// experimental (como o próprio texto acima admite) e era a ÚNICA diferença,
+// no nível do Chromium, entre capturar um monitor (quebrava) e capturar uma
+// janela (funcionava). Sem ele, monitor volta pro capturador padrão e bem
+// testado do Chromium (DXGI Desktop Duplication). O caso que motivou a flag
+// (jogo em tela cheia EXCLUSIVA, que o DXGI não enxerga) continua coberto
+// pelo fallback nativo próprio (screen-capture-wgc.exe, ver
+// createNativeFrameCaptureChannel mais abaixo), que entra sozinho quando a
+// captura normal falha. WGC pra JANELA continua ligado (nunca deu problema).
+app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcWindowCapturer')
 
 // Login com Google — o navegador do sistema não tem como abrir uma
 // janela do Electron diretamente, então o "endereço de volta" pro app
@@ -253,6 +264,19 @@ function flushDebugLogSync() {
   }
 }
 
+// Diagnóstico do crash ao compartilhar a tela: além do renderer
+// ('render-process-gone', ver createWindow), um processo AUXILIAR do
+// Chromium também pode cair durante a captura/codificação (GPU — encoder
+// de vídeo por hardware —, serviço de áudio — loopback do sistema —,
+// serviço de captura de vídeo). Antes isso não era registrado em lugar
+// nenhum; agora vai pro mamacos-debug.log com o tipo do processo.
+app.on('child-process-gone', (_event, details) => {
+  appendDebugLog(
+    'main',
+    `child-process-gone: type=${details?.type} reason=${details?.reason} exitCode=${details?.exitCode}` +
+      `${details?.serviceName ? ` service=${details.serviceName}` : ''}${details?.name ? ` name=${details.name}` : ''}`
+  )
+})
 
 // Rede de segurança geral: se algum erro escapar de todos os try/catch
 // (de qualquer parte do app, não só do push-to-talk), isso evita que
@@ -1728,14 +1752,53 @@ function createWindow() {
   // página sozinho depois do aviso — com um limite, pra não entrar num
   // laço infinito de "trava → recarrega → trava" se o problema for
   // permanente.
-  let rendererRecoveryAttempts = 0
+  //
+  // CORREÇÃO (crash ao compartilhar a tela inteira): o aviso era um
+  // dialog.showErrorBox — MODAL e bloqueante (a pessoa precisava clicar em
+  // OK antes de qualquer coisa, e o reload só acontecia depois). Agora a
+  // recuperação é automática e imediata (recarrega a página na hora) e o
+  // aviso é uma notificação do sistema, não bloqueante. A caixa modal só
+  // aparece se o renderer continuar morrendo em sequência (3 vezes em
+  // menos de 2 minutos) — aí recarregar de novo não adianta e a pessoa
+  // precisa saber. Tudo continua indo pro mamacos-debug.log, junto com o
+  // que o renderer estava fazendo logo antes (ver os logDebug do
+  // compartilhamento de tela em VoiceContext.tsx).
+  const RENDERER_CRASH_WINDOW_MS = 2 * 60 * 1000
+  const RENDERER_MAX_RECOVERIES = 3
+  let rendererCrashTimes = []
   win.webContents.on('render-process-gone', (_event, details) => {
     appendDebugLog('main', `render-process-gone: reason=${details.reason} exitCode=${details.exitCode}`)
     if (details.reason === 'clean-exit') return
-    dialog.showErrorBox('Mamacos Voip — processo travou', `Motivo: ${details.reason}`)
-    if (rendererRecoveryAttempts < 3 && !win.isDestroyed()) {
-      rendererRecoveryAttempts++
+    const now = Date.now()
+    rendererCrashTimes = rendererCrashTimes.filter((t) => now - t < RENDERER_CRASH_WINDOW_MS)
+    rendererCrashTimes.push(now)
+    if (win.isDestroyed()) return
+    if (rendererCrashTimes.length > RENDERER_MAX_RECOVERIES) {
+      appendDebugLog('main', `render-process-gone: ${rendererCrashTimes.length} travamentos em menos de 2 min — desistindo de recarregar sozinho`)
+      flushDebugLogSync()
+      dialog.showErrorBox(
+        'Mamacos Voip — processo travou',
+        `Motivo: ${details.reason}\n\nO app travou várias vezes seguidas. Feche e abra de novo pela bandeja. ` +
+          `Se continuar, envie o arquivo de log:\n${debugLogPath}`
+      )
+      return
+    }
+    appendDebugLog('main', `render-process-gone: recarregando a página automaticamente (tentativa ${rendererCrashTimes.length}/${RENDERER_MAX_RECOVERIES})`)
+    try {
       win.webContents.reload()
+    } catch (err) {
+      appendDebugLog('main', `render-process-gone: reload falhou — ${err?.message}`)
+    }
+    try {
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Mamacos Voip se recuperou de um travamento',
+          body: 'O app recarregou sozinho (você saiu da call). Se aconteceu ao compartilhar a tela, tente de novo com uma qualidade menor.',
+          silent: true,
+        }).show()
+      }
+    } catch {
+      // notificação é só um aviso — sem ela o app já se recuperou igual
     }
   })
 
@@ -3125,6 +3188,13 @@ app.whenReady().then(() => {
     }
 
     function runUpdateCheck({ silent, isRetry = false }) {
+      // Versão instalada pela Microsoft Store: quem atualiza é a própria
+      // Store (o pacote MSIX nem permite o app se sobrescrever). Sem isso
+      // o electron-updater tentaria baixar o .exe do GitHub à toa.
+      if (process.windowsStore) {
+        if (!silent) sendToMain('update-status', { status: 'not-available' })
+        return
+      }
       if (updateReadyToInstall || updateDownloadInFlight) {
         // Já tem algo em andamento/pronto — num pedido manual, só
         // reapresenta o estado atual em vez de começar tudo de novo.

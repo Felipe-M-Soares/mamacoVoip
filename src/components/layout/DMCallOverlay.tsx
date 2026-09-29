@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore, useVoiceSpeaking } from '../../hooks/useVoice'
+import { useAuth } from '../../hooks/useAuth'
 import { Avatar } from '../ui/Avatar'
 import { VideoTile } from './CallMediaTiles'
 import type { Profile } from '../../types/database'
@@ -12,7 +13,8 @@ import type { Profile } from '../../types/database'
 // de DM/grupo em andamento (connectedServerId null é o sinal disso,
 // ver join() em VoiceContext.tsx).
 export function DMCallOverlay({ profilesById }: { profilesById: Record<string, Profile> }) {
-  const voice = useVoice()
+  const voice = useVoiceCore()
+  const selfId = useAuth().user?.id ?? null
   const [minimized, setMinimized] = useState(false)
 
   if (!voice.connectedChannelId || voice.connectedServerId) return null
@@ -61,7 +63,7 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
             isLocal
             name="Você"
             avatarUrl={undefined}
-            speaking={voice.speaking}
+            speakerId={selfId}
             hasVideo={false}
             stream={null}
             sinkId={null}
@@ -76,7 +78,7 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
                 isLocal={false}
                 name={profile?.display_name || profile?.username || 'Usuário'}
                 avatarUrl={profile?.avatar_url}
-                speaking={data?.speaking ?? false}
+                speakerId={id}
                 hasVideo={hasVideo}
                 stream={data?.cameraStream ?? null}
                 sinkId={voice.audioSettings.speakerId}
@@ -151,7 +153,7 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
 function ParticipantMiniTile({
   name,
   avatarUrl,
-  speaking,
+  speakerId,
   hasVideo,
   stream,
   sinkId,
@@ -159,11 +161,14 @@ function ParticipantMiniTile({
   isLocal: boolean
   name: string
   avatarUrl?: string | null
-  speaking: boolean
+  // Quem é (pra acender a borda quando fala) — lido direto do store de
+  // atividade, sem re-renderizar a janela da chamada inteira.
+  speakerId: string | null
   hasVideo: boolean
   stream: MediaStream | null
   sinkId?: string | null
 }) {
+  const speaking = useVoiceSpeaking(speakerId)
   return (
     <div
       className={`relative ${hasVideo && stream ? 'aspect-video' : 'aspect-[5/4] flex-col gap-1.5 pt-1'} bg-discord-darker rounded-xl flex items-center justify-center overflow-hidden border transition-[border-color,box-shadow] duration-200 ${

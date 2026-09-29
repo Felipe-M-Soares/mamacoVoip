@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore } from '../../hooks/useVoice'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
 import { useTheme } from '../../hooks/useTheme'
 import { THEMES, type ThemeId } from '../../context/ThemeContext'
@@ -10,6 +10,7 @@ import { getNotificationPermission, requestNotificationPermission } from '../../
 import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sounds'
 import { SecurityTab } from './SecurityTab'
 import { exportUserData } from '../../lib/exportUserData'
+import { useAdultContent } from '../../hooks/useAdultContent'
 import { validatePassword } from '../../lib/authValidation'
 import { traduzErro } from '../../context/AuthContext'
 import { NetworkDiagnosticsPanel } from './NetworkDiagnosticsPanel'
@@ -670,7 +671,7 @@ function AudioTab() {
   // ao lado do perfil) — só valia depois de fechar e abrir o app de
   // novo. Usando a MESMA instância do VoiceContext, qualquer alteração
   // aqui já é a fonte da verdade em todo lugar.
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const audio = voice.audioSettings
   const [testing, setTesting] = useState(false)
   const [echoing, setEchoing] = useState(false)
@@ -1175,7 +1176,7 @@ function AudioTab() {
 }
 
 function PushToTalkSection() {
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const [capturing, setCapturing] = useState(false)
 
   useEffect(() => {
@@ -1323,6 +1324,8 @@ function PrivacyTab() {
         </div>
       </SettingsCard>
 
+      <AdultContentCard />
+
       <SettingsCard>
         <div className="flex gap-3">
           <span className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.05] text-discord-text-muted flex items-center justify-center">
@@ -1351,5 +1354,58 @@ function PrivacyTab() {
         }
       />
     </div>
+  )
+}
+
+// Conteúdo +18 (canais com restrição de idade — migration 015): a
+// preferência de mostrar direto e o estado da confirmação de idade.
+function AdultContentCard() {
+  const { verified, verifiedAt, showAdult, setShowAdult, revokeAdult } = useAdultContent()
+  const [revoking, setRevoking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleRevoke() {
+    setRevoking(true)
+    setError(null)
+    const { error } = await revokeAdult()
+    setRevoking(false)
+    if (error) setError(error)
+  }
+
+  const verifiedLabel = verifiedAt
+    ? `Confirmada em ${new Date(verifiedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}.`
+    : verified
+      ? 'Confirmada neste aparelho.'
+      : 'Ainda não confirmada — o aviso aparece ao abrir um canal +18.'
+
+  return (
+    <SettingsCard
+      title="Conteúdo +18"
+      description="Canais marcados como +18 pelo servidor podem ter conteúdo adulto (inclusive GIFs com classificação R). Fora deles, nada muda."
+    >
+      <RowList>
+        <SettingRow
+          title="Mostrar conteúdo +18 em canais com restrição de idade"
+          description="Desligado: o conteúdo fica oculto e o aviso de idade aparece toda vez que você abrir um canal +18."
+          control={<Toggle label="Mostrar conteúdo +18 em canais com restrição de idade" checked={showAdult} onChange={setShowAdult} />}
+        />
+        <SettingRow
+          title="Confirmação de idade"
+          description={verifiedLabel}
+          control={
+            verified ? (
+              <button onClick={handleRevoke} disabled={revoking} className="btn-secondary h-9 px-4 text-sm shrink-0">
+                {revoking ? 'Revogando...' : 'Revogar'}
+              </button>
+            ) : undefined
+          }
+        />
+      </RowList>
+      {error && (
+        <div className="mt-3">
+          <InlineMessage tone="error">{error}</InlineMessage>
+        </div>
+      )}
+    </SettingsCard>
   )
 }

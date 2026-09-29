@@ -117,3 +117,25 @@ coisa (antes o 2FA era só uma tela e dava pra pular usando a API direto).
   refatorar vários componentes.
 - Canais criados por outra pessoa só aparecem ao recarregar (tabelas fora da publicação Realtime).
 - Links dentro do texto das mensagens não viram links clicáveis (comportamento atual preservado).
+
+## Rodada 2 (pedidos de 29/09)
+
+- **Crash ao compartilhar tela inteira / janela em tela cheia:** o quadro do monitor inteiro (4K, ultrawide) ia sem limite
+  pro codificador H.264, que não aceita acima de ~4096×2304 e roda dentro do processo da página. Agora há teto de 1440p
+  aplicado ANTES de publicar, troca automática pra VP8 se ainda passar do limite, e a flag experimental de captura de tela
+  (WGC) foi removida. Se o processo cair mesmo assim, o app recarrega sozinho com uma notificação (sem a caixa "processo
+  travou") e registra tudo em `%APPDATA%\Mamacos Voip\mamacos-debug.log`.
+- **Lentidão dos botões:** modais agora são pré-carregados em segundo plano (o 1º clique esperava baixar o código),
+  a voz não redesenha mais o app inteiro a cada "fulano está falando", canais/servidores já visitados abrem na hora
+  (cache), menos idas ao servidor, animações mais curtas e sem desfoque de fundo pesado. Ex.: Configurações 414→222 ms,
+  voltar a um canal 448→~140 ms (medido com CPU 4× mais lenta).
+- **Arrastar usuários entre salas:** dono (ou cargo com "Mover membros") arrasta o participante na barra lateral para
+  outro canal de voz, ou botão direito → "Mover para…". Validado no banco (migration **014**), respeita hierarquia de
+  cargos e fica no log de moderação.
+- **GIFs +18:** canais marcados como +18 (migration **015**) com confirmação de idade; neles o GIF usa o nível máximo do
+  GIPHY (`r`). O GIPHY não oferece pornografia explícita — `r` é o limite da API. Opção em Configurações › Privacidade.
+- **Instalador:** assistente em português com imagens da marca, licença, escolha de pasta, atalho na área de trabalho e
+  "abrir ao terminar"; ícone `.ico` próprio. Build opcional para a **Microsoft Store** (grátis, tira o aviso do Windows) —
+  ver `COMO_TIRAR_AVISO_DO_WINDOWS.md`.
+
+Rodar no Supabase, na ordem: `014_move_members.sql` e `015_nsfw_channels.sql`.

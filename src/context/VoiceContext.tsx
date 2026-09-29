@@ -18,7 +18,15 @@ import { supabase } from '../lib/supabase'
 import { fetchLiveKitToken } from '../lib/livekit'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
-import { useScreenShareQuality, contentHintForPreset, type QualityPreset } from '../hooks/useScreenShareQuality'
+import {
+  useScreenShareQuality,
+  contentHintForPreset,
+  exceedsH264FrameLimits,
+  fitWithin,
+  SAFE_MAX_CAPTURE_HEIGHT,
+  SAFE_MAX_CAPTURE_WIDTH,
+  type QualityPreset,
+} from '../hooks/useScreenShareQuality'
 import { createNoiseSuppressor, type NoiseSuppressor, createScreenAudioDenoiser, type ScreenAudioDenoiser } from '../lib/noiseSuppression'
 import { takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
@@ -26,6 +34,7 @@ import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
 import { armScreenShareChoice } from '../lib/chooseScreenShareSource'
 import { PcmStreamPlayer } from '../lib/pcmStreamPlayer'
 import { isAllowedSoundboardUrl } from '../lib/soundboardUrl'
+import { useSplitVoiceValue, VoiceActivityContext, VoiceCoreContext } from './voiceSplit'
 import {
   playConnectSound,
   playDisconnectSound,
@@ -237,18 +246,98 @@ const APP_AUDIO_CONFIRM_TIMEOUT_MS = 3000
 // compartilhar a tela" (agora à prova de qualquer constraint problemática)
 // de "ajustar a qualidade fina" (best-effort, sem risco pro básico
 // funcionar).
-async function applyVideoQualityConstraints(track: MediaStreamTrack, preset: QualityPreset) {
+//
+// CORREÇÃO — crash do renderer ao compartilhar a TELA INTEIRA (ou janela em
+// tela cheia): antes isso era chamado com `void` (sem esperar) e, pra
+// "Fonte", sem teto nenhum — então a track era PUBLICADA (encoder H.264
+// ligado) ainda com quadros do tamanho do monitor inteiro (4K, ultrawide,
+// multi-monitor), já que a fonte "screen:" é aberta sem limites (ver
+// attemptGetUserMedia). Agora: (1) o teto é sempre aplicado e nunca passa
+// de SAFE_MAX_CAPTURE_* (2560x1440); (2) quem chama ESPERA isso terminar
+// antes de publicar (com prazo, pra nunca travar a transmissão); (3) se a
+// primeira tentativa falhar, tenta de novo só com o teto de tamanho (sem
+// fps); (4) registra no mamacos-debug.log o tamanho antes/depois — é o
+// ponto de risco, e é o que vai dizer se o problema voltar. Devolve o
+// tamanho final pra quem chama decidir o codec (ver pickScreenShareCodec).
+function readVideoSettings(track: MediaStreamTrack): { width: number; height: number; frameRate: number } {
   try {
-    await track.applyConstraints({
-      width: preset.capResolution ? { ideal: preset.width, max: preset.width } : { ideal: preset.width },
-      height: preset.capResolution ? { ideal: preset.height, max: preset.height } : { ideal: preset.height },
-      frameRate: { ideal: preset.frameRate },
-    })
+    const s = track.getSettings()
+    return { width: s.width ?? 0, height: s.height ?? 0, frameRate: Math.round(s.frameRate ?? 0) }
   } catch {
-    // Sem problema — a transmissão já está rolando com a resolução/taxa
-    // nativa da captura (quase sempre já é boa o bastante sozinha); só
-    // não conseguiu o ajuste fino extra dessa vez.
+    return { width: 0, height: 0, frameRate: 0 }
   }
+}
+
+function withScreenShareTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new DOMException(`${label}: tempo esgotado`, 'TimeoutError')), ms)
+    promise.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(timer)
+        reject(e)
+      }
+    )
+  })
+}
+
+async function applyVideoQualityConstraints(
+  track: MediaStreamTrack,
+  preset: QualityPreset,
+  context: string
+): Promise<{ width: number; height: number; frameRate: number }> {
+  const before = readVideoSettings(track)
+  const maxWidth = Math.min(preset.width, SAFE_MAX_CAPTURE_WIDTH)
+  const maxHeight = Math.min(preset.height, SAFE_MAX_CAPTURE_HEIGHT)
+  logDebug(
+    `${context}: captura aberta em ${before.width}x${before.height}@${before.frameRate}fps — aplicando teto ${maxWidth}x${maxHeight}@${preset.frameRate}fps (label=${track.label || '?'})`
+  )
+  try {
+    await withScreenShareTimeout(
+      track.applyConstraints({
+        width: { ideal: maxWidth, max: maxWidth },
+        height: { ideal: maxHeight, max: maxHeight },
+        frameRate: { ideal: preset.frameRate },
+      }),
+      3000,
+      'applyConstraints'
+    )
+  } catch (err) {
+    logDebug(`${context}: applyConstraints (tamanho+fps) falhou — ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}; tentando só o tamanho`)
+    try {
+      await withScreenShareTimeout(
+        track.applyConstraints({ width: { max: maxWidth }, height: { max: maxHeight } }),
+        3000,
+        'applyConstraints'
+      )
+    } catch (err2) {
+      logDebug(`${context}: applyConstraints (só tamanho) também falhou — ${err2 instanceof Error ? `${err2.name}: ${err2.message}` : String(err2)}`)
+    }
+  }
+  const after = readVideoSettings(track)
+  const overCap = after.width > SAFE_MAX_CAPTURE_WIDTH || after.height > SAFE_MAX_CAPTURE_HEIGHT
+  logDebug(
+    `${context}: resolução final ${after.width}x${after.height}@${after.frameRate}fps${overCap ? ' — ATENÇÃO: acima do teto de segurança (redução não pegou)' : ''}`
+  )
+  return after
+}
+
+// H.264 (preferido: tem encoder por hardware na maioria das GPUs — ver o
+// comentário grande no publishTrack de toggleScreenShare) não codifica
+// quadros acima do nível 5.2 (~4096x2304): encoder de hardware recusa e o
+// OpenH264 (software, roda DENTRO do renderer) é justamente o ponto que
+// suspeitamos derrubar o processo. Se, mesmo depois do teto acima, o quadro
+// continuar grande demais (a redução não pegou), usa VP8, que não tem esse
+// limite, em vez de arriscar o H.264.
+function pickScreenShareCodec(settings: { width: number; height: number }, context: string): 'h264' | 'vp8' {
+  if (exceedsH264FrameLimits(settings.width, settings.height)) {
+    logDebug(`${context}: quadro ${settings.width}x${settings.height} acima do limite do H.264 — publicando em VP8`)
+    return 'vp8'
+  }
+  return 'h264'
 }
 
 // OITAVA RODADA — mudança de arquitetura mais importante até agora: o
@@ -371,9 +460,17 @@ async function captureNativeFallbackStream(kind: 'wgc' | 'gdi', monitorIndex: nu
   let decoding = false
   let cleanedUp = false
 
+  // Tamanho REAL do monitor (vindo do .exe) — o canvas/track saem
+  // reduzidos pro teto de segurança (ver SAFE_MAX_CAPTURE_*): um canvas 4K
+  // + captureStream + encoder, tudo dentro do renderer, é exatamente o tipo
+  // de carga que derrubava o processo com monitor grande. A redução já é
+  // feita na DECODIFICAÇÃO do JPEG (resizeWidth/resizeHeight), sem nunca
+  // alocar o bitmap em tamanho cheio.
   const unsubFormat = api.onFormat(({ width, height }) => {
-    canvas.width = width
-    canvas.height = height
+    const fitted = fitWithin(width, height)
+    canvas.width = fitted.width || width
+    canvas.height = fitted.height || height
+    logDebug(`captureNativeFallbackStream(${kind}): monitor ${width}x${height} → canvas ${canvas.width}x${canvas.height}`)
     ready = true
   })
   const unsubFrame = api.onFrame((frame) => {
@@ -385,7 +482,11 @@ async function captureNativeFallbackStream(kind: 'wgc' | 'gdi', monitorIndex: nu
     // seguro de virar um ArrayBuffer isolado pro Blob — usar
     // `frame.buffer` direto arriscaria pegar bytes de OUTROS frames
     // vizinhos no mesmo buffer.
-    createImageBitmap(new Blob([frame.slice().buffer], { type: 'image/jpeg' }))
+    createImageBitmap(new Blob([frame.slice().buffer], { type: 'image/jpeg' }), {
+      resizeWidth: canvas.width,
+      resizeHeight: canvas.height,
+      resizeQuality: 'medium',
+    })
       .then((bitmap) => {
         ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
         bitmap.close()
@@ -541,6 +642,9 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
   // Pra JANELA continua pedindo os limites de cara — esse caminho nunca
   // deu esse erro, então não tem motivo pra mexer nele.
   const isScreenSource = sourceId.startsWith('screen:')
+  logDebug(
+    `captureScreenShareStream: fonte escolhida sourceId=${sourceId} (tipo=${isScreenSource ? 'tela inteira' : 'janela'}, preset=${preset.width}x${preset.height}@${preset.frameRate}fps)`
+  )
   // VIGÉSIMA RODADA — bug relatado com print de tela: depois da correção
   // anterior (tirar os limites de resolução/fps do pedido pra fontes de
   // TELA), o erro mudou de "Invalid capture constraints (AbortError)"
@@ -809,7 +913,7 @@ export interface VoiceParticipant {
 // em VoiceProvider abaixo.
 export type VoiceConnectionQuality = 'excellent' | 'good' | 'poor' | 'lost'
 
-interface VoiceContextValue {
+export interface VoiceContextValue {
   connectedChannelId: string | null
   connectedChannelName: string | null
   joiningChannelId: string | null
@@ -1679,8 +1783,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // a propriedade "mandatory" (é específica do Electron/Chromium,
         // de antes da era getDisplayMedia) — daí o "as unknown as ...".
       } as unknown as MediaStreamConstraints
+      logDebug('captureSystemAudioTrack: pedindo áudio de sistema (loopback)...')
       const audioStream = await navigator.mediaDevices.getUserMedia(constraints)
       const track = audioStream.getAudioTracks()[0] ?? null
+      logDebug(`captureSystemAudioTrack: ${track ? `ok (${track.label || track.id})` : 'nenhuma track de áudio'}`)
       // NONA RODADA: agora que confirmei (testando de verdade, ver
       // captureScreenShareStream acima) que misturar sintaxe antiga com
       // propriedades modernas não é mais suspeito de causar "Invalid
@@ -3309,10 +3415,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setLocalScreenStream(stream)
       const videoTrack = stream.getVideoTracks()[0]
       if (!videoTrack) throw new DOMException('A captura não retornou nenhum vídeo.', 'NotReadableError')
-      // Ajuste de qualidade best-effort, à parte — ver
-      // applyVideoQualityConstraints acima. Não bloqueia nem arrisca a
-      // transmissão: se falhar, só continua na resolução/taxa nativa.
-      void applyVideoQualityConstraints(videoTrack, preset)
+      // Teto de resolução/fps ANTES de publicar (antes era `void`, sem
+      // esperar — o encoder começava com o quadro do monitor inteiro). Ver
+      // applyVideoQualityConstraints acima. Nunca lança: se falhar, segue.
+      const finalVideoSettings = await applyVideoQualityConstraints(videoTrack, preset, 'toggleScreenShare')
+      const screenVideoCodec = pickScreenShareCodec(finalVideoSettings, 'toggleScreenShare')
       // QUINTA RODADA: vídeo e áudio agora são COMPLETAMENTE
       // independentes — `stream` (acima) só tem vídeo. Tenta primeiro a
       // captura por processo (isola só o som do jogo, quando o PID foi
@@ -3437,11 +3544,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // (ida-e-volta de rede), e nenhum dos dois depende do resultado
         // do outro. Rodando os dois ao mesmo tempo com Promise.all, o
         // tempo total vira o do mais lento dos dois, não a soma.
+        logDebug(
+          `toggleScreenShare: publicando vídeo (${screenVideoCodec}, até ${preset.maxBitrate}bps) e áudio (${audioTrack ? 'sim' : 'não'})...`
+        )
         const [videoPublication, audioPublication] = await Promise.all([
           roomRef.current.localParticipant.publishTrack(videoTrack, {
             name: 'screen',
             source: Track.Source.ScreenShare,
-            videoCodec: 'h264',
+            videoCodec: screenVideoCodec,
             backupCodec: false,
             screenShareEncoding: {
               maxBitrate: preset.maxBitrate,
@@ -3461,6 +3571,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         ])
         screenVideoPublicationRef.current = videoPublication
         if (audioPublication) screenAudioPublicationRef.current = audioPublication
+        logDebug('toggleScreenShare: publicação concluída')
       }
       started = true
       setScreenSharing(true)
@@ -3590,9 +3701,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         newStream.getTracks().forEach((t) => t.stop())
         return
       }
-      // Ajuste de qualidade best-effort, à parte — ver
-      // applyVideoQualityConstraints acima.
-      void applyVideoQualityConstraints(newVideoTrack, preset)
+      // Teto de resolução/fps ANTES do replaceTrack — ver
+      // applyVideoQualityConstraints acima (mesmo motivo do toggleScreenShare).
+      // replaceTrack mantém o codec já negociado; se esta fonte nova ficou
+      // grande demais pro H.264 mesmo depois do teto, só dá pra registrar.
+      const newVideoSettings = await applyVideoQualityConstraints(newVideoTrack, preset, 'switchScreenShareSource')
+      if (exceedsH264FrameLimits(newVideoSettings.width, newVideoSettings.height)) {
+        logDebug('switchScreenShareSource: ATENÇÃO — fonte nova acima do limite do H.264 e a redução não pegou')
+      }
       // DÉCIMA PRIMEIRA RODADA: idem toggleScreenShare acima — no Linux
       // `newStream` já pode vir com a track de áudio embutida (seletor
       // nativo do sistema, ver captureScreenShareStream).
@@ -3740,9 +3856,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // attachRoomEvents, via RoomEvent.ActiveSpeakersChanged, que o LiveKit
   // dispara sozinho sempre que muda.
 
-  return (
-    <VoiceContext.Provider
-      value={{
+  // Valor dividido em "core" estável + "atividade" de alta frequência —
+  // ver o comentário grande em voiceSplit.tsx (lentidão geral dos cliques
+  // durante uma call). A lista de campos abaixo continua sendo a API
+  // completa de useVoice().
+  const splitValue = useSplitVoiceValue(
+    {
         connectedChannelId,
         connectedChannelName,
         joiningChannelId,
@@ -3792,9 +3911,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         setParticipantVolume,
         getScreenShareVolume,
         setScreenShareVolume,
-      }}
-    >
-      {children}
-    </VoiceContext.Provider>
+    },
+    user?.id ?? null,
+    // getParticipantVolume/getScreenShareVolume leem estes estados, que
+    // não são campos do valor — força um "core" novo quando mudam.
+    `${JSON.stringify(participantVolumes)}|${JSON.stringify(screenShareVolumes)}`
+  )
+
+  return (
+    <VoiceActivityContext.Provider value={splitValue.store}>
+      <VoiceCoreContext.Provider value={splitValue.core}>
+        <VoiceContext.Provider value={splitValue.full}>{children}</VoiceContext.Provider>
+      </VoiceCoreContext.Provider>
+    </VoiceActivityContext.Provider>
   )
 }

@@ -88,14 +88,33 @@
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.ico"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
-      "createDesktopShortcut": true,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/uninstallerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "license": "build/license.txt",
+      "language": "1046",
+      "installerLanguages": [
+        "pt_BR"
+      ],
+      "multiLanguageInstaller": false,
+      "unicode": true,
+      "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
+      "shortcutName": "Mamacos Voip",
+      "uninstallDisplayName": "Mamacos Voip",
+      "runAfterFinish": true,
       "deleteAppDataOnUninstall": true,
+      "differentialPackage": true,
       "artifactName": "MamacosVoip-Setup.exe"
     },
     "mac": {
@@ -118,6 +137,18 @@
       "owner": "Felipe-M-Soares",
       "repo": "mamacoVoip",
       "releaseType": "release"
+    },
+    "appx": {
+      "applicationId": "MamacosVoip",
+      "displayName": "Mamacos Voip",
+      "publisherDisplayName": "Felipe M. Soares",
+      "backgroundColor": "#07070a",
+      "languages": [
+        "pt-BR",
+        "en-US"
+      ],
+      "showNameOnTiles": true,
+      "artifactName": "MamacosVoip-Store.${ext}"
     }
   }
 }

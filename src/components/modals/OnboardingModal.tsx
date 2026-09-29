@@ -78,7 +78,7 @@ export function OnboardingModal({ onDismiss }: { onDismiss: () => void }) {
   // "fixed" dentro dele passa a ser relativo a esse ancestral (e o
   // overlay aparecia preso dentro da barra lateral).
   return createPortal(
-    <div className="fixed inset-0 z-[400] bg-black/60 backdrop-blur-sm animate-fade-in flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[400] bg-black/70 animate-fade-in flex items-center justify-center p-4">
       <div
         role="dialog"
         aria-modal="true"

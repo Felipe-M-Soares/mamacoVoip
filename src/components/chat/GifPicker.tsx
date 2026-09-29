@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { GIPHY_API_KEY } from '../../lib/config'
+import { giphyRating } from '../../lib/adultContent'
 
 interface GifResult {
   id: string
@@ -7,7 +8,22 @@ interface GifResult {
   previewUrl: string
 }
 
-export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) => void; onClose: () => void }) {
+export function GifPicker({
+  onSelect,
+  onClose,
+  adult = false,
+}: {
+  onSelect: (gifUrl: string) => void
+  onClose: () => void
+  /**
+   * Modo adulto: só em canal +18 com o portão de idade já confirmado
+   * (quem decide é o ChatArea). Usa `rating=r`, o nível mais permissivo
+   * que a API da GIPHY oferece — ela não serve pornografia explícita.
+   * Em todo o resto (canais comuns, DMs, grupos) continua `pg-13`.
+   */
+  adult?: boolean
+}) {
+  const rating = giphyRating(adult)
   const [query, setQuery] = useState('')
   const [gifs, setGifs] = useState<GifResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -43,7 +59,7 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
     const timeout = setTimeout(() => void fetchGifs(query), delay)
     return () => clearTimeout(timeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query])
+  }, [query, rating])
 
   async function fetchGifs(q: string) {
     // Cancela a busca anterior: sem isso, a resposta de "gat" podia chegar
@@ -58,11 +74,11 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
       // sobre o Google ter desligado o Tenor API de vez em 2026).
       // "trending" quando o campo de busca está vazio (equivalente ao
       // "em alta" que o Tenor tinha), "search" quando a pessoa digitou
-      // algo. `rating=pg-13` filtra conteúdo mais pesado, sem ser
-      // excessivamente restritivo.
+      // algo. `rating=pg-13` (padrão) filtra conteúdo mais pesado, sem ser
+      // excessivamente restritivo; em canal +18 confirmado vira `r`.
       const endpoint = q.trim()
-        ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(q)}&limit=24&rating=pg-13&lang=pt`
-        : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=24&rating=pg-13`
+        ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(q)}&limit=24&rating=${rating}&lang=pt`
+        : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=24&rating=${rating}`
       const res = await fetch(endpoint, { signal: controller.signal })
       const data = await res.json()
       if (controller.signal.aborted) return
@@ -115,6 +131,14 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
           aria-label="Buscar GIF"
           className="flex-1 min-w-0 bg-discord-darker text-sm text-discord-text px-3 py-2 outline-none"
         />
+        {adult && (
+          <span
+            title="Canal +18: resultados com classificação até R (o máximo da GIPHY)"
+            className="chip !text-rose-300 !bg-rose-500/10 !border-rose-500/25 shrink-0 font-semibold tabular-nums"
+          >
+            +18
+          </span>
+        )}
         <button onClick={onClose} aria-label="Fechar" title="Fechar" className="icon-btn w-8 h-8 shrink-0">
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
             <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
@@ -157,7 +181,7 @@ export function GifPicker({ onSelect, onClose }: { onSelect: (gifUrl: string) =>
         )}
       </div>
       <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-discord-text-muted text-center py-1.5 border-t border-[var(--color-line)]">
-        GIFs via GIPHY
+        {adult ? 'GIFs via GIPHY · classificação R' : 'GIFs via GIPHY'}
       </p>
     </div>
   )

@@ -109,7 +109,7 @@ export function Modal({
     // desses painéis (ex.: "Encaminhar mensagem" a partir de uma thread)
     // renderiza atrás do painel, dando a impressão de estar quebrado.
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm animate-fade-in flex items-center justify-center z-[500] p-3 sm:p-4"
+      className="fixed inset-0 bg-black/70 animate-fade-in flex items-center justify-center z-[500] p-3 sm:p-4"
       onMouseDown={(e) => {
         pointerDownOnBackdropRef.current = e.target === e.currentTarget
       }}

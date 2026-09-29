@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
-import type { Ban, ModerationLog, Permission, Profile } from '../types/database'
+import { PERMISSIONS, type Ban, type ModerationLog, type Permission, type Profile } from '../types/database'
 
 export type BanWithProfile = Ban & { profile: Profile }
 export type LogWithProfiles = ModerationLog & { actor: Profile | undefined; target: Profile | undefined }
@@ -24,17 +24,7 @@ export function useModeration(serverId: string | null) {
 
   const checkPermissions = useCallback(async () => {
     if (!serverId || !user) return {} as Record<Permission, boolean>
-    const perms: Permission[] = [
-      'administrator',
-      'manage_server',
-      'manage_roles',
-      'manage_channels',
-      'manage_messages',
-      'kick_members',
-      'ban_members',
-      'timeout_members',
-      'view_audit_log',
-    ]
+    const perms: Permission[] = [...PERMISSIONS]
     const map = {} as Record<Permission, boolean>
 
     // Uma chamada só (my_permissions, migration 013) em vez de 9

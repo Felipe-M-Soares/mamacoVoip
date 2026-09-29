@@ -19,6 +19,7 @@ export function CreateChannelModal({
   const [type, setType] = useState<ChannelType>('text')
   const [isStage, setIsStage] = useState(false)
   const [userLimit, setUserLimit] = useState(0)
+  const [isNsfw, setIsNsfw] = useState(false)
   const [categoryId, setCategoryId] = useState<string>(defaultCategoryId ?? '')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -31,7 +32,7 @@ export function CreateChannelModal({
       return
     }
     setLoading(true)
-    const { error } = await createChannel(cleanName, type, categoryId || null, type === 'voice' && isStage, type === 'voice' ? userLimit : 0)
+    const { error } = await createChannel(cleanName, type, categoryId || null, type === 'voice' && isStage, type === 'voice' ? userLimit : 0, type === 'text' && isNsfw)
     setLoading(false)
     if (error) {
       setError(error)
@@ -96,6 +97,15 @@ export function CreateChannelModal({
             />
           </div>
         </div>
+
+        {type === 'text' && (
+          <ToggleRow
+            title="Canal +18 (restrição de idade)"
+            description="Quem abrir o canal precisa confirmar que tem 18 anos ou mais antes de ver o conteúdo, e o seletor de GIF aqui inclui GIFs com classificação R."
+          >
+            <Toggle label="Canal +18 (restrição de idade)" checked={isNsfw} onChange={setIsNsfw} />
+          </ToggleRow>
+        )}
 
         {type === 'voice' && (
           <ToggleRow

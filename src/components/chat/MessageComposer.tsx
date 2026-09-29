@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
+import { lazyComponent } from '../modals/lazyModal'
 import type { KeyboardEvent } from 'react'
 import type { Profile, ServerEmoji, Role } from '../../types/database'
 import { getDraft, setDraft } from '../../lib/messageDrafts'
 
 // Só carrega o seletor de GIF quando alguém abre — fora do pacote inicial.
-const GifPicker = lazy(() => import('./GifPicker').then((m) => ({ default: m.GifPicker })))
+const GifPicker = lazyComponent(() => import('./GifPicker').then((m) => m.GifPicker))
 
 const MAX_LENGTH = 4000
 
@@ -20,6 +21,7 @@ export function MessageComposer({
   onCancelReply,
   onSend,
   onTyping,
+  adultGifs = false,
 }: {
   channelName: string
   members: Profile[]
@@ -32,6 +34,8 @@ export function MessageComposer({
   onCancelReply: () => void
   onSend: (content: string, files: File[]) => Promise<{ error: string | null } | void>
   onTyping?: () => void
+  /** GIFs com classificação R (só canal +18 confirmado — ver ChatArea). DMs nunca passam isso. */
+  adultGifs?: boolean
 }) {
   const [value, setValueState] = useState(() => (draftKey ? getDraft(draftKey) : ''))
   const [files, setFiles] = useState<File[]>([])
@@ -494,6 +498,7 @@ export function MessageComposer({
                   }
                 }}
                 onClose={() => setShowGifPicker(false)}
+                adult={adultGifs}
               />
             </Suspense>
           )}

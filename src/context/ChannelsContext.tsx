@@ -1,6 +1,7 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { describeError } from '../lib/errors'
+import { useAuth } from '../hooks/useAuth'
 import type { Category, Channel, ChannelType } from '../types/database'
 
 interface ChannelsContextValue {
@@ -14,9 +15,10 @@ interface ChannelsContextValue {
     type: ChannelType,
     categoryId: string | null,
     isStage?: boolean,
-    userLimit?: number
+    userLimit?: number,
+    isNsfw?: boolean
   ) => Promise<{ error: string | null }>
-  updateChannel: (channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean; user_limit?: number; is_restricted?: boolean }) => Promise<{ error: string | null }>
+  updateChannel: (channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean; user_limit?: number; is_restricted?: boolean; is_nsfw?: boolean }) => Promise<{ error: string | null }>
   deleteChannel: (channelId: string) => Promise<{ error: string | null }>
   createCategory: (name: string) => Promise<{ error: string | null }>
   updateCategory: (categoryId: string, name: string) => Promise<{ error: string | null }>
@@ -37,10 +39,21 @@ export const ChannelsContext = createContext<ChannelsContextValue | undefined>(u
 // estado (sem vazar canais de um servidor pro outro) e, dentro do MESMO
 // servidor, toda a árvore (sidebar, modais, área de chat) compartilha
 // exatamente a mesma lista — igual ao ServersContext.
+// Última lista de canais/categorias vista de cada servidor (só em
+// memória). O provider é recriado a cada troca de servidor
+// (key={server.id}); sem isso, voltar pra um servidor já aberto mostrava
+// o skeleton e esperava a ida ao servidor de novo antes de qualquer canal
+// aparecer. Agora mostra na hora e revalida em segundo plano.
+const channelsCache = new Map<string, { categories: Category[]; channels: Channel[] }>()
+
 export function ChannelsProvider({ serverId, children }: { serverId: string; children: ReactNode }) {
-  const [categories, setCategories] = useState<Category[]>([])
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [loading, setLoading] = useState(true)
+  // Chave inclui o usuário: outra conta no mesmo computador nunca vê a
+  // lista (com canais restritos) que a anterior tinha em cache.
+  const cacheKey = `${useAuth().user?.id ?? ''}|${serverId}`
+  const [initialCache] = useState(() => channelsCache.get(cacheKey))
+  const [categories, setCategories] = useState<Category[]>(() => initialCache?.categories ?? [])
+  const [channels, setChannels] = useState<Channel[]>(() => initialCache?.channels ?? [])
+  const [loading, setLoading] = useState(!initialCache)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // Antes, uma falha de rede/RLS aqui (uma exceção lançada pelo fetch,
@@ -53,7 +66,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   // de verdade, o motivo aparece pra quem está usando (e pra quem for
   // depurar depois) em vez de falhar em silêncio.
   const loadSeqRef = useRef(0)
-  const hasLoadedRef = useRef(false)
+  const hasLoadedRef = useRef(Boolean(initialCache))
   const refresh = useCallback(async () => {
     const seq = ++loadSeqRef.current
     // Skeleton só na PRIMEIRA carga (ou depois de um erro). Antes toda
@@ -72,6 +85,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
       if (seq !== loadSeqRef.current) return
       setCategories(catsRes.data ?? [])
       setChannels(chansRes.data ?? [])
+      channelsCache.set(cacheKey, { categories: catsRes.data ?? [], channels: chansRes.data ?? [] })
       setLoadError(null)
       hasLoadedRef.current = true
     } catch (err) {
@@ -80,7 +94,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     } finally {
       if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [serverId])
+  }, [serverId, cacheKey])
 
   useEffect(() => {
     refresh()
@@ -91,12 +105,14 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   // try/catch garante que quem chamou SEMPRE recebe uma mensagem de
   // erro de volta em vez de uma exceção não tratada — que no modal de
   // criar canal virava "sem erro, mas o canal nunca aparece".
-  async function createChannel(name: string, type: ChannelType, categoryId: string | null, isStage = false, userLimit = 0) {
+  async function createChannel(name: string, type: ChannelType, categoryId: string | null, isStage = false, userLimit = 0, isNsfw = false) {
     try {
       const position = channels.filter((c) => c.category_id === categoryId).length
       const { error } = await supabase
         .from('channels')
-        .insert({ server_id: serverId, name, type, category_id: categoryId, position, is_stage: isStage, user_limit: userLimit })
+        // is_nsfw só vai no insert quando ligado: assim criar canal comum
+        // continua funcionando mesmo num banco que ainda não rodou a 015.
+        .insert({ server_id: serverId, name, type, category_id: categoryId, position, is_stage: isStage, user_limit: userLimit, ...(isNsfw ? { is_nsfw: true } : {}) })
       if (error) return { error: describeError(error, 'Não foi possível criar o canal.') }
       await refresh()
       return { error: null }
@@ -105,7 +121,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
-  async function updateChannel(channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean; user_limit?: number; is_restricted?: boolean }) {
+  async function updateChannel(channelId: string, updates: { name?: string; topic?: string | null; is_stage?: boolean; slowmode_seconds?: number; is_spoiler?: boolean; user_limit?: number; is_restricted?: boolean; is_nsfw?: boolean }) {
     try {
       const { error } = await supabase.from('channels').update(updates).eq('id', channelId)
       if (error) return { error: describeError(error, 'Não foi possível atualizar o canal.') }

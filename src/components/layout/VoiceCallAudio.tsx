@@ -1,4 +1,4 @@
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore } from '../../hooks/useVoice'
 import { RemoteAudio } from './CallMediaTiles'
 
 // TRIGÉSIMA NONA RODADA — bug relatado: navegar pra OUTRO canal (só
@@ -43,7 +43,7 @@ import { RemoteAudio } from './CallMediaTiles'
 // (antes só a voz usava `sinkId`; o som da transmissão ia sempre pro
 // dispositivo padrão do sistema).
 export function VoiceCallAudio() {
-  const voice = useVoice()
+  const voice = useVoiceCore()
 
   if (!voice.connectedChannelId) return null
 

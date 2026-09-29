@@ -18,15 +18,52 @@ interface ResolutionInfo {
   label: string
 }
 
-// "native" (Fonte) usa um teto bem folgado, maior que qualquer monitor
-// real hoje em dia (inclusive 8K) — na prática funciona como "sem
-// limite", a captura sai na resolução NATIVA da tela da pessoa em vez
-// de ser reduzida (ver `capResolution` em buildPreset abaixo).
+// TETO DE SEGURANÇA da captura de tela — bug relatado (Windows): compartilhar
+// a TELA INTEIRA (ou uma janela em tela cheia) derrubava o processo de
+// renderização ("processo travou — Motivo: crashed"), enquanto janelas
+// menores funcionavam. O que essas duas escolhas têm em comum (e as janelas
+// normais não) é o TAMANHO do quadro: sai do tamanho do monitor inteiro. Antes
+// "Fonte" usava 7680x4320 como teto (= sem limite) e a fonte "screen:" era
+// capturada sem limite nenhum; com isso quadros 4K / ultrawide / multi-monitor
+// iam direto pro encoder H.264 (forçado em VoiceContext.tsx), que roda DENTRO
+// do renderer quando cai no encoder por software (OpenH264) — e o H.264 nem
+// suporta quadros acima do nível 5.2 (4096x2304). Agora NENHUMA captura passa
+// de 2560x1440, qualquer que seja o preset ou o tipo de fonte.
+export const SAFE_MAX_CAPTURE_WIDTH = 2560
+export const SAFE_MAX_CAPTURE_HEIGHT = 1440
+
+// Limite de tamanho de quadro do H.264 (nível 5.2: 36864 macroblocos — na
+// prática 4096x2304). Acima disso encoders de hardware e o OpenH264 recusam
+// ou quebram; ver VoiceContext.tsx (troca pra VP8 se a redução falhar).
+export function exceedsH264FrameLimits(width: number, height: number): boolean {
+  if (!width || !height) return false
+  const macroblocks = Math.ceil(width / 16) * Math.ceil(height / 16)
+  return width > 4096 || height > 4096 || macroblocks > 36864
+}
+
+// Encaixa (width x height) dentro de (maxWidth x maxHeight) mantendo a
+// proporção, sem nunca aumentar, e com dimensões PARES (encoders de vídeo
+// com subamostragem 4:2:0 exigem largura/altura pares).
+export function fitWithin(
+  width: number,
+  height: number,
+  maxWidth = SAFE_MAX_CAPTURE_WIDTH,
+  maxHeight = SAFE_MAX_CAPTURE_HEIGHT
+): { width: number; height: number } {
+  if (!(width > 0) || !(height > 0)) return { width: 0, height: 0 }
+  const scale = Math.min(1, maxWidth / width, maxHeight / height)
+  const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2)
+  return { width: even(width * scale), height: even(height * scale) }
+}
+
+// "native" (Fonte) = a resolução da própria tela, mas limitada ao teto de
+// segurança acima (monitores até 1440p saem nativos; 4K/ultrawide são
+// reduzidos mantendo a proporção).
 const RESOLUTIONS: Record<ScreenShareResolution, ResolutionInfo> = {
   '720p': { width: 1280, height: 720, label: '720p (HD)' },
   '1080p': { width: 1920, height: 1080, label: '1080p (Full HD)' },
   '1440p': { width: 2560, height: 1440, label: '1440p (2K)' },
-  native: { width: 7680, height: 4320, label: 'Fonte (resolução nativa da sua tela)' },
+  native: { width: SAFE_MAX_CAPTURE_WIDTH, height: SAFE_MAX_CAPTURE_HEIGHT, label: 'Fonte (nativa, até 1440p)' },
 }
 
 export const RESOLUTION_OPTIONS: { value: ScreenShareResolution; label: string }[] = (
@@ -45,10 +82,10 @@ const BITRATE_TABLE: Record<ScreenShareResolution, Record<ScreenShareFrameRate, 
   '720p': { 15: 1_200_000, 30: 2_500_000, 60: 4_000_000 },
   '1080p': { 15: 2_500_000, 30: 4_000_000, 60: 6_000_000 },
   '1440p': { 15: 4_500_000, 30: 8_000_000, 60: 12_000_000 },
-  // "quality" (rodada anterior) usava 35Mbps pra native/60 — mantido
-  // igual aqui, é o valor que já tinha sido calibrado pra 4K/60fps de
-  // verdade (referência comum pra isso fica entre 35-45Mbps).
-  native: { 15: 8_000_000, 30: 16_000_000, 60: 35_000_000 },
+  // Antes 35Mbps (calibrado pra 4K/60) — como "Fonte" agora nunca passa
+  // de 1440p (ver SAFE_MAX_CAPTURE_*), usa o mesmo patamar do 1440p com
+  // uma folga pequena.
+  native: { 15: 5_000_000, 30: 9_000_000, 60: 14_000_000 },
 }
 
 export interface QualityPreset {
@@ -59,10 +96,9 @@ export interface QualityPreset {
   degradationPreference: 'maintain-framerate' | 'maintain-resolution'
   // Se `true`, `width`/`height` são um TETO de verdade (constraint
   // "max" no getDisplayMedia) — a tela é reduzida pra caber nesse
-  // limite mesmo que a resolução nativa seja maior. Se `false` (só
-  // acontece com resolução "native"), `width`/`height` são só um teto
-  // bem folgado pra deixar a captura sair na resolução NATIVA da tela
-  // da pessoa, sem reduzir nada.
+  // limite mesmo que a resolução nativa seja maior. Hoje é SEMPRE `true`
+  // (ver SAFE_MAX_CAPTURE_* — "Fonte" deixou de ser "sem limite" porque
+  // quadros do tamanho de um monitor 4K derrubavam o renderer).
   capResolution: boolean
   label: string
   description: string
@@ -81,10 +117,12 @@ function buildPreset(resolution: ScreenShareResolution, frameRate: ScreenShareFr
     // sempre é usada por quem tem internet de sobra e quer nitidez
     // máxima, então prioriza manter a resolução em vez do fps.
     degradationPreference: isNative ? 'maintain-resolution' : 'maintain-framerate',
-    capResolution: !isNative,
+    // Sempre um teto de verdade agora (ver SAFE_MAX_CAPTURE_*) — inclusive
+    // em "Fonte", que antes era "sem limite".
+    capResolution: true,
     label: `${res.label} · ${frameRate}fps`,
     description: isNative
-      ? 'Transmite na resolução nativa da sua tela, no bitrate mais alto que dá — exige bem mais do seu PC e da internet de quem assiste.'
+      ? 'Transmite na resolução nativa da sua tela (até 1440p — telas maiores são reduzidas por segurança), no bitrate mais alto que dá.'
       : `Resolução fixa em ${res.label}, ${frameRate} quadros por segundo.`,
   }
 }

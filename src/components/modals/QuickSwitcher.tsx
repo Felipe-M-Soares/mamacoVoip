@@ -116,7 +116,7 @@ export function QuickSwitcher({
   // overlay aparecia preso dentro da barra lateral).
   return createPortal(
     <div
-      className="fixed inset-0 z-[350] bg-black/60 backdrop-blur-sm animate-fade-in flex items-start justify-center pt-[12vh] px-4"
+      className="fixed inset-0 z-[350] bg-black/70 animate-fade-in flex items-start justify-center pt-[12vh] px-4"
       onClick={onClose}
     >
       <div

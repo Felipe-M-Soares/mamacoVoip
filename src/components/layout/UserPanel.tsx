@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
-import { useVoice } from '../../hooks/useVoice'
+import { useLocalVoiceConnectionQuality, useVoiceCore } from '../../hooks/useVoice'
 import { useConnectionPing } from '../../hooks/useConnectionPing'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { Avatar } from '../ui/Avatar'
@@ -201,7 +201,7 @@ function HudSquareButton({
 // mesma ideia da referência do Discord ("Não Compartilhando").
 export function PlayingActivityCard() {
   const { profile } = useAuth()
-  const voice = useVoice()
+  const voice = useVoiceCore()
   if (!profile?.playing) return null
 
   const subtitle = voice.connectedChannelId
@@ -229,7 +229,7 @@ export function PlayingActivityCard() {
 // pelo Início/DMs ou por outro servidor enquanto a call de outro
 // servidor continua rolando, igual o Discord de verdade faz.
 function VoiceHud() {
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const [showSoundboard, setShowSoundboard] = useState(false)
 
   if (!voice.connectedChannelId) return null
@@ -290,7 +290,7 @@ function VoiceHud() {
 
 export function UserPanel() {
   const { profile, signOut, updateStatus } = useAuth()
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const apiPingMs = useConnectionPing()
   // TRIGÉSIMA QUARTA RODADA — antes disso, a call era mesh (P2P direto
   // entre cada dupla de pessoas), então "latência da chamada" fazia
@@ -302,21 +302,22 @@ export function UserPanel() {
   // ms) é o que o LiveKit entrega — mapeada aqui pra um valor em ms
   // aproximado só pra reaproveitar o mesmo ícone de barrinhas
   // (WifiSignalIcon) sem precisar reescrevê-lo.
+  const localConnectionQuality = useLocalVoiceConnectionQuality()
   const callQualityMs: number | null =
-    voice.connectedChannelId && voice.localConnectionQuality
-      ? voice.localConnectionQuality === 'excellent'
+    voice.connectedChannelId && localConnectionQuality
+      ? localConnectionQuality === 'excellent'
         ? 40
-        : voice.localConnectionQuality === 'good'
+        : localConnectionQuality === 'good'
           ? 150
           : 350
       : null
   const pingMs = callQualityMs ?? apiPingMs
   const callQualityLabel =
-    voice.localConnectionQuality === 'excellent'
+    localConnectionQuality === 'excellent'
       ? 'Ótima'
-      : voice.localConnectionQuality === 'good'
+      : localConnectionQuality === 'good'
         ? 'Boa'
-        : voice.localConnectionQuality === 'poor'
+        : localConnectionQuality === 'poor'
           ? 'Instável'
           : 'Perdida'
   const pingLabel =

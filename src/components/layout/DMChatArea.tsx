@@ -7,7 +7,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../context/FriendsContext'
 import { useTypingIndicator } from '../../hooks/useTypingIndicator'
 import { useDMSeenState } from '../../hooks/useDMSeenState'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore } from '../../hooks/useVoice'
 import { useChatScroll } from '../../hooks/useChatScroll'
 import { MessageListSkeleton } from '../chat/MessageListSkeleton'
 import type { DMMessage, Profile } from '../../types/database'
@@ -19,7 +19,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   const { messages, attachments, loading, loadingOlder, hasMore, loadOlder, loadError, sendMessage, editMessage, deleteMessage } =
     useDirectMessages(conversationId)
   const { blocked, blockUser, unblockUser } = useFriends()
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const isThisCall = voice.connectedChannelId === conversationId
   const isInAnotherCall = Boolean(voice.connectedChannelId) && !isThisCall
   const { typingUserIds, notifyTyping, stopTyping } = useTypingIndicator(conversationId, user?.id)

@@ -31,6 +31,7 @@ export function EditChannelModal({
   const [userLimit, setUserLimit] = useState(channel.user_limit)
   const [slowmodeSeconds, setSlowmodeSeconds] = useState(channel.slowmode_seconds)
   const [isSpoiler, setIsSpoiler] = useState(channel.is_spoiler)
+  const [isNsfw, setIsNsfw] = useState(!!channel.is_nsfw)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +52,9 @@ export function EditChannelModal({
       slowmode_seconds: channel.type === 'text' ? slowmodeSeconds : channel.slowmode_seconds,
       is_spoiler: channel.type === 'text' ? isSpoiler : channel.is_spoiler,
       is_restricted: isRestricted,
+      // Só manda is_nsfw quando mudou: editar outros campos continua
+      // funcionando num banco que ainda não rodou a migration 015.
+      ...(isNsfw !== !!channel.is_nsfw ? { is_nsfw: isNsfw } : {}),
     })
     if (!error && isRestricted) {
       const { error: rolesError } = await setAllowedRoles(selectedRoleIds)
@@ -197,6 +201,15 @@ export function EditChannelModal({
             description="O conteúdo fica borrado até a pessoa clicar pra revelar (bom pra spoiler de jogo, filme, série)"
           >
             <Toggle label="Canal spoiler" checked={isSpoiler} onChange={setIsSpoiler} />
+          </ToggleRow>
+        )}
+
+        {channel.type === 'text' && (
+          <ToggleRow
+            title="Canal +18 (restrição de idade)"
+            description="Quem abrir o canal precisa confirmar que tem 18 anos ou mais antes de ver o conteúdo. O seletor de GIF aqui passa a incluir GIFs com classificação R (o máximo da GIPHY). Use só pra conteúdo adulto permitido pelas regras do servidor."
+          >
+            <Toggle label="Canal +18 (restrição de idade)" checked={isNsfw} onChange={setIsNsfw} />
           </ToggleRow>
         )}
 

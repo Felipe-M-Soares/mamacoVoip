@@ -28,6 +28,60 @@ function sameReaction(a: MessageReaction, b: Pick<MessageReaction, 'message_id' 
   return a.message_id === b.message_id && a.user_id === b.user_id && a.emoji === b.emoji
 }
 
+// Cache em memória da última página vista de cada canal/thread. Voltar
+// pra um canal que já foi aberto mostra as mensagens NA HORA (em vez do
+// skeleton + 2 idas ao servidor: mensagens e depois anexos/reações) e
+// revalida em silêncio por trás — o que mudou enquanto a pessoa estava
+// em outro canal entra sem piscar a tela.
+type CacheEntry = { messages: Message[]; attachments: AttachmentMap; reactions: ReactionMap; hasMore: boolean }
+const MESSAGE_CACHE_LIMIT = 30
+const messageCache = new Map<string, CacheEntry>()
+function writeCache(key: string, entry: CacheEntry) {
+  messageCache.delete(key)
+  messageCache.set(key, entry)
+  while (messageCache.size > MESSAGE_CACHE_LIMIT) {
+    const oldest = messageCache.keys().next().value
+    if (oldest === undefined) break
+    messageCache.delete(oldest)
+  }
+}
+
+const EMBEDDED_SELECT = '*, message_attachments(*), message_reactions(*)'
+type EmbeddedMessage = Message & { message_attachments?: MessageAttachment[] | null; message_reactions?: MessageReaction[] | null }
+
+/**
+ * Busca uma página de mensagens JÁ com anexos e reações numa única
+ * requisição. Se o embed falhar por qualquer motivo (ex.: relação não
+ * exposta no cache de schema do PostgREST), cai no caminho antigo de
+ * duas etapas — nunca fica sem mensagens por causa disso.
+ */
+async function fetchPageWithExtras(
+  run: (embed: boolean) => PromiseLike<{ data: unknown[] | null; error: unknown }>
+): Promise<{ page: Message[]; attachments: AttachmentMap; reactions: ReactionMap }> {
+  const embedded = await run(true)
+  if (!embedded.error) {
+    const rows = ((embedded.data ?? []) as EmbeddedMessage[]).reverse()
+    const attachments: AttachmentMap = {}
+    const reactions: ReactionMap = {}
+    const page = rows.map(({ message_attachments, message_reactions, ...m }) => {
+      if (message_attachments?.length) attachments[m.id] = message_attachments
+      if (message_reactions?.length) reactions[m.id] = message_reactions
+      return m as Message
+    })
+    // Resposta sem as chaves embutidas (servidor ignorou o embed): busca à parte.
+    if (rows.length > 0 && !('message_attachments' in rows[0])) {
+      const extras = await fetchExtras(page.map((m) => m.id))
+      return { page, ...extras }
+    }
+    return { page, attachments, reactions }
+  }
+  const plain = await run(false)
+  if (plain.error) throw plain.error
+  const page = ((plain.data ?? []) as Message[]).reverse()
+  const extras = await fetchExtras(page.map((m) => m.id))
+  return { page, ...extras }
+}
+
 async function fetchExtras(messageIds: string[]): Promise<{ attachments: AttachmentMap; reactions: ReactionMap }> {
   if (messageIds.length === 0) return { attachments: {}, reactions: {} }
   const [{ data: atts }, { data: reacts }] = await Promise.all([
@@ -77,8 +131,11 @@ export function useMessages(channelId: string | null, serverId: string | null, t
   viewKeyRef.current = viewKey
   const loadSeqRef = useRef(0)
 
-  const buildQuery = useCallback(() => {
-    const base = supabase.from('messages').select('*')
+  const buildQuery = useCallback((embedExtras = false) => {
+    // Com embedExtras, anexos e reações vêm JUNTO na mesma resposta
+    // (relação por chave estrangeira no PostgREST) — uma ida ao servidor
+    // a menos ao abrir um canal.
+    const base = supabase.from('messages').select(embedExtras ? EMBEDDED_SELECT : '*')
     // Mensagens de dentro de uma thread ficam separadas das mensagens
     // "normais" do canal — sem esse filtro, elas apareceriam
     // duplicadas na visão principal do canal.
@@ -106,10 +163,9 @@ export function useMessages(channelId: string | null, serverId: string | null, t
       }
       if (!silent) setLoading(true)
       try {
-        const { data, error } = await buildQuery().order('created_at', { ascending: false }).limit(MESSAGE_PAGE_SIZE)
-        if (error) throw error
-        const page = (data ?? []).reverse()
-        const extras = await fetchExtras(page.map((m) => m.id))
+        const { page, ...extras } = await fetchPageWithExtras((embed) =>
+          buildQuery(embed).order('created_at', { ascending: false }).limit(MESSAGE_PAGE_SIZE)
+        )
         if (key !== viewKeyRef.current || seq !== loadSeqRef.current) return
 
         if (silent && page.length > 0) {
@@ -141,16 +197,40 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     [viewKey, channelId, buildQuery]
   )
 
+  const cacheKey = channelId ? `${user?.id ?? ''}|${viewKey}` : null
+  const cacheKeyRef = useRef(cacheKey)
+  cacheKeyRef.current = cacheKey
+
   // Troca de canal/thread: limpa na hora (sem mostrar as mensagens do canal
-  // anterior enquanto o novo carrega) e busca a página mais recente.
+  // anterior enquanto o novo carrega) e busca a página mais recente — ou,
+  // se esse canal já foi aberto antes, mostra o que estava em cache e só
+  // revalida em segundo plano.
   useEffect(() => {
+    const cached = cacheKeyRef.current ? messageCache.get(cacheKeyRef.current) : undefined
+    setLoadError(null)
+    if (cached) {
+      setMessages(cached.messages)
+      setAttachments(cached.attachments)
+      setReactions(cached.reactions)
+      setHasMore(cached.hasMore)
+      setLoading(false)
+      setLoadedKey(viewKeyRef.current)
+      void load(true)
+      return
+    }
     setMessages([])
     setAttachments({})
     setReactions({})
     setHasMore(false)
-    setLoadError(null)
     void load(false)
   }, [load])
+
+  // Mantém o cache em dia com o que está na tela (inclui o que chegou em
+  // tempo real, reações, páginas antigas carregadas etc.).
+  useEffect(() => {
+    if (!cacheKey || loadedKey !== viewKey || loading) return
+    writeCache(cacheKey, { messages, attachments, reactions, hasMore })
+  }, [cacheKey, loadedKey, viewKey, loading, messages, attachments, reactions, hasMore])
 
   const refresh = useCallback(() => load(false), [load])
 
@@ -164,13 +244,9 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     loadingOlderRef.current = true
     setLoadingOlder(true)
     try {
-      const { data, error } = await buildQuery()
-        .lt('created_at', oldest.created_at)
-        .order('created_at', { ascending: false })
-        .limit(MESSAGE_PAGE_SIZE)
-      if (error) throw error
-      const page = (data ?? []).reverse()
-      const extras = await fetchExtras(page.map((m) => m.id))
+      const { page, ...extras } = await fetchPageWithExtras((embed) =>
+        buildQuery(embed).lt('created_at', oldest.created_at).order('created_at', { ascending: false }).limit(MESSAGE_PAGE_SIZE)
+      )
       if (key !== viewKeyRef.current) return
       setMessages((prev) => {
         const known = new Set(prev.map((m) => m.id))
@@ -498,13 +574,16 @@ export function useMessages(channelId: string | null, serverId: string | null, t
   }, [])
 
   const isCurrent = loadedKey === viewKey
+  // No PRIMEIRO render depois de trocar de canal (antes do efeito acima
+  // rodar), já devolve o cache — sem um frame de skeleton no meio.
+  const cachedView = !isCurrent && cacheKey ? messageCache.get(cacheKey) : undefined
   return {
-    messages: isCurrent ? messages : EMPTY_MESSAGES,
-    attachments: isCurrent ? attachments : EMPTY_MAP,
-    reactions: isCurrent ? reactions : EMPTY_MAP,
-    loading: loading || !isCurrent,
+    messages: isCurrent ? messages : cachedView?.messages ?? EMPTY_MESSAGES,
+    attachments: isCurrent ? attachments : cachedView?.attachments ?? EMPTY_MAP,
+    reactions: isCurrent ? reactions : cachedView?.reactions ?? EMPTY_MAP,
+    loading: isCurrent ? loading : !cachedView,
     loadingOlder,
-    hasMore,
+    hasMore: isCurrent ? hasMore : cachedView?.hasMore ?? false,
     loadError,
     refresh,
     loadOlder,

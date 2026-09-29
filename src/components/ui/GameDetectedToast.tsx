@@ -1,9 +1,9 @@
 import { useGameJustDetected } from '../../hooks/useGameJustDetected'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore } from '../../hooks/useVoice'
 
 export function GameDetectedToast() {
   const { justDetectedGame, dismiss } = useGameJustDetected()
-  const voice = useVoice()
+  const voice = useVoiceCore()
 
   if (!justDetectedGame) return null
 

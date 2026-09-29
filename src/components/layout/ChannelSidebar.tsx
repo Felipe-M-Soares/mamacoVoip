@@ -1,9 +1,9 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { useAuth } from '../../hooks/useAuth'
 import { useChannels } from '../../hooks/useChannels'
 import { useModeration } from '../../hooks/useModeration'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore, useVoiceSpeaking } from '../../hooks/useVoice'
 import { useVoicePresence } from '../../hooks/useVoicePresence'
 import { useChannelMutes } from '../../hooks/useChannelMutes'
 import { useServerEvents } from '../../hooks/useServerEvents'
@@ -15,6 +15,16 @@ import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
 import { Avatar } from '../ui/Avatar'
 import type { Channel, Profile, Server } from '../../types/database'
 import { lazyModal } from '../modals/lazyModal'
+import { supabase } from '../../lib/supabase'
+import {
+  VOICE_MEMBER_DRAG_TYPE,
+  canDropVoiceMemberOn,
+  decodeVoiceMemberDrag,
+  describeVoiceMoveError,
+  encodeVoiceMemberDrag,
+  isVoiceMemberDrag,
+  type VoiceMemberDragPayload,
+} from '../../lib/voiceMove'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const InviteModal = lazyModal(() => import('../modals/InviteModal').then((m) => m.InviteModal))
@@ -49,13 +59,35 @@ function VoiceChannelPresence({
   channelId,
   profileById,
   userLimit,
+  serverId,
+  ownerId,
+  canMoveMembers = false,
+  isOwner = false,
+  onMemberDragStart,
+  onMemberDragEnd,
+  onMemberContextMenu,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   channelId: string
   profileById: Record<string, Profile>
   userLimit?: number
+  // Mover membros entre salas (migration 014) — só pra quem pode.
+  serverId?: string
+  ownerId?: string
+  canMoveMembers?: boolean
+  isOwner?: boolean
+  onMemberDragStart?: (payload: VoiceMemberDragPayload) => void
+  onMemberDragEnd?: () => void
+  onMemberContextMenu?: (e: React.MouseEvent, userId: string, channelId: string) => void
+  // A lista de participantes também aceita o "soltar" (igual à linha do canal).
+  onDragOver?: (e: React.DragEvent) => void
+  onDragLeave?: () => void
+  onDrop?: (e: React.DragEvent) => void
 }) {
   const { user } = useAuth()
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const isConnectedHere = voice.connectedChannelId === channelId || voice.joiningChannelId === channelId
 
   // Pro canal que você já está conectado de verdade, usa a lista de
@@ -69,7 +101,12 @@ function VoiceChannelPresence({
 
   if (userIds.length === 0) return null
   return (
-    <div className="relative flex flex-col gap-px ml-[18px] pl-3 pb-1.5 pt-0.5 border-l border-[var(--color-line-strong)]">
+    <div
+      className="relative flex flex-col gap-px ml-[18px] pl-3 pb-1.5 pt-0.5 border-l border-[var(--color-line-strong)]"
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {Boolean(userLimit) && (
         <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted px-1.5 pb-0.5 tabular-nums">
           {userIds.length}/{userLimit} pessoas
@@ -78,21 +115,47 @@ function VoiceChannelPresence({
       {userIds.map((id) => {
         const p = id === user?.id ? undefined : profileById[id]
         const name = id === user?.id ? 'Você' : p?.display_name || p?.username || '...'
-        const isSpeaking = id === user?.id ? voice.speaking : voice.participants[id]?.speaking ?? false
         const isSharingScreen = id === user?.id ? voice.screenSharing : Boolean(voice.participants[id]?.screenStream)
+        // Arrastar pra outra sala: não vale pra si mesmo (é só clicar no
+        // outro canal) nem pro dono do servidor, se quem arrasta não é o dono.
+        const movable = Boolean(canMoveMembers && serverId && id !== user?.id && (isOwner || id !== ownerId))
         return (
-          <div key={id} className="flex items-center gap-2 rounded-md px-1.5 py-[3px] hover:bg-white/[0.04] transition-colors">
+          <div
+            key={id}
+            draggable={movable}
+            onDragStart={
+              movable && serverId
+                ? (e) => {
+                    e.stopPropagation()
+                    const payload = { userId: id, fromChannelId: channelId, serverId }
+                    e.dataTransfer.setData(VOICE_MEMBER_DRAG_TYPE, encodeVoiceMemberDrag(payload))
+                    e.dataTransfer.effectAllowed = 'move'
+                    onMemberDragStart?.(payload)
+                  }
+                : undefined
+            }
+            onDragEnd={movable ? () => onMemberDragEnd?.() : undefined}
+            onContextMenu={
+              movable && onMemberContextMenu
+                ? (e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onMemberContextMenu(e, id, channelId)
+                  }
+                : undefined
+            }
+            title={movable ? `Arraste ${name} para outro canal de voz` : undefined}
+            className={`flex items-center gap-2 rounded-md px-1.5 py-[3px] hover:bg-white/[0.04] transition-colors ${
+              movable ? 'cursor-grab active:cursor-grabbing' : ''
+            }`}
+          >
             {/* Só a FOTO pisca ao detectar áudio, não a linha inteira — a
                 pessoa reclamou que antes o nome também "acendia" junto,
                 o que distraía mais do que ajudava numa lista com vários
                 nomes lado a lado. */}
-            <div
-              className={`relative rounded-full shrink-0 transition-shadow ${
-                isSpeaking ? 'ring-2 ring-discord-green ring-offset-1 ring-offset-discord-sidebar' : ''
-              }`}
-            >
+            <SpeakingAvatarRing userId={id}>
               <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={20} />
-            </div>
+            </SpeakingAvatarRing>
             <span className="text-[13px] text-discord-text-muted truncate">{name}</span>
             {isSharingScreen && (
               <span title="Compartilhando tela" className="shrink-0 ml-auto text-[9px] font-bold tracking-wide uppercase px-1.5 py-px rounded bg-rose-500 text-white flex items-center gap-1">
@@ -105,6 +168,21 @@ function VoiceChannelPresence({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// Só este anel re-renderiza quando a pessoa começa/para de falar — antes a
+// barra lateral inteira (todos os canais) era redesenhada a cada mudança.
+function SpeakingAvatarRing({ userId, children }: { userId: string; children: ReactNode }) {
+  const isSpeaking = useVoiceSpeaking(userId)
+  return (
+    <div
+      className={`relative rounded-full shrink-0 transition-shadow ${
+        isSpeaking ? 'ring-2 ring-discord-green ring-offset-1 ring-offset-discord-sidebar' : ''
+      }`}
+    >
+      {children}
     </div>
   )
 }
@@ -219,7 +297,7 @@ function ChannelRow({
   onRename: (name: string) => void
   onContextMenu: (e: React.MouseEvent) => void
 }) {
-  const voice = useVoice()
+  const voice = useVoiceCore()
   return (
     <div
       draggable={isOwner}
@@ -262,6 +340,15 @@ function ChannelRow({
         onSave={onRename}
         className="truncate flex-1 text-sm"
       />
+      {channel.is_nsfw && (
+        <span
+          title="Canal com restrição de idade (+18)"
+          aria-label="Canal +18"
+          className="shrink-0 text-[9.5px] font-bold leading-none px-1 py-[3px] rounded-[5px] bg-rose-500/15 text-rose-300 tabular-nums"
+        >
+          +18
+        </span>
+      )}
       {unread && !active && !muted && <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-discord-text" />}
       {channel.type === 'voice' && voice.connectedChannelId === channel.id && voice.connectedAt && (
         <CallDurationTimer startedAt={voice.connectedAt} />
@@ -373,10 +460,70 @@ export function ChannelSidebar({
   const { menuState, openMenu, closeMenu } = useContextMenuState()
 
   function handleChannelContextMenu(e: React.MouseEvent, channel: Channel) {
+    setContextMember(null)
     setContextChannel(channel)
     openMenu(e)
   }
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null)
+
+  // --- Mover participante de voz pra outra sala (migration 014) ---------
+  // Usa um tipo próprio no dataTransfer (VOICE_MEMBER_DRAG_TYPE), então o
+  // arraste de canais/categorias (que usa 'text/plain') segue igual.
+  const canMoveMembers = isOwner || Boolean(permissions.move_members) || Boolean(permissions.administrator)
+  const [memberDrag, setMemberDrag] = useState<VoiceMemberDragPayload | null>(null)
+  const [memberDropTarget, setMemberDropTarget] = useState<string | null>(null)
+  const [contextMember, setContextMember] = useState<{ userId: string; channelId: string } | null>(null)
+  const [moveError, setMoveError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!moveError) return
+    const t = setTimeout(() => setMoveError(null), 6000)
+    return () => clearTimeout(t)
+  }, [moveError])
+
+  async function moveVoiceMember(userId: string, toChannel: Channel) {
+    setMoveError(null)
+    const { error } = await supabase.rpc('move_voice_member', {
+      p_server_id: server.id,
+      p_user_id: userId,
+      p_to_channel_id: toChannel.id,
+    })
+    if (error) setMoveError(describeVoiceMoveError(error.message))
+  }
+
+  function handleMemberContextMenu(e: React.MouseEvent, userId: string, channelId: string) {
+    setContextChannel(null)
+    setContextMember({ userId, channelId })
+    openMenu(e)
+  }
+
+  // Devolve true se o evento era de um participante sendo arrastado (e já
+  // foi tratado) — aí os handlers de reordenar canal não fazem nada.
+  function handleMemberDragOver(e: React.DragEvent, channel: Channel): boolean {
+    if (!isVoiceMemberDrag(e.dataTransfer.types)) return false
+    e.stopPropagation() // não deixa a categoria "acender" nem aceitar o drop
+    if (canMoveMembers && canDropVoiceMemberOn(channel, memberDrag)) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      if (memberDropTarget !== channel.id) setMemberDropTarget(channel.id)
+    } else if (memberDropTarget !== null) {
+      setMemberDropTarget(null)
+    }
+    return true
+  }
+
+  function handleMemberDrop(e: React.DragEvent, channel: Channel): boolean {
+    if (!isVoiceMemberDrag(e.dataTransfer.types)) return false
+    e.preventDefault()
+    e.stopPropagation()
+    const payload = decodeVoiceMemberDrag(e.dataTransfer.getData(VOICE_MEMBER_DRAG_TYPE)) ?? memberDrag
+    setMemberDropTarget(null)
+    setMemberDrag(null)
+    if (canMoveMembers && payload && canDropVoiceMemberOn(channel, payload)) {
+      void moveVoiceMember(payload.userId, channel)
+    }
+    return true
+  }
 
   function handleDragStart(e: React.DragEvent, channelId: string) {
     e.dataTransfer.setData('text/plain', channelId)
@@ -384,17 +531,20 @@ export function ChannelSidebar({
     setDraggedChannelId(channelId)
   }
 
-  function handleDragOverChannel(e: React.DragEvent, targetId: string) {
+  function handleDragOverChannel(e: React.DragEvent, target: Channel) {
+    if (handleMemberDragOver(e, target)) return
     e.preventDefault()
-    setDragOverTarget(targetId)
+    setDragOverTarget(target.id)
   }
 
   function handleDragOverCategory(e: React.DragEvent, categoryKey: string) {
+    if (isVoiceMemberDrag(e.dataTransfer.types)) return
     e.preventDefault()
     setDragOverTarget(categoryKey)
   }
 
   async function handleDropOnChannel(e: React.DragEvent, targetChannel: Channel) {
+    if (handleMemberDrop(e, targetChannel)) return
     e.preventDefault()
     const draggedId = e.dataTransfer.getData('text/plain')
     setDragOverTarget(null)
@@ -404,6 +554,7 @@ export function ChannelSidebar({
   }
 
   async function handleDropOnCategory(e: React.DragEvent, categoryId: string | null) {
+    if (isVoiceMemberDrag(e.dataTransfer.types)) return
     e.preventDefault()
     const draggedId = e.dataTransfer.getData('text/plain')
     setDragOverTarget(null)
@@ -420,6 +571,13 @@ export function ChannelSidebar({
 
   const uncategorized = channels.filter((c) => c.category_id === null).sort((a, b) => a.position - b.position)
   const sortedCategories = [...categories].sort((a, b) => a.position - b.position)
+  // Canais de voz na mesma ordem da barra lateral (menu "Mover para").
+  const orderedVoiceChannels = [
+    ...uncategorized,
+    ...sortedCategories.flatMap((cat) =>
+      channels.filter((c) => c.category_id === cat.id).sort((a, b) => a.position - b.position)
+    ),
+  ].filter((c) => c.type === 'voice')
 
   return (
     <aside className="w-64 bg-discord-sidebar flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
@@ -577,20 +735,40 @@ export function ChannelSidebar({
                   muted={mutedChannelIds.has(channel.id)}
                   pinned={pinnedIds.has(channel.id)}
                   isOwner={isOwner}
-                  isDragOver={dragOverTarget === channel.id && draggedChannelId !== channel.id}
+                  isDragOver={(dragOverTarget === channel.id && draggedChannelId !== channel.id) || memberDropTarget === channel.id}
                   onSelect={() => onSelectChannel(channel)}
                   onEdit={() => setEditingChannel(channel)}
                   onMoveUp={() => moveChannel(channel.id, null, 'up')}
                   onMoveDown={() => moveChannel(channel.id, null, 'down')}
                   onDragStart={(e) => handleDragStart(e, channel.id)}
-                  onDragOver={(e) => handleDragOverChannel(e, channel.id)}
-                  onDragLeave={() => setDragOverTarget(null)}
+                  onDragOver={(e) => handleDragOverChannel(e, channel)}
+                  onDragLeave={() => {
+                    setDragOverTarget(null)
+                    setMemberDropTarget(null)
+                  }}
                   onDrop={(e) => handleDropOnChannel(e, channel)}
                   onRename={(name) => updateChannel(channel.id, { name: name.toLowerCase().replace(/\s+/g, "-") })}
                   onContextMenu={(e) => handleChannelContextMenu(e, channel)}
                 />
                 {channel.type === 'voice' && (
-                  <VoiceChannelPresence channelId={channel.id} profileById={profileById} userLimit={channel.user_limit} />
+                  <VoiceChannelPresence
+                    channelId={channel.id}
+                    profileById={profileById}
+                    userLimit={channel.user_limit}
+                    serverId={server.id}
+                    ownerId={server.owner_id}
+                    isOwner={isOwner}
+                    canMoveMembers={canMoveMembers}
+                    onMemberDragStart={setMemberDrag}
+                    onMemberDragEnd={() => {
+                      setMemberDrag(null)
+                      setMemberDropTarget(null)
+                    }}
+                    onMemberContextMenu={handleMemberContextMenu}
+                    onDragOver={(e) => handleMemberDragOver(e, channel)}
+                    onDragLeave={() => setMemberDropTarget(null)}
+                    onDrop={(e) => handleMemberDrop(e, channel)}
+                  />
                 )}
               </Fragment>
             ))}
@@ -692,20 +870,40 @@ export function ChannelSidebar({
                         muted={mutedChannelIds.has(channel.id)}
                         pinned={pinnedIds.has(channel.id)}
                         isOwner={isOwner}
-                        isDragOver={dragOverTarget === channel.id && draggedChannelId !== channel.id}
+                        isDragOver={(dragOverTarget === channel.id && draggedChannelId !== channel.id) || memberDropTarget === channel.id}
                         onSelect={() => onSelectChannel(channel)}
                         onEdit={() => setEditingChannel(channel)}
                         onMoveUp={() => moveChannel(channel.id, category.id, 'up')}
                         onMoveDown={() => moveChannel(channel.id, category.id, 'down')}
                         onDragStart={(e) => handleDragStart(e, channel.id)}
-                        onDragOver={(e) => handleDragOverChannel(e, channel.id)}
-                        onDragLeave={() => setDragOverTarget(null)}
+                        onDragOver={(e) => handleDragOverChannel(e, channel)}
+                        onDragLeave={() => {
+                          setDragOverTarget(null)
+                          setMemberDropTarget(null)
+                        }}
                         onDrop={(e) => handleDropOnChannel(e, channel)}
                         onRename={(name) => updateChannel(channel.id, { name: name.toLowerCase().replace(/\s+/g, '-') })}
                         onContextMenu={(e) => handleChannelContextMenu(e, channel)}
                       />
                       {channel.type === 'voice' && (
-                        <VoiceChannelPresence channelId={channel.id} profileById={profileById} userLimit={channel.user_limit} />
+                        <VoiceChannelPresence
+                    channelId={channel.id}
+                    profileById={profileById}
+                    userLimit={channel.user_limit}
+                    serverId={server.id}
+                    ownerId={server.owner_id}
+                    isOwner={isOwner}
+                    canMoveMembers={canMoveMembers}
+                    onMemberDragStart={setMemberDrag}
+                    onMemberDragEnd={() => {
+                      setMemberDrag(null)
+                      setMemberDropTarget(null)
+                    }}
+                    onMemberContextMenu={handleMemberContextMenu}
+                    onDragOver={(e) => handleMemberDragOver(e, channel)}
+                    onDragLeave={() => setMemberDropTarget(null)}
+                    onDrop={(e) => handleMemberDrop(e, channel)}
+                  />
                       )}
                     </Fragment>
                   ))}
@@ -718,7 +916,26 @@ export function ChannelSidebar({
         )}
       </div>
 
-      {showInvite && <InviteModal serverId={server.id} onClose={() => setShowInvite(false)} />}
+      {moveError && (
+        <div
+          role="alert"
+          className="mx-2.5 mb-2 px-3 py-2 rounded-lg border border-rose-500/20 bg-rose-500/[0.08] flex items-start gap-2 animate-fade-in"
+        >
+          <p className="text-xs text-rose-300 flex-1 min-w-0 break-words">{moveError}</p>
+          <button
+            onClick={() => setMoveError(null)}
+            title="Fechar aviso"
+            aria-label="Fechar aviso"
+            className="shrink-0 text-rose-300/70 hover:text-rose-200"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
+              <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {showInvite &&<InviteModal serverId={server.id} onClose={() => setShowInvite(false)} />}
       {showInviteFriends && (
         <InviteFriendsModal serverId={server.id} onClose={() => setShowInviteFriends(false)} />
       )}
@@ -764,6 +981,29 @@ export function ChannelSidebar({
       )}
       {showRoles && <RolesManagerModal serverId={server.id} onClose={() => setShowRoles(false)} />}
       {showModeration && <ModerationLogModal serverId={server.id} onClose={() => setShowModeration(false)} />}
+
+      {menuState && contextMember && (
+        <ContextMenu
+          x={menuState.x}
+          y={menuState.y}
+          onClose={closeMenu}
+          items={(() => {
+            const targets = orderedVoiceChannels.filter((c) => c.id !== contextMember.channelId)
+            if (targets.length === 0) {
+              return [{ label: 'Nenhum outro canal de voz', disabled: true, onClick: () => {} }]
+            }
+            return targets.map((c) => ({
+              label: `Mover para ${c.name}`,
+              icon: (
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4" aria-hidden="true">
+                  <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 0 1-14 0z" />
+                </svg>
+              ),
+              onClick: () => void moveVoiceMember(contextMember.userId, c),
+            }))
+          })()}
+        />
+      )}
 
       {menuState && contextChannel && (
         <ContextMenu

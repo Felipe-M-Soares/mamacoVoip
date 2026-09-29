@@ -19,6 +19,10 @@ export type Profile = {
   custom_status: string | null
   playing: string | null
   profile_visibility: ProfileVisibility
+  // Quando a pessoa confirmou (no portão de canal +18) ter 18 anos ou
+  // mais — o banco carimba a hora do servidor (migration 015). null =
+  // não confirmou ou revogou nas Configurações > Privacidade.
+  age_verified_adult_at: string | null
   created_at: string
   updated_at: string
 }
@@ -129,6 +133,7 @@ export type ModerationAction =
   | 'role_assigned'
   | 'role_removed'
   | 'message_deleted'
+  | 'member_moved'
 
 export type ModerationLog = {
   id: string
@@ -151,8 +156,20 @@ export const PERMISSIONS = [
   'ban_members',
   'timeout_members',
   'view_audit_log',
+  'move_members',
 ] as const
 export type Permission = (typeof PERMISSIONS)[number]
+
+// Pedido de "mover para outro canal de voz" (migration 014). Só a RPC
+// move_voice_member() grava; o alvo recebe via postgres_changes.
+export type VoiceMoveRequest = {
+  id: string
+  server_id: string
+  target_user_id: string
+  to_channel_id: string
+  requested_by: string
+  created_at: string
+}
 
 export type ChannelReadState = {
   channel_id: string
@@ -199,6 +216,10 @@ export type Channel = {
   slowmode_seconds: number
   user_limit: number
   is_restricted: boolean
+  // Canal com restrição de idade (+18) — migration 015. O conteúdo fica
+  // oculto até a pessoa confirmar a idade, e o seletor de GIF usa o
+  // rating mais permissivo da GIPHY ("r") só aqui.
+  is_nsfw: boolean
   position: number
   created_at: string
 }
@@ -350,6 +371,7 @@ export type Database = {
             | 'custom_status'
             | 'playing'
             | 'profile_visibility'
+            | 'age_verified_adult_at'
           >
         >
         Relationships: []
@@ -382,8 +404,8 @@ export type Database = {
       channels: {
         Row: Channel
         Insert: Pick<Channel, 'server_id' | 'name' | 'type'> &
-          Partial<Pick<Channel, 'category_id' | 'position' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler' | 'user_limit' | 'is_restricted'>>
-        Update: Partial<Pick<Channel, 'name' | 'category_id' | 'position' | 'topic' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler' | 'user_limit' | 'is_restricted'>>
+          Partial<Pick<Channel, 'category_id' | 'position' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler' | 'user_limit' | 'is_restricted' | 'is_nsfw'>>
+        Update: Partial<Pick<Channel, 'name' | 'category_id' | 'position' | 'topic' | 'is_stage' | 'slowmode_seconds' | 'is_spoiler' | 'user_limit' | 'is_restricted' | 'is_nsfw'>>
         Relationships: []
       }
       channel_role_access: {
@@ -492,6 +514,12 @@ export type Database = {
       moderation_logs: {
         Row: ModerationLog
         Insert: never // inserts só pelas funções de moderação (security definer)
+        Update: never
+        Relationships: []
+      }
+      voice_move_requests: {
+        Row: VoiceMoveRequest
+        Insert: never // inserts só via move_voice_member()
         Update: never
         Relationships: []
       }
@@ -614,6 +642,10 @@ export type Database = {
       remove_role: {
         Args: { p_server_id: string; p_user_id: string; p_role_id: string }
         Returns: void
+      }
+      move_voice_member: {
+        Args: { p_server_id: string; p_user_id: string; p_to_channel_id: string }
+        Returns: string
       }
       kick_member: {
         Args: { p_server_id: string; p_user_id: string; p_reason?: string | null }

@@ -1,4 +1,6 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazyComponent, preloadLazyChunks } from '../components/modals/lazyModal'
+import { preloadNoiseSuppression } from '../lib/noiseSuppression'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ServerBar } from '../components/layout/ServerBar'
 import { ChannelSidebar } from '../components/layout/ChannelSidebar'
@@ -18,26 +20,27 @@ import { ServersProvider } from '../context/ServersContext'
 import { ChannelsProvider } from '../context/ChannelsContext'
 import { VoiceProvider } from '../context/VoiceContext'
 import { useAuth } from '../hooks/useAuth'
-import { useVoice } from '../hooks/useVoice'
+import { useVoiceCore } from '../hooks/useVoice'
 import { useServers } from '../hooks/useServers'
 import { useChannels } from '../hooks/useChannels'
 import { useConversations } from '../hooks/useConversations'
 import { useUnreadOverview } from '../hooks/useUnreadOverview'
 import { useGamePresence } from '../hooks/useGamePresence'
 import { GameDetectedToast } from '../components/ui/GameDetectedToast'
+import { VoiceMovedToast } from '../components/ui/VoiceMovedToast'
 import { OverlayStateSync } from '../components/layout/OverlayStateSync'
 import { AutoIdleStatus } from '../components/layout/AutoIdleStatus'
 import type { Channel, Profile, Server } from '../types/database'
 
-const VoiceChannelView = lazy(() =>
-  import('../components/layout/VoiceChannelView').then((m) => ({ default: m.VoiceChannelView }))
+const VoiceChannelView = lazyComponent(() =>
+  import('../components/layout/VoiceChannelView').then((m) => m.VoiceChannelView)
 )
 // Modais que só abrem sob demanda — fora do pacote inicial.
-const UserProfileModal = lazy(() => import('../components/modals/UserProfileModal').then((m) => ({ default: m.UserProfileModal })))
-const EditProfileModal = lazy(() => import('../components/modals/EditProfileModal').then((m) => ({ default: m.EditProfileModal })))
-const QuickSwitcher = lazy(() => import('../components/modals/QuickSwitcher').then((m) => ({ default: m.QuickSwitcher })))
-const KeyboardShortcutsModal = lazy(() =>
-  import('../components/modals/KeyboardShortcutsModal').then((m) => ({ default: m.KeyboardShortcutsModal }))
+const UserProfileModal = lazyComponent(() => import('../components/modals/UserProfileModal').then((m) => m.UserProfileModal))
+const EditProfileModal = lazyComponent(() => import('../components/modals/EditProfileModal').then((m) => m.EditProfileModal))
+const QuickSwitcher = lazyComponent(() => import('../components/modals/QuickSwitcher').then((m) => m.QuickSwitcher))
+const KeyboardShortcutsModal = lazyComponent(() =>
+  import('../components/modals/KeyboardShortcutsModal').then((m) => m.KeyboardShortcutsModal)
 )
 
 // Fica DENTRO do ChannelsProvider, então tem acesso à lista de canais
@@ -218,7 +221,7 @@ function ActiveServerContent({
 function MainLayoutInner() {
   useGamePresence()
   const { profile: ownProfile } = useAuth()
-  const voice = useVoice()
+  const voice = useVoiceCore()
   const { servers, loading: loadingServers } = useServers()
   const location = useLocation()
   const navigate = useNavigate()
@@ -259,6 +262,20 @@ function MainLayoutInner() {
   const isElectronApp = Boolean(window.electronAPI?.isElectron)
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+
+  // Baixa em segundo plano (em idle, um por vez) o código de todos os
+  // modais/painéis sob demanda — sem isso o PRIMEIRO clique em
+  // "Configurações", "Pesquisar", "Criar servidor" etc. esperava o arquivo
+  // do modal ser baixado/interpretado antes de qualquer coisa aparecer.
+  useEffect(() => {
+    const cancel = preloadLazyChunks()
+    // Também adianta o WASM do redutor de ruído usado ao entrar em call.
+    const t = window.setTimeout(preloadNoiseSuppression, 3000)
+    return () => {
+      cancel()
+      clearTimeout(t)
+    }
+  }, [])
 
   // Servidor aberto sumiu da lista (excluído, expulso, saiu por outro
   // dispositivo): volta pra tela inicial em vez de ficar numa tela quebrada.
@@ -445,7 +462,7 @@ function MainLayoutInner() {
 
       {/* Overlay escuro atrás do drawer, só em mobile */}
       {!isElectronApp && mobileSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-[2px] z-30 animate-fade-in" onClick={() => setMobileSidebarOpen(false)} />
+        <div className="lg:hidden fixed inset-0 bg-black/70 z-30 animate-fade-in" onClick={() => setMobileSidebarOpen(false)} />
       )}
 
       {activeServer ? (
@@ -557,6 +574,7 @@ function MainLayoutInner() {
 
       <VoiceCallAudio />
       <GameDetectedToast />
+      <VoiceMovedToast />
       <OverlayStateSync />
       <AutoIdleStatus />
 

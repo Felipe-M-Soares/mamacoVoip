@@ -48,6 +48,15 @@ function getWasmBinary(): Promise<ArrayBuffer> {
   return wasmBinaryPromise
 }
 
+/**
+ * Baixa os bytes do WASM do RNNoise antes de alguém entrar numa call
+ * (chamado em idle pelo MainLayout) — assim o "entrar no canal de voz"
+ * não espera esse download depois de pegar o microfone. Best-effort.
+ */
+export function preloadNoiseSuppression() {
+  getWasmBinary().catch(() => {})
+}
+
 // Cria o AudioContext dedicado e registra os worklets. Se QUALQUER etapa
 // falhar (WASM não baixou, addModule rejeitou por CSP, etc.), fecha o
 // contexto antes de propagar o erro — antes ele ficava aberto e órfão

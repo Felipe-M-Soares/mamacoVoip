@@ -5,7 +5,7 @@ import { MessageComposer } from '../chat/MessageComposer'
 import { useGroupMessages } from '../../hooks/useGroupMessages'
 import { useGroupConversations, type GroupConversationWithMembers } from '../../context/GroupConversationsContext'
 import { useAuth } from '../../hooks/useAuth'
-import { useVoice } from '../../hooks/useVoice'
+import { useVoiceCore } from '../../hooks/useVoice'
 import { useChatScroll } from '../../hooks/useChatScroll'
 import { useTypingIndicator } from '../../hooks/useTypingIndicator'
 import { MessageListSkeleton } from '../chat/MessageListSkeleton'
@@ -34,7 +34,7 @@ export function GroupChatArea({
   // Confirmações inline (antes eram confirm() nativos)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [confirmingLeave, setConfirmingLeave] = useState(false)
-  const voice = useVoice()
+  const voice = useVoiceCore()
   // Grupo não tinha indicador de "digitando…" (DM e canal tinham).
   const { typingUserIds, notifyTyping, stopTyping } = useTypingIndicator(group.id, user?.id)
 

@@ -29,24 +29,26 @@ export function LeaveServerModal({
   }
 
   return (
-    <Modal title={`Sair de '${serverName}'`} onClose={onClose}>
-      <p className="text-sm text-discord-text-muted">
+    <Modal
+      title={`Sair de '${serverName}'`}
+      onClose={onClose}
+      maxWidth="max-w-sm"
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary h-9 px-4 text-sm">
+            Cancelar
+          </button>
+          <button onClick={handleLeave} disabled={loading} className="btn-danger h-9 px-4 text-sm">
+            {loading ? 'Saindo...' : 'Sair do servidor'}
+          </button>
+        </>
+      }
+    >
+      <p className="text-[14px] text-discord-text-muted leading-relaxed">
         Tem certeza que deseja sair de <span className="text-white font-medium">{serverName}</span>? Você vai
         precisar de um novo convite para entrar de novo.
       </p>
-      {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
-      <div className="flex justify-end gap-3 mt-5">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-discord-text-muted hover:underline">
-          Cancelar
-        </button>
-        <button
-          onClick={handleLeave}
-          disabled={loading}
-          className="px-4 py-2 text-sm rounded btn-danger disabled:opacity-60"
-        >
-          {loading ? 'Saindo...' : 'Sair do servidor'}
-        </button>
-      </div>
+      {error && <p className="text-sm text-rose-400 mt-3">{error}</p>}
     </Modal>
   )
 }

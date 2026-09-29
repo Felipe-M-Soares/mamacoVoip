@@ -6,6 +6,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../context/FriendsContext'
 import { useConversations } from '../../hooks/useConversations'
 import { useIsPresent } from '../../hooks/usePresence'
+import { useRoles } from '../../hooks/useRoles'
 import { getUserNote, setUserNote } from '../../lib/pinnedItems'
 import type { Profile } from '../../types/database'
 
@@ -35,6 +36,10 @@ export function UserProfileModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reporting, setReporting] = useState(false)
+  // Só leitura, pra mostrar os cargos da pessoa como chips (quando o
+  // perfil é aberto de dentro de um servidor).
+  const { rolesForUser } = useRoles(serverId ?? null)
+  const memberRoles = serverId ? rolesForUser(targetProfile.id) : []
 
   // "Jogando X" fica desatualizado assim que a pessoa fecha o app (o
   // campo playing no perfil só é limpo na próxima vez que ela abrir um
@@ -70,133 +75,154 @@ export function UserProfileModal({
     if (error) setError(error)
   }
 
+  const outlineBtn =
+    'h-9 px-4 text-sm font-medium rounded-[10px] border border-[var(--color-line-strong)] text-discord-text hover:bg-white/[0.05] transition-colors disabled:opacity-60'
+
   return (
-    <Modal title="Perfil" onClose={onClose}>
+    <Modal title={`Perfil de ${targetProfile.display_name || targetProfile.username}`} onClose={onClose} headerless>
       {/* Mesmo fallback de gradiente-por-nome de ProfileSidePanel.tsx —
           se a pessoa não enviou um banner de verdade, mostra a mesma cor
           consistente que aparece em todo canto que o perfil dela é
-          exibido, em vez de um espaço genérico vazio aqui. Sangra só nas
-          laterais (-mx-5) pra ficar rente às bordas do modal — o topo já
-          tem o cabeçalho de título por cima, então não bleeda pra lá. */}
+          exibido, em vez de um espaço genérico vazio aqui. */}
       <div
-        className="-mx-5 -mt-5 h-32 bg-cover bg-center"
+        className="h-28 bg-cover bg-center"
         style={
           targetProfile.banner_url
             ? { backgroundImage: `url(${targetProfile.banner_url})` }
             : { background: gradientFor(targetProfile.username) }
         }
       />
-      <div className="flex flex-col items-center text-center -mt-9">
-        <Avatar
-          name={targetProfile.username}
-          avatarUrl={targetProfile.avatar_url}
-          decorationUrl={targetProfile.avatar_decoration_url}
-          status={targetProfile.status}
-          userId={targetProfile.id}
-          size={72}
-        />
-        <h3 className="text-lg font-bold text-white mt-3">
-          {targetProfile.display_name || targetProfile.username}
-        </h3>
-        <p className="text-sm text-discord-text-muted">@{targetProfile.username}</p>
-        {isRestricted ? (
-          <p className="text-xs text-discord-text-muted mt-2 flex items-center gap-1">
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-              <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3z" />
-            </svg>
-            Este perfil é privado — só amigos veem mais detalhes
-          </p>
-        ) : (
-          <>
-            {targetProfile.playing && isEffectivelyOnline && (
-              <p className="text-sm text-discord-text-muted mt-2">🎮 Jogando {targetProfile.playing}</p>
-            )}
-            {targetProfile.custom_status && (
-              <p className="text-sm text-discord-text mt-2">{targetProfile.custom_status}</p>
-            )}
-          </>
-        )}
+      <div className="px-5 pb-5">
+        <div className="flex items-end justify-between gap-3 -mt-11">
+          <div className="rounded-full ring-[6px] ring-[var(--color-elevated)] bg-[var(--color-elevated)]">
+            <Avatar
+              name={targetProfile.username}
+              avatarUrl={targetProfile.avatar_url}
+              decorationUrl={targetProfile.avatar_decoration_url}
+              status={targetProfile.status}
+              userId={targetProfile.id}
+              size={80}
+            />
+          </div>
+          {isFriend && <span className="chip mb-1">Amigo</span>}
+        </div>
 
-        {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
+        <div className="mt-3 rounded-xl bg-discord-darker/60 border border-[var(--color-line)] p-4">
+          <h3 className="font-display text-xl font-semibold text-white leading-tight">
+            {targetProfile.display_name || targetProfile.username}
+          </h3>
+          <p className="text-[13px] text-discord-text-muted">@{targetProfile.username}</p>
+          {isRestricted ? (
+            <p className="text-[12.5px] text-discord-text-muted mt-3 flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0">
+                <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
+                <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+              </svg>
+              Este perfil é privado — só amigos veem mais detalhes
+            </p>
+          ) : (
+            <>
+              {(targetProfile.custom_status || (targetProfile.playing && isEffectivelyOnline)) && (
+                <div className="mt-3 pt-3 border-t border-[var(--color-line)] space-y-1.5">
+                  {targetProfile.custom_status && (
+                    <p className="text-[14px] text-discord-text">{targetProfile.custom_status}</p>
+                  )}
+                  {targetProfile.playing && isEffectivelyOnline && (
+                    <p className="text-[13px] text-discord-text-muted flex items-center gap-1.5">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-discord-green shrink-0">
+                        <rect x="2.5" y="7" width="19" height="11" rx="4" />
+                        <path d="M7.5 11v3M6 12.5h3M15.5 12h.01M18 13.5h.01" />
+                      </svg>
+                      Jogando <span className="text-discord-text font-medium">{targetProfile.playing}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+              {memberRoles.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-[var(--color-line)]">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-2">Cargos</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {memberRoles.map((role) => (
+                      <span key={role.id} className="chip !text-discord-text">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: role.color }} />
+                        {role.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {!isSelf && <UserNoteField userId={targetProfile.id} />}
+        </div>
 
-        {!isSelf && <UserNoteField userId={targetProfile.id} />}
+        {error && <p className="text-sm text-rose-400 mt-3">{error}</p>}
 
         {!isSelf && (
-          <div className="w-full space-y-2 mt-5">
-            {!isBlocked && (
-              <button
-                onClick={handleMessage}
-                disabled={loading}
-                className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-              >
-                Enviar mensagem
-              </button>
-            )}
-
-            {isBlocked ? (
-              <button
-                onClick={() => handleAction(() => unblockUser(targetProfile.id))}
-                disabled={loading}
-                className="w-full py-2.5 rounded border border-discord-text-muted text-discord-text hover:bg-white/5 transition-colors disabled:opacity-60"
-              >
-                Desbloquear
-              </button>
-            ) : friendship ? (
-              <button
-                onClick={() => handleAction(() => removeFriend(targetProfile.id))}
-                disabled={loading}
-                className="w-full py-2.5 rounded border border-discord-text-muted text-discord-text hover:bg-white/5 transition-colors disabled:opacity-60"
-              >
-                Remover amigo
-              </button>
-            ) : incomingRequest ? (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleAction(() => acceptRequest(incomingRequest.id))}
-                  disabled={loading}
-                  className="flex-1 py-2.5 rounded bg-discord-green text-white font-medium hover:bg-green-600 transition-colors disabled:opacity-60"
-                >
-                  Aceitar
+          <div className="mt-4 space-y-2">
+            <div className="flex flex-wrap gap-2">
+              {!isBlocked && (
+                <button onClick={handleMessage} disabled={loading} className="btn-primary h-9 px-4 text-sm flex-1 min-w-[9rem]">
+                  Enviar mensagem
                 </button>
-                <button
-                  onClick={() => handleAction(() => declineRequest(incomingRequest.id))}
-                  disabled={loading}
-                  className="flex-1 py-2.5 rounded border border-discord-text-muted text-discord-text hover:bg-white/5 transition-colors disabled:opacity-60"
-                >
-                  Recusar
+              )}
+
+              {isBlocked ? (
+                <button onClick={() => handleAction(() => unblockUser(targetProfile.id))} disabled={loading} className={`${outlineBtn} flex-1`}>
+                  Desbloquear
                 </button>
-              </div>
-            ) : outgoingRequest ? (
-              <button disabled className="w-full py-2.5 rounded bg-discord-darker text-discord-text-muted">
-                Pedido enviado
-              </button>
-            ) : (
-              <button
-                onClick={() => handleAction(() => sendRequest(targetProfile.username))}
-                disabled={loading}
-                className="w-full py-2.5 rounded border border-discord-blurple text-discord-blurple hover:bg-discord-blurple/10 transition-colors disabled:opacity-60"
-              >
-                Adicionar amigo
-              </button>
-            )}
+              ) : friendship ? (
+                <button onClick={() => handleAction(() => removeFriend(targetProfile.id))} disabled={loading} className={outlineBtn}>
+                  Remover amigo
+                </button>
+              ) : incomingRequest ? (
+                <>
+                  <button
+                    onClick={() => handleAction(() => acceptRequest(incomingRequest.id))}
+                    disabled={loading}
+                    className="h-9 px-4 text-sm font-semibold rounded-[10px] bg-discord-green text-white hover:brightness-110 transition disabled:opacity-60"
+                  >
+                    Aceitar
+                  </button>
+                  <button onClick={() => handleAction(() => declineRequest(incomingRequest.id))} disabled={loading} className={outlineBtn}>
+                    Recusar
+                  </button>
+                </>
+              ) : outgoingRequest ? (
+                <button disabled className="h-9 px-4 text-sm rounded-[10px] bg-white/[0.04] text-discord-text-muted cursor-not-allowed">
+                  Pedido enviado
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleAction(() => sendRequest(targetProfile.username))}
+                  disabled={loading}
+                  className="h-9 px-4 text-sm font-medium rounded-[10px] border border-discord-blurple/60 text-discord-blurple hover:bg-discord-blurple/10 transition-colors disabled:opacity-60"
+                >
+                  Adicionar amigo
+                </button>
+              )}
+            </div>
 
-            {!isBlocked && (
+            <div className="flex items-center justify-between pt-1">
+              {!isBlocked ? (
+                <button
+                  onClick={() => handleAction(() => blockUser(targetProfile.id))}
+                  disabled={loading}
+                  className="h-8 px-2.5 -ml-2.5 rounded-lg text-[13px] font-medium text-rose-400 hover:bg-rose-500/10 transition-colors disabled:opacity-60"
+                >
+                  Bloquear
+                </button>
+              ) : (
+                <span />
+              )}
               <button
-                onClick={() => handleAction(() => blockUser(targetProfile.id))}
+                onClick={() => setReporting(true)}
                 disabled={loading}
-                className="w-full py-2.5 rounded border border-red-600 text-red-500 hover:bg-red-600/10 transition-colors disabled:opacity-60"
+                className="h-8 px-2.5 -mr-2.5 rounded-lg text-[13px] text-discord-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors disabled:opacity-60"
               >
-                Bloquear
+                Denunciar usuário
               </button>
-            )}
-
-            <button
-              onClick={() => setReporting(true)}
-              disabled={loading}
-              className="w-full py-2 text-xs text-discord-text-muted hover:text-red-400 transition-colors disabled:opacity-60"
-            >
-              Denunciar usuário
-            </button>
+            </div>
           </div>
         )}
       </div>
@@ -218,8 +244,8 @@ function UserNoteField({ userId }: { userId: string }) {
   const [note, setNote] = useState(() => getUserNote(userId))
 
   return (
-    <div className="mt-3">
-      <label className="block text-[10px] font-bold uppercase text-discord-text-muted mb-1">
+    <div className="mt-3 pt-3 border-t border-[var(--color-line)]">
+      <label htmlFor={`user-note-${userId}`} className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-1.5">
         Nota — visível apenas para você
       </label>
       <textarea
@@ -228,10 +254,11 @@ function UserNoteField({ userId }: { userId: string }) {
           setNote(e.target.value)
           setUserNote(userId, e.target.value)
         }}
+        id={`user-note-${userId}`}
         placeholder="Escreva uma nota..."
         maxLength={256}
         rows={2}
-        className="w-full px-2.5 py-1.5 text-xs rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple resize-none"
+        className="w-full px-3 py-2 text-[13px] bg-discord-darker text-discord-text outline-none resize-none"
       />
     </div>
   )

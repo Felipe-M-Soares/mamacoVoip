@@ -10,9 +10,9 @@ const STATUS_LABEL: Record<ProfileStatus, string> = {
 }
 const STATUS_DOT: Record<ProfileStatus, string> = {
   online: 'bg-discord-green',
-  idle: 'bg-yellow-500',
-  dnd: 'bg-red-500',
-  offline: 'bg-gray-500',
+  idle: 'bg-amber-400',
+  dnd: 'bg-rose-500',
+  offline: 'bg-zinc-500',
 }
 
 // Mesmo truque de gradiente-por-nome de ServerBar.tsx (ServerIcon) — o
@@ -53,16 +53,19 @@ export function ProfileSidePanel({
   const isEffectivelyOnline = profile.status !== 'offline' && (isSelf || isPresent)
 
   return (
-    <aside className="hidden xl:flex w-72 shrink-0 bg-discord-sidebar flex-col overflow-y-auto">
+    <aside aria-label="Perfil" className="hidden xl:flex w-72 shrink-0 bg-discord-sidebar flex-col overflow-y-auto border-t border-l border-[var(--color-line)]">
+      <div className="p-3 pb-0">
       <div
-        className="h-40 shrink-0 bg-cover bg-center"
+        className="h-28 shrink-0 bg-cover bg-center rounded-xl"
         style={
           profile.banner_url
             ? { backgroundImage: `url(${profile.banner_url})` }
             : { background: gradientFor(profile.username) }
         }
       />
+      </div>
       <div className="px-4 pb-4 -mt-10">
+        <div className="inline-block rounded-full ring-[6px] ring-discord-sidebar ml-2">
         <Avatar
           name={profile.username}
           avatarUrl={profile.avatar_url}
@@ -71,31 +74,41 @@ export function ProfileSidePanel({
           userId={profile.id}
           size={80}
         />
-        <h3 className="text-lg font-bold text-white mt-3 truncate">
+        </div>
+        <div className="rounded-xl bg-white/[0.03] border border-[var(--color-line)] p-3.5 mt-3">
+        <h3 className="font-display text-lg font-semibold text-white truncate">
           {profile.display_name || profile.username}
         </h3>
         <p className="text-sm text-discord-text-muted truncate">@{profile.username}</p>
 
-        <div className="flex items-center gap-1.5 mt-2">
+        <div className="chip mt-3">
           <span className={`w-2 h-2 rounded-full ${STATUS_DOT[isEffectivelyOnline ? profile.status : 'offline']}`} />
-          <span className="text-xs text-discord-text-muted">
-            {STATUS_LABEL[isEffectivelyOnline ? profile.status : 'offline']}
-          </span>
+          {STATUS_LABEL[isEffectivelyOnline ? profile.status : 'offline']}
         </div>
 
+        {(profile.custom_status || (profile.playing && isEffectivelyOnline)) && <div className="h-px bg-[var(--color-line)] my-3" />}
+        {profile.custom_status && <p className="text-sm text-discord-text break-words">{profile.custom_status}</p>}
         {profile.playing && isEffectivelyOnline && (
-          <p className="text-sm text-discord-text mt-3 flex items-center gap-1.5">
-            <span>🎮</span>
-            <span className="truncate">Jogando {profile.playing}</span>
-          </p>
+          <div className="mt-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-1.5">Atividade</p>
+            <div className="flex items-center gap-2.5">
+              <span className="w-9 h-9 rounded-lg bg-discord-green/15 text-discord-green flex items-center justify-center shrink-0" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                  <path d="M7 6h10a5 5 0 0 1 4.9 6l-.8 4a3 3 0 0 1-5.2 1.4L14.2 16H9.8l-1.7 1.4A3 3 0 0 1 2.9 16l-.8-4A5 5 0 0 1 7 6zm0 3v1.5H5.5v1.5H7v1.5h1.5V12H10v-1.5H8.5V9H7zm8.5.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm2 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" />
+                </svg>
+              </span>
+              <span className="min-w-0 leading-tight">
+                <span className="block text-xs text-discord-text-muted">Jogando</span>
+                <span className="block text-sm font-semibold text-white truncate">{profile.playing}</span>
+              </span>
+            </div>
+          </div>
         )}
-        {profile.custom_status && <p className="text-sm text-discord-text mt-2 break-words">{profile.custom_status}</p>}
-
-        <div className="h-px bg-white/10 my-4" />
+        </div>
 
         <button
           onClick={onViewFullProfile}
-          className="w-full py-2.5 rounded btn-secondary text-sm font-medium"
+          className="w-full h-10 mt-3 btn-secondary text-sm font-medium"
         >
           {isSelf ? 'Editar perfil' : 'Ver perfil completo'}
         </button>

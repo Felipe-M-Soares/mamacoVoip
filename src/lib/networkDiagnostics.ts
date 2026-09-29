@@ -16,9 +16,10 @@ export interface NetworkDiagnosticsResult {
 }
 
 export async function runNetworkDiagnostics(): Promise<NetworkDiagnosticsResult> {
-  const url = `${SUPABASE_URL}/rest/v1/`
-  const markStart = `mamacos-diag-start-${Date.now()}`
-  performance.mark(markStart)
+  // Query string única por medição: garante uma entrada de Resource
+  // Timing própria (antes pegava a última entrada com esse prefixo, que
+  // podia ser de outra requisição do app) e evita cache no caminho.
+  const url = `${SUPABASE_URL}/rest/v1/?diag=${Date.now()}-${Math.random().toString(36).slice(2)}`
 
   const start = performance.now()
   let region: string | null = null
@@ -33,8 +34,7 @@ export async function runNetworkDiagnostics(): Promise<NetworkDiagnosticsResult>
   // Espera um instante pra entrada de performance ficar disponível
   await new Promise((r) => setTimeout(r, 50))
 
-  const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[]
-  const matching = entries.filter((e) => e.name.startsWith(url)).pop()
+  const matching = (performance.getEntriesByName(url, 'resource') as PerformanceResourceTiming[]).pop()
 
   let dnsMs: number | null = null
   let tcpMs: number | null = null

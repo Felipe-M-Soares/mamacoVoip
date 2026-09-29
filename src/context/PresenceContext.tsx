@@ -1,5 +1,5 @@
-import { createContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { supabase } from '../lib/supabase'
+import { createContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { openSharedChannel } from '../lib/realtimeChannel'
 import { useAuth } from '../hooks/useAuth'
 
 interface PresenceContextValue {
@@ -28,35 +28,46 @@ export const PresenceContext = createContext<PresenceContextValue>({ onlineIds: 
 // como online/ausente/não perturbe se as DUAS coisas baterem.
 export function PresenceProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
-  const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set())
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  // Só o ID: o objeto `user` troca de identidade a cada renovação do token
+  // (~1h). Antes isso derrubava e recriava o canal de presença com o
+  // MESMO nome — e como a saída do canal antigo é assíncrona, o
+  // `supabase.channel()` devolvia o canal antigo ainda "saindo", a
+  // inscrição nova não acontecia e a pessoa sumia como offline pra todo
+  // mundo até recarregar o app.
+  const userId = user?.id ?? null
+  const [onlineIds, setOnlineIds] = useState<Set<string>>(EMPTY_SET)
 
   useEffect(() => {
-    if (!user) {
-      setOnlineIds(new Set())
+    if (!userId) {
+      setOnlineIds(EMPTY_SET)
       return
     }
 
-    const channel = supabase.channel('presence:online', {
-      config: { presence: { key: user.id } },
+    return openSharedChannel('presence:online', { config: { presence: { key: userId } } }, (channel) => {
+      channel
+        .on('presence', { event: 'sync' }, () => {
+          const next = new Set(Object.keys(channel.presenceState()))
+          // Só troca o Set se o conteúdo mudou de verdade — todo Avatar do
+          // app lê isso, então um Set novo a cada "sync" re-renderizava
+          // todos eles mesmo sem ninguém ter entrado/saído.
+          setOnlineIds((prev) => (sameSet(prev, next) ? prev : next))
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            void channel.track({ online_at: new Date().toISOString() })
+          }
+        })
     })
-    channelRef.current = channel
+  }, [userId])
 
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        setOnlineIds(new Set(Object.keys(channel.presenceState())))
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          channel.track({ online_at: new Date().toISOString() })
-        }
-      })
+  const value = useMemo(() => ({ onlineIds }), [onlineIds])
+  return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>
+}
 
-    return () => {
-      supabase.removeChannel(channel)
-      channelRef.current = null
-    }
-  }, [user])
+const EMPTY_SET: Set<string> = new Set()
 
-  return <PresenceContext.Provider value={{ onlineIds }}>{children}</PresenceContext.Provider>
+function sameSet(a: Set<string>, b: Set<string>) {
+  if (a.size !== b.size) return false
+  for (const v of a) if (!b.has(v)) return false
+  return true
 }

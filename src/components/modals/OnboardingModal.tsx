@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useEffect, useRef, useState } from 'react'
 
 function seenKey(userId: string) {
   return `mamacos-onboarding-seen:${userId}`
@@ -36,7 +37,7 @@ const SLIDES = [
     title: 'Bem-vindo ao Mamacos Voip!',
     text: 'Um espaço pra conversar por texto, voz e vídeo com seus amigos e comunidades — vamos te mostrar o básico em poucos passos.',
     icon: (
-      <path d="M5.5 4.5c.5-.5 1.2-.8 2-.8h1.4l-.3 15h-1c-.8 0-1.5-.3-2-.8-.6-.5-.9-1.2-.9-2v-9.4c0-.8.3-1.5.8-2zm10 0c.5.5.8 1.2.8 2v9.4c0 .8-.3 1.5-.8 2-.5.5-1.2.8-2 .8h-1l-.3-15h1.4c.8 0 1.5.3 2 .8z" />
+      <path d="M12 2.5l2.35 5.9 6.15.55-4.7 4.1 1.45 6.2L12 15.95 6.75 19.25l1.45-6.2-4.7-4.1 6.15-.55z" />
     ),
   },
   {
@@ -66,54 +67,89 @@ export function OnboardingModal({ onDismiss }: { onDismiss: () => void }) {
   const [step, setStep] = useState(0)
   const slide = SLIDES[step]
   const isLast = step === SLIDES.length - 1
+  const dialogRef = useRef<HTMLDivElement>(null)
 
-  return (
-    <div className="fixed inset-0 z-[400] bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-discord-dark rounded-2xl shadow-2xl border border-discord-blurple/20 overflow-hidden">
-        <div className="p-6 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-discord-blurple to-discord-darker flex items-center justify-center mx-auto mb-4 brand-glow-sm">
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-white">
-              {slide.icon}
-            </svg>
+  // Leva o foco pro diálogo ao abrir (leitor de tela anuncia o título).
+  useEffect(() => {
+    dialogRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  // Portal no <body>: se algum ancestral tiver transform/filter, um
+  // "fixed" dentro dele passa a ser relativo a esse ancestral (e o
+  // overlay aparecia preso dentro da barra lateral).
+  return createPortal(
+    <div className="fixed inset-0 z-[400] bg-black/60 backdrop-blur-sm animate-fade-in flex items-center justify-center p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="onboarding-title"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="outline-none relative w-full max-w-md surface-elevated rounded-2xl overflow-hidden animate-pop-in"
+      >
+        {/* Brilho suave da marca atrás da ilustração */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-x-0 top-0 h-48 opacity-60 pointer-events-none"
+          style={{
+            background:
+              'radial-gradient(60% 70% at 50% 0%, color-mix(in srgb, var(--color-discord-blurple) 35%, transparent), transparent 70%)',
+          }}
+        />
+        <div className="relative px-6 pt-5 pb-6 text-center">
+          <div className="flex items-center justify-between h-8 mb-4">
+            <span className="text-[12px] font-medium text-discord-text-muted tabular-nums">
+              Passo {step + 1} de {SLIDES.length}
+            </span>
+            {!isLast && (
+              <button onClick={onDismiss} className="btn-ghost h-8 px-3 text-[13px]">
+                Pular
+              </button>
+            )}
           </div>
-          <h2 className="font-display text-xl font-bold text-white tracking-wide mb-2">{slide.title}</h2>
-          <p className="text-sm text-discord-text-muted leading-relaxed">{slide.text}</p>
 
-          <div className="flex items-center justify-center gap-1.5 mt-5">
+          <div key={step} className="animate-fade-slide-in">
+            <div className="relative w-20 h-20 mx-auto mb-5">
+              <div aria-hidden="true" className="absolute inset-0 rounded-[26px] bg-brand-gradient blur-xl opacity-50" />
+              <div className="relative w-20 h-20 rounded-[26px] bg-brand-gradient flex items-center justify-center shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-9 h-9 text-white drop-shadow" aria-hidden="true">
+                  {slide.icon}
+                </svg>
+              </div>
+            </div>
+            <h2 id="onboarding-title" className="font-display text-xl font-semibold text-white mb-2">
+              {slide.title}
+            </h2>
+            <p className="text-[14px] text-discord-text-muted leading-relaxed min-h-[4.5rem]">{slide.text}</p>
+          </div>
+
+          <div className="flex items-center justify-center gap-1.5 mt-5" aria-hidden="true">
             {SLIDES.map((_, i) => (
               <span
                 key={i}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === step ? 'w-5 bg-discord-blurple' : 'w-1.5 bg-discord-text-muted/40'
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  i === step ? 'w-6 bg-brand-gradient' : i < step ? 'w-1.5 bg-discord-blurple/60' : 'w-1.5 bg-white/15'
                 }`}
               />
             ))}
           </div>
 
-          <div className="flex gap-2 mt-5">
+          <div className="flex gap-2 mt-6">
             {step > 0 && (
-              <button
-                onClick={() => setStep((s) => s - 1)}
-                className="flex-1 py-2.5 rounded border border-discord-text-muted text-discord-text hover:bg-white/5 transition-colors"
-              >
+              <button onClick={() => setStep((s) => s - 1)} className="flex-1 h-10 btn-secondary text-sm">
                 Voltar
               </button>
             )}
             <button
               onClick={() => (isLast ? onDismiss() : setStep((s) => s + 1))}
-              className="flex-1 py-2.5 rounded btn-primary text-sm"
+              className="flex-1 h-10 btn-primary text-sm"
             >
               {isLast ? 'Vamos lá!' : 'Próximo'}
             </button>
           </div>
-
-          {!isLast && (
-            <button onClick={onDismiss} className="mt-3 text-xs text-discord-text-muted hover:text-white transition-colors">
-              Pular
-            </button>
-          )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

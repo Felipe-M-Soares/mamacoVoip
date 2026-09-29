@@ -41,9 +41,15 @@ export function openScreenSharePicker(payload: ScreenShareSourcesPayload): Promi
     pendingResolve = null
     resolve(null)
   }
+  // AUDITORIA: se o ScreenSharePicker ainda não está montado (nenhum
+  // listener inscrito), ninguém nunca resolveria essa Promise — quem chamou
+  // (VoiceContext) ficava esperando pra sempre, com o botão de compartilhar
+  // "travado". Trata como cancelado na hora.
+  if (!listener) return Promise.resolve(null)
+  const notify = listener
   return new Promise((resolve) => {
     pendingResolve = resolve
-    listener?.(payload)
+    notify(payload)
   })
 }
 

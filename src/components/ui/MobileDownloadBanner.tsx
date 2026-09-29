@@ -23,9 +23,9 @@ export function MobileDownloadBanner() {
       href={DESKTOP_DOWNLOAD_URL}
       target="_blank"
       rel="noreferrer"
-      className="md:hidden relative z-10 mb-4 flex items-center gap-3 rounded-xl border border-discord-blurple/30 bg-discord-blurple/10 px-4 py-3 text-left transition-colors hover:bg-discord-blurple/15"
+      className="md:hidden relative z-10 mb-4 flex items-center gap-3 rounded-2xl border border-[var(--color-line-strong)] bg-white/[0.03] px-4 py-3 text-left transition-colors hover:bg-white/[0.06]"
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-discord-blurple/20 text-discord-blurple">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-white">
         <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
           <path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4l3.3 3.3V4a1 1 0 0 1 1-1zM4 19a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2H4z" />
         </svg>

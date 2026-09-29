@@ -25,30 +25,43 @@ import { RemoteAudio } from './CallMediaTiles'
 // existindo só pra parte VISUAL (vídeo, botões, sliders) — não toca
 // mais áudio nenhum sozinho, pra não duplicar o som enquanto a pessoa
 // está de fato olhando o canal conectado.
+//
+// AUDITORIA DE VOZ — este componente passou a tocar o áudio de TODA call,
+// inclusive DM/grupo. Antes, DM/grupo tocava o áudio de dentro dos tiles
+// do DMCallOverlay.tsx, o que tinha três bugs: (1) minimizar a barra da
+// chamada DESMONTAVA os tiles e cortava o áudio de todo mundo; (2) o
+// volume era fixo em 100% — "Ensurdecer" (que zera o volume geral) e o
+// volume por pessoa não tinham efeito nenhum em DM; (3) o áudio da
+// transmissão de tela de quem estava na DM nunca tocava.
+//
+// Também usa as streams SÓ-ÁUDIO (micAudioStream/screenAudioStream, ver
+// recomputeParticipant em VoiceContext.tsx) em vez de cameraStream/
+// screenStream: essas mudam de identidade quando a pessoa liga/desliga a
+// câmera (ou a transmissão troca de vídeo), e cada troca recriava o
+// gráfico de áudio — um "clique"/corte na voz toda vez que alguém ligava
+// a câmera. E o áudio da tela agora respeita o alto-falante escolhido
+// (antes só a voz usava `sinkId`; o som da transmissão ia sempre pro
+// dispositivo padrão do sistema).
 export function VoiceCallAudio() {
   const voice = useVoice()
 
-  // Chamada de DM/grupo já tem seu próprio áudio sempre-montado (ver
-  // DMCallOverlay.tsx, que segue exatamente esse mesmo padrão) — aqui
-  // cuida só de canal de voz DE SERVIDOR (connectedServerId != null),
-  // pra não tocar a mesma stream duas vezes ao mesmo tempo.
-  if (!voice.connectedChannelId || !voice.connectedServerId) return null
+  if (!voice.connectedChannelId) return null
 
   const sinkId = voice.audioSettings.speakerId
 
   return (
     <>
       {Object.entries(voice.participants).map(([userId, data]) => {
-        if (!data.cameraStream) return null
+        if (!data.micAudioStream) return null
         const participantVolume = voice.getParticipantVolume(userId)
         const effectiveVolume = (voice.masterVolume / 100) * (participantVolume / 100)
-        return <RemoteAudio key={`mic-${userId}`} stream={data.cameraStream} sinkId={sinkId} volume={effectiveVolume} />
+        return <RemoteAudio key={`mic-${userId}`} stream={data.micAudioStream} sinkId={sinkId} volume={effectiveVolume} />
       })}
       {Object.entries(voice.participants).map(([userId, data]) => {
-        if (!data.screenStream || data.screenStream.getAudioTracks().length === 0) return null
+        if (!data.screenAudioStream) return null
         const shareVolume = voice.getScreenShareVolume(userId)
         const effectiveVolume = (voice.masterVolume / 100) * (shareVolume / 100)
-        return <RemoteAudio key={`screen-${userId}`} stream={data.screenStream} volume={effectiveVolume} />
+        return <RemoteAudio key={`screen-${userId}`} stream={data.screenAudioStream} sinkId={sinkId} volume={effectiveVolume} />
       })}
     </>
   )

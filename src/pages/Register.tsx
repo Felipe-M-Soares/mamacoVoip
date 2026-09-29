@@ -3,49 +3,62 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { GoogleSignInButton } from '../components/ui/GoogleSignInButton'
 import { MobileDownloadBanner } from '../components/ui/MobileDownloadBanner'
+import { AuthAlert, AuthDivider, AuthField, AuthHeader, AuthIcons, AuthShell, DesktopDownloadChip } from './AuthShell'
+import { supabase } from '../lib/supabase'
+import {
+  validateEmail,
+  validatePassword,
+  validateUsername,
+  passwordStrength,
+  PASSWORD_MIN_LENGTH,
+  USERNAME_MAX_LENGTH,
+} from '../lib/authValidation'
 
-function GlowBackdrop() {
-  return (
-    <>
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background:
-            'radial-gradient(ellipse 900px 600px at 50% 0%, color-mix(in srgb, var(--color-discord-blurple) 22%, transparent), transparent 70%)',
-        }}
-      />
-      <div
-        className="absolute inset-0 pointer-events-none opacity-[0.04]"
-        style={{
-          backgroundImage:
-            'repeating-linear-gradient(45deg, var(--color-discord-text) 0, var(--color-discord-text) 1px, transparent 1px, transparent 14px)',
-        }}
-      />
-    </>
-  )
-}
+const STRENGTH_LABELS = ['', 'Fraca', 'Razoável', 'Boa', 'Forte'] as const
 
 export function Register() {
   const { signUp } = useAuth()
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [confirmationSent, setConfirmationSent] = useState(false)
 
+  const termsError = 'Você precisa aceitar os Termos de Uso e a Política de Privacidade pra continuar.'
+
   function validate(): string | null {
-    if (username.length < 3) return 'O nome de usuário precisa ter no mínimo 3 caracteres.'
-    if (!/^[a-zA-Z0-9_.]+$/.test(username))
-      return 'O nome de usuário só pode ter letras, números, ponto e underline.'
-    if (password.length < 6) return 'A senha precisa ter no mínimo 6 caracteres.'
-    if (!acceptedTerms) return 'Você precisa aceitar os Termos de Uso e a Política de Privacidade pra continuar.'
-    return null
+    const trimmedUsername = username.trim()
+    return (
+      validateUsername(trimmedUsername) ??
+      validateEmail(email) ??
+      validatePassword(password, { email, username: trimmedUsername }) ??
+      (password !== confirmPassword ? 'As senhas não são iguais.' : null) ??
+      (!acceptedTerms ? termsError : null)
+    )
+  }
+
+  // O banco acrescenta um número no fim se o nome já estiver em uso
+  // (ex.: "joao" vira "joao1") — melhor avisar ANTES de criar a conta.
+  // Usa a função is_username_available (migration 013); se ela ainda não
+  // existir no banco, simplesmente segue sem essa checagem.
+  async function isUsernameTaken(name: string): Promise<boolean> {
+    try {
+      const { data, error } = await (
+        supabase.rpc.bind(supabase) as unknown as (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>
+      )('is_username_available', { p_username: name })
+      if (error) return false
+      return data === false
+    } catch {
+      return false
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (loading) return // evita duplo envio
     setError(null)
 
     const validationError = validate()
@@ -55,7 +68,13 @@ export function Register() {
     }
 
     setLoading(true)
-    const { error } = await signUp(email, password, username)
+    const trimmedUsername = username.trim()
+    if (await isUsernameTaken(trimmedUsername)) {
+      setLoading(false)
+      setError('Esse nome de usuário já está em uso. Escolha outro.')
+      return
+    }
+    const { error } = await signUp(email, password, trimmedUsername)
     setLoading(false)
 
     if (error) {
@@ -65,130 +84,140 @@ export function Register() {
     setConfirmationSent(true)
   }
 
+  const strength = password ? passwordStrength(password) : 0
+  const strengthColor = ['bg-rose-500', 'bg-rose-500', 'bg-amber-400', 'bg-discord-green', 'bg-discord-green'][strength]
+
   if (confirmationSent) {
     return (
-      <div className="min-h-full bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
-        <GlowBackdrop />
-        <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 text-center border border-white/5">
-          <img src="/logo.png" alt="Mamacos Voip" className="w-16 h-16 rounded-full object-cover mx-auto mb-4 brand-glow-sm" />
-          <h1 className="font-display text-2xl font-bold text-white tracking-wide">Confirme seu e-mail</h1>
-          <p className="text-discord-text-muted mt-3">
-            Enviamos um link de confirmação para <span className="text-discord-text">{email}</span>.
+      <AuthShell>
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-discord-green/15 text-discord-green ring-1 ring-inset ring-discord-green/25">
+            {AuthIcons.mail}
+          </div>
+          <h1 className="font-display text-2xl font-semibold text-white">Confirme seu e-mail</h1>
+          <p className="mt-3 text-[14px] leading-relaxed text-discord-text-muted">
+            Enviamos um link de confirmação para <span className="font-medium text-discord-text">{email}</span>.
             Clique no link para ativar sua conta e poder entrar.
           </p>
-          <Link to="/login" className="text-discord-blurple hover:underline mt-6 inline-block">
+          <Link to="/login" className="btn-secondary mt-6 inline-flex h-10 items-center justify-center px-5 text-[14px]">
             Voltar para o login
           </Link>
         </div>
-      </div>
+      </AuthShell>
     )
   }
 
   return (
-    <div className="min-h-full bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
-      <GlowBackdrop />
-      <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 border border-white/5">
-        <MobileDownloadBanner />
-        <div className="flex justify-center mb-5">
-          <img src="/logo.png" alt="Mamacos Voip" className="w-24 h-24 rounded-full object-cover brand-glow" />
-        </div>
-        <h1 className="font-display text-3xl font-bold text-white text-center tracking-wide">Criar uma conta</h1>
+    <AuthShell wide>
+      <MobileDownloadBanner />
+      <AuthHeader title="Criar uma conta" subtitle="Leva menos de um minuto." />
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-          <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-              Nome de usuário
-            </label>
-            <input
-              type="text"
-              required
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
-              autoComplete="username"
-            />
-          </div>
+      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+        <AuthField
+          label="Nome de usuário"
+          icon={AuthIcons.user}
+          type="text"
+          required
+          value={username}
+          maxLength={USERNAME_MAX_LENGTH}
+          onChange={(e) => setUsername(e.target.value.replace(/\s/g, ''))}
+          autoComplete="username"
+          placeholder="seunome"
+        />
 
-          <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-              E-mail
-            </label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
-              autoComplete="email"
-            />
-          </div>
+        <AuthField
+          label="E-mail"
+          icon={AuthIcons.mail}
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          placeholder="voce@exemplo.com"
+        />
 
-          <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-              Senha
-            </label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
-              autoComplete="new-password"
-            />
-          </div>
-
-          <label className="flex items-start gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={acceptedTerms}
-              onChange={(e) => setAcceptedTerms(e.target.checked)}
-              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
-            />
-            <span className="text-xs text-discord-text-muted">
-              Eu li e concordo com os{' '}
-              <Link to="/termos" target="_blank" className="text-discord-blurple hover:underline">
-                Termos de Uso
-              </Link>{' '}
-              e a{' '}
-              <Link to="/privacidade" target="_blank" className="text-discord-blurple hover:underline">
-                Política de Privacidade
-              </Link>
-              .
-            </span>
-          </label>
-
-          {error && (
-            <p className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded px-3 py-2">
-              {error}
-            </p>
+        <div>
+          <AuthField
+            label="Senha"
+            icon={AuthIcons.lock}
+            type="password"
+            revealable
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={PASSWORD_MIN_LENGTH}
+            maxLength={72}
+            autoComplete="new-password"
+            placeholder={`Mínimo ${PASSWORD_MIN_LENGTH} caracteres`}
+            hint={
+              <>
+                Mínimo {PASSWORD_MIN_LENGTH} caracteres, com letras e números.
+                {password && ` Força: ${STRENGTH_LABELS[passwordStrength(password)] || 'Muito fraca'}.`}
+              </>
+            }
+          />
+          {password && (
+            <div className="mt-2 flex gap-1" aria-hidden>
+              {[1, 2, 3, 4].map((n) => (
+                <span key={n} className={`h-1 flex-1 rounded-full transition-colors ${n <= strength ? strengthColor : 'bg-white/[0.08]'}`} />
+              ))}
+            </div>
           )}
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 rounded bg-discord-blurple text-white font-display font-semibold tracking-wide text-base hover:brightness-110 hover:brand-glow-sm transition-all disabled:opacity-60"
-          >
-            {loading ? 'Criando conta...' : 'Continuar'}
-          </button>
+        <AuthField
+          label="Confirmar senha"
+          icon={AuthIcons.lock}
+          type="password"
+          revealable
+          required
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          maxLength={72}
+          autoComplete="new-password"
+          placeholder="Repita a senha"
+        />
 
-          <p className="text-sm text-discord-text-muted">
-            Já tem uma conta?{' '}
-            <Link to="/login" className="text-discord-blurple hover:underline">
-              Entrar
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-[10px] border border-[var(--color-line)] bg-white/[0.02] p-3">
+          <input
+            type="checkbox"
+            checked={acceptedTerms}
+            onChange={(e) => setAcceptedTerms(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-discord-blurple"
+          />
+          <span className="text-[13px] leading-snug text-discord-text-muted">
+            Eu li e concordo com os{' '}
+            <Link to="/termos" target="_blank" className="font-medium text-discord-blurple hover:underline">
+              Termos de Uso
+            </Link>{' '}
+            e a{' '}
+            <Link to="/privacidade" target="_blank" className="font-medium text-discord-blurple hover:underline">
+              Política de Privacidade
             </Link>
-          </p>
-        </form>
+            .
+          </span>
+        </label>
 
-        <div className="flex items-center gap-3 mt-5">
-          <div className="h-px flex-1 bg-white/5" />
-          <span className="text-[11px] uppercase text-discord-text-muted">ou</span>
-          <div className="h-px flex-1 bg-white/5" />
-        </div>
+        {error && <AuthAlert tone="error">{error}</AuthAlert>}
 
-        <div className="mt-4">
-          <GoogleSignInButton label="Cadastrar com Google" />
-        </div>
-      </div>
-    </div>
+        <button type="submit" disabled={loading} aria-busy={loading} className="btn-primary flex h-11 w-full items-center justify-center gap-2 text-[15px]">
+          {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />}
+          {loading ? 'Criando conta...' : 'Continuar'}
+        </button>
+      </form>
+
+      <AuthDivider />
+
+      <GoogleSignInButton label="Cadastrar com Google" beforeStart={() => (acceptedTerms ? null : termsError)} />
+
+      <p className="mt-6 text-center text-[14px] text-discord-text-muted">
+        Já tem uma conta?{' '}
+        <Link to="/login" className="font-medium text-discord-blurple hover:underline">
+          Entrar
+        </Link>
+      </p>
+
+      <DesktopDownloadChip />
+    </AuthShell>
   )
 }

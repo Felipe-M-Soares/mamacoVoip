@@ -15,15 +15,22 @@ export function useConnectionPing() {
       // latência de rede de verdade, e por isso aparecia um "ping"
       // bem mais alto do que a conexão real. Um HEAD simples na raiz
       // da API mede só o vai-e-volta da rede, sem tocar no banco.
+      // Janela minimizada/em segundo plano: não gasta rede/CPU medindo
+      // um número que ninguém está olhando (e que o Chromium distorce de
+      // qualquer jeito, já que ele atrasa timers de abas em background).
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       const start = performance.now()
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 5000)
       try {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 5000)
-        await fetch(`${SUPABASE_URL}/rest/v1/`, { method: 'HEAD', signal: controller.signal })
-        clearTimeout(timeout)
+        await fetch(`${SUPABASE_URL}/rest/v1/`, { method: 'HEAD', signal: controller.signal, cache: 'no-store' })
         if (!cancelled) setPingMs(Math.round(performance.now() - start))
       } catch {
         if (!cancelled) setPingMs(null)
+      } finally {
+        // Antes só era limpo no caminho de sucesso — num erro de rede o
+        // timer continuava pendurado até disparar.
+        clearTimeout(timeout)
       }
     }
 

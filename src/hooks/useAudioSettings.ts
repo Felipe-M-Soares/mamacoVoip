@@ -127,13 +127,21 @@ export function useAudioSettings() {
     return () => navigator.mediaDevices?.removeEventListener?.('devicechange', handler)
   }, [refreshDevices])
 
-  function persist(next: StoredSettings) {
-    setSettings(next)
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-    } catch {
-      // best-effort — se não der pra persistir, a preferência só vale pra sessão atual
-    }
+  // Atualização FUNCIONAL (a partir do estado mais recente, não do
+  // `settings` capturado no render) — antes, duas mudanças no mesmo
+  // tick (ex.: trocar o modo de sensibilidade e o valor do slider logo em
+  // seguida) faziam a segunda sobrescrever a primeira com o objeto
+  // velho, e uma das preferências "voltava sozinha".
+  function update(patch: Partial<StoredSettings>) {
+    setSettings((prev) => {
+      const next = { ...prev, ...patch }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      } catch {
+        // best-effort — se não der pra persistir, a preferência só vale pra sessão atual
+      }
+      return next
+    })
   }
 
   async function requestPermission() {
@@ -148,31 +156,31 @@ export function useAudioSettings() {
   }
 
   function setMicId(id: string | null) {
-    persist({ ...settings, micId: id })
+    update({ micId: id })
   }
   function setSpeakerId(id: string | null) {
-    persist({ ...settings, speakerId: id })
+    update({ speakerId: id })
   }
   function setCameraId(id: string | null) {
-    persist({ ...settings, cameraId: id })
+    update({ cameraId: id })
   }
   function setEchoCancellation(v: boolean) {
-    persist({ ...settings, echoCancellation: v })
+    update({ echoCancellation: v })
   }
   function setNoiseSuppression(v: boolean) {
-    persist({ ...settings, noiseSuppression: v })
+    update({ noiseSuppression: v })
   }
   function setAutoGainControl(v: boolean) {
-    persist({ ...settings, autoGainControl: v })
+    update({ autoGainControl: v })
   }
   function setMicSensitivity(v: number) {
-    persist({ ...settings, micSensitivity: v })
+    update({ micSensitivity: v })
   }
   function setMicSensitivityMode(v: 'auto' | 'manual') {
-    persist({ ...settings, micSensitivityMode: v })
+    update({ micSensitivityMode: v })
   }
   function setScreenAudioNoiseSuppression(v: boolean) {
-    persist({ ...settings, screenAudioNoiseSuppression: v })
+    update({ screenAudioNoiseSuppression: v })
   }
 
   // `overrides` existe pro caso de ligar/desligar um desses três (eco,

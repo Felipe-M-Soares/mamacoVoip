@@ -25,30 +25,37 @@ export function CreateCategoryModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Criar categoria" onClose={onClose}>
+    <Modal
+      title="Criar categoria"
+      description="Categorias agrupam canais na barra lateral."
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary h-9 px-4 text-sm">
+            Cancelar
+          </button>
+          <button onClick={handleSubmit} disabled={loading} className="btn-primary h-9 px-4 text-sm">
+            {loading ? 'Criando...' : 'Criar categoria'}
+          </button>
+        </>
+      }
+    >
       <div className="space-y-4">
         <div>
-          <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+          <label htmlFor="create-category-name" className="field-label">
             Nome da categoria
           </label>
           <input
+            id="create-category-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="NOVA CATEGORIA"
-            className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+            className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none uppercase"
           />
         </div>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
-
-        <button
-          onClick={handleSubmit}
-          disabled={loading}
-          className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-        >
-          {loading ? 'Criando...' : 'Criar categoria'}
-        </button>
+        {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>
     </Modal>
   )

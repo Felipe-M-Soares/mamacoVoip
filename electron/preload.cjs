@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update-status', handler)
   },
   restartToUpdate: () => ipcRenderer.invoke('app:restartToUpdate'),
+  // AUDITORIA: último estado relevante do auto-updater (baixando/pronta),
+  // pra página poder se atualizar ao montar/recarregar — ver
+  // app:get-update-status em electron/main.cjs e useAppUpdater.ts.
+  getUpdateStatus: () => ipcRenderer.invoke('app:get-update-status'),
   // OITAVA RODADA: trocado de "evento que chega sozinho" (onScreenShareSources)
   // pra "pedido ativo" (getScreenShareSources) — ver o comentário grande em
   // electron/main.cjs perto de ipcMain.handle('screen-share:get-sources', ...)

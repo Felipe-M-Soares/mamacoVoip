@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ServerBar } from '../components/layout/ServerBar'
 import { ChannelSidebar } from '../components/layout/ChannelSidebar'
@@ -10,13 +10,9 @@ import { useGroupConversations } from '../context/GroupConversationsContext'
 import { GroupChatArea } from '../components/layout/GroupChatArea'
 import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
-import { UserProfileModal } from '../components/modals/UserProfileModal'
 import { OnboardingModal, useOnboarding } from '../components/modals/OnboardingModal'
 import { DMCallOverlay } from '../components/layout/DMCallOverlay'
 import { VoiceCallAudio } from '../components/layout/VoiceCallAudio'
-import { EditProfileModal } from '../components/modals/EditProfileModal'
-import { QuickSwitcher } from '../components/modals/QuickSwitcher'
-import { KeyboardShortcutsModal } from '../components/modals/KeyboardShortcutsModal'
 import { ProfileSidePanel } from '../components/layout/ProfileSidePanel'
 import { ServersProvider } from '../context/ServersContext'
 import { ChannelsProvider } from '../context/ChannelsContext'
@@ -35,6 +31,13 @@ import type { Channel, Profile, Server } from '../types/database'
 
 const VoiceChannelView = lazy(() =>
   import('../components/layout/VoiceChannelView').then((m) => ({ default: m.VoiceChannelView }))
+)
+// Modais que só abrem sob demanda — fora do pacote inicial.
+const UserProfileModal = lazy(() => import('../components/modals/UserProfileModal').then((m) => ({ default: m.UserProfileModal })))
+const EditProfileModal = lazy(() => import('../components/modals/EditProfileModal').then((m) => ({ default: m.EditProfileModal })))
+const QuickSwitcher = lazy(() => import('../components/modals/QuickSwitcher').then((m) => ({ default: m.QuickSwitcher })))
+const KeyboardShortcutsModal = lazy(() =>
+  import('../components/modals/KeyboardShortcutsModal').then((m) => ({ default: m.KeyboardShortcutsModal }))
 )
 
 // Fica DENTRO do ChannelsProvider, então tem acesso à lista de canais
@@ -59,6 +62,10 @@ function ActiveServerBody({
   onToggleMembers: () => void
 }) {
   const { channels, loading: loadingChannels } = useChannels()
+  // O canal ativo guardado lá em cima é uma CÓPIA de quando foi clicado —
+  // renomear, mudar o tópico, ligar modo lento/spoiler etc. não aparecia no
+  // chat até trocar de canal e voltar. Usa sempre a versão atual da lista.
+  const liveChannel = activeChannel ? channels.find((c) => c.id === activeChannel.id) ?? activeChannel : null
 
   useEffect(() => {
     if (loadingChannels) return
@@ -72,27 +79,39 @@ function ActiveServerBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channels, loadingChannels, activeChannel?.id])
 
-  if (!activeChannel) {
+  if (!liveChannel) {
     return (
-      <div className="flex-1 flex items-center justify-center text-discord-text-muted">
-        {loadingChannels ? '' : 'Este servidor ainda não tem canais.'}
+      <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-discord-channels border-t border-l border-[var(--color-line)]">
+        {loadingChannels ? (
+          <div role="status" aria-label="Carregando canal" className="w-7 h-7 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+        ) : (
+          <div className="flex flex-col items-center animate-fade-in">
+            <span className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center mb-4" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-discord-text-muted">
+                <path d="M9.3 3.1a1 1 0 0 1 1.94.48L10.6 6.5h3.24l.68-2.92a1 1 0 1 1 1.94.48L15.86 6.5h2.14a1 1 0 1 1 0 2h-2.6l-.7 3h2.3a1 1 0 1 1 0 2h-2.77l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H9.13l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H4.9a1 1 0 1 1 0-2h2.64l.7-3H6a1 1 0 1 1 0-2h2.6l.7-3zm.84 5.4-.7 3h3.24l.7-3z" />
+              </svg>
+            </span>
+            <p className="font-display font-semibold text-white">Nenhum canal por aqui</p>
+            <p className="text-sm text-discord-text-muted mt-1 max-w-xs">Este servidor ainda não tem canais. Quem administra pode criar um pela lista ao lado.</p>
+          </div>
+        )}
       </div>
     )
   }
 
-  return activeChannel.type === 'voice' ? (
+  return liveChannel.type === 'voice' ? (
     <Suspense
       fallback={
-        <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+        <div className="flex-1 flex items-center justify-center bg-discord-channels border-t border-l border-[var(--color-line)]">
+          <div role="status" aria-label="Carregando" className="w-7 h-7 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
         </div>
       }
     >
-      <VoiceChannelView channel={activeChannel} serverId={server.id} onViewProfile={onViewProfile} onMessageUser={onMessageUser} />
+      <VoiceChannelView channel={liveChannel} serverId={server.id} onViewProfile={onViewProfile} onMessageUser={onMessageUser} />
     </Suspense>
   ) : (
     <ChatArea
-      channel={activeChannel}
+      channel={liveChannel}
       server={server}
       onViewProfile={onViewProfile}
       onJumpToChannel={onSelectChannel}
@@ -151,8 +170,8 @@ function ActiveServerContent({
         className={
           isElectronApp
             ? 'static flex flex-col'
-            : `fixed inset-y-0 left-0 z-40 flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto ${
-                drawerOpen ? 'translate-x-0' : '-translate-x-full'
+            : `fixed inset-y-0 left-0 z-40 flex flex-col transition-transform duration-200 lg:static lg:translate-none lg:z-auto ${
+                drawerOpen ? 'translate-none' : '-translate-x-full'
               }`
         }
       >
@@ -203,7 +222,13 @@ function MainLayoutInner() {
   const { servers, loading: loadingServers } = useServers()
   const location = useLocation()
   const navigate = useNavigate()
-  const [activeServer, setActiveServer] = useState<Server | null>(null)
+  // Guarda só o ID e deriva o servidor da lista atual: antes era uma cópia
+  // do objeto, então renomear/trocar ícone do servidor não aparecia até
+  // selecionar de novo, e ser removido/expulso de um servidor deixava a
+  // tela dele aberta com tudo falhando.
+  const [activeServerId, setActiveServerId] = useState<string | null>(null)
+  const activeServer = useMemo(() => servers.find((s) => s.id === activeServerId) ?? null, [servers, activeServerId])
+  const setActiveServer = useCallback((server: Server | null) => setActiveServerId(server?.id ?? null), [])
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null)
   const [pendingChannelId, setPendingChannelId] = useState<string | null>(null)
   // Marca "assim que o canal-alvo do convite for selecionado, entra na
@@ -235,11 +260,22 @@ function MainLayoutInner() {
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
 
+  // Servidor aberto sumiu da lista (excluído, expulso, saiu por outro
+  // dispositivo): volta pra tela inicial em vez de ficar numa tela quebrada.
+  useEffect(() => {
+    if (!activeServerId || loadingServers) return
+    if (!servers.some((s) => s.id === activeServerId)) {
+      setActiveServerId(null)
+      setActiveChannel(null)
+    }
+  }, [activeServerId, servers, loadingServers])
+
   useEffect(() => {
     function handleGlobalKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        setShowQuickSwitcher(true)
+        // Ctrl+K de novo fecha (antes só abria)
+        setShowQuickSwitcher((v) => !v)
       }
       if ((e.ctrlKey || e.metaKey) && e.key === '/') {
         e.preventDefault()
@@ -294,20 +330,30 @@ function MainLayoutInner() {
 
   async function handleMessageUser(userId: string) {
     const { conversation, error } = await openConversationWith(userId)
-    if (!error && conversation) handleOpenConversation(conversation.id)
+    // antes um erro aqui era ignorado — o clique em "Mensagem" não fazia nada
+    if (error) alert(error)
+    else if (conversation) handleOpenConversation(conversation.id)
   }
   const { groups } = useGroupConversations()
   const unread = useUnreadOverview()
 
+  // Marca como lido ao abrir E sempre que o canal/conversa aberto aparecer
+  // como "não lido" de novo (mensagem nova chegando enquanto você está
+  // olhando pra ele) — antes a bolinha de não lido aparecia no próprio
+  // canal que estava aberto na tela.
+  const activeTextChannelId = activeServer && activeChannel?.type === 'text' ? activeChannel.id : null
+  const activeTextChannelUnread = activeTextChannelId ? unread.unreadChannelIds.has(activeTextChannelId) : false
   useEffect(() => {
-    if (activeChannel && activeChannel.type === 'text') unread.markChannelRead(activeChannel.id)
+    if (activeTextChannelId) void unread.markChannelRead(activeTextChannelId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeChannel?.id])
+  }, [activeTextChannelId, activeTextChannelUnread])
 
+  const openConversationId = !activeServer && homeView === 'conversation' ? activeConversationId : null
+  const openConversationUnread = openConversationId ? unread.unreadConversationIds.has(openConversationId) : false
   useEffect(() => {
-    if (homeView === 'conversation' && activeConversationId) unread.markConversationRead(activeConversationId)
+    if (openConversationId) void unread.markConversationRead(openConversationId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [homeView, activeConversationId])
+  }, [openConversationId, openConversationUnread])
 
   function handleServerGone() {
     setActiveServer(null)
@@ -365,15 +411,31 @@ function MainLayoutInner() {
   const activeConversation = conversations.find((c) => c.id === activeConversationId)
   const activeGroup = groups.find((g) => g.id === activeGroupId)
 
+  // Antes esses dois eram recriados a cada render do layout (qualquer
+  // tecla, qualquer mudança de estado), refazendo o merge de todos os
+  // perfis e forçando re-render do overlay de chamada.
+  const callProfilesById = useMemo(
+    () => ({
+      ...Object.fromEntries(conversations.map((c) => [c.otherProfile.id, c.otherProfile])),
+      ...Object.fromEntries(groups.flatMap((g) => g.members.map((m) => [m.id, m]))),
+    }),
+    [conversations, groups]
+  )
+  const switcherConversations = useMemo(
+    () => conversations.map((c) => ({ id: c.id, otherProfile: c.otherProfile })),
+    [conversations]
+  )
+
   return (
-    <div className="h-full w-full flex overflow-hidden bg-discord-dark relative">
+    <div className="h-full w-full flex overflow-hidden bg-discord-darker relative">
       {/* Botão de menu — só aparece em telas pequenas (nunca no app
           desktop, que não tem esse "modo mobile" — ver isElectronApp). */}
       {!isElectronApp && (
         <button
           onClick={() => setMobileSidebarOpen(true)}
-          className="lg:hidden fixed top-2 left-2 z-30 w-9 h-9 rounded-md bg-discord-darker/90 backdrop-blur text-white flex items-center justify-center shadow-lg"
+          className="lg:hidden fixed top-2.5 left-2.5 z-30 w-9 h-9 rounded-[10px] glass text-discord-text hover:text-white flex items-center justify-center shadow-[0_8px_20px_-8px_rgb(0_0_0/0.7)] active:scale-95 transition"
           aria-label="Abrir menu"
+          title="Abrir menu"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
             <path d="M4 6h16a1 1 0 1 0 0-2H4a1 1 0 1 0 0 2zm16 5H4a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2zm0 7H4a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2z" />
@@ -383,7 +445,7 @@ function MainLayoutInner() {
 
       {/* Overlay escuro atrás do drawer, só em mobile */}
       {!isElectronApp && mobileSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/60 z-30" onClick={() => setMobileSidebarOpen(false)} />
+        <div className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-[2px] z-30 animate-fade-in" onClick={() => setMobileSidebarOpen(false)} />
       )}
 
       {activeServer ? (
@@ -412,8 +474,8 @@ function MainLayoutInner() {
             className={
               isElectronApp
                 ? 'static flex flex-col'
-                : `fixed inset-y-0 left-0 z-40 flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto ${
-                    mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                : `fixed inset-y-0 left-0 z-40 flex flex-col transition-transform duration-200 lg:static lg:translate-none lg:z-auto ${
+                    mobileSidebarOpen ? 'translate-none' : '-translate-x-full'
                   }`
             }
           >
@@ -448,13 +510,15 @@ function MainLayoutInner() {
           </div>
 
           {loadingServers ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="w-8 h-8 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+            <div className="flex-1 flex items-center justify-center bg-discord-channels border-t border-l border-[var(--color-line)] rounded-tl-[var(--radius-panel)]">
+              <div role="status" aria-label="Carregando" className="w-7 h-7 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
             </div>
           ) : homeView === 'conversation' && activeConversation ? (
-            <DMChatArea conversationId={activeConversation.id} otherProfile={activeConversation.otherProfile} />
+            // key: cada conversa/grupo começa com estado limpo — antes o
+            // "respondendo a…" de uma conversa passava pra outra.
+            <DMChatArea key={activeConversation.id} conversationId={activeConversation.id} otherProfile={activeConversation.otherProfile} />
           ) : homeView === 'group' && activeGroup ? (
-            <GroupChatArea group={activeGroup} onLeave={handleSelectHome} />
+            <GroupChatArea key={activeGroup.id} group={activeGroup} onLeave={handleSelectHome} />
           ) : (
             <FriendsPanel onOpenConversation={handleOpenConversation} />
           )}
@@ -477,6 +541,7 @@ function MainLayoutInner() {
         />
       )}
 
+      <Suspense fallback={null}>
       {viewingProfile && (
         <UserProfileModal
           targetProfile={viewingProfile}
@@ -486,25 +551,22 @@ function MainLayoutInner() {
         />
       )}
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
+      </Suspense>
       {onboarding.show && <OnboardingModal onDismiss={onboarding.dismiss} />}
-      <DMCallOverlay
-        profilesById={{
-          ...Object.fromEntries(conversations.map((c) => [c.otherProfile.id, c.otherProfile])),
-          ...Object.fromEntries(groups.flatMap((g) => g.members.map((m) => [m.id, m]))),
-        }}
-      />
+      <DMCallOverlay profilesById={callProfilesById} />
 
       <VoiceCallAudio />
       <GameDetectedToast />
       <OverlayStateSync />
       <AutoIdleStatus />
 
+      <Suspense fallback={null}>
       {showShortcuts && <KeyboardShortcutsModal onClose={() => setShowShortcuts(false)} />}
 
       {showQuickSwitcher && (
         <QuickSwitcher
           servers={servers}
-          conversations={conversations.map((c) => ({ id: c.id, otherProfile: c.otherProfile }))}
+          conversations={switcherConversations}
           activeServerId={activeServer?.id ?? null}
           onSelectServer={(server) => {
             handleSelectServer(server)
@@ -522,6 +584,7 @@ function MainLayoutInner() {
           onClose={() => setShowQuickSwitcher(false)}
         />
       )}
+      </Suspense>
     </div>
   )
 }

@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- AUDITORIA: allowBackup="false" — com "true", o backup automático
+         do Android (nuvem do Google e `adb backup`) copiava os dados da
+         WebView, incluindo a sessão de login do Supabase (token de
+         acesso/renovação em localStorage). Restaurar esse backup em outro
+         aparelho = já entrar logado na conta da pessoa. O app não guarda
+         nada localmente que valha a pena restaurar (tudo vem do servidor). -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -54,7 +61,9 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <!-- BLUETOOTH (legado) só existe até o Android 11; do 12 em diante o
+         que vale é BLUETOOTH_CONNECT logo abaixo. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Deixa o app aparecer só em aparelhos que realmente têm câmera E
          microfone — evita instalação em dispositivos incompatíveis via

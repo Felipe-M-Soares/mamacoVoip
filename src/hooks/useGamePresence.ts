@@ -95,7 +95,12 @@ declare global {
       getCurrentGame: () => Promise<string | null>
       onGameStatusChanged: (callback: (game: string | null) => void) => () => void
       onUpdateStatus: (callback: (payload: UpdateStatusPayload) => void) => () => void
-      restartToUpdate: () => Promise<void>
+      // Resolve `true` se o reinício pra instalar foi agendado, `false` se
+      // ainda não havia atualização baixada (ver electron/main.cjs).
+      restartToUpdate: () => Promise<boolean | void>
+      // AUDITORIA: último estado relevante do auto-updater (baixando/pronta)
+      // — opcional pra continuar compatível com um processo principal antigo.
+      getUpdateStatus?: () => Promise<UpdateStatusPayload | null>
       // OITAVA RODADA: pedido ativo (invoke/Promise) em vez de esperar
       // um evento chegar sozinho — ver electron/preload.cjs e o
       // comentário grande em electron/main.cjs sobre abandonar
@@ -191,15 +196,28 @@ export function useGamePresence() {
   useEffect(() => {
     if (!user || !window.electronAPI) return
 
+    // Evita atualizar o perfil depois do efeito já ter sido desmontado
+    // (logout/troca de conta enquanto getCurrentGame ainda respondia) —
+    // senão o "Jogando X" da sessão anterior podia ser gravado no perfil
+    // errado/depois do logout.
+    let cancelled = false
     const unsubscribe = window.electronAPI.onGameStatusChanged((game) => {
-      updateProfile({ playing: game })
+      if (!cancelled) updateProfile({ playing: game })
     })
 
-    window.electronAPI.getCurrentGame().then((game) => {
-      if (game) updateProfile({ playing: game })
-    })
+    window.electronAPI
+      .getCurrentGame()
+      .then((game) => {
+        if (game && !cancelled) updateProfile({ playing: game })
+      })
+      .catch(() => {
+        // IPC indisponível — sem problema, o evento acima cobre as mudanças
+      })
 
-    return unsubscribe
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
 }

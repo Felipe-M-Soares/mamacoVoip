@@ -2,6 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { LoadingScreen } from './ui/LoadingScreen'
 import { MfaChallengeScreen } from '../pages/MfaChallengeScreen'
+import { safeRedirectPath } from '../lib/authValidation'
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading, mfaPending } = useAuth()
@@ -16,7 +17,8 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     // o Login usa isso pra mandar de volta pro lugar certo depois de entrar.
     if (location.pathname !== '/login' && location.pathname !== '/cadastro') {
       try {
-        sessionStorage.setItem('mamacos-post-login-redirect', location.pathname + location.search)
+        const target = safeRedirectPath(location.pathname + location.search)
+        if (target !== '/') sessionStorage.setItem('mamacos-post-login-redirect', target)
       } catch {
         // best-effort
       }

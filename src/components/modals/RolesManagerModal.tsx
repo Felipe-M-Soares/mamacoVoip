@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
+import { Toggle } from '../ui/Toggle'
+import { EmptyState } from './settingsUI'
 import { useRoles } from '../../hooks/useRoles'
 import { PERMISSIONS, type Permission, type Role } from '../../types/database'
 
@@ -45,27 +47,56 @@ export function RolesManagerModal({ serverId, onClose }: { serverId: string; onC
   }
 
   return (
-    <Modal title="Cargos do servidor" onClose={onClose} maxWidth="max-w-lg">
+    <Modal
+      title="Cargos do servidor"
+      description="Cargos agrupam permissões e dão cor ao nome dos membros."
+      onClose={onClose}
+      maxWidth="max-w-lg"
+    >
       <button
         onClick={() => setEditing('new')}
-        className="w-full py-2.5 rounded btn-primary mb-4"
+        className="w-full h-11 mb-4 rounded-xl border border-dashed border-[var(--color-line-strong)] text-[14px] font-medium text-discord-text-muted hover:text-white hover:border-discord-blurple/60 hover:bg-discord-blurple/[0.06] transition-colors flex items-center justify-center gap-2"
       >
-        + Criar cargo
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Criar cargo
       </button>
 
-      <div className="space-y-1 max-h-96 overflow-y-auto">
+      <div className="space-y-0.5 max-h-96 overflow-y-auto">
         {roles.length === 0 ? (
-          <p className="text-sm text-discord-text-muted">Nenhum cargo criado ainda.</p>
+          <EmptyState
+            icon={
+              <>
+                <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+                <circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" />
+              </>
+            }
+            title="Nenhum cargo criado ainda"
+            hint="Crie cargos como Moderador ou VIP pra organizar o servidor."
+          />
         ) : (
           roles.map((role) => (
             <button
               key={role.id}
               onClick={() => setEditing(role)}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded hover:bg-white/5 text-left"
+              className="group w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] hover:bg-white/[0.05] text-left transition-colors"
             >
-              <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: role.color }} />
-              <span className="text-sm text-white flex-1 truncate">{role.name}</span>
-              <span className="text-xs text-discord-text-muted">{role.permissions.length} permissões</span>
+              <span
+                className="w-7 h-7 rounded-lg shrink-0 flex items-center justify-center"
+                style={{ backgroundColor: `${role.color}26`, color: role.color }}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
+                  <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7.5 6.3a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z" />
+                </svg>
+              </span>
+              <span className="text-[14px] font-medium flex-1 truncate" style={{ color: role.color }}>
+                {role.name}
+              </span>
+              <span className="chip">{role.permissions.length} permissões</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-discord-text-muted opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">
+                <path d="m9 6 6 6-6 6" />
+              </svg>
             </button>
           ))
         )}
@@ -115,92 +146,120 @@ function RoleEditor({
 
   if (confirmingDelete && onDelete) {
     return (
-      <Modal title={`Excluir cargo '${role?.name}'`} onClose={onCancel}>
-        <p className="text-sm text-discord-text-muted">
+      <Modal
+        title={`Excluir cargo '${role?.name}'`}
+        onClose={onCancel}
+        maxWidth="max-w-sm"
+        footer={
+          <>
+            <button onClick={() => setConfirmingDelete(false)} className="btn-secondary h-9 px-4 text-sm">
+              Cancelar
+            </button>
+            <button onClick={onDelete} className="btn-danger h-9 px-4 text-sm">
+              Excluir cargo
+            </button>
+          </>
+        }
+      >
+        <p className="text-[14px] text-discord-text-muted leading-relaxed">
           Tem certeza que deseja excluir o cargo <span className="text-white font-medium">{role?.name}</span>? Todos
           os membros perderão esse cargo.
         </p>
-        <div className="flex justify-end gap-3 mt-5">
-          <button onClick={() => setConfirmingDelete(false)} className="px-4 py-2 text-sm text-discord-text-muted hover:underline">
-            Cancelar
-          </button>
-          <button
-            onClick={onDelete}
-            className="px-4 py-2 text-sm rounded btn-danger"
-          >
-            Excluir cargo
-          </button>
-        </div>
       </Modal>
     )
   }
 
   return (
-    <Modal title={role ? 'Editar cargo' : 'Criar cargo'} onClose={onCancel} maxWidth="max-w-lg">
-      <div className="space-y-4">
+    <Modal
+      title={role ? 'Editar cargo' : 'Criar cargo'}
+      onClose={onCancel}
+      maxWidth="max-w-lg"
+      footer={
+        <>
+          {onDelete && (
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              className="mr-auto h-9 px-3 -ml-2 rounded-[10px] text-sm font-medium text-rose-400 hover:bg-rose-500/10 transition-colors"
+            >
+              Excluir cargo
+            </button>
+          )}
+          <button onClick={onCancel} className="btn-secondary h-9 px-4 text-sm">
+            Voltar
+          </button>
+          <button onClick={handleSave} disabled={loading} className="btn-primary h-9 px-4 text-sm">
+            {loading ? 'Salvando...' : 'Salvar'}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-5">
         <div>
-          <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Nome do cargo</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
-          />
+          <label htmlFor="role-editor-name" className="field-label">
+            Nome do cargo
+          </label>
+          <div className="relative">
+            <span
+              aria-hidden="true"
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
+              style={{ backgroundColor: color }}
+            />
+            <input
+              id="role-editor-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full pl-8 pr-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+            />
+          </div>
         </div>
 
         <div>
-          <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Cor</label>
-          <div className="flex gap-2 flex-wrap">
+          <p id="role-editor-color" className="field-label">
+            Cor
+          </p>
+          <div role="radiogroup" aria-labelledby="role-editor-color" className="flex gap-2 flex-wrap">
             {PRESET_COLORS.map((c) => (
               <button
                 key={c}
+                role="radio"
+                aria-checked={color === c}
+                aria-label={`Cor ${c}`}
+                title={c}
                 onClick={() => setColor(c)}
-                className={`w-8 h-8 rounded-full border-2 ${color === c ? 'border-white' : 'border-transparent'}`}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-transform hover:scale-110 ${
+                  color === c ? 'ring-2 ring-white ring-offset-2 ring-offset-[var(--color-elevated)]' : ''
+                }`}
                 style={{ backgroundColor: c }}
-              />
+              >
+                {color === c && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 drop-shadow">
+                    <path d="M5 12.5l4.5 4.5L19 7.5" />
+                  </svg>
+                )}
+              </button>
             ))}
           </div>
         </div>
 
         <div>
-          <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Permissões</label>
-          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+          <div className="flex items-center justify-between">
+            <p className="field-label">Permissões</p>
+            <span className="chip mb-[0.45rem]">{permissions.size} ativas</span>
+          </div>
+          <div className="rounded-xl border border-[var(--color-line)] divide-y divide-[var(--color-line)] max-h-64 overflow-y-auto">
             {PERMISSIONS.map((p) => (
-              <label key={p} className="flex items-center gap-2.5 text-sm text-discord-text cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={permissions.has(p)}
-                  onChange={() => togglePermission(p)}
-                  className="w-4 h-4 accent-discord-blurple"
-                />
-                {PERMISSION_LABELS[p]}
-              </label>
+              <div key={p} className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-white/[0.015]">
+                <span className={`text-[13.5px] ${p === 'administrator' ? 'text-amber-300' : 'text-discord-text'}`}>
+                  {PERMISSION_LABELS[p]}
+                </span>
+                <Toggle size="sm" label={PERMISSION_LABELS[p]} checked={permissions.has(p)} onChange={() => togglePermission(p)} />
+              </div>
             ))}
           </div>
         </div>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
-
-        <button
-          onClick={handleSave}
-          disabled={loading}
-          className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-        >
-          {loading ? 'Salvando...' : 'Salvar'}
-        </button>
-
-        {onDelete && (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            className="w-full py-2.5 rounded border border-red-600 text-red-500 hover:bg-red-600/10 transition-colors"
-          >
-            Excluir cargo
-          </button>
-        )}
-
-        <button onClick={onCancel} className="w-full text-sm text-discord-text-muted hover:underline">
-          Voltar
-        </button>
+        {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>
     </Modal>
   )

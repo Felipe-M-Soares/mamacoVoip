@@ -1,16 +1,20 @@
+import { identityGradient } from '../../lib/identityColor'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useServers } from '../../hooks/useServers'
 import { useServerOrder } from '../../hooks/useLocalOrganization'
-import { CreateOrJoinServerModal } from '../modals/CreateOrJoinServerModal'
-import { InviteFriendsModal } from '../modals/InviteFriendsModal'
-import { LeaveServerModal } from '../modals/LeaveServerModal'
-import { ServerSettingsModal } from '../modals/ServerSettingsModal'
-import { ReportsPanel } from '../modals/ReportsPanel'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { ServerHoverCard } from './ServerHoverCard'
 import { supabase } from '../../lib/supabase'
 import type { Server, Channel } from '../../types/database'
+import { lazyModal } from '../modals/lazyModal'
+
+// Modais/painéis carregados só quando abertos (fora do pacote inicial).
+const CreateOrJoinServerModal = lazyModal(() => import('../modals/CreateOrJoinServerModal').then((m) => m.CreateOrJoinServerModal))
+const InviteFriendsModal = lazyModal(() => import('../modals/InviteFriendsModal').then((m) => m.InviteFriendsModal))
+const LeaveServerModal = lazyModal(() => import('../modals/LeaveServerModal').then((m) => m.LeaveServerModal))
+const ServerSettingsModal = lazyModal(() => import('../modals/ServerSettingsModal').then((m) => m.ServerSettingsModal))
+const ReportsPanel = lazyModal(() => import('../modals/ReportsPanel').then((m) => m.ReportsPanel))
 
 function ServerIcon({
   name,
@@ -52,15 +56,9 @@ function ServerIcon({
     .join('')
     .toUpperCase()
 
-  // Gradiente único por servidor (baseado no nome) — cada servidor sem
-  // ícone próprio fica com uma cor diferente, em vez de todos caírem
-  // no mesmo cinza/azul genérico.
-  const gradient = (() => {
-    let hash = 0
-    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
-    const hue = Math.abs(hash) % 360
-    return `linear-gradient(135deg, hsl(${hue} 70% 45%), hsl(${(hue + 45) % 360} 65% 28%))`
-  })()
+  // Gradiente de identidade por servidor (ver lib/identityColor) —
+  // paleta curada em vez de um hue aleatório 0-360.
+  const gradient = identityGradient(name)
 
   return (
     <div
@@ -75,21 +73,20 @@ function ServerIcon({
       onMouseLeave={onMouseLeave}
     >
       <span
-        className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 bg-white rounded-r-full transition-all duration-150 ${
-          active ? 'h-10' : 'h-0 group-hover:h-5'
+        className={`absolute -left-3 top-1/2 -translate-y-1/2 w-1 rounded-r-full transition-all duration-200 ${
+          active ? 'h-9 bg-brand-gradient' : unread ? 'h-2 bg-discord-text' : 'h-0 bg-discord-text group-hover:h-4'
         }`}
       />
-      {unread && !active && (
-        <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white rounded-full border-2 border-discord-darker" />
-      )}
       <button
         onClick={onClick}
         title={name}
         style={!iconUrl && variant === 'server' ? { background: gradient } : undefined}
-        className={`w-12 h-12 flex items-center justify-center font-display font-semibold text-white transition-all duration-150 overflow-hidden
-          ${active ? 'rounded-2xl brand-glow-sm' : 'rounded-3xl hover:rounded-2xl'}
-          ${variant === 'server' && !iconUrl ? '' : active ? 'bg-discord-blurple' : 'bg-discord-channels hover:bg-discord-blurple'}
-          ${variant === 'add' ? 'text-discord-green hover:text-white' : ''}
+        aria-label={name}
+        aria-current={active ? 'page' : undefined}
+        className={`w-12 h-12 flex items-center justify-center font-display font-semibold text-white text-[15px] transition-all duration-200 overflow-hidden
+          ${active ? 'rounded-[16px] ring-2 ring-discord-blurple/70 ring-offset-2 ring-offset-discord-darker' : 'rounded-[18px] hover:rounded-[14px] hover:-translate-y-px'}
+          ${variant === 'server' && !iconUrl ? (active ? '' : 'saturate-[.85] hover:saturate-100') : variant === 'add' ? '' : active ? 'bg-discord-lighter' : 'bg-discord-lighter/70 hover:bg-discord-lighter'}
+          ${variant === 'add' ? 'text-2xl font-light text-discord-text-muted border border-dashed border-white/15 hover:border-discord-green hover:text-discord-green hover:bg-discord-green/10' : ''}
           ${isDragOver ? 'ring-2 ring-discord-blurple' : ''}
           ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}
         `}
@@ -97,7 +94,7 @@ function ServerIcon({
         {iconUrl ? (
           <img src={iconUrl} alt={name} className="w-full h-full object-cover" />
         ) : variant === 'home' ? (
-          <img src="/logo-192.png" alt="Início" className="w-full h-full object-cover" />
+          <img src="/logo-192.png" alt="" className="w-full h-full object-cover" />
         ) : variant === 'add' ? (
           '+'
         ) : (
@@ -192,9 +189,9 @@ export function ServerBar({
 
   return (
     <>
-      <nav className="w-[72px] bg-discord-darker flex flex-col items-center py-3 gap-2 shrink-0 overflow-y-auto">
+      <nav aria-label="Servidores" className="w-[72px] bg-discord-darker flex flex-col items-center py-3 gap-2.5 shrink-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none]">
         <ServerIcon name="Início" variant="home" active={activeServerId === null} onClick={onSelectHome} />
-        <div className="w-8 h-px bg-discord-channels rounded-full my-1" />
+        <div className="w-8 h-px bg-white/10 rounded-full my-0.5" />
 
         {!loading &&
           orderedServers.map((server) => (

@@ -37,9 +37,38 @@ import noiseGateWorkletPath from './vendor/noiseGateWorkletProcessor.js?url'
 let wasmBinaryPromise: Promise<ArrayBuffer> | null = null
 function getWasmBinary(): Promise<ArrayBuffer> {
   if (!wasmBinaryPromise) {
-    wasmBinaryPromise = loadRnnoise({ url: rnnoiseWasmPath, simdUrl: rnnoiseWasmSimdPath })
+    wasmBinaryPromise = loadRnnoise({ url: rnnoiseWasmPath, simdUrl: rnnoiseWasmSimdPath }).catch((err) => {
+      // Não deixa uma falha passageira (rede caiu no primeiro download)
+      // ficar cacheada pra sempre — antes, a Promise REJEITADA ficava
+      // guardada aqui e o RNNoise nunca mais funcionava até reiniciar o app.
+      wasmBinaryPromise = null
+      throw err
+    })
   }
   return wasmBinaryPromise
+}
+
+// Cria o AudioContext dedicado e registra os worklets. Se QUALQUER etapa
+// falhar (WASM não baixou, addModule rejeitou por CSP, etc.), fecha o
+// contexto antes de propagar o erro — antes ele ficava aberto e órfão
+// (cada tentativa de entrar numa call vazava um AudioContext inteiro,
+// e o Chromium tem um limite baixo de contextos simultâneos).
+async function createProcessingContext(workletPaths: string[]): Promise<{ audioContext: AudioContext; wasmBinary: ArrayBuffer }> {
+  const audioContext = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
+  try {
+    const wasmBinary = await getWasmBinary()
+    for (const path of workletPaths) {
+      await audioContext.audioWorklet.addModule(path)
+    }
+    // Um contexto criado fora de um gesto do usuário pode nascer
+    // "suspended" (política de autoplay) — nesse estado o gráfico não
+    // processa nada e a track de saída fica MUDA.
+    if (audioContext.state === 'suspended') await audioContext.resume().catch(() => {})
+    return { audioContext, wasmBinary }
+  } catch (err) {
+    audioContext.close().catch(() => {})
+    throw err
+  }
 }
 
 // Sensibilidade do microfone (modo MANUAL): 0 (menos sensível — só sons
@@ -108,14 +137,11 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
   // numa taxa diferente dependendo do hardware da pessoa, e o
   // processamento saía errado — na prática, mais chiado/distorção em vez
   // de menos.
-  const audioContext = new AudioContext({ sampleRate: 48000 })
-  const wasmBinary = await getWasmBinary()
   // Os módulos dos worklets precisam ser registrados em CADA
   // AudioContext (não são compartilhados entre contextos diferentes) —
   // como esse contexto acabou de ser criado agora mesmo, isso só roda
   // uma vez por chamada de createNoiseSuppressor.
-  await audioContext.audioWorklet.addModule(rnnoiseWorkletPath)
-  await audioContext.audioWorklet.addModule(noiseGateWorkletPath)
+  const { audioContext, wasmBinary } = await createProcessingContext([rnnoiseWorkletPath, noiseGateWorkletPath])
 
   let source: MediaStreamAudioSourceNode | null = null
   let rnnoiseNode: RnnoiseWorkletNode | null = null
@@ -296,9 +322,7 @@ export interface ScreenAudioDenoiser {
 }
 
 export async function createScreenAudioDenoiser(): Promise<ScreenAudioDenoiser> {
-  const audioContext = new AudioContext({ sampleRate: 48000 })
-  const wasmBinary = await getWasmBinary()
-  await audioContext.audioWorklet.addModule(rnnoiseWorkletPath)
+  const { audioContext, wasmBinary } = await createProcessingContext([rnnoiseWorkletPath])
 
   let source: MediaStreamAudioSourceNode | null = null
   let rnnoiseNode: RnnoiseWorkletNode | null = null

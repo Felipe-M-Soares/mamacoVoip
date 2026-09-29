@@ -32,7 +32,18 @@ export function useDMSeenState(conversationId: string | null, otherUserId: strin
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'dm_read_state', filter: `conversation_id=eq.${convoId}` },
-        fetchState
+        (payload) => {
+          // Usa a própria linha que chegou em vez de consultar de novo — e
+          // ignora as MINHAS leituras (antes cada vez que eu abria a conversa
+          // disparava uma consulta à toa).
+          const row = payload.new as { user_id?: string; last_read_at?: string } | null
+          if (row?.user_id && row.user_id !== otherId) return
+          if (row?.user_id === otherId && row.last_read_at) {
+            if (!cancelled) setOtherLastReadAt(row.last_read_at)
+            return
+          }
+          void fetchState()
+        }
       )
       .subscribe()
 

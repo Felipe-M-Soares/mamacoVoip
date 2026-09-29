@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { useServers } from '../../hooks/useServers'
+import { ConfirmDialog } from './ConfirmDialog'
 
 const ICON_MAX_BYTES = 5 * 1024 * 1024 // precisa bater com o file_size_limit do bucket 'server-icons'
 
@@ -21,6 +22,9 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
 
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  // Aviso pós-criação (ex.: o ícone não salvou) — antes era um
+  // window.alert() nativo depois de fechar o modal.
+  const [createdWarning, setCreatedWarning] = useState<string | null>(null)
 
   function handleIconChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -47,12 +51,16 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
       setError(error)
       return
     }
-    onClose()
     // O servidor em si foi criado com sucesso — só o ícone falhou ao
     // salvar (ver comentário grande em ServersContext.tsx). Não vale a
     // pena travar a criação por isso, mas também não pode desaparecer
-    // sem avisar ninguém (era exatamente esse o bug).
-    if (warning) window.alert(warning)
+    // sem avisar ninguém (era exatamente esse o bug). Mostra o aviso num
+    // diálogo do app e só fecha quando a pessoa confirmar.
+    if (warning) {
+      setCreatedWarning(warning)
+      return
+    }
+    onClose()
   }
 
   async function handleJoin() {
@@ -74,23 +82,51 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
     onClose()
   }
 
+  if (createdWarning) {
+    return (
+      <ConfirmDialog
+        alertOnly
+        title="Servidor criado"
+        message={createdWarning}
+        confirmLabel="Entendi"
+        onConfirm={onClose}
+        onCancel={onClose}
+      />
+    )
+  }
+
+  const tabClass = (active: boolean) =>
+    `flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
+      active ? 'bg-discord-lighter text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]' : 'text-discord-text-muted hover:text-discord-text'
+    }`
+
   return (
-    <Modal title={tab === 'create' ? 'Personalize seu servidor' : 'Entrar em um servidor'} onClose={onClose} maxWidth="max-w-lg">
-      <div className="flex gap-2 mb-5 bg-discord-darker rounded-lg p-1">
-        <button
-          onClick={() => setTab('create')}
-          className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            tab === 'create' ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:text-white'
-          }`}
-        >
+    <Modal
+      title={tab === 'create' ? 'Personalize seu servidor' : 'Entrar em um servidor'}
+      onClose={onClose}
+      maxWidth="max-w-lg"
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary h-9 px-4 text-sm">
+            Cancelar
+          </button>
+          {tab === 'create' ? (
+            <button onClick={handleCreate} disabled={loading} className="btn-primary h-9 px-4 text-sm">
+              {loading ? 'Criando...' : 'Criar servidor'}
+            </button>
+          ) : (
+            <button onClick={handleJoin} disabled={loading} className="btn-primary h-9 px-4 text-sm">
+              {loading ? 'Entrando...' : 'Entrar no servidor'}
+            </button>
+          )}
+        </>
+      }
+    >
+      <div role="tablist" aria-label="Criar ou entrar" className="flex gap-1 p-1 mb-5 rounded-xl bg-discord-darker border border-[var(--color-line)]">
+        <button role="tab" aria-selected={tab === 'create'} onClick={() => setTab('create')} className={tabClass(tab === 'create')}>
           Criar servidor
         </button>
-        <button
-          onClick={() => setTab('join')}
-          className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            tab === 'join' ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:text-white'
-          }`}
-        >
+        <button role="tab" aria-selected={tab === 'join'} onClick={() => setTab('join')} className={tabClass(tab === 'join')}>
           Já tenho um convite
         </button>
       </div>
@@ -114,12 +150,13 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
                 igual ao padrão usado no avatar do EditProfileModal. */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="relative w-24 h-24 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted/60 flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors group"
+              className="relative w-24 h-24 rounded-full bg-discord-darker border-2 border-dashed border-white/[0.18] flex items-center justify-center hover:border-discord-blurple transition-colors group"
+              aria-label={iconPreview ? 'Trocar ícone do servidor' : 'Adicionar ícone do servidor'}
             >
               {iconPreview ? (
                 <>
-                  <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover" />
-                  <span className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+                  <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover rounded-full" />
+                  <span className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-white">
                       <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                     </svg>
@@ -136,7 +173,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
               {/* Selo de "editar" no canto — mesma linguagem visual que a
                   troca de avatar/banner usa em EditProfileModal, deixa
                   claro que dá pra clicar de novo pra trocar. */}
-              <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-discord-blurple flex items-center justify-center border-2 border-discord-dark group-hover:brightness-110 transition-all">
+              <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-discord-blurple flex items-center justify-center border-2 border-[var(--color-elevated)] group-hover:brightness-110 transition-all">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 text-white">
                   <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
@@ -149,73 +186,60 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
             <p className="text-[11px] text-discord-text-muted text-center">
               PNG, JPG, WEBP ou GIF animado — até 5MB. Recomendado: imagem quadrada.
             </p>
-            {iconError && <p className="text-xs text-red-400">{iconError}</p>}
+            {iconError && <p className="text-xs text-rose-400">{iconError}</p>}
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+            <label htmlFor="server-create-name" className="field-label">
               Nome do servidor
             </label>
             <input
+              id="server-create-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Servidor do João"
               maxLength={60}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+            <label htmlFor="server-create-description" className="field-label">
               Sobre o servidor <span className="normal-case font-normal text-discord-text-muted/70">(opcional)</span>
             </label>
             <textarea
+              id="server-create-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Do que é esse servidor? (aparece pra quem vê o servidor antes de entrar)"
               maxLength={200}
               rows={2}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple resize-none"
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none resize-none"
             />
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
-
-          <button
-            onClick={handleCreate}
-            disabled={loading}
-            className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-          >
-            {loading ? 'Criando...' : 'Criar servidor'}
-          </button>
+          {error && <p className="text-sm text-rose-400">{error}</p>}
         </div>
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-discord-text-muted">Cole um convite abaixo para entrar em um servidor existente.</p>
 
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+            <label htmlFor="server-join-code" className="field-label">
               Link ou código do convite
             </label>
             <input
+              id="server-join-code"
               type="text"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="ex: a1b2c3d4"
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
             />
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
-
-          <button
-            onClick={handleJoin}
-            disabled={loading}
-            className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-          >
-            {loading ? 'Entrando...' : 'Entrar no servidor'}
-          </button>
+          {error && <p className="text-sm text-rose-400">{error}</p>}
         </div>
       )}
     </Modal>

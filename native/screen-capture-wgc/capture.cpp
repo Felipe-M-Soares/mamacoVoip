@@ -89,6 +89,7 @@
 #include <stdio.h>
 #include <io.h>
 #include <fcntl.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -138,6 +139,44 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) {
     return TRUE;
   }
   return FALSE;
+}
+
+// AUDITORIA — "cão de guarda" do processo pai. O Electron cria este .exe
+// com o stdin ligado a um pipe (padrão do spawn do Node) e nunca escreve
+// nada nele. Se o app principal MORRER sem conseguir matar este processo
+// (travamento, "Finalizar tarefa", queda de energia do lado do Electron),
+// o Windows NÃO mata os processos filhos junto — e este .exe ficava
+// capturando e codificando pra sempre em segundo plano, gastando
+// CPU/GPU até reiniciar o PC. Quando o pai morre, o pipe do stdin fecha
+// e o ReadFile abaixo retorna — aí pedimos pra sair do laço principal.
+// Só é ativado quando o stdin é de fato um pipe (rodando à mão num
+// console, nada muda).
+DWORD WINAPI ParentWatchdogThread(LPVOID) {
+  HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+  char buffer[256];
+  DWORD bytesRead = 0;
+  while (ReadFile(in, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) {
+    // ninguém deveria escrever aqui — só descarta
+  }
+  g_stopRequested.store(true);
+  return 0;
+}
+
+void StartParentWatchdog() {
+  HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+  if (in == nullptr || in == INVALID_HANDLE_VALUE) return;
+  if (GetFileType(in) != FILE_TYPE_PIPE) return;
+  HANDLE thread = CreateThread(nullptr, 0, ParentWatchdogThread, nullptr, 0, nullptr);
+  if (thread) CloseHandle(thread);
+}
+
+// AUDITORIA: antes, o resultado de fwrite/fflush no stdout era ignorado —
+// se o pipe fechasse (app principal encerrou), o laço seguia capturando e
+// codificando quadros que ninguém mais ia ler. Agora qualquer falha de
+// escrita encerra a captura.
+bool WriteAllStdout(const void* data, size_t size) {
+  if (size == 0) return true;
+  return fwrite(data, 1, size, stdout) == size;
 }
 
 struct MonitorSearchState {
@@ -221,14 +260,14 @@ bool GetEncoderClsid(const WCHAR* mimeType, CLSID* clsid) {
   return false;
 }
 
-void WriteU32LE(uint32_t value) {
+bool WriteU32LE(uint32_t value) {
   uint8_t bytes[4] = {
       static_cast<uint8_t>(value & 0xFF),
       static_cast<uint8_t>((value >> 8) & 0xFF),
       static_cast<uint8_t>((value >> 16) & 0xFF),
       static_cast<uint8_t>((value >> 24) & 0xFF),
   };
-  fwrite(bytes, 1, 4, stdout);
+  return WriteAllStdout(bytes, 4);
 }
 
 // Codifica um retângulo cru de pixels BGRA (o formato que a captura
@@ -239,7 +278,12 @@ void WriteU32LE(uint32_t value) {
 // mesmo layout de bytes diretamente.
 bool EncodeBgraToJpeg(const uint8_t* data, int width, int height, int stride, const CLSID& jpegClsid,
                       std::vector<uint8_t>* outBytes) {
-  Bitmap bitmap(width, height, stride, PixelFormat32bppARGB, const_cast<uint8_t*>(data));
+  // AUDITORIA: PixelFormat32bppRGB (mesmo layout BGRA em memória, mas com
+  // o 4º byte IGNORADO) em vez de 32bppARGB — o canal alfa das texturas
+  // de captura não tem significado nenhum pra um JPEG (que não tem alfa);
+  // declarando o formato sem alfa, o GDI+ não precisa fazer nenhum
+  // tratamento de transparência na conversão pra 24 bits do encoder.
+  Bitmap bitmap(width, height, stride, PixelFormat32bppRGB, const_cast<uint8_t*>(data));
   if (bitmap.GetLastStatus() != Status::Ok) return false;
 
   IStream* stream = nullptr;
@@ -278,6 +322,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
   _setmode(_fileno(stdout), _O_BINARY);
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+  StartParentWatchdog();
 
   // C++/WinRT precisa de um apartamento COM inicializado antes de
   // qualquer chamada — multi_threaded porque o resto deste programa
@@ -333,6 +378,10 @@ int wmain(int argc, wchar_t* argv[]) {
     // thread própria: o SDK do Windows já entrega esse callback numa
     // thread de pool dele mesmo.
     HANDLE frameEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!frameEvent) {
+      LogError("CreateEvent falhou");
+      return 1;
+    }
     auto revoker = framePool.FrameArrived(
         winrt::auto_revoke,
         [frameEvent](Direct3D11CaptureFramePool const&, winrt::Windows::Foundation::IInspectable const&) {
@@ -398,25 +447,37 @@ int wmain(int argc, wchar_t* argv[]) {
       d3dContext->CopyResource(stagingTexture.get(), texture.get());
 
       D3D11_MAPPED_SUBRESOURCE mapped = {};
+      bool writeFailed = false;
       if (SUCCEEDED(d3dContext->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-        const int width = static_cast<int>(frameContentSize.Width);
-        const int height = static_cast<int>(frameContentSize.Height);
-        if (EncodeBgraToJpeg(static_cast<const uint8_t*>(mapped.pData), width, height,
+        // AUDITORIA — leitura fora da memória: logo depois de uma troca de
+        // resolução, o ContentSize do quadro pode ser MAIOR que a textura
+        // do pool (que só é recriada no fim desta volta do laço, mais
+        // abaixo). Usar o ContentSize direto fazia o GDI+ ler além do fim
+        // da região mapeada (crash ou lixo na imagem). Limita ao tamanho
+        // real da textura copiada.
+        const UINT clampedWidth = (std::min)(static_cast<UINT>(frameContentSize.Width), stagingDesc.Width);
+        const UINT clampedHeight = (std::min)(static_cast<UINT>(frameContentSize.Height), stagingDesc.Height);
+        const int width = static_cast<int>(clampedWidth);
+        const int height = static_cast<int>(clampedHeight);
+        if (width > 0 && height > 0 &&
+            EncodeBgraToJpeg(static_cast<const uint8_t*>(mapped.pData), width, height,
                               static_cast<int>(mapped.RowPitch), jpegClsid, &frameBytes)) {
           if (!headerSent) {
-            WriteU32LE(kMagic);
-            WriteU32LE(static_cast<uint32_t>(width));
-            WriteU32LE(static_cast<uint32_t>(height));
-            WriteU32LE(0);
-            fflush(stdout);
+            writeFailed = !WriteU32LE(kMagic) || !WriteU32LE(static_cast<uint32_t>(width)) ||
+                          !WriteU32LE(static_cast<uint32_t>(height)) || !WriteU32LE(0) || fflush(stdout) != 0;
             headerSent = true;
-            LogStatus("primeiro quadro capturado, cabecalho enviado");
+            if (!writeFailed) LogStatus("primeiro quadro capturado, cabecalho enviado");
           }
-          WriteU32LE(static_cast<uint32_t>(frameBytes.size()));
-          fwrite(frameBytes.data(), 1, frameBytes.size(), stdout);
-          fflush(stdout);
+          if (!writeFailed) {
+            writeFailed = !WriteU32LE(static_cast<uint32_t>(frameBytes.size())) ||
+                          !WriteAllStdout(frameBytes.data(), frameBytes.size()) || fflush(stdout) != 0;
+          }
         }
         d3dContext->Unmap(stagingTexture.get(), 0);
+      }
+      if (writeFailed) {
+        LogStatus("stdout fechado (app principal encerrou?), parando captura");
+        break;
       }
 
       // Recria o frame pool se o tamanho do CONTEÚDO capturado mudou

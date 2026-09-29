@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import type { Thread } from '../types/database'
@@ -9,33 +9,47 @@ export function useChannelThreads(channelId: string | null) {
   const { user } = useAuth()
   const [threadsByMessageId, setThreadsByMessageId] = useState<Record<string, Thread>>({})
   const [replyCounts, setReplyCounts] = useState<Record<string, number>>({})
+  const channelIdRef = useRef(channelId)
+  channelIdRef.current = channelId
+  const loadSeqRef = useRef(0)
+  const loadedChannelRef = useRef<string | null>(null)
 
   const refresh = useCallback(async () => {
-    if (!channelId) {
+    const seq = ++loadSeqRef.current
+    // Zera na hora ao trocar de canal — antes as threads do canal anterior
+    // ficavam "penduradas" em mensagens do canal novo até a busca voltar,
+    // e uma resposta atrasada do canal anterior podia sobrescrever a nova.
+    if (loadedChannelRef.current !== channelId) {
+      loadedChannelRef.current = channelId
       setThreadsByMessageId({})
       setReplyCounts({})
-      return
     }
-    const { data: threads } = await supabase.from('threads').select('*').eq('channel_id', channelId)
-    const byMessage: Record<string, Thread> = {}
-    for (const t of threads ?? []) byMessage[t.parent_message_id] = t
-    setThreadsByMessageId(byMessage)
+    if (!channelId) return
+    const isStale = () => seq !== loadSeqRef.current || channelIdRef.current !== channelId
+    try {
+      const { data: threads } = await supabase.from('threads').select('*').eq('channel_id', channelId)
+      if (isStale()) return
+      const byMessage: Record<string, Thread> = {}
+      for (const t of threads ?? []) byMessage[t.parent_message_id] = t
+      setThreadsByMessageId(byMessage)
 
-    if ((threads ?? []).length > 0) {
-      const { data: counts } = await supabase
-        .from('messages')
-        .select('thread_id')
-        .in(
-          'thread_id',
-          (threads ?? []).map((t) => t.id)
-        )
-      const countMap: Record<string, number> = {}
-      for (const row of counts ?? []) {
-        if (row.thread_id) countMap[row.thread_id] = (countMap[row.thread_id] ?? 0) + 1
+      if ((threads ?? []).length > 0) {
+        const { data: counts } = await supabase
+          .from('messages')
+          .select('thread_id')
+          .in(
+            'thread_id',
+            (threads ?? []).map((t) => t.id)
+          )
+        if (isStale()) return
+        const countMap: Record<string, number> = {}
+        for (const row of counts ?? []) {
+          if (row.thread_id) countMap[row.thread_id] = (countMap[row.thread_id] ?? 0) + 1
+        }
+        setReplyCounts(countMap)
       }
-      setReplyCounts(countMap)
-    } else {
-      setReplyCounts({})
+    } catch (err) {
+      console.error('[useChannelThreads] Falha ao carregar threads:', err)
     }
   }, [channelId])
 

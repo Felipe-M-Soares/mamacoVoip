@@ -1,6 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { Link, useNavigate } from 'react-router-dom'
+import { AUTH_REDIRECT_TYPE, supabase } from '../lib/supabase'
+import { traduzErro } from '../context/AuthContext'
+import { PASSWORD_MIN_LENGTH, validatePassword } from '../lib/authValidation'
+import { AuthAlert, AuthField, AuthHeader, AuthIcons, AuthShell } from './AuthShell'
 
 export function ResetPassword() {
   const navigate = useNavigate()
@@ -9,22 +12,41 @@ export function ResetPassword() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
+  const [checking, setChecking] = useState(true)
   const [success, setSuccess] = useState(false)
 
   useEffect(() => {
     // O link do e-mail já vem com a sessão de recuperação embutida
     // (processada automaticamente pelo detectSessionInUrl) — só
     // precisa confirmar que ela chegou antes de mostrar o formulário.
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setReady(Boolean(session))
+    //
+    // Antes, QUALQUER sessão servia: alguém com acesso a um app já
+    // logado (computador destravado) abria /redefinir-senha e trocava a
+    // senha da conta sem saber a atual. Agora o formulário só aparece
+    // quando a sessão veio de fato de um link de recuperação.
+    let cancelled = false
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' && session && !cancelled) setReady(true)
     })
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return
+      if (session && AUTH_REDIRECT_TYPE === 'recovery') setReady(true)
+      setChecking(false)
+    })
+    return () => {
+      cancelled = true
+      listener.subscription.unsubscribe()
+    }
   }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (loading) return
     setError(null)
-    if (password.length < 6) {
-      setError('A senha precisa ter pelo menos 6 caracteres.')
+    const { data: userData } = await supabase.auth.getUser()
+    const passwordError = validatePassword(password, { email: userData.user?.email ?? undefined })
+    if (passwordError) {
+      setError(passwordError)
       return
     }
     if (password !== confirmPassword) {
@@ -33,77 +55,77 @@ export function ResetPassword() {
     }
     setLoading(true)
     const { error } = await supabase.auth.updateUser({ password })
-    setLoading(false)
     if (error) {
-      setError(error.message)
+      setLoading(false)
+      setError(traduzErro(error.message))
       return
     }
+    // Senha trocada por recuperação = pode ser que alguém tenha a senha
+    // antiga. Derruba as outras sessões abertas (outros aparelhos).
+    await supabase.auth.signOut({ scope: 'others' }).catch(() => {})
+    setLoading(false)
     setSuccess(true)
     setTimeout(() => navigate('/', { replace: true }), 2000)
   }
 
   return (
-    <div className="min-h-full bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          backgroundImage:
-            'radial-gradient(ellipse 900px 600px at 50% 0%, color-mix(in srgb, var(--color-discord-blurple) 22%, transparent), transparent 70%)',
-        }}
-      />
-      <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 border border-white/5">
-        <h1 className="font-display text-2xl font-bold text-white text-center tracking-wide">Nova senha</h1>
+    <AuthShell>
+      <AuthHeader icon={AuthIcons.lock} title="Nova senha" subtitle="Escolha uma senha forte que você não usa em outro lugar." />
 
-        {success ? (
-          <p className="mt-6 text-sm text-discord-green bg-green-950/40 border border-green-900 rounded px-3 py-3 text-center">
-            Senha alterada! Levando você pro app...
-          </p>
-        ) : !ready ? (
-          <p className="text-discord-text-muted text-center mt-6 text-sm">
-            Esse link não é mais válido, ou já expirou. Peça um novo na tela de login.
-          </p>
-        ) : (
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            <div>
-              <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Nova senha</label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                autoFocus
-                className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-                Confirmar nova senha
-              </label>
-              <input
-                type="password"
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                autoComplete="new-password"
-                className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
-              />
-            </div>
+      {success ? (
+        <div className="mt-6">
+          <AuthAlert tone="success">Senha alterada! Levando você pro app...</AuthAlert>
+        </div>
+      ) : !ready && checking ? (
+        <div className="mt-6 space-y-4" aria-busy="true" aria-label="Verificando o link...">
+          <div className="h-3 w-24 animate-pulse rounded bg-white/[0.05]" />
+          <div className="h-11 animate-pulse rounded-[10px] bg-white/[0.05]" />
+          <div className="h-3 w-32 animate-pulse rounded bg-white/[0.05]" />
+          <div className="h-11 animate-pulse rounded-[10px] bg-white/[0.05]" />
+          <p className="text-center text-[13px] text-discord-text-muted">Verificando o link...</p>
+        </div>
+      ) : !ready ? (
+        <div className="mt-6 space-y-4">
+          <AuthAlert tone="error">Esse link não é mais válido, ou já expirou. Peça um novo na tela de login.</AuthAlert>
+          <Link to="/esqueci-senha" className="btn-secondary flex h-10 w-full items-center justify-center text-[14px]">
+            Pedir um novo link
+          </Link>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <AuthField
+            label="Nova senha"
+            icon={AuthIcons.lock}
+            type="password"
+            revealable
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={PASSWORD_MIN_LENGTH}
+            maxLength={72}
+            autoComplete="new-password"
+            autoFocus
+            hint={`Mínimo ${PASSWORD_MIN_LENGTH} caracteres, com letras e números.`}
+          />
+          <AuthField
+            label="Confirmar nova senha"
+            icon={AuthIcons.lock}
+            type="password"
+            revealable
+            required
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+          />
 
-            {error && (
-              <p className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded px-3 py-2">{error}</p>
-            )}
+          {error && <AuthAlert tone="error">{error}</AuthAlert>}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-            >
-              {loading ? 'Salvando...' : 'Salvar nova senha'}
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
+          <button type="submit" disabled={loading} aria-busy={loading} className="btn-primary flex h-11 w-full items-center justify-center gap-2 text-[15px]">
+            {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />}
+            {loading ? 'Salvando...' : 'Salvar nova senha'}
+          </button>
+        </form>
+      )}
+    </AuthShell>
   )
 }

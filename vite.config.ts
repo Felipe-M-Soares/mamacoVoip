@@ -32,11 +32,21 @@ export default defineConfig(({ mode }) => ({
   build: {
     rollupOptions: {
       output: {
+        // Bibliotecas grandes e que mudam pouco em chunks próprios: o
+        // navegador/Electron reaproveita do cache entre versões do app, e o
+        // LiveKit (~1/3 do código total) só é baixado junto com o layout
+        // principal — as telas de login/cadastro não precisam dele.
+        // O teste antigo `id.includes('react')` pegava qualquer caminho com
+        // "react" no nome; agora compara o nome exato do pacote.
         manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('scheduler')) return 'react-vendor'
-            if (id.includes('@supabase')) return 'supabase-vendor'
-          }
+          const match = id.match(/[\\/]node_modules[\\/]((?:@[^\\/]+[\\/])?[^\\/]+)/)
+          if (!match) return undefined
+          const pkg = match[1].replace(/\\/g, '/')
+          if (pkg === 'react' || pkg === 'react-dom' || pkg === 'scheduler') return 'react-vendor'
+          if (pkg === 'react-router' || pkg === 'react-router-dom') return 'router-vendor'
+          if (pkg.startsWith('@supabase/') || pkg === 'iceberg-js') return 'supabase-vendor'
+          if (pkg === 'livekit-client' || pkg.startsWith('@livekit/')) return 'livekit-vendor'
+          return undefined
         },
       },
     },

@@ -22,6 +22,9 @@ import { supabase } from './supabase'
 export interface LiveKitTokenResult {
   token: string
   url: string
+  // `false` quando o servidor negou publicação (ex.: ouvinte num canal
+  // "Palco") — o cliente entra só pra ouvir, sem publicar microfone.
+  canPublish: boolean
 }
 
 // Extrai a mensagem de erro REAL que a Edge Function mandou (o corpo
@@ -30,15 +33,18 @@ export interface LiveKitTokenResult {
 // genérico — isso é o que torna um problema de configuração (secret
 // faltando, função não publicada, LiveKit fora do ar) diagnosticável
 // pela mensagem de erro sozinha, sem precisar abrir o DevTools.
-async function extractFunctionErrorMessage(error: unknown): Promise<string | null> {
-  if (!(error instanceof FunctionsHttpError)) return null
+async function extractFunctionError(error: unknown): Promise<{ message: string | null; code: string | null }> {
+  if (!(error instanceof FunctionsHttpError)) return { message: null, code: null }
   try {
     const body = await error.context.clone().json()
-    if (body && typeof body.error === 'string') return body.error
+    return {
+      message: body && typeof body.error === 'string' ? body.error : null,
+      code: body && typeof body.code === 'string' ? body.code : null,
+    }
   } catch {
     // corpo não era JSON, ou já foi consumido — sem problema, cai no genérico
   }
-  return null
+  return { message: null, code: null }
 }
 
 // Pede um token de acesso pra uma sala específica (o `channelId`, igual
@@ -53,14 +59,15 @@ export async function fetchLiveKitToken(params: {
   name?: string
   userLimit?: number
 }): Promise<LiveKitTokenResult> {
-  const { data, error } = await supabase.functions.invoke<LiveKitTokenResult & { error?: string; code?: string }>(
-    'livekit-token',
-    { body: params }
-  )
+  const { data, error } = await supabase.functions.invoke<
+    Omit<LiveKitTokenResult, 'canPublish'> & { canPublish?: boolean; error?: string; code?: string }
+  >('livekit-token', { body: params })
   if (error) {
-    const detail = await extractFunctionErrorMessage(error)
-    if (detail === 'A sala está cheia.') {
-      const full = new Error(detail)
+    const { message: detail, code } = await extractFunctionError(error)
+    // Compara pelo `code` (estável) e, por compatibilidade com uma Edge
+    // Function antiga ainda publicada, também pela mensagem.
+    if (code === 'room_full' || detail === 'A sala está cheia.') {
+      const full = new Error(detail ?? 'Esse canal de voz já está cheio.')
       full.name = 'RoomFullError'
       throw full
     }
@@ -74,5 +81,6 @@ export async function fetchLiveKitToken(params: {
     }
     throw new Error(data?.error || 'Não foi possível conectar ao servidor de voz.')
   }
-  return { token: data.token, url: data.url }
+  // Edge Function antiga (sem o campo) sempre permitia publicar.
+  return { token: data.token, url: data.url, canPublish: data.canPublish !== false }
 }

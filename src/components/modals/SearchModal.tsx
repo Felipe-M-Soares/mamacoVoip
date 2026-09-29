@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { Avatar } from '../ui/Avatar'
+import { Toggle } from '../ui/Toggle'
 import { supabase } from '../../lib/supabase'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useServers } from '../../hooks/useServers'
@@ -89,6 +90,14 @@ export function SearchModal({
   const channelById = { ...extraChannelsById, ...Object.fromEntries(channels.map((c) => [c.id, c])) }
 
   const [filterError, setFilterError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Atalhos de filtro clicáveis — só acrescentam o prefixo no campo.
+  const FILTER_HINTS = ['de:', 'em:', 'com:arquivo', 'antes:', 'depois:']
+  function addFilter(token: string) {
+    setQuery((q) => (q.trim() ? `${q.trim()} ${token}` : token))
+    inputRef.current?.focus()
+  }
 
   async function handleSearch() {
     const parsed = parseSearchQuery(query)
@@ -183,84 +192,139 @@ export function SearchModal({
   }
 
   return (
-    <Modal title="Pesquisar mensagens" onClose={onClose} maxWidth="max-w-lg">
-      <div className="flex gap-2 mb-1.5">
+    <Modal title="Pesquisar mensagens" onClose={onClose} maxWidth="max-w-xl" headerless>
+      <div className="flex items-center gap-3 pl-5 pr-14 h-16 border-b border-[var(--color-line)]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5 text-discord-text-muted shrink-0" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="m20 20-4.2-4.2" />
+        </svg>
         <input
+          ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder="Buscar... (ex: de:fulano em:geral com:arquivo)"
+          placeholder="Buscar mensagens..."
+          aria-label="Buscar mensagens (ex: de:fulano em:geral com:arquivo)"
           autoFocus
-          className="flex-1 px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm"
+          // O CSS global desenha um anel de foco em todo input; aqui o campo
+          // é "sem moldura" (a própria paleta é a moldura), então some com ele.
+          style={{ boxShadow: 'none' }}
+          className="flex-1 min-w-0 bg-transparent outline-none text-[17px] text-white placeholder:text-discord-text-muted"
         />
-        <button
-          onClick={handleSearch}
-          className="px-4 py-2.5 rounded btn-primary text-sm shrink-0"
-        >
+        <button onClick={handleSearch} className="btn-primary h-8 px-3.5 text-[13px] shrink-0">
           Buscar
         </button>
       </div>
 
-      {servers.length > 1 && (
-        <label className="flex items-center gap-2 mb-2 text-xs text-discord-text-muted cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={crossServer}
-            onChange={(e) => setCrossServer(e.target.checked)}
-            className="accent-discord-blurple"
-          />
-          Buscar em todos os meus servidores ({servers.length})
-        </label>
-      )}
+      <div className="px-4 pt-3 pb-2 flex flex-wrap items-center gap-1.5 border-b border-[var(--color-line)]">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mr-1">Filtros</span>
+        {FILTER_HINTS.map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => addFilter(f)}
+            className="chip font-mono !font-medium hover:!text-white hover:!border-[var(--color-line-strong)] hover:!bg-white/[0.08] transition-colors"
+          >
+            {f}
+          </button>
+        ))}
+        {servers.length > 1 && (
+          <span className="ml-auto flex items-center gap-2 text-[12px] text-discord-text-muted select-none">
+            <Toggle
+              size="sm"
+              id="search-cross-server"
+              checked={crossServer}
+              onChange={setCrossServer}
+            />
+            <label htmlFor="search-cross-server" className="cursor-pointer">
+              Todos os meus servidores ({servers.length})
+            </label>
+          </span>
+        )}
+      </div>
 
-      <p className="text-[10px] text-discord-text-muted mb-4">
-        Filtros: <code>de:usuário</code> · <code>em:canal</code> · <code>com:arquivo</code> ·{' '}
-        <code>antes:DD/MM/AAAA</code> · <code>depois:DD/MM/AAAA</code>
-      </p>
+      <div className="p-2 min-h-[120px]">
+        {filterError && <p className="text-sm text-rose-400 px-2.5 py-2">{filterError}</p>}
 
-      {filterError && <p className="text-sm text-red-400 mb-3">{filterError}</p>}
-
-      {loading ? (
-        <div className="flex justify-center py-8">
-          <div className="w-6 h-6 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : searched && results.length === 0 ? (
-        <p className="text-sm text-discord-text-muted">Nenhuma mensagem encontrada.</p>
-      ) : (
-        <div className="space-y-1 max-h-96 overflow-y-auto">
-          {results.map((message) => {
-            const author = profileById[message.author_id]
-            const channel = channelById[message.channel_id]
-            const fromOtherServer = message.server_id !== serverId
-            const server = fromOtherServer ? serverById[message.server_id] : undefined
-            return (
-              <button
-                key={message.id}
-                onClick={() => {
-                  if (channel) onJumpToChannel(channel, fromOtherServer ? message.server_id : undefined)
-                  onClose()
-                }}
-                className="w-full flex gap-3 px-3 py-2 rounded hover:bg-white/5 text-left"
-              >
-                <Avatar name={author?.username ?? '?'} avatarUrl={author?.avatar_url} size={32} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-medium text-white">
-                      {author?.display_name || author?.username || 'Usuário'}
-                    </span>
-                    <span className="text-xs text-discord-text-muted">
-                      em #{channel?.name ?? '?'}
-                      {server ? ` · ${server.name}` : ''} · {formatDate(message.created_at)}
-                    </span>
-                  </div>
-                  <p className="text-sm text-discord-text truncate">{message.content}</p>
+        {loading ? (
+          <div className="space-y-1 p-1" aria-busy="true" aria-label="Buscando">
+            {[0, 1, 2, 3].map((k) => (
+              <div key={k} className="flex gap-3 px-2.5 py-2">
+                <div className="w-8 h-8 rounded-full animate-pulse bg-white/[0.05] shrink-0" />
+                <div className="flex-1 space-y-2 pt-1">
+                  <div className="h-2.5 w-40 rounded animate-pulse bg-white/[0.05]" />
+                  <div className="h-2.5 w-full rounded animate-pulse bg-white/[0.05]" />
                 </div>
-              </button>
-            )
-          })}
-        </div>
-      )}
+              </div>
+            ))}
+          </div>
+        ) : searched && results.length === 0 ? (
+          !filterError && (
+            <div className="flex flex-col items-center text-center py-8">
+              <span className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center text-discord-text-muted mb-3">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="w-6 h-6" aria-hidden="true">
+                  <circle cx="11" cy="11" r="6.5" />
+                  <path d="m20 20-4.2-4.2M8.5 11h5" />
+                </svg>
+              </span>
+              <p className="text-[14px] font-medium text-white">Nenhuma mensagem encontrada</p>
+              <p className="text-[12.5px] text-discord-text-muted mt-0.5">Tente outras palavras ou tire algum filtro.</p>
+            </div>
+          )
+        ) : !searched ? (
+          <div className="px-3 py-4 space-y-2 text-[12.5px] text-discord-text-muted">
+            <p>
+              Combine texto com filtros, por exemplo{' '}
+              <code className="font-mono text-discord-text bg-discord-darker px-1.5 py-0.5 rounded">de:ana em:geral clip</code>
+            </p>
+            <p>
+              Datas no formato <code className="font-mono text-discord-text">DD/MM/AAAA</code> em{' '}
+              <code className="font-mono text-discord-text">antes:</code> e <code className="font-mono text-discord-text">depois:</code>.
+              Aperte <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-discord-darker border border-[var(--color-line-strong)]">Enter</kbd> pra buscar.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-0.5 max-h-[min(420px,55vh)] overflow-y-auto">
+            <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">
+              {results.length} resultado{results.length !== 1 ? 's' : ''}
+            </p>
+            {results.map((message) => {
+              const author = profileById[message.author_id]
+              const channel = channelById[message.channel_id]
+              const fromOtherServer = message.server_id !== serverId
+              const server = fromOtherServer ? serverById[message.server_id] : undefined
+              return (
+                <button
+                  key={message.id}
+                  onClick={() => {
+                    if (channel) onJumpToChannel(channel, fromOtherServer ? message.server_id : undefined)
+                    onClose()
+                  }}
+                  className="group w-full flex gap-3 px-2.5 py-2 rounded-[10px] hover:bg-white/[0.06] focus-visible:bg-white/[0.06] text-left transition-colors"
+                >
+                  <Avatar name={author?.username ?? '?'} avatarUrl={author?.avatar_url} size={32} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2 min-w-0">
+                      <span className="text-[14px] font-medium text-white shrink-0">
+                        {author?.display_name || author?.username || 'Usuário'}
+                      </span>
+                      <span className="text-[11.5px] text-discord-text-muted truncate">
+                        em #{channel?.name ?? '?'}
+                        {server ? ` · ${server.name}` : ''} · {formatDate(message.created_at)}
+                      </span>
+                    </div>
+                    <p className="text-[13.5px] text-discord-text truncate">{message.content}</p>
+                  </div>
+                  <span aria-hidden="true" className="self-center text-[11px] text-discord-text-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    Ir →
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </Modal>
   )
 }

@@ -1,12 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
-import { InviteModal } from '../modals/InviteModal'
-import { InviteFriendsModal } from '../modals/InviteFriendsModal'
-import { ServerSettingsModal } from '../modals/ServerSettingsModal'
-import { LeaveServerModal } from '../modals/LeaveServerModal'
-import { CreateChannelModal } from '../modals/CreateChannelModal'
-import { CreateCategoryModal } from '../modals/CreateCategoryModal'
-import { EditChannelModal } from '../modals/EditChannelModal'
 import { useAuth } from '../../hooks/useAuth'
 import { useChannels } from '../../hooks/useChannels'
 import { useModeration } from '../../hooks/useModeration'
@@ -14,16 +7,26 @@ import { useVoice } from '../../hooks/useVoice'
 import { useVoicePresence } from '../../hooks/useVoicePresence'
 import { useChannelMutes } from '../../hooks/useChannelMutes'
 import { useServerEvents } from '../../hooks/useServerEvents'
-import { EventsModal } from '../modals/EventsModal'
 import { useServerWelcomeScreen, ServerWelcomeModal } from '../modals/ServerWelcomeModal'
 import { ChannelSidebarSkeleton } from './ChannelSidebarSkeleton'
 import { usePinnedItems } from '../../hooks/usePinnedItems'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
 import { Avatar } from '../ui/Avatar'
-import { RolesManagerModal } from '../modals/RolesManagerModal'
-import { ModerationLogModal } from '../modals/ModerationLogModal'
 import type { Channel, Profile, Server } from '../../types/database'
+import { lazyModal } from '../modals/lazyModal'
+
+// Modais/painéis carregados só quando abertos (fora do pacote inicial).
+const InviteModal = lazyModal(() => import('../modals/InviteModal').then((m) => m.InviteModal))
+const InviteFriendsModal = lazyModal(() => import('../modals/InviteFriendsModal').then((m) => m.InviteFriendsModal))
+const ServerSettingsModal = lazyModal(() => import('../modals/ServerSettingsModal').then((m) => m.ServerSettingsModal))
+const LeaveServerModal = lazyModal(() => import('../modals/LeaveServerModal').then((m) => m.LeaveServerModal))
+const CreateChannelModal = lazyModal(() => import('../modals/CreateChannelModal').then((m) => m.CreateChannelModal))
+const CreateCategoryModal = lazyModal(() => import('../modals/CreateCategoryModal').then((m) => m.CreateCategoryModal))
+const EditChannelModal = lazyModal(() => import('../modals/EditChannelModal').then((m) => m.EditChannelModal))
+const EventsModal = lazyModal(() => import('../modals/EventsModal').then((m) => m.EventsModal))
+const RolesManagerModal = lazyModal(() => import('../modals/RolesManagerModal').then((m) => m.RolesManagerModal))
+const ModerationLogModal = lazyModal(() => import('../modals/ModerationLogModal').then((m) => m.ModerationLogModal))
 
 function CallDurationTimer({ startedAt }: { startedAt: number }) {
   const [now, setNow] = useState(Date.now())
@@ -66,9 +69,9 @@ function VoiceChannelPresence({
 
   if (userIds.length === 0) return null
   return (
-    <div className="flex flex-col gap-0.5 pl-7 pb-1">
+    <div className="relative flex flex-col gap-px ml-[18px] pl-3 pb-1.5 pt-0.5 border-l border-[var(--color-line-strong)]">
       {Boolean(userLimit) && (
-        <p className="text-[10px] text-discord-text-muted">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted px-1.5 pb-0.5 tabular-nums">
           {userIds.length}/{userLimit} pessoas
         </p>
       )}
@@ -78,24 +81,25 @@ function VoiceChannelPresence({
         const isSpeaking = id === user?.id ? voice.speaking : voice.participants[id]?.speaking ?? false
         const isSharingScreen = id === user?.id ? voice.screenSharing : Boolean(voice.participants[id]?.screenStream)
         return (
-          <div key={id} className="flex items-center gap-1.5 rounded px-1 py-0.5">
+          <div key={id} className="flex items-center gap-2 rounded-md px-1.5 py-[3px] hover:bg-white/[0.04] transition-colors">
             {/* Só a FOTO pisca ao detectar áudio, não a linha inteira — a
                 pessoa reclamou que antes o nome também "acendia" junto,
                 o que distraía mais do que ajudava numa lista com vários
                 nomes lado a lado. */}
             <div
               className={`relative rounded-full shrink-0 transition-shadow ${
-                isSpeaking ? 'ring-2 ring-discord-blurple shadow-[0_0_6px_0] shadow-discord-blurple/60 animate-pulse' : ''
+                isSpeaking ? 'ring-2 ring-discord-green ring-offset-1 ring-offset-discord-sidebar' : ''
               }`}
             >
-              <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={16} />
+              <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={20} />
             </div>
-            <span className="text-[11px] text-discord-text-muted truncate">{name}</span>
+            <span className="text-[13px] text-discord-text-muted truncate">{name}</span>
             {isSharingScreen && (
-              <span title="Compartilhando tela" className="shrink-0">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 text-discord-green">
+              <span title="Compartilhando tela" className="shrink-0 ml-auto text-[9px] font-bold tracking-wide uppercase px-1.5 py-px rounded bg-rose-500 text-white flex items-center gap-1">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-2.5 h-2.5" aria-hidden="true">
                   <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
                 </svg>
+                Ao vivo
               </span>
             )}
           </div>
@@ -224,8 +228,8 @@ function ChannelRow({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onContextMenu={onContextMenu}
-      className={`group flex items-center gap-1.5 px-2 py-1.5 rounded text-sm font-medium transition-colors ${isOwner ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
-        ${active ? 'bg-discord-lighter text-white' : unread ? 'text-white' : 'text-discord-text-muted hover:bg-white/5 hover:text-discord-text'}
+      className={`group relative flex items-center gap-2 px-2.5 py-[7px] rounded-lg text-[14px] font-medium transition-colors ${isOwner ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
+        ${active ? 'bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]' : unread ? 'text-white hover:bg-white/[0.04]' : 'text-discord-text-muted hover:bg-white/[0.04] hover:text-discord-text'}
         ${isDragOver ? 'ring-2 ring-discord-blurple' : ''}
       `}
       onClick={onSelect}
@@ -258,7 +262,7 @@ function ChannelRow({
         onSave={onRename}
         className="truncate flex-1 text-sm"
       />
-      {unread && !active && !muted && <span className="w-2 h-2 rounded-full bg-white shrink-0" />}
+      {unread && !active && !muted && <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-discord-text" />}
       {channel.type === 'voice' && voice.connectedChannelId === channel.id && voice.connectedAt && (
         <CallDurationTimer startedAt={voice.connectedAt} />
       )}
@@ -418,31 +422,33 @@ export function ChannelSidebar({
   const sortedCategories = [...categories].sort((a, b) => a.position - b.position)
 
   return (
-    <aside className="w-64 bg-discord-sidebar flex flex-col shrink-0">
+    <aside className="w-64 bg-discord-sidebar flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
       {server.banner_url && (
-        <div className="h-20 w-full overflow-hidden shrink-0 border-b border-discord-blurple/30">
+        <div className="relative h-24 w-full overflow-hidden shrink-0">
           <img src={server.banner_url} alt="" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-discord-sidebar" />
         </div>
       )}
       <div className="relative">
         <button
           onClick={() => setMenuOpen((v) => !v)}
-          className="w-full h-12 px-4 flex items-center justify-between border-b border-black/20 shadow-sm text-white font-semibold text-left hover:bg-white/5 transition-colors"
+          aria-expanded={menuOpen}
+          className="w-full h-14 px-4 flex items-center justify-between border-b border-[var(--color-line)] text-white font-semibold text-left hover:bg-white/[0.04] transition-colors"
         >
-          <span className="truncate font-display tracking-wide">{server.name}</span>
+          <span className="truncate font-display text-[15px]">{server.name}</span>
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 shrink-0">
             <path d="M12 16a1 1 0 0 1-.7-.3l-6-6a1 1 0 1 1 1.4-1.4L12 13.6l5.3-5.3a1 1 0 0 1 1.4 1.4l-6 6a1 1 0 0 1-.7.3z" />
           </svg>
         </button>
 
         {menuOpen && (
-          <div className="absolute top-full left-2 right-2 mt-1 bg-discord-darker rounded-md shadow-xl border border-black/40 py-1.5 z-20">
+          <div className="absolute top-full left-2 right-2 mt-1.5 surface-elevated rounded-xl p-1.5 z-20 animate-pop-in">
             <button
               onClick={() => {
                 setShowInvite(true)
                 setMenuOpen(false)
               }}
-              className="w-full text-left px-3 py-2 text-sm text-discord-blurple hover:bg-white/5 transition-colors"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-discord-blurple hover:bg-discord-blurple/10 transition-colors"
             >
               Convidar pessoas
             </button>
@@ -451,7 +457,7 @@ export function ChannelSidebar({
                 setShowInviteFriends(true)
                 setMenuOpen(false)
               }}
-              className="w-full text-left px-3 py-2 text-sm text-discord-blurple hover:bg-white/5 transition-colors"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-discord-blurple hover:bg-discord-blurple/10 transition-colors"
             >
               Chamar amigos
             </button>
@@ -462,7 +468,7 @@ export function ChannelSidebar({
                     setShowCreateChannel({ categoryId: null })
                     setMenuOpen(false)
                   }}
-                  className="w-full text-left px-3 py-2 text-sm text-discord-text hover:bg-white/5 transition-colors"
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
                 >
                   Criar canal
                 </button>
@@ -471,7 +477,7 @@ export function ChannelSidebar({
                     setShowCreateCategory(true)
                     setMenuOpen(false)
                   }}
-                  className="w-full text-left px-3 py-2 text-sm text-discord-text hover:bg-white/5 transition-colors"
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
                 >
                   Criar categoria
                 </button>
@@ -483,7 +489,7 @@ export function ChannelSidebar({
                   setShowRoles(true)
                   setMenuOpen(false)
                 }}
-                className="w-full text-left px-3 py-2 text-sm text-discord-text hover:bg-white/5 transition-colors"
+                className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
               >
                 Cargos
               </button>
@@ -494,7 +500,7 @@ export function ChannelSidebar({
                   setShowModeration(true)
                   setMenuOpen(false)
                 }}
-                className="w-full text-left px-3 py-2 text-sm text-discord-text hover:bg-white/5 transition-colors"
+                className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
               >
                 Moderação
               </button>
@@ -504,7 +510,7 @@ export function ChannelSidebar({
                 setShowSettings(true)
                 setMenuOpen(false)
               }}
-              className="w-full text-left px-3 py-2 text-sm text-discord-text hover:bg-white/5 transition-colors"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
             >
               Configurações do servidor
             </button>
@@ -515,7 +521,7 @@ export function ChannelSidebar({
                   setShowLeave(true)
                   setMenuOpen(false)
                 }}
-                className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-red-500/10 transition-colors"
               >
                 Sair do servidor
               </button>
@@ -524,17 +530,20 @@ export function ChannelSidebar({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
+      <div className="flex-1 overflow-y-auto px-2.5 py-3 space-y-4">
         {loadingChannels ? (
           <ChannelSidebarSkeleton />
         ) : channelsLoadError ? (
-          <div className="px-2 py-3 space-y-2">
-            <p className="text-sm text-red-400">Não foi possível carregar os canais.</p>
+          <div className="mx-1 px-4 py-5 rounded-xl border border-rose-500/20 bg-rose-500/[0.05] flex flex-col items-center text-center gap-2">
+            <span className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5 text-rose-400">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8v5M12 16.5v.01" />
+              </svg>
+            </span>
+            <p className="text-sm font-medium text-discord-text">Não foi possível carregar os canais</p>
             <p className="text-xs text-discord-text-muted break-words">{channelsLoadError}</p>
-            <button
-              onClick={() => refresh()}
-              className="text-xs font-medium text-discord-blurple hover:underline"
-            >
+            <button onClick={() => refresh()} className="btn-secondary h-8 px-3 text-xs mt-1">
               Tentar de novo
             </button>
           </div>
@@ -542,16 +551,14 @@ export function ChannelSidebar({
           <>
         <button
           onClick={() => setShowEvents(true)}
-          className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-sm font-medium text-discord-text-muted hover:bg-white/5 hover:text-discord-text transition-colors"
+          className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[14px] font-medium text-discord-text-muted hover:bg-white/[0.04] hover:text-discord-text transition-colors"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0">
             <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zM4 10v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9H4zm3 3h4v4H7v-4z" />
           </svg>
           Eventos
           {upcomingEventsCount > 0 && (
-            <span className="ml-auto bg-discord-blurple text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-              {upcomingEventsCount}
-            </span>
+            <span className="ml-auto badge-count !shadow-none">{upcomingEventsCount}</span>
           )}
         </button>
 
@@ -627,7 +634,7 @@ export function ChannelSidebar({
                     value={category.name}
                     editable={isOwner}
                     onSave={(name) => updateCategory(category.id, name.toUpperCase())}
-                    className="text-xs font-semibold text-discord-text-muted tracking-wide truncate"
+                    className="text-[11px] font-semibold uppercase text-discord-text-muted tracking-[0.08em] truncate group-hover/category:text-discord-text transition-colors"
                   />
                 </div>
                 {isOwner && (

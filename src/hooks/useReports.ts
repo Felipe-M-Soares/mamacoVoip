@@ -20,11 +20,16 @@ export function useSubmitReport() {
       serverId?: string
     }) => {
       if (!user) return { error: 'Não autenticado' }
+      const reason = params.reason.trim()
+      if (!reason) return { error: 'Escolha um motivo pra denúncia.' }
+      if (reason.length > 100) return { error: 'Motivo longo demais.' }
+      const details = params.details?.trim()
+      if (details && details.length > 1000) return { error: 'Os detalhes podem ter no máximo 1000 caracteres.' }
       const { error } = await supabase.from('reports').insert({
         reporter_id: user.id,
         target_type: params.targetType,
-        reason: params.reason,
-        details: params.details?.trim() || undefined,
+        reason,
+        details: details || undefined,
         message_id: params.messageId,
         reported_user_id: params.reportedUserId,
         server_id: params.serverId,

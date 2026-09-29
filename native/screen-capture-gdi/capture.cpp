@@ -160,6 +160,44 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) {
   return FALSE;
 }
 
+// AUDITORIA — "cão de guarda" do processo pai. O Electron cria este .exe
+// com o stdin ligado a um pipe (padrão do spawn do Node) e nunca escreve
+// nada nele. Se o app principal MORRER sem conseguir matar este processo
+// (travamento, "Finalizar tarefa", queda de energia do lado do Electron),
+// o Windows NÃO mata os processos filhos junto — e este .exe ficava
+// capturando e codificando pra sempre em segundo plano, gastando
+// CPU/GPU até reiniciar o PC. Quando o pai morre, o pipe do stdin fecha
+// e o ReadFile abaixo retorna — aí pedimos pra sair do laço principal.
+// Só é ativado quando o stdin é de fato um pipe (rodando à mão num
+// console, nada muda).
+DWORD WINAPI ParentWatchdogThread(LPVOID) {
+  HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+  char buffer[256];
+  DWORD bytesRead = 0;
+  while (ReadFile(in, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) {
+    // ninguém deveria escrever aqui — só descarta
+  }
+  g_stopRequested.store(true);
+  return 0;
+}
+
+void StartParentWatchdog() {
+  HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+  if (in == nullptr || in == INVALID_HANDLE_VALUE) return;
+  if (GetFileType(in) != FILE_TYPE_PIPE) return;
+  HANDLE thread = CreateThread(nullptr, 0, ParentWatchdogThread, nullptr, 0, nullptr);
+  if (thread) CloseHandle(thread);
+}
+
+// AUDITORIA: antes, o resultado de fwrite/fflush no stdout era ignorado —
+// se o pipe fechasse (app principal encerrou), o laço seguia capturando e
+// codificando quadros que ninguém mais ia ler. Agora qualquer falha de
+// escrita encerra a captura.
+bool WriteAllStdout(const void* data, size_t size) {
+  if (size == 0) return true;
+  return fwrite(data, 1, size, stdout) == size;
+}
+
 // Struct simples pra descrição de MONITORENUMPROC — precisamos contar
 // monitores NÃO-principais até achar o N-ésimo (ver o comentário grande
 // no topo sobre a ordem de enumeração ser best-effort).
@@ -293,14 +331,14 @@ bool CaptureFrameAsJpeg(const RECT& rect, const CLSID& jpegClsid, std::vector<ui
   return ok;
 }
 
-void WriteU32LE(uint32_t value) {
+bool WriteU32LE(uint32_t value) {
   uint8_t bytes[4] = {
       static_cast<uint8_t>(value & 0xFF),
       static_cast<uint8_t>((value >> 8) & 0xFF),
       static_cast<uint8_t>((value >> 16) & 0xFF),
       static_cast<uint8_t>((value >> 24) & 0xFF),
   };
-  fwrite(bytes, 1, 4, stdout);
+  return WriteAllStdout(bytes, 4);
 }
 
 }  // namespace
@@ -318,6 +356,7 @@ int wmain(int argc, wchar_t* argv[]) {
   _setmode(_fileno(stdout), _O_BINARY);
 
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+  StartParentWatchdog();
 
   Gdiplus::GdiplusStartupInput gdiplusStartupInput;
   ULONG_PTR gdiplusToken = 0;
@@ -350,18 +389,21 @@ int wmain(int argc, wchar_t* argv[]) {
     const DWORD frameStart = GetTickCount();
 
     if (CaptureFrameAsJpeg(targetRect, jpegClsid, &frameBytes)) {
+      bool writeFailed = false;
       if (!headerSent) {
-        WriteU32LE(kMagic);
-        WriteU32LE(width);
-        WriteU32LE(height);
-        WriteU32LE(0);
-        fflush(stdout);
+        writeFailed = !WriteU32LE(kMagic) || !WriteU32LE(width) || !WriteU32LE(height) || !WriteU32LE(0) ||
+                      fflush(stdout) != 0;
         headerSent = true;
-        LogStatus("primeiro quadro capturado, cabecalho enviado");
+        if (!writeFailed) LogStatus("primeiro quadro capturado, cabecalho enviado");
       }
-      WriteU32LE(static_cast<uint32_t>(frameBytes.size()));
-      fwrite(frameBytes.data(), 1, frameBytes.size(), stdout);
-      fflush(stdout);
+      if (!writeFailed) {
+        writeFailed = !WriteU32LE(static_cast<uint32_t>(frameBytes.size())) ||
+                      !WriteAllStdout(frameBytes.data(), frameBytes.size()) || fflush(stdout) != 0;
+      }
+      if (writeFailed) {
+        LogStatus("stdout fechado (app principal encerrou?), parando captura");
+        break;
+      }
     }
     // Quadro perdido isolado (BitBlt ou codificação JPEG falhou essa
     // vez) — sem log a cada ocorrência de propósito, pra não inundar

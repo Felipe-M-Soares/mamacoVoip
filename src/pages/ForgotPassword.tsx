@@ -1,6 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { PUBLIC_WEB_URL } from '../lib/config'
+import { traduzErro } from '../context/AuthContext'
+import { normalizeEmail, validateEmail } from '../lib/authValidation'
+import { checkRateLimit } from '../lib/rateLimit'
+import { AuthAlert, AuthField, AuthHeader, AuthIcons, AuthShell } from './AuthShell'
 
 export function ForgotPassword() {
   const [email, setEmail] = useState('')
@@ -10,78 +15,86 @@ export function ForgotPassword() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (loading) return
     setError(null)
+    const emailError = validateEmail(email)
+    if (emailError) {
+      setError(emailError)
+      return
+    }
+    const limit = checkRateLimit('forgot-password', 3, 5 * 60_000)
+    if (!limit.allowed) {
+      setError(`Você já pediu alguns links agora. Espere ${limit.retryAfterSeconds}s antes de pedir outro.`)
+      return
+    }
     setLoading(true)
     // Sempre manda pro site (não pro app://) — clicar num link de
     // e-mail sempre abre o navegador do sistema, então a redefinição
     // acontece lá. Depois é só entrar de novo no app (web ou desktop)
     // com a senha nova.
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'https://mamaco-voip.vercel.app/redefinir-senha',
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), {
+      redirectTo: `${PUBLIC_WEB_URL}/redefinir-senha`,
     })
     setLoading(false)
     if (error) {
-      setError(error.message)
-      return
+      // Só mostra erro de limite/conexão — qualquer outro caso cai na
+      // mesma mensagem de sucesso, pra não revelar se o e-mail tem conta.
+      const translated = traduzErro(error.message)
+      if (/rate limit|segundos|Muitas|conexão|internet/i.test(error.message + translated)) {
+        setError(translated)
+        return
+      }
     }
     setSent(true)
   }
 
   return (
-    <div className="min-h-full bg-discord-darker flex items-center justify-center p-4 relative overflow-hidden">
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          backgroundImage:
-            'radial-gradient(ellipse 900px 600px at 50% 0%, color-mix(in srgb, var(--color-discord-blurple) 22%, transparent), transparent 70%)',
-        }}
+    <AuthShell>
+      <AuthHeader
+        icon={AuthIcons.key}
+        title="Esqueceu sua senha?"
+        subtitle="Digite seu e-mail e mandamos um link pra você criar uma senha nova."
       />
-      <div className="relative bg-discord-dark rounded-xl shadow-2xl w-full max-w-md p-8 border border-white/5">
-        <h1 className="font-display text-2xl font-bold text-white text-center tracking-wide">
-          Esqueceu sua senha?
-        </h1>
-        <p className="text-discord-text-muted text-center mt-1 text-sm">
-          Digite seu e-mail e mandamos um link pra você criar uma senha nova.
-        </p>
 
-        {sent ? (
-          <p className="mt-6 text-sm text-discord-green bg-green-950/40 border border-green-900 rounded px-3 py-3 text-center">
-            Se esse e-mail estiver cadastrado, você vai receber um link em instantes. Confere sua caixa de
-            entrada (e o spam).
-          </p>
-        ) : (
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            <div>
-              <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">E-mail</label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-                autoFocus
-                className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border border-white/5 outline-none focus:ring-2 focus:ring-discord-blurple focus:border-transparent transition-shadow"
-              />
-            </div>
+      {sent ? (
+        <div className="mt-6">
+          <AuthAlert tone="success">
+            Se esse e-mail estiver cadastrado, você vai receber um link em instantes. Confere sua caixa de entrada (e o
+            spam).
+          </AuthAlert>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <AuthField
+            label="E-mail"
+            icon={AuthIcons.mail}
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+            autoFocus
+            placeholder="voce@exemplo.com"
+          />
 
-            {error && (
-              <p className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded px-3 py-2">{error}</p>
-            )}
+          {error && <AuthAlert tone="error">{error}</AuthAlert>}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-            >
-              {loading ? 'Enviando...' : 'Enviar link de recuperação'}
-            </button>
-          </form>
-        )}
+          <button type="submit" disabled={loading} aria-busy={loading} className="btn-primary flex h-11 w-full items-center justify-center gap-2 text-[15px]">
+            {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />}
+            {loading ? 'Enviando...' : 'Enviar link de recuperação'}
+          </button>
+        </form>
+      )}
 
-        <Link to="/login" className="block text-center text-sm text-discord-blurple hover:underline mt-5">
-          Voltar pro login
-        </Link>
-      </div>
-    </div>
+      <Link
+        to="/login"
+        className="btn-ghost mt-5 flex h-10 w-full items-center justify-center gap-1.5 text-[14px] font-medium"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
+          <path d="M19 12H5M11 18l-6-6 6-6" />
+        </svg>
+        Voltar pro login
+      </Link>
+    </AuthShell>
   )
 }

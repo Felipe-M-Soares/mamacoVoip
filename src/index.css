@@ -1,145 +1,379 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+/* Fontes auto-hospedadas (antes vinham do Google Fonts): funcionam
+   offline no app desktop (file://), não dependem de CSP externo e não
+   atrasam a primeira pintura esperando outro domínio responder. */
+@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource-variable/sora/wght.css';
 @import "tailwindcss";
 
 /* ============================================================
-   Tema padrão — "Vermelho" (identidade da marca Mamacos Voip).
+   DESIGN SYSTEM — "Mamacos Neo"
+   Tema padrão "Vermelho" (identidade da marca).
+
    Tailwind v4 gera as classes utilitárias (bg-discord-blurple, etc.)
    referenciando estas variáveis via var(...), então trocar o valor
-   delas em runtime (veja os blocos [data-theme] mais abaixo) já basta
-   pra retemar o app inteiro — nenhum componente precisa saber que
-   temas existem.
+   delas em runtime (blocos [data-theme] abaixo) retema o app inteiro.
+
+   Camadas de superfície (do mais fundo pro mais alto):
+     darker   → tela de fundo do app, barra de servidores, campos
+     dark     → fundos neutros secundários (abas, barras flutuantes)
+     sidebar  → painéis laterais (canais, membros, perfil)
+     channels → painel principal (chat, voz, amigos)
+     lighter  → hover, botões secundários, chips
    ============================================================ */
 @theme {
-  --color-discord-dark: #0f0e10;
-  --color-discord-darker: #09090a;
-  --color-discord-sidebar: #171516;
-  --color-discord-channels: #1c1a1c;
-  --color-discord-lighter: #29262a;
-  --color-discord-blurple: #e0201b;
-  --color-discord-green: #3ba55c;
-  --color-discord-text: #f3efee;
-  --color-discord-text-muted: #a39a9c;
+  --color-discord-darker: #07070a;
+  --color-discord-dark: #0e0e13;
+  --color-discord-channels: #121218;
+  --color-discord-sidebar: #0d0d12;
+  --color-discord-lighter: #25252e;
+  --color-discord-blurple: #ee3a34;
+  --color-discord-green: #22c55e;
+  --color-discord-text: #f4f4f7;
+  --color-discord-text-muted: #9d9dab;
 
-  --font-display: 'Rajdhani', 'Inter', sans-serif;
+  /* Tokens novos do design system */
+  --color-accent-2: #ff8a3d; /* segunda cor do gradiente da marca */
+  --color-line: rgb(255 255 255 / 0.07);
+  --color-line-strong: rgb(255 255 255 / 0.12);
+  --color-elevated: #17171e;
+
+  --font-display: 'Sora Variable', 'Inter Variable', system-ui, sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --radius-panel: 16px;
+
+  --animate-fade-slide-in: fade-slide-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-pop-in: pop-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 
-/* Tema "Azul" — o clássico, pra quem preferir a cara mais neutra */
-/* Tema "Clássico" — paleta e tipografia calcadas na versão atual do
-   Discord (não os tons mais antigos de 2020), pra quem quer a cara mais
-   parecida possível com o app original. Também troca a fonte de
-   destaque: a Rajdhani condensada é bonita pra logo/identidade da
-   marca, mas o Discord de verdade usa a MESMA família em tudo (só varia
-   o peso) — então aqui --font-display vira a mesma sans-serif do corpo
-   do texto, e cada componente que já usa `font-display` (cabeçalhos de
-   canal, nome de servidor, títulos de modal) muda de cara sozinho, sem
-   precisar tocar em nenhum desses 18 arquivos. */
+/* Tema "Clássico" — paleta calcada no Discord atual, mesma fonte em tudo */
 [data-theme='azul'] {
-  --color-discord-dark: #232428;
   --color-discord-darker: #1e1f22;
-  --color-discord-sidebar: #2b2d31;
+  --color-discord-dark: #232428;
   --color-discord-channels: #313338;
-  --color-discord-lighter: #383a40;
+  --color-discord-sidebar: #2b2d31;
+  --color-discord-lighter: #3a3c43;
   --color-discord-blurple: #5865f2;
+  --color-accent-2: #8b7bff;
   --color-discord-green: #23a55a;
   --color-discord-text: #f2f3f5;
-  --color-discord-text-muted: #949ba4;
-  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --color-discord-text-muted: #a0a6b0;
+  --color-elevated: #313338;
+  --font-display: 'Inter Variable', system-ui, sans-serif;
 }
 
 /* Tema "Roxo Meia-noite" */
 [data-theme='roxo'] {
-  --color-discord-dark: #14121f;
-  --color-discord-darker: #0c0a15;
-  --color-discord-sidebar: #1e1a2e;
-  --color-discord-channels: #241f38;
-  --color-discord-lighter: #322b4a;
+  --color-discord-darker: #08070f;
+  --color-discord-dark: #0f0d1a;
+  --color-discord-channels: #161329;
+  --color-discord-sidebar: #100e1b;
+  --color-discord-lighter: #2a2540;
   --color-discord-blurple: #8b5cf6;
-  --color-discord-green: #3ba55c;
-  --color-discord-text: #e8e4f2;
-  --color-discord-text-muted: #9891ab;
+  --color-accent-2: #ec4899;
+  --color-discord-green: #22c55e;
+  --color-discord-text: #eeeaf8;
+  --color-discord-text-muted: #a39cb8;
+  --color-elevated: #1b1830;
 }
 
-body {
-  margin: 0;
-  font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  background-color: var(--color-discord-dark);
+/* Tema "Oceano" — novo: azul-petróleo, calmo, bom pra longas sessões */
+[data-theme='oceano'] {
+  --color-discord-darker: #05090c;
+  --color-discord-dark: #091014;
+  --color-discord-channels: #0f191e;
+  --color-discord-sidebar: #0a1216;
+  --color-discord-lighter: #1d2c35;
+  --color-discord-blurple: #14b8a6;
+  --color-accent-2: #38bdf8;
+  --color-discord-green: #22c55e;
+  --color-discord-text: #eef6f8;
+  --color-discord-text-muted: #93a6ae;
+  --color-elevated: #111c22;
 }
 
-/* Utilitários de marca — brilho ao redor de elementos importantes
-   (logo, botão principal, ícone de servidor ativo). Usa color-mix
-   pra herdar a cor de acento do tema atual automaticamente. */
+/* ============================================================
+   Base
+   ============================================================ */
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    background-color: var(--color-discord-darker);
+    color: var(--color-discord-text);
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-discord-blurple) 40%, transparent);
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+  /* Foco visível só pra teclado — acessibilidade sem poluir o clique */
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-discord-blurple) 80%, white);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: color-mix(in srgb, var(--color-discord-text-muted) 70%, transparent);
+  }
+  input[type='range'] {
+    accent-color: var(--color-discord-blurple);
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-discord-blurple);
+  }
+  hr {
+    border-color: var(--color-line);
+  }
+}
+
+/* Campos de texto: antes usavam o MESMO tom do fundo (bg-discord-darker +
+   border-none) e ficavam invisíveis em várias telas. Fora das camadas
+   de propósito (CSS sem @layer vence qualquer utilitário), mas com
+   :not(:focus) pra não brigar com o anel de foco (focus:ring-*). */
+:is(input, textarea, select):is(.bg-discord-darker, .bg-discord-dark, .bg-discord-lighter):not(:focus):not([type='range']):not([type='checkbox']):not([type='radio']) {
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+:is(input, textarea, select):is(.bg-discord-darker, .bg-discord-dark, .bg-discord-lighter) {
+  border-radius: 10px;
+  transition: box-shadow 0.15s ease, background-color 0.15s ease;
+}
+:is(input, textarea, select):is(.bg-discord-darker, .bg-discord-dark):hover:not(:focus) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-discord-text-muted) 45%, transparent);
+}
+:is(input, textarea, select):focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-discord-blurple) 70%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--color-discord-blurple) 18%, transparent);
+}
+select.bg-discord-darker,
+select.bg-discord-dark {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239d9dab' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 1rem;
+  padding-right: 2rem;
+}
+
+/* ============================================================
+   Componentes reutilizáveis
+   ============================================================ */
+
+/* Painel flutuante (chat, sidebars) — o layout novo usa painéis
+   arredondados com um respiro entre eles, em cima do fundo do app. */
+.panel {
+  background: var(--color-discord-channels);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+}
+.panel-muted {
+  background: var(--color-discord-sidebar);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+}
+.surface-elevated {
+  background: var(--color-elevated);
+  border: 1px solid var(--color-line);
+  box-shadow: 0 24px 60px -12px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(0 0 0 / 0.35);
+}
+.glass {
+  background: color-mix(in srgb, var(--color-elevated) 78%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--color-line-strong);
+}
+
+.text-gradient {
+  background: linear-gradient(120deg, var(--color-discord-blurple), var(--color-accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.bg-brand-gradient {
+  background: linear-gradient(135deg, var(--color-discord-blurple), var(--color-accent-2));
+}
+
+/* Brilho ao redor de elementos importantes — herda a cor do tema */
 .brand-glow {
-  box-shadow: 0 0 28px 0 color-mix(in srgb, var(--color-discord-blurple) 55%, transparent);
+  box-shadow: 0 0 32px 0 color-mix(in srgb, var(--color-discord-blurple) 45%, transparent);
 }
-
 .brand-glow-sm {
-  box-shadow: 0 0 14px 0 color-mix(in srgb, var(--color-discord-blurple) 45%, transparent);
+  box-shadow: 0 0 16px 0 color-mix(in srgb, var(--color-discord-blurple) 38%, transparent);
 }
 
-/* Botões modernos e reutilizáveis — usados nos CTAs principais do app */
 .btn-primary {
-  background: linear-gradient(135deg, var(--color-discord-blurple), color-mix(in srgb, var(--color-discord-blurple) 75%, black));
+  background: linear-gradient(135deg, var(--color-discord-blurple), color-mix(in srgb, var(--color-discord-blurple) 55%, var(--color-accent-2)));
   color: white;
   font-weight: 600;
-  border-radius: 0.5rem;
-  box-shadow: 0 2px 8px 0 color-mix(in srgb, var(--color-discord-blurple) 35%, transparent);
-  transition: transform 0.12s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  border-radius: 10px;
+  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.18) inset, 0 6px 18px -6px color-mix(in srgb, var(--color-discord-blurple) 70%, transparent);
+  transition: transform 0.12s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
-  box-shadow: 0 4px 16px 0 color-mix(in srgb, var(--color-discord-blurple) 50%, transparent);
+  filter: brightness(1.08) saturate(1.05);
+  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.2) inset, 0 10px 26px -8px color-mix(in srgb, var(--color-discord-blurple) 80%, transparent);
   transform: translateY(-1px);
 }
 .btn-primary:active:not(:disabled) {
-  transform: translateY(0);
-  filter: brightness(0.95);
+  transform: translateY(0) scale(0.99);
+  filter: brightness(0.96);
 }
 .btn-primary:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .btn-secondary {
   background: var(--color-discord-lighter);
   color: var(--color-discord-text);
   font-weight: 500;
-  border-radius: 0.5rem;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--color-line) inset;
   transition: background-color 0.15s ease, transform 0.12s ease;
 }
 .btn-secondary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-discord-lighter) 80%, white);
-  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--color-discord-lighter) 82%, white);
 }
 .btn-secondary:active:not(:disabled) {
-  transform: translateY(0);
+  transform: scale(0.99);
+}
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  color: var(--color-discord-text-muted);
+  border-radius: 10px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.06);
+  color: var(--color-discord-text);
 }
 
 .btn-danger {
-  background: linear-gradient(135deg, #dc2626, #991b1b);
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
   color: white;
   font-weight: 600;
-  border-radius: 0.5rem;
-  box-shadow: 0 2px 8px 0 rgba(220, 38, 38, 0.3);
-  transition: transform 0.12s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  border-radius: 10px;
+  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.16) inset, 0 6px 18px -6px rgb(239 68 68 / 0.6);
+  transition: transform 0.12s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
 .btn-danger:hover:not(:disabled) {
-  filter: brightness(1.1);
-  box-shadow: 0 4px 16px 0 rgba(220, 38, 38, 0.45);
+  filter: brightness(1.08);
   transform: translateY(-1px);
 }
 .btn-danger:active:not(:disabled) {
   transform: translateY(0);
 }
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Botão redondo de ícone (controles de voz, ações de barra) */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: var(--color-discord-text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+}
+.icon-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.07);
+  color: var(--color-discord-text);
+}
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+/* Rótulo de campo de formulário */
+.field-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-discord-text-muted);
+  margin-bottom: 0.45rem;
+}
+
+/* Chip / badge */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgb(255 255 255 / 0.06);
+  color: var(--color-discord-text-muted);
+  border: 1px solid var(--color-line);
+}
+
+/* Contador de não lidas */
+.badge-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--color-discord-blurple);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 0 0 3px var(--color-discord-darker);
+}
 
 .font-display {
   font-family: var(--font-display);
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
 }
 
-/* Scrollbar discreta, combina com o visual escuro em qualquer tema */
+/* Fundo decorativo das telas de entrada (login/cadastro) */
+.auth-backdrop {
+  background:
+    radial-gradient(900px 520px at 12% -10%, color-mix(in srgb, var(--color-discord-blurple) 30%, transparent), transparent 65%),
+    radial-gradient(800px 560px at 100% 110%, color-mix(in srgb, var(--color-accent-2) 20%, transparent), transparent 60%),
+    var(--color-discord-darker);
+}
+.auth-grid {
+  background-image: linear-gradient(var(--color-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 30%, transparent 75%);
+}
+
+/* Scrollbar fina, some quando não está em uso */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-discord-lighter) transparent;
+}
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -147,25 +381,60 @@ body {
 ::-webkit-scrollbar-thumb {
   background-color: var(--color-discord-lighter);
   border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in srgb, var(--color-discord-lighter) 70%, white);
 }
 
-/* Entrada suave — mensagem nova, toast, item de lista aparecendo.
-   Sutil de propósito: um movimento pequeno demais pra "chamar
-   atenção" errada, só o suficiente pra não parecer que o conteúdo
-   simplesmente "piscou" na tela do nada. */
+/* Animações */
 @keyframes fade-slide-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 .animate-fade-slide-in {
-  animation: fade-slide-in 0.15s ease-out;
+  animation: var(--animate-fade-slide-in);
+}
+.animate-pop-in {
+  animation: var(--animate-pop-in);
+}
+.animate-fade-in {
+  animation: fade-in 0.18s ease-out;
+}
+
+/* Respeita quem pediu menos movimento no sistema */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

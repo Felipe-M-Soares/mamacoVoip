@@ -52,6 +52,23 @@ export function ScreenSharePicker() {
     })
   }, [])
 
+  // Esc cancela o seletor (antes só dava pra cancelar clicando fora ou no
+  // botão) — cancelar resolve a Promise pendente em VoiceContext como
+  // "cancelado", sem deixar o botão de compartilhar preso em "Conectando".
+  const isOpen = sources !== null
+  useEffect(() => {
+    if (!isOpen) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      setPendingGameShareHint(null)
+      setPendingAppAudioPid(null)
+      resolveScreenSharePicker(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isOpen])
+
   if (!sources) return null
   // TypeScript não propaga o `if (!sources) return null` acima pra
   // dentro de `choose` (uma função aninhada, fechamento separado) —
@@ -112,19 +129,36 @@ export function ScreenSharePicker() {
 
   return (
     <div
-      className="fixed inset-0 z-[400] bg-black/70 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[400] bg-black/70 backdrop-blur-[2px] flex items-center justify-center p-4 animate-fade-in"
       onClick={() => choose(null)}
     >
       <div
-        className="bg-discord-dark rounded-lg shadow-2xl max-w-2xl w-full p-5 border border-white/5"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="screen-share-picker-title"
+        className="surface-elevated rounded-2xl max-w-2xl w-full p-5 sm:p-6 animate-pop-in"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <h2 className="font-display text-lg font-bold text-white tracking-wide">Escolha o que compartilhar</h2>
-          <span className="text-[10px] text-discord-text-muted shrink-0">{currentQualityPreset.label}</span>
+        <div className="flex items-start justify-between gap-3 mb-5">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="w-10 h-10 rounded-xl bg-discord-blurple/15 text-discord-blurple ring-1 ring-inset ring-discord-blurple/25 flex items-center justify-center shrink-0">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5" aria-hidden>
+                <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
+              </svg>
+            </span>
+            <div className="min-w-0">
+              <h2 id="screen-share-picker-title" className="font-display text-lg font-semibold text-white leading-tight">
+                Escolha o que compartilhar
+              </h2>
+              <p className="text-[12px] text-discord-text-muted">O áudio é escolhido sozinho conforme a fonte.</p>
+            </div>
+          </div>
+          <span className="chip shrink-0" title="Qualidade da transmissão">
+            {currentQualityPreset.label}
+          </span>
         </div>
 
-        <div className="max-h-[55vh] overflow-y-auto pr-1 space-y-4">
+        <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1 pb-1 space-y-5">
           {gameCard && suggestion && (
             <SourceSection title={gameCardTitle}>
               <SourceCard
@@ -147,7 +181,7 @@ export function ScreenSharePicker() {
                 onClick={() => choose(gameCard.id, { processNames: suggestion.processNames, label: suggestion.label })}
               />
               {gameCard.type === 'screen' && (
-                <p className="col-span-2 sm:col-span-3 text-[10px] text-discord-text-muted -mt-2">
+                <p className="col-span-2 sm:col-span-3 text-[11px] leading-snug text-discord-text-muted -mt-1">
                   A miniatura pode não corresponder ao jogo (o Windows não gera preview de tela cheia exclusiva) — clicar
                   aqui compartilha o jogo de verdade mesmo assim.
                 </p>
@@ -184,16 +218,24 @@ export function ScreenSharePicker() {
             ela nesse estado — não é bug nosso, é limitação do próprio
             Windows. Precisa estar pelo menos visível (pode estar atrás
             de outra janela) na hora de abrir esse seletor. */}
-        <p className="text-[10px] text-discord-text-muted mt-3">
-          Jogo não aparece como janela? Troque pra "tela cheia sem bordas" nas configurações dele.
-        </p>
-        <p className="text-[10px] text-discord-text-muted mt-1">
-          Não vê a janela que procura? Ela pode estar minimizada — o Windows só mostra aqui janelas abertas e visíveis (restaure a janela e tente de novo).
-        </p>
+        <div className="mt-4 flex gap-2.5 rounded-xl bg-white/[0.03] border border-[var(--color-line)] px-3 py-2.5">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4 text-discord-text-muted shrink-0 mt-px" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 11v5M12 8h.01" />
+          </svg>
+          <div className="space-y-1 text-[11px] leading-snug text-discord-text-muted">
+            <p>Jogo não aparece como janela? Troque pra "tela cheia sem bordas" nas configurações dele.</p>
+            <p>
+              Não vê a janela que procura? Ela pode estar minimizada — o Windows só mostra aqui janelas abertas e visíveis (restaure a janela e tente de novo).
+            </p>
+          </div>
+        </div>
 
-        <button onClick={() => choose(null)} className="mt-3 w-full py-2.5 rounded btn-secondary">
-          Cancelar
-        </button>
+        <div className="mt-4 flex justify-end">
+          <button onClick={() => choose(null)} className="h-10 px-5 btn-secondary text-[14px]">
+            Cancelar
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -201,10 +243,10 @@ export function ScreenSharePicker() {
 
 function SourceSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
-      <p className="text-[10px] font-bold uppercase text-discord-text-muted tracking-wide mb-1.5">{title}</p>
+    <section aria-label={title}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-2">{title}</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{children}</div>
-    </div>
+    </section>
   )
 }
 
@@ -220,12 +262,21 @@ function SourceCard({
   return (
     <button
       onClick={onClick}
-      className={`text-left rounded-lg overflow-hidden border-2 transition-colors bg-discord-darker ${
-        highlighted ? 'border-discord-blurple' : 'border-transparent hover:border-discord-blurple'
+      title={source.name}
+      className={`group text-left rounded-xl overflow-hidden border bg-discord-darker transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 ${
+        highlighted
+          ? 'border-discord-blurple shadow-[0_0_0_1px_var(--color-discord-blurple),0_10px_28px_-12px_var(--color-discord-blurple)]'
+          : 'border-[var(--color-line)] hover:border-discord-blurple/60 hover:shadow-[0_10px_28px_-14px_rgb(0_0_0/0.9)]'
       }`}
     >
-      <img src={source.thumbnail} alt={source.name} className="w-full aspect-video object-cover bg-black" />
-      <p className="text-xs text-discord-text px-2 py-1.5 truncate">{source.name}</p>
+      <div className="relative">
+        <img src={source.thumbnail} alt={source.name} className="w-full aspect-video object-cover bg-black" />
+        <span className="absolute inset-0 bg-discord-blurple/0 group-hover:bg-discord-blurple/10 transition-colors" aria-hidden />
+        {highlighted && (
+          <span className="absolute top-2 left-2 chip !bg-discord-blurple !text-white !border-transparent">Recomendado</span>
+        )}
+      </div>
+      <p className="text-[12px] font-medium text-discord-text px-2.5 py-2 truncate">{source.name}</p>
     </button>
   )
 }

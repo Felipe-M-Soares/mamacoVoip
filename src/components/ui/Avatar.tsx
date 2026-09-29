@@ -1,11 +1,19 @@
+import { identityGradient } from '../../lib/identityColor'
 import type { ProfileStatus } from '../../types/database'
 import { useIsPresent } from '../../hooks/usePresence'
 
 const STATUS_COLOR: Record<ProfileStatus, string> = {
   online: 'bg-discord-green',
-  idle: 'bg-yellow-500',
-  dnd: 'bg-red-500',
-  offline: 'bg-gray-500',
+  idle: 'bg-amber-400',
+  dnd: 'bg-rose-500',
+  offline: 'bg-zinc-500',
+}
+
+const STATUS_LABEL: Record<ProfileStatus, string> = {
+  online: 'Online',
+  idle: 'Ausente',
+  dnd: 'Não perturbe',
+  offline: 'Offline',
 }
 
 interface AvatarProps {
@@ -52,11 +60,11 @@ export function Avatar({ name, avatarUrl, status, userId, size = 40, decorationU
     >
       <div className="absolute" style={{ top: pad, left: pad, width: size, height: size }}>
         {avatarUrl ? (
-          <img src={avatarUrl} alt={name} className="w-full h-full rounded-full object-cover" />
+          <img src={avatarUrl} alt={name} loading="lazy" decoding="async" className="w-full h-full rounded-full object-cover bg-discord-lighter" />
         ) : (
           <div
-            className="w-full h-full rounded-full bg-discord-blurple flex items-center justify-center text-white font-medium"
-            style={{ fontSize: size * 0.4 }}
+            className="w-full h-full rounded-full flex items-center justify-center text-white font-semibold select-none"
+            style={{ fontSize: size * 0.42, background: identityGradient(userId || name), textShadow: '0 1px 2px rgb(0 0 0 / 0.25)' }}
           >
             {initial}
           </div>
@@ -72,8 +80,17 @@ export function Avatar({ name, avatarUrl, status, userId, size = 40, decorationU
       )}
       {effectiveStatus && (
         <span
-          className={`absolute rounded-full border-[3px] border-discord-sidebar ${STATUS_COLOR[effectiveStatus]}`}
-          style={{ width: size * 0.32, height: size * 0.32, bottom: pad, right: pad }}
+          className={`absolute rounded-full transition-colors ${STATUS_COLOR[effectiveStatus]}`}
+          title={STATUS_LABEL[effectiveStatus]}
+          role="img"
+          aria-label={STATUS_LABEL[effectiveStatus]}
+          style={{
+            width: Math.max(8, size * 0.3),
+            height: Math.max(8, size * 0.3),
+            bottom: pad,
+            right: pad,
+            boxShadow: `0 0 0 ${Math.max(2, Math.round(size * 0.07))}px var(--avatar-ring, var(--color-discord-sidebar))`,
+          }}
         />
       )}
     </div>

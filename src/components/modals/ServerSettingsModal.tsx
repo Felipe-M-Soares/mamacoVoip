@@ -90,51 +90,83 @@ export function ServerSettingsModal({
 
   if (confirmingDelete) {
     return (
-      <Modal title={`Excluir '${server.name}'`} onClose={onClose}>
-        <p className="text-sm text-discord-text-muted">
+      <Modal
+        title={`Excluir '${server.name}'`}
+        onClose={onClose}
+        footer={
+          <>
+            <button onClick={() => setConfirmingDelete(false)} className="btn-secondary h-9 px-4 text-sm">
+              Cancelar
+            </button>
+            <button onClick={handleDelete} disabled={loading} className="btn-danger h-9 px-4 text-sm">
+              {loading ? 'Excluindo...' : 'Excluir servidor'}
+            </button>
+          </>
+        }
+      >
+        <p className="text-[14px] text-discord-text-muted leading-relaxed">
           Tem certeza que deseja excluir <span className="text-white font-medium">{server.name}</span>? Essa ação
           não pode ser desfeita — todos os canais e mensagens serão perdidos.
         </p>
-        {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
-        <div className="flex justify-end gap-3 mt-5">
-          <button
-            onClick={() => setConfirmingDelete(false)}
-            className="px-4 py-2 text-sm text-discord-text-muted hover:underline"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={loading}
-            className="px-4 py-2 text-sm rounded btn-danger disabled:opacity-60"
-          >
-            {loading ? 'Excluindo...' : 'Excluir servidor'}
-          </button>
-        </div>
+        {error && <p className="text-sm text-rose-400 mt-3">{error}</p>}
       </Modal>
     )
   }
 
+  const editHint = (
+    <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/45 transition-colors">
+      <span className="flex items-center gap-1.5 text-[12px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/55 px-2.5 py-1 rounded-full">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+          <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+        </svg>
+        Trocar
+      </span>
+    </span>
+  )
+
   return (
-    <Modal title="Configurações do servidor" onClose={onClose}>
-      <div className="space-y-4">
+    <Modal
+      title="Configurações do servidor"
+      description={`Criado em ${formatDate(server.created_at)}`}
+      onClose={onClose}
+      maxWidth="max-w-xl"
+      footer={
+        isOwner ? (
+          <>
+            <button onClick={onClose} className="btn-secondary h-9 px-4 text-sm">
+              Cancelar
+            </button>
+            <button onClick={handleSave} disabled={loading} className="btn-primary h-9 px-4 text-sm">
+              {loading ? 'Salvando...' : 'Salvar alterações'}
+            </button>
+          </>
+        ) : undefined
+      }
+    >
+      <div className="space-y-5">
+        {/* Capa + ícone sobreposto, como aparece no topo do servidor */}
         <div>
-          <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-            Capa do servidor
-          </label>
           <button
+            type="button"
             onClick={() => isOwner && bannerInputRef.current?.click()}
-            className={`w-full aspect-[3/1] rounded-lg bg-discord-darker border-2 border-dashed border-discord-text-muted flex items-center justify-center overflow-hidden ${
-              isOwner ? 'hover:border-discord-blurple transition-colors' : 'cursor-not-allowed opacity-70'
-            }`}
+            aria-label={bannerPreview ? 'Trocar capa do servidor' : 'Adicionar capa do servidor'}
+            className={`group relative w-full aspect-[3/1] rounded-xl overflow-hidden flex items-center justify-center ${
+              bannerPreview ? '' : 'bg-discord-darker/60 border-2 border-dashed border-white/[0.14]'
+            } ${isOwner ? 'hover:border-discord-blurple/60 transition-colors' : 'cursor-not-allowed opacity-70'}`}
           >
             {bannerPreview ? (
-              <img src={bannerPreview} alt="Capa" className="w-full h-full object-cover" />
+              <img src={bannerPreview} alt="Capa" className="absolute inset-0 w-full h-full object-cover" />
             ) : (
-              <span className="text-xs text-discord-text-muted text-center px-2">
+              <span className="flex flex-col items-center gap-1.5 text-[12px] text-discord-text-muted text-center px-2">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+                  <rect x="3" y="4" width="18" height="16" rx="3" />
+                  <circle cx="8.5" cy="9.5" r="1.5" />
+                  <path d="M21 15l-5-5-9 9" />
+                </svg>
                 Sem capa — clique pra adicionar uma imagem ou GIF
               </span>
             )}
+            {isOwner && bannerPreview && editHint}
           </button>
           <input
             ref={bannerInputRef}
@@ -144,22 +176,26 @@ export function ServerSettingsModal({
             onChange={handleBannerChange}
             disabled={!isOwner}
           />
-          <p className="text-[10px] text-discord-text-muted mt-1">Até 5MB — aceita GIF animado</p>
-        </div>
-
-        <div className="flex justify-center">
-          <button
-            onClick={() => isOwner && fileInputRef.current?.click()}
-            className={`w-20 h-20 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted flex items-center justify-center overflow-hidden ${
-              isOwner ? 'hover:border-discord-blurple transition-colors' : 'cursor-not-allowed opacity-70'
-            }`}
-          >
-            {iconPreview ? (
-              <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-xs text-discord-text-muted text-center px-2">Sem ícone</span>
-            )}
-          </button>
+          <div className="flex items-end gap-3 px-3 -mt-9 relative">
+            <button
+              type="button"
+              onClick={() => isOwner && fileInputRef.current?.click()}
+              aria-label={iconPreview ? 'Trocar ícone do servidor' : 'Adicionar ícone do servidor'}
+              className={`group relative w-[76px] h-[76px] shrink-0 rounded-2xl ring-[5px] ring-[var(--color-elevated)] bg-discord-darker flex items-center justify-center overflow-hidden ${
+                isOwner ? '' : 'cursor-not-allowed opacity-70'
+              }`}
+            >
+              {iconPreview ? (
+                <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover" />
+              ) : (
+                <span className="w-full h-full bg-brand-gradient flex items-center justify-center font-display text-xl font-semibold text-white">
+                  {server.name.slice(0, 2).toUpperCase()}
+                </span>
+              )}
+              {isOwner && editHint}
+            </button>
+            <p className="text-[11px] text-discord-text-muted pb-1">Capa até 5MB — aceita GIF animado</p>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -171,42 +207,42 @@ export function ServerSettingsModal({
         </div>
 
         <div>
-          <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+          <label htmlFor="server-settings-name" className="field-label">
             Nome do servidor
           </label>
           <input
+            id="server-settings-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={!isOwner}
-            className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple disabled:opacity-60"
+            className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none disabled:opacity-60"
           />
         </div>
 
         <div>
-          <div className="flex items-baseline justify-between mb-2">
-            <label className="block text-xs font-bold uppercase text-discord-text-muted">
+          <div className="flex items-baseline justify-between">
+            <label htmlFor="server-settings-description" className="field-label">
               Descrição
             </label>
-            <span className="text-xs text-discord-text-muted">{description.length}/300</span>
+            <span className="text-[11px] text-discord-text-muted tabular-nums">{description.length}/300</span>
           </div>
           <textarea
+            id="server-settings-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             disabled={!isOwner}
             maxLength={300}
             rows={3}
             placeholder="Do que se trata este servidor?"
-            className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple disabled:opacity-60 resize-none"
+            className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none disabled:opacity-60 resize-none"
           />
         </div>
 
         {isOwner && (
-          <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-              Canal AFK
-            </label>
-            <p className="text-[10px] text-discord-text-muted mb-2">
+          <section className="rounded-2xl bg-white/[0.02] border border-[var(--color-line)] p-4">
+            <p className="text-[14px] font-semibold text-white">Canal AFK</p>
+            <p className="text-[12.5px] text-discord-text-muted mt-0.5 mb-3">
               Quem ficar inativo (sem mexer o mouse/teclado) numa chamada por muito tempo é movido pra cá
               automaticamente.
             </p>
@@ -214,7 +250,8 @@ export function ServerSettingsModal({
               <select
                 value={afkChannelId}
                 onChange={(e) => setAfkChannelId(e.target.value)}
-                className="flex-1 px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+                aria-label="Canal AFK"
+                className="flex-1 min-w-0 px-3 py-2 text-sm bg-discord-darker text-discord-text outline-none"
               >
                 <option value="">Desativado</option>
                 {channels
@@ -229,7 +266,8 @@ export function ServerSettingsModal({
                 <select
                   value={afkTimeoutMinutes}
                   onChange={(e) => setAfkTimeoutMinutes(Number(e.target.value))}
-                  className="px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+                  aria-label="Tempo de inatividade"
+                  className="px-3 py-2 text-sm bg-discord-darker text-discord-text outline-none"
                 >
                   {[5, 10, 15, 30, 60].map((m) => (
                     <option key={m} value={m}>
@@ -239,40 +277,29 @@ export function ServerSettingsModal({
                 </select>
               )}
             </div>
-          </div>
+          </section>
         )}
 
         <EmojiManagementSection serverId={server.id} isOwner={isOwner} />
 
-        <div className="bg-discord-darker rounded-lg p-3 text-xs text-discord-text-muted">
-          Servidor criado em {formatDate(server.created_at)}
-        </div>
-
         {!isOwner && (
-          <p className="text-xs text-discord-text-muted">
+          <p className="text-[12.5px] text-discord-text-muted rounded-lg bg-white/[0.03] border border-[var(--color-line)] px-3 py-2">
             Só o dono do servidor pode alterar nome, descrição e ícone.
           </p>
         )}
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-rose-400">{error}</p>}
 
         {isOwner && (
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-          >
-            {loading ? 'Salvando...' : 'Salvar alterações'}
-          </button>
-        )}
-
-        {isOwner && (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            className="w-full py-2.5 rounded border border-red-600 text-red-500 font-medium hover:bg-red-600/10 transition-colors"
-          >
-            Excluir servidor
-          </button>
+          <section className="rounded-2xl border border-rose-500/30 bg-rose-500/[0.04] p-4 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[14px] font-semibold text-rose-300">Excluir servidor</p>
+              <p className="text-[12.5px] text-discord-text-muted mt-0.5">Apaga canais e mensagens pra todo mundo.</p>
+            </div>
+            <button onClick={() => setConfirmingDelete(true)} className="btn-danger h-9 px-4 text-sm shrink-0">
+              Excluir
+            </button>
+          </section>
         )}
       </div>
     </Modal>
@@ -306,10 +333,11 @@ function EmojiManagementSection({ serverId, isOwner }: { serverId: string; isOwn
   }
 
   return (
-    <div>
-      <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-        Emojis customizados ({emojis.length})
-      </label>
+    <section className="rounded-2xl bg-white/[0.02] border border-[var(--color-line)] p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[14px] font-semibold text-white">Emojis customizados</p>
+        <span className="chip">{emojis.length}</span>
+      </div>
 
       {emojis.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
@@ -319,15 +347,18 @@ function EmojiManagementSection({ serverId, isOwner }: { serverId: string; isOwn
                 src={emoji.image_url}
                 alt={emoji.name}
                 title={`:${emoji.name}:`}
-                className="w-9 h-9 rounded bg-discord-darker object-contain p-1"
+                className="w-10 h-10 rounded-lg bg-discord-darker border border-[var(--color-line)] object-contain p-1"
               />
               {isOwner && (
                 <button
                   onClick={() => deleteEmoji(emoji.id)}
                   title="Remover"
-                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 rounded-full text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label={`Remover :${emoji.name}:`}
+                  className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] bg-rose-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shadow"
                 >
-                  ×
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="w-2.5 h-2.5">
+                    <path d="M6 6l12 12M18 6 6 18" />
+                  </svg>
                 </button>
               )}
             </div>
@@ -342,13 +373,14 @@ function EmojiManagementSection({ serverId, isOwner }: { serverId: string; isOwn
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="nome_do_emoji"
+            aria-label="Nome do emoji"
             maxLength={32}
-            className="flex-1 px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+            className="flex-1 min-w-0 px-3 py-2 text-sm bg-discord-darker text-discord-text outline-none"
           />
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="px-3 py-2 text-sm rounded btn-secondary disabled:opacity-60 shrink-0"
+            className="h-9 px-4 text-sm btn-secondary shrink-0"
           >
             {uploading ? 'Enviando...' : 'Adicionar'}
           </button>
@@ -361,10 +393,11 @@ function EmojiManagementSection({ serverId, isOwner }: { serverId: string; isOwn
           />
         </div>
       )}
-      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
-      <p className="text-[10px] text-discord-text-muted mt-1">
-        Até 256KB, aceita GIF animado. Use assim no chat: <code>:nome_do_emoji:</code>
+      {error && <p className="text-xs text-rose-400 mt-1.5">{error}</p>}
+      <p className="text-[11px] text-discord-text-muted mt-2">
+        Até 256KB, aceita GIF animado. Use assim no chat:{' '}
+        <code className="font-mono text-discord-text bg-discord-darker px-1 py-0.5 rounded">:nome_do_emoji:</code>
       </p>
-    </div>
+    </section>
   )
 }

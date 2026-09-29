@@ -13,8 +13,12 @@ marcados com ⚠️ são limitações conhecidas e documentadas, não omissões.
 | Recuperação de senha | ✅ | `SettingsModal.tsx` (trocar senha logado) + Supabase Auth cuida do fluxo de "esqueci a senha" por e-mail |
 | Confirmação de e-mail | ✅ | Configurável no dashboard do Supabase (`supabase/README.md`) |
 | Proteção contra sessões inválidas | ✅ | `onAuthStateChange` do Supabase invalida sessão expirada automaticamente |
-| Logout de todas as sessões | ⚠️ | `signOut()` encerra a sessão atual; logout de *todos* os dispositivos exigiria `supabase.auth.admin.signOut(userId, 'global')` via uma Edge Function (não incluída) |
-| Rate limit para tentativas de login | ✅ | Nativo do Supabase Auth (configurável no dashboard) |
+| Logout de todas as sessões | ✅ | `SecurityTab.tsx`: "Sair de todos os outros aparelhos" (`signOut({scope:'others'})`) e "Sair de todos os aparelhos" (`scope:'global'`); redefinir senha derruba as outras sessões |
+| Rate limit para tentativas de login | ✅ | Nativo do Supabase Auth (configurável no dashboard) + trava de UX no `Login.tsx` |
+| Política de senha | ✅ | `lib/authValidation.ts` (mín. 8, letra + número, máx. 72 bytes) — **configure o mesmo no dashboard** (ver seção 9) |
+| 2FA cobrado no banco, não só na tela | ✅ | `013_audit_fixes.sql`: `mfa_requirement_met()` + política restritiva em todas as tabelas |
+| Open redirect pós-login | ✅ | `safeRedirectPath()` em `lib/authValidation.ts` |
+| Limpeza de dados locais no logout | ✅ | `AuthContext.tsx`: fecha canais Realtime, limpa cache de preview, notas/fixados locais, dispara `mamacos:signed-out` |
 
 ## 2. Banco de dados
 
@@ -34,8 +38,8 @@ marcados com ⚠️ são limitações conhecidas e documentadas, não omissões.
 |---|---|---|
 | Hierarquia de cargos | ✅ | `top_role_position()` em `006_roles_moderation.sql` |
 | Permissões por cargo | ✅ | `roles.permissions text[]` + `has_permission()` |
-| Permissões por canal | ⚠️ | Implementamos permissões por servidor/cargo; overrides por canal individual (ex: "cargo X não vê canal Y") não foram implementados — todo canal é visível a todo membro do servidor |
-| Proteção contra alteração de permissões | ✅ | `assign_role()` impede atribuir cargo igual/acima do próprio nível |
+| Permissões por canal | ✅ | Canal restrito por cargo (`channel_role_access`, `004`/`011`) |
+| Proteção contra alteração de permissões | ✅ | `013`: criar/editar/excluir/atribuir/remover cargo só abaixo do próprio nível, e só concedendo permissões que você tem |
 | Dono do servidor protegido | ✅ | Dono nunca pode ser kickado/banido/silenciado (`kick_member`, `ban_member`, `timeout_member`) nem perde acesso de edição do servidor |
 | Sistema de banimento | ✅ | `bans` + `ban_member()`/`unban_member()`, bloqueia reingresso via convite |
 | Sistema de expulsão | ✅ | `kick_member()` |
@@ -47,11 +51,11 @@ marcados com ⚠️ são limitações conhecidas e documentadas, não omissões.
 |---|---|---|
 | Controle de quem pode enviar mensagens | ✅ | RLS: só membros, e não quem está em timeout |
 | Controle de quem pode excluir mensagens | ✅ | Autor ou quem tem `manage_messages` |
-| Controle de quem pode editar mensagens | ✅ | Só o autor |
+| Controle de quem pode editar mensagens | ✅ | Só o autor; `013` impede mover mensagem de canal/conversa, forjar data e moderador reescrever texto alheio |
 | Proteção contra spam | ✅ | Trigger `check_message_rate_limit` |
 | Rate limit de mensagens | ✅ | Máx. 8 mensagens / 10s por usuário (`004_messages.sql`, `005_friends_dms.sql`) |
 | Limite de tamanho das mensagens | ✅ | `check (char_length(content) between 1 and 4000)` |
-| Sistema de denúncias | ⚠️ | Não implementado — o registro de moderação (`moderation_logs`) cobre ações de moderador, mas não há fluxo de "usuário denuncia mensagem" |
+| Sistema de denúncias | ✅ | `012_content_reports.sql` + limites em `013` |
 | Registro de ações administrativas | ✅ | `moderation_logs` + `ModerationLogModal.tsx` |
 
 ## 5. Uploads
@@ -142,3 +146,28 @@ são lacunas conscientes — coisas que dependem de infraestrutura externa
 (TURN, CDN privado, proteção de borda) ou são funcionalidades adicionais
 de produto (denúncias, política de retenção) que ficam como próximos
 passos claros, não como buracos de segurança escondidos.
+
+## 9. Auditoria 013 — o que o dono do projeto precisa fazer no painel
+
+Coisas que não dá pra resolver só com código/migration:
+
+1. **Rodar `supabase/migrations/013_audit_fixes.sql`** no SQL Editor.
+2. **Authentication → Providers → Email**: "Minimum password length" = 8 e
+   "Password requirements" = letras e dígitos (igual `authValidation.ts`).
+   Ligar **"Secure password change"** (troca de senha exige reautenticação).
+3. **Authentication → Settings**: ligar **"Leaked password protection"**.
+4. **Authentication → URL Configuration**: "Redirect URLs" só com
+   `https://mamaco-voip.vercel.app/**` e `mamacovoip://auth-callback**`
+   (nada de curinga amplo tipo `**`).
+5. **Authentication → Rate Limits**: revisar limites de login/cadastro/OTP.
+6. **Edge Functions**: redeploy da `link-preview` (agora exige usuário
+   logado e bloqueia SSRF). `supabase functions deploy link-preview`.
+7. **Storage → Policies**: conferir se o bucket `soundboard` não tem
+   políticas antigas mais permissivas que as `soundboard_objects_*`.
+8. **Buckets `dm-attachments` e `group-attachments` são públicos** ⚠️ —
+   quem tiver o link direto de um arquivo de DM baixa sem login. O ideal
+   é torná-los privados e usar `createSignedUrl` no app (mudança de
+   código no chat, ainda não feita).
+9. **CSP (`vercel.json`)**: se o LiveKit for auto-hospedado (não
+   `*.livekit.cloud`), acrescente o domínio dele em `connect-src`.
+

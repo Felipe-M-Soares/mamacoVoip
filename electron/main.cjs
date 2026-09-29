@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut, screen } = require('electron')
+const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut, screen, powerMonitor } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { exec, spawn } = require('node:child_process')
@@ -73,22 +73,50 @@ app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcScreenCapturer,We
 // package.json) — sem isso, o Windows nunca aprende que é este app
 // quem trata esse esquema de link.
 const AUTH_DEEP_LINK_SCHEME = 'mamacovoip'
-if (!app.isDefaultProtocolClient(AUTH_DEEP_LINK_SCHEME)) {
+// AUDITORIA: rodando em desenvolvimento (`electron .`), o executável é o
+// electron.exe genérico — registrar o esquema sem passar o caminho do
+// app faria o Windows abrir um Electron "vazio" ao clicar no link de
+// volta do login. Em produção (process.defaultApp === undefined) a
+// chamada simples continua sendo a certa.
+if (process.defaultApp && process.argv.length >= 2) {
+  if (!app.isDefaultProtocolClient(AUTH_DEEP_LINK_SCHEME, process.execPath, [path.resolve(process.argv[1])])) {
+    app.setAsDefaultProtocolClient(AUTH_DEEP_LINK_SCHEME, process.execPath, [path.resolve(process.argv[1])])
+  }
+} else if (!app.isDefaultProtocolClient(AUTH_DEEP_LINK_SCHEME)) {
   app.setAsDefaultProtocolClient(AUTH_DEEP_LINK_SCHEME)
 }
 
-let pendingAuthDeepLink = null
+// AUDITORIA: o link de volta chega como argumento de linha de comando —
+// ou seja, QUALQUER programa (ou página web, via link mamacovoip://)
+// consegue mandar um texto arbitrário até aqui. O renderer já valida o
+// `state` do OAuth (ver AuthContext.tsx), mas não custa nada barrar no
+// processo principal o que claramente não é um link nosso: tamanho
+// absurdo ou algo que nem é uma URL válida desse esquema.
+const MAX_AUTH_DEEP_LINK_LENGTH = 8192
+function isValidAuthDeepLink(url) {
+  if (typeof url !== 'string' || url.length > MAX_AUTH_DEEP_LINK_LENGTH) return false
+  if (!url.toLowerCase().startsWith(`${AUTH_DEEP_LINK_SCHEME}://`)) return false
+  try {
+    return new URL(url).protocol === `${AUTH_DEEP_LINK_SCHEME}:`
+  } catch {
+    return false
+  }
+}
+
+function findAuthDeepLinkInArgv(argv) {
+  return (argv || []).find((arg) => isValidAuthDeepLink(arg)) ?? null
+}
+
 // Cobre o caso (2) acima: app fechado, aberto direto pelo link.
-pendingAuthDeepLink =
-  process.argv.find((arg) => arg.startsWith(`${AUTH_DEEP_LINK_SCHEME}://`)) ?? null
+let pendingAuthDeepLink = findAuthDeepLinkInArgv(process.argv)
 
 function handleAuthDeepLink(url) {
-  if (!url || !url.startsWith(`${AUTH_DEEP_LINK_SCHEME}://`)) return
+  if (!isValidAuthDeepLink(url)) return
   if (!mainWindow || mainWindow.isDestroyed()) {
     pendingAuthDeepLink = url
     return
   }
-  mainWindow.webContents.send('google-auth-callback', url)
+  sendToMain('google-auth-callback', url)
   if (mainWindow.isMinimized()) mainWindow.restore()
   forceFocusMainWindow()
 }
@@ -130,34 +158,6 @@ function tryLoadUiohook() {
 
 const isDev = !app.isPackaged
 
-// Rede de segurança geral: se algum erro escapar de todos os try/catch
-// (de qualquer parte do app, não só do push-to-talk), isso evita que
-// ele derrube o processo principal inteiro — o que travaria o app
-// inteiro pra todo mundo, muito pior do que uma função específica
-// falhar sozinha.
-process.on('uncaughtException', (err) => {
-  console.error('Erro não tratado no processo principal:', err)
-  // DÉCIMA SÉTIMA RODADA: além do console (que ninguém vê num app
-  // empacotado — foi exatamente esse o motivo de existir o log em
-  // arquivo abaixo, appendDebugLog), grava aqui também. `appendDebugLog`
-  // é uma DECLARAÇÃO de função (não uma const/arrow), então já está
-  // disponível aqui mesmo definida mais abaixo no arquivo — só importa
-  // que os dois já existam quando um erro de verdade acontecer em
-  // tempo de execução, o que sempre é depois do script inteiro já ter
-  // rodado uma vez.
-  appendDebugLog('main:uncaughtException', `${err?.message ?? err}\n${err?.stack ?? ''}`)
-})
-
-// Antes só existia o de cima (uncaughtException) — uma Promise rejeitada
-// sem .catch() no processo principal NÃO dispara esse evento, dispara
-// este aqui (unhandledRejection), que não existia. Mesmo tratamento:
-// não derruba o processo, só registra pra dar pra diagnosticar depois.
-process.on('unhandledRejection', (reason) => {
-  console.error('Promise rejeitada sem tratamento no processo principal:', reason)
-  const detail = reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason)
-  appendDebugLog('main:unhandledRejection', detail)
-})
-
 // ============================================================
 // DÉCIMA QUARTA RODADA — log em ARQUIVO, sem depender do DevTools.
 // Motivo direto: pedi pra abrir o DevTools (Ctrl+Shift+I) pra ver por
@@ -175,15 +175,111 @@ process.on('unhandledRejection', (reason) => {
 // os pontos de uso em VoiceContext.tsx) — tudo no mesmo arquivo, em
 // ordem, pra dar o quadro completo de uma tentativa de compartilhamento
 // sem precisar cruzar dois lugares diferentes.
+const fs = require('node:fs')
 const debugLogPath = path.join(app.getPath('userData'), 'mamacos-debug.log')
-function appendDebugLog(source, message) {
+// AUDITORIA — dois problemas reais no log original:
+//  1. crescia SEM LIMITE (cada sessão de compartilhamento grava várias
+//     linhas, e o renderer também escreve aqui via debug:log) — em
+//     semanas de uso vira dezenas/centenas de MB no AppData. Agora, ao
+//     passar de DEBUG_LOG_MAX_BYTES, o arquivo atual vira
+//     "mamacos-debug.log.1" (substituindo o anterior) e um novo começa.
+//  2. usava appendFileSync — escrita SÍNCRONA em disco na thread
+//     principal do Electron, que é a mesma que repassa quadros de vídeo
+//     e áudio pro renderer. Agora as linhas vão pra uma fila e são
+//     gravadas de forma assíncrona, em lote.
+const DEBUG_LOG_MAX_BYTES = 5 * 1024 * 1024
+const DEBUG_LOG_MAX_LINE = 8000
+let debugLogQueue = []
+let debugLogFlushing = false
+let debugLogSize = -1 // -1 = ainda não sabemos o tamanho atual do arquivo
+
+function formatDebugLogLine(source, message) {
+  let text = typeof message === 'string' ? message : String(message)
+  if (text.length > DEBUG_LOG_MAX_LINE) text = `${text.slice(0, DEBUG_LOG_MAX_LINE)}… (truncado)`
+  return `[${new Date().toISOString()}] [${source}] ${text}\n`
+}
+
+async function flushDebugLog() {
+  if (debugLogFlushing) return
+  debugLogFlushing = true
   try {
-    require('node:fs').appendFileSync(debugLogPath, `[${new Date().toISOString()}] [${source}] ${message}\n`)
-  } catch {
-    // Sem essa pasta gravável, ou disco cheio — não é crítico o
-    // suficiente pra incomodar quem está usando o app com isso.
+    while (debugLogQueue.length > 0) {
+      const chunk = debugLogQueue.join('')
+      debugLogQueue = []
+      const chunkBytes = Buffer.byteLength(chunk)
+      if (debugLogSize < 0) {
+        try {
+          debugLogSize = (await fs.promises.stat(debugLogPath)).size
+        } catch {
+          debugLogSize = 0
+        }
+      }
+      if (debugLogSize + chunkBytes > DEBUG_LOG_MAX_BYTES) {
+        try {
+          await fs.promises.rename(debugLogPath, `${debugLogPath}.1`)
+        } catch {
+          // sem arquivo ainda, ou travado por outro programa — segue sem girar
+        }
+        debugLogSize = 0
+      }
+      try {
+        await fs.promises.appendFile(debugLogPath, chunk)
+        debugLogSize += chunkBytes
+      } catch {
+        // Sem essa pasta gravável, ou disco cheio — não é crítico o
+        // suficiente pra incomodar quem está usando o app com isso.
+      }
+    }
+  } finally {
+    debugLogFlushing = false
   }
 }
+
+function appendDebugLog(source, message) {
+  debugLogQueue.push(formatDebugLogLine(source, message))
+  void flushDebugLog()
+}
+
+// Na hora de fechar o app não dá pra esperar a fila assíncrona — grava o
+// que sobrou de forma síncrona (uma vez só, fora de qualquer caminho quente).
+function flushDebugLogSync() {
+  if (debugLogQueue.length === 0) return
+  const chunk = debugLogQueue.join('')
+  debugLogQueue = []
+  try {
+    fs.appendFileSync(debugLogPath, chunk)
+  } catch {
+    // idem acima
+  }
+}
+
+
+// Rede de segurança geral: se algum erro escapar de todos os try/catch
+// (de qualquer parte do app, não só do push-to-talk), isso evita que
+// ele derrube o processo principal inteiro — o que travaria o app
+// inteiro pra todo mundo, muito pior do que uma função específica
+// falhar sozinha.
+process.on('uncaughtException', (err) => {
+  console.error('Erro não tratado no processo principal:', err)
+  // DÉCIMA SÉTIMA RODADA: além do console (que ninguém vê num app
+  // empacotado — foi exatamente esse o motivo de existir o log em
+  // arquivo acima, appendDebugLog), grava aqui também. AUDITORIA: o
+  // bloco do log foi movido pra ANTES destes handlers — antes ele vinha
+  // depois, e `debugLogPath` (uma const) ainda estaria na "zona morta"
+  // se um erro acontecesse cedo demais, fazendo o próprio handler lançar
+  // outro erro.
+  appendDebugLog('main:uncaughtException', `${err?.message ?? err}\n${err?.stack ?? ''}`)
+})
+
+// Antes só existia o de cima (uncaughtException) — uma Promise rejeitada
+// sem .catch() no processo principal NÃO dispara esse evento, dispara
+// este aqui (unhandledRejection), que não existia. Mesmo tratamento:
+// não derruba o processo, só registra pra dar pra diagnosticar depois.
+process.on('unhandledRejection', (reason) => {
+  console.error('Promise rejeitada sem tratamento no processo principal:', reason)
+  const detail = reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason)
+  appendDebugLog('main:unhandledRejection', detail)
+})
 
 // URL/arquivo que o app tem permissão de carregar — qualquer tentativa
 // de navegar pra outro lugar (ex: um link malicioso injetado de algum
@@ -205,13 +301,77 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
-function isAllowedNavigation(url) {
-  if (isDev) return url.startsWith(DEV_SERVER_URL)
+const DEV_SERVER_ORIGIN = (() => {
   try {
-    return new URL(url).protocol === 'app:'
+    return new URL(DEV_SERVER_URL).origin
+  } catch {
+    return 'http://localhost:5173'
+  }
+})()
+
+function isAllowedNavigation(url) {
+  try {
+    const parsed = new URL(url)
+    // AUDITORIA: compara a ORIGEM exata (antes era `startsWith`, que
+    // aceitaria algo como "http://localhost:5173.site-malicioso.com").
+    if (isDev) return parsed.origin === DEV_SERVER_ORIGIN
+    return parsed.protocol === 'app:' && parsed.host === 'bundle'
   } catch {
     return false
   }
+}
+
+// AUDITORIA — manda uma mensagem pra janela principal sem risco de
+// lançar "Object has been destroyed": `sendToMain(...)`
+// (usado em vários lugares antes) só protege contra `mainWindow` ser
+// null, não contra a janela/webContents já ter sido destruída (ex.: um
+// evento de processo filho ou do auto-updater chegando bem durante o
+// fechamento do app) — o que virava uma exceção não tratada no processo
+// principal.
+function sendToMain(channel, ...args) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const contents = mainWindow.webContents
+  if (!contents || contents.isDestroyed()) return
+  try {
+    contents.send(channel, ...args)
+  } catch {
+    // janela fechando bem nesse instante — nada a fazer
+  }
+}
+
+// AUDITORIA — validação do REMETENTE de toda mensagem IPC (recomendação
+// explícita do checklist de segurança do Electron). Sem isso, qualquer
+// frame que por algum motivo conseguisse rodar dentro de uma janela
+// nossa (um iframe de terceiros, uma página carregada por engano) teria
+// acesso às mesmas funções poderosas do processo principal: iniciar
+// capturas de tela/áudio, restaurar janelas de outros programas, etc.
+// Só aceitamos mensagens vindas do FRAME PRINCIPAL de uma página do
+// próprio app (app://bundle em produção, o servidor do Vite em dev).
+function isTrustedIpcSender(event) {
+  const frame = event?.senderFrame
+  if (!frame) return false
+  if (frame.parent) return false // só o frame principal, nunca um iframe
+  return isAllowedNavigation(frame.url)
+}
+
+function handleTrusted(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!isTrustedIpcSender(event)) {
+      appendDebugLog('main', `IPC recusado (remetente não confiável) em ${channel}`)
+      throw new Error('Remetente não autorizado')
+    }
+    return handler(event, ...args)
+  })
+}
+
+function onTrusted(channel, listener) {
+  ipcMain.on(channel, (event, ...args) => {
+    if (!isTrustedIpcSender(event)) {
+      appendDebugLog('main', `IPC recusado (remetente não confiável) em ${channel}`)
+      return
+    }
+    listener(event, ...args)
+  })
 }
 
 // TRIGÉSIMA SEXTA RODADA — falha de segurança real encontrada numa
@@ -238,7 +398,11 @@ function openExternalSafely(url) {
       appendDebugLog('main', `openExternalSafely: bloqueado protocolo não permitido (${parsed.protocol}) — url=${url}`)
       return
     }
-    shell.openExternal(url)
+    // openExternal devolve uma Promise — sem o .catch, uma falha (ex.:
+    // nenhum navegador padrão configurado) virava unhandledRejection.
+    shell.openExternal(parsed.toString()).catch((err) => {
+      appendDebugLog('main', `openExternalSafely: falha ao abrir — ${err?.message ?? err}`)
+    })
   } catch {
     // URL malformada — nem tenta abrir
   }
@@ -401,32 +565,93 @@ let gameCheckTickCount = 0
 // jogo conhecido (KNOWN_GAMES) quanto pra checar se um processo que
 // estamos vigiando (watchedProcessNames) ainda está rodando — evitar dois
 // `tasklist`/`ps` separados a cada tick.
-function getRunningProcessListLower() {
+// AUDITORIA — duas falhas reais na versão anterior (que fazia só
+// `tasklist` e procurava o nome com `includes` no texto inteiro):
+//  1. `tasklist` no formato padrão (tabela) CORTA o nome da imagem em 25
+//     caracteres — "fortniteclient-win64-shipping.exe" (33) e
+//     "valorant-win64-shipping.exe" (27) nunca batiam, então Fortnite e
+//     Valorant nunca eram detectados por esse nome. O formato CSV
+//     (`/fo csv /nh`) não corta nada.
+//  2. `includes` num texto corrido dava falso positivo com qualquer
+//     processo cujo nome TERMINA igual: "trust.exe" batia com "rust.exe",
+//     "spark.exe" com "ark.exe", etc. No Windows agora a comparação é por
+//     nome EXATO de processo (um Set). Fora do Windows (ps), mantemos a
+//     busca por trecho de texto de antes (nomes vêm com caminho no macOS
+//     e cortados em 15 caracteres no Linux).
+function getRunningProcessSnapshot() {
   return new Promise((resolve) => {
-    const cmd =
-      process.platform === 'win32' ? 'tasklist' : process.platform === 'darwin' ? 'ps -Ao comm' : 'ps -eo comm'
+    const isWin = process.platform === 'win32'
+    const cmd = isWin ? 'tasklist /fo csv /nh' : process.platform === 'darwin' ? 'ps -Ao comm' : 'ps -eo comm'
 
-    exec(cmd, { windowsHide: true, timeout: 5000 }, (err, stdout) => {
-      resolve(err || !stdout ? '' : stdout.toLowerCase())
+    exec(cmd, { windowsHide: true, timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      if (err || !stdout) {
+        resolve(null)
+        return
+      }
+      const text = stdout.toLowerCase()
+      const names = new Set()
+      if (isWin) {
+        for (const line of text.split(/\r?\n/)) {
+          // Cada linha: "nome.exe","pid","sessão","#","memória"
+          const match = /^"([^"]+)"/.exec(line)
+          if (match) names.add(match[1])
+        }
+      }
+      resolve({ text, names, isWin })
     })
   })
 }
 
-function detectRunningGameFromList(lower) {
-  if (!lower) return null
+// `name` pode vir com ou sem ".exe" (KNOWN_GAMES usa com; os nomes
+// vigiados vindos do renderer/scanner normalmente vêm sem).
+function snapshotHasProcess(snapshot, name) {
+  if (!snapshot || !name) return false
+  const lower = String(name).toLowerCase()
+  if (snapshot.isWin) {
+    return snapshot.names.has(lower) || snapshot.names.has(`${lower}.exe`)
+  }
+  return snapshot.text.includes(lower)
+}
+
+function detectRunningGameFromSnapshot(snapshot) {
+  if (!snapshot) return null
   for (const [processName, label] of Object.entries(KNOWN_GAMES)) {
-    if (lower.includes(processName)) return label
+    if (snapshotHasProcess(snapshot, processName)) return label
   }
   return null
 }
 
+// Evita que duas verificações se sobreponham (tasklist + scanner podem
+// passar dos 15s do intervalo com a máquina sob carga pesada de um jogo).
+let gameCheckInFlight = false
+
 function startGameDetection() {
   if (gameCheckTimer) return
   gameCheckTimer = setInterval(async () => {
-    gameCheckTickCount++
-    const lower = await getRunningProcessListLower()
+    if (gameCheckInFlight) return
+    gameCheckInFlight = true
+    try {
+      await runGameCheckTick()
+    } catch (err) {
+      appendDebugLog('main', `startGameDetection: falha na verificação — ${err?.message ?? err}`)
+    } finally {
+      gameCheckInFlight = false
+    }
+  }, GAME_CHECK_INTERVAL_MS)
 
-    let game = detectRunningGameFromList(lower)
+  if (foregroundCheckTimer) return
+  foregroundCheckTimer = setInterval(runForegroundCheckTick, FOREGROUND_CHECK_INTERVAL_MS)
+}
+
+async function runGameCheckTick() {
+    gameCheckTickCount++
+    const snapshot = await getRunningProcessSnapshot()
+    // AUDITORIA: tasklist/ps falhou nessa rodada (timeout sob carga, por
+    // exemplo) — mantém o estado anterior em vez de "piscar" o status pra
+    // "não jogando" por causa de uma falha isolada.
+    if (!snapshot) return
+
+    let game = detectRunningGameFromSnapshot(snapshot)
 
     // NONA RODADA — corrige o status "Jogando X" ficando travado mesmo
     // depois de fechar o jogo de verdade. `tasklist` sozinho só prova que
@@ -470,28 +695,29 @@ function startGameDetection() {
 
     if (game !== currentGame) {
       currentGame = game
-      mainWindow?.webContents.send('game-status-changed', game)
+      sendToMain('game-status-changed', game)
     }
 
     // Se tem um processo sendo vigiado (compartilhamento de tela cheia
     // ativo) e ele SUMIU da lista depois de já termos confirmado que
     // estava rodando, avisa o renderer pra encerrar o compartilhamento
     // sozinho — ver screenShareGameHint.ts e VoiceContext.tsx.
-    if (watchedProcessNames.length > 0) {
-      const stillRunning = Boolean(lower) && watchedProcessNames.some((name) => lower.includes(name))
+    // AUDITORIA: se o próprio `tasklist` falhou nessa rodada (snapshot
+    // null), NÃO conclui que o processo fechou — antes, uma falha isolada
+    // do tasklist (timeout sob carga) encerrava o compartilhamento sozinho.
+    if (watchedProcessNames.length > 0 && snapshot) {
+      const stillRunning = watchedProcessNames.some((name) => snapshotHasProcess(snapshot, name))
       if (stillRunning) {
         watchedProcessWasSeen = true
       } else if (watchedProcessWasSeen) {
         watchedProcessNames = []
         watchedProcessWasSeen = false
-        mainWindow?.webContents.send('watched-process-exited')
+        sendToMain('watched-process-exited')
       }
     }
+}
 
-  }, GAME_CHECK_INTERVAL_MS)
-
-  if (foregroundCheckTimer) return
-  foregroundCheckTimer = setInterval(async () => {
+async function runForegroundCheckTick() {
     // Só atualiza o "último app em primeiro plano" quando NOSSA janela não
     // está em foco — assim, no instante em que a pessoa clica em
     // "Compartilhar tela" dentro do próprio app (quando o foco já é nosso),
@@ -529,7 +755,13 @@ function startGameDetection() {
         foregroundCheckInFlight = false
       }
     }
-  }, FOREGROUND_CHECK_INTERVAL_MS)
+}
+
+function stopGameDetection() {
+  if (gameCheckTimer) clearInterval(gameCheckTimer)
+  if (foregroundCheckTimer) clearInterval(foregroundCheckTimer)
+  gameCheckTimer = null
+  foregroundCheckTimer = null
 }
 
 // ============================================================
@@ -541,7 +773,7 @@ function startGameDetection() {
 //
 // A ideia: enquanto uma dessas transmissões de tela cheia "sobre um
 // jogo" está ativa, fica de olho em qual é a janela em PRIMEIRO PLANO
-// (não só "o processo está rodando", que é o que detectRunningGameFromList()
+// (não só "o processo está rodando", que é o que detectRunningGameFromSnapshot()
 // já verifica) — assim que deixar de ser o próprio jogo, avisa o
 // renderer, que troca o vídeo enviado pelos outros por uma tela de
 // aviso (ver VoiceContext.tsx) até o jogo voltar a ser a janela ativa.
@@ -883,7 +1115,15 @@ function ensureScanner() {
       settled = true
       resolve(value)
     }
+    // AUDITORIA: escrever no stdin de um PowerShell que acabou de morrer
+    // emite 'error' (EPIPE) no stream — sem listener, isso virava uma
+    // exceção não tratada no processo principal.
+    proc.stdin?.on('error', () => {})
     proc.stdout?.on('data', (chunk) => {
+      // AUDITORIA: dados atrasados de um scanner ANTIGO (já substituído
+      // por um novo depois de um timeout) não podem consumir a fila de
+      // perguntas do scanner novo — isso dessincronizava respostas.
+      if (scannerProc !== proc) return
       scannerBuffer += chunk.toString()
       let idx
       while ((idx = scannerBuffer.indexOf('\n')) >= 0) {
@@ -907,18 +1147,29 @@ function ensureScanner() {
         }
       }
     })
+    // AUDITORIA: só derruba o scanner ATUAL se for este mesmo processo —
+    // antes, o 'exit' atrasado de um scanner antigo (morto por timeout)
+    // chamava killScanner() e matava o scanner NOVO que já estava de pé.
     proc.on('error', () => {
       settleOnce(null)
-      killScanner()
+      if (scannerProc === proc) killScanner()
     })
     proc.on('exit', () => {
       settleOnce(null)
-      killScanner()
+      if (scannerProc === proc) killScanner()
     })
     // Segurança: se o 'READY' nunca chegar (Add-Type falhando por algum
     // motivo raro do ambiente/política do sistema), não trava pra
     // sempre — só desiste e volta a se comportar como antes (best-effort).
-    setTimeout(() => settleOnce(null), 8000)
+    // AUDITORIA: e mata esse PowerShell travado — antes ele ficava vivo
+    // (e a Promise resolvida com null ficava em cache pra sempre, então
+    // o scanner nunca mais era recriado nessa sessão do app).
+    const readyTimer = setTimeout(() => {
+      if (settled) return
+      settleOnce(null)
+      if (scannerProc === proc) killScanner()
+    }, 8000)
+    proc.once('exit', () => clearTimeout(readyTimer))
   })
 
   return scannerReadyPromise
@@ -1168,7 +1419,10 @@ function startForegroundWatch(processNames) {
   stopForegroundWatch()
   if (process.platform !== 'win32') return false
 
-  foregroundWatcherGames = (processNames || []).map((n) => String(n).toLowerCase())
+  foregroundWatcherGames = (Array.isArray(processNames) ? processNames : [])
+    .slice(0, 32)
+    .map((n) => String(n).toLowerCase())
+    .filter(Boolean)
   if (foregroundWatcherGames.length === 0) return false
 
   // -EncodedCommand (Base64, UTF-16LE) evita qualquer problema de
@@ -1185,6 +1439,11 @@ public class MamacosFg {
 }
 "@
 while ($true) {
+  # AUDITORIA: se o Mamacos Voip fechar/travar sem conseguir matar este
+  # PowerShell (queda do processo principal, "Finalizar tarefa"), ele
+  # ficava rodando esse laço PRA SEMPRE em segundo plano. Agora ele sai
+  # sozinho assim que o processo pai deixa de existir.
+  if (-not (Get-Process -Id ${process.pid} -ErrorAction SilentlyContinue)) { exit }
   try {
     $hwnd = [MamacosFg]::GetForegroundWindow()
     $procId = 0
@@ -1199,14 +1458,16 @@ while ($true) {
 `
   try {
     const encoded = Buffer.from(script, 'utf16le').toString('base64')
-    foregroundWatcherProc = spawn(
+    const watcher = spawn(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
       { windowsHide: true }
     )
+    foregroundWatcherProc = watcher
     let lineBuffer = ''
     let lastFocused = null
-    foregroundWatcherProc.stdout?.on('data', (chunk) => {
+    watcher.stdout?.on('data', (chunk) => {
+      if (foregroundWatcherProc !== watcher) return
       lineBuffer += chunk.toString()
       let newlineIndex
       while ((newlineIndex = lineBuffer.indexOf('\n')) >= 0) {
@@ -1215,17 +1476,22 @@ while ($true) {
         const isFocused = foregroundWatcherGames.some((name) => processName === name)
         if (isFocused !== lastFocused) {
           lastFocused = isFocused
-          mainWindow?.webContents.send('game-foreground-changed', isFocused)
+          sendToMain('game-foreground-changed', isFocused)
         }
       }
     })
-    foregroundWatcherProc.on('error', () => {
+    // AUDITORIA: só zera a referência se ainda for ESTE processo — antes,
+    // o 'exit' atrasado de um vigia antigo (morto por stopForegroundWatch
+    // logo antes de iniciar um novo) zerava a referência do vigia NOVO,
+    // que ficava órfão: ninguém mais conseguia matá-lo, nem ao fechar o
+    // app (um PowerShell rodando um laço a cada 700ms pra sempre).
+    watcher.on('error', () => {
       // PowerShell pode não estar disponível/bloqueado por política do
       // sistema — desiste dessa proteção extra sem quebrar nada mais.
-      foregroundWatcherProc = null
+      if (foregroundWatcherProc === watcher) foregroundWatcherProc = null
     })
-    foregroundWatcherProc.on('exit', () => {
-      foregroundWatcherProc = null
+    watcher.on('exit', () => {
+      if (foregroundWatcherProc === watcher) foregroundWatcherProc = null
     })
     return true
   } catch {
@@ -1308,8 +1574,36 @@ function createOverlayWindow() {
   overlay.setAlwaysOnTop(true, 'screen-saver')
   overlay.setIgnoreMouseEvents(true)
   overlay.loadFile(path.join(__dirname, 'overlay.html'))
+  // Assim que a página da sobreposição carregar, já entrega o último
+  // estado conhecido da call (ver lastOverlayState/ensureOverlayWindow).
+  overlay.webContents.on('did-finish-load', () => {
+    if (lastOverlayState !== null && !overlay.isDestroyed()) {
+      overlay.webContents.send('overlay:voice-state', lastOverlayState)
+    }
+  })
+  overlay.on('closed', () => {
+    if (overlayWindow === overlay) {
+      overlayWindow = null
+      overlayVisible = false
+    }
+  })
   overlay.hide()
   return overlay
+}
+
+// AUDITORIA — desempenho: antes a janela da sobreposição era criada
+// SEMPRE ao abrir o app, mesmo pra quem nunca aperta Ctrl+Shift+O — uma
+// janela transparente a mais = um processo de renderização a mais do
+// Chromium (dezenas de MB de RAM + tempo de inicialização) só pra ficar
+// escondida. Agora ela só nasce na primeira vez que for mostrada, e o
+// último estado da call fica guardado aqui pra ela já abrir atualizada.
+let lastOverlayState = null
+
+function ensureOverlayWindow() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    overlayWindow = createOverlayWindow()
+  }
+  return overlayWindow
 }
 
 // Reconquista o foco da janela principal depois que o Windows rouba ele
@@ -1414,8 +1708,13 @@ function createWindow() {
   // ausente), mostra um alerta nativo do sistema automaticamente — sem
   // isso, uma falha de carregamento vira só uma tela preta muda, sem
   // nenhuma pista visível de por que.
-  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (errorCode === -3) return // ERR_ABORTED — comum durante navegação normal, não é erro de verdade
+    // AUDITORIA: esse evento também dispara pra IFRAMES (ex.: uma
+    // prévia de link/vídeo embutido que falhou ao carregar) — antes
+    // isso abria uma caixa de erro nativa "falha ao carregar" por causa
+    // de um pedaço irrelevante da página. Só a página principal importa.
+    if (!isMainFrame) return
     dialog.showErrorBox(
       'Mamacos Voip — falha ao carregar',
       `Código: ${errorCode}\nDescrição: ${errorDescription}\nCaminho: ${validatedURL}`,
@@ -1424,8 +1723,20 @@ function createWindow() {
 
   // Se a página carregar mas travar depois (aba/processo interno
   // morreu), avisa também — outro jeito comum de "tela preta muda".
+  // AUDITORIA: antes só mostrava o alerta e deixava a janela PRETA pra
+  // sempre (só reiniciando o app inteiro pela bandeja). Agora recarrega a
+  // página sozinho depois do aviso — com um limite, pra não entrar num
+  // laço infinito de "trava → recarrega → trava" se o problema for
+  // permanente.
+  let rendererRecoveryAttempts = 0
   win.webContents.on('render-process-gone', (_event, details) => {
+    appendDebugLog('main', `render-process-gone: reason=${details.reason} exitCode=${details.exitCode}`)
+    if (details.reason === 'clean-exit') return
     dialog.showErrorBox('Mamacos Voip — processo travou', `Motivo: ${details.reason}`)
+    if (rendererRecoveryAttempts < 3 && !win.isDestroyed()) {
+      rendererRecoveryAttempts++
+      win.webContents.reload()
+    }
   })
 
   // Bloqueia navegação pra qualquer lugar que não seja o próprio app —
@@ -1458,6 +1769,12 @@ function createWindow() {
     if (isQuitting) return
     event.preventDefault()
     win.hide()
+  })
+  // AUDITORIA: no Windows, ao desligar/reiniciar/sair da conta, o 'close'
+  // acima (que só esconde a janela) fazia o app "segurar" o desligamento
+  // — o Windows mostrava "Mamacos Voip está impedindo o desligamento".
+  win.on('session-end', () => {
+    isQuitting = true
   })
 
   mainWindow = win
@@ -1520,16 +1837,19 @@ function createTray(win) {
 // forceFocusMainWindow() já cuida de mostrar + contornar a proteção do
 // Windows contra roubo de foco.
 app.on('second-instance', (_event, argv) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  forceFocusMainWindow()
-
   // Windows/Linux entregam o link de volta do login do Google assim:
   // como o app já estava aberto, o clique no link "abre outra
   // tentativa" que cai aqui em vez de virar janela nova — o link vem
   // dentro desses argumentos de linha de comando.
-  const deepLink = argv.find((arg) => arg.startsWith(`${AUTH_DEEP_LINK_SCHEME}://`))
+  // AUDITORIA: tratado ANTES da checagem de janela — se a segunda
+  // tentativa chegasse durante a abertura (janela ainda não criada), o
+  // link se perdia; handleAuthDeepLink já guarda como pendente nesse caso.
+  const deepLink = findAuthDeepLinkInArgv(argv)
   if (deepLink) handleAuthDeepLink(deepLink)
+
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  forceFocusMainWindow()
 })
 
 app.whenReady().then(() => {
@@ -1538,13 +1858,30 @@ app.whenReady().then(() => {
   // bloqueio silencioso de módulos JS do Chromium.
   if (!isDev) {
     protocol.handle('app', (request) => {
-      const parsedUrl = new URL(request.url)
-      let pathname = decodeURIComponent(parsedUrl.pathname)
+      let pathname
+      try {
+        const parsedUrl = new URL(request.url)
+        // Só existe um "host" legítimo (app://bundle/...) — qualquer outro
+        // é recusado em vez de servir os mesmos arquivos sob outra origem.
+        if (parsedUrl.host !== 'bundle') return new Response('Not Found', { status: 404 })
+        // decodeURIComponent LANÇA exceção com "%" malformado (ex.:
+        // "/%E0%A4%A") — antes isso estourava dentro do handler.
+        pathname = decodeURIComponent(parsedUrl.pathname)
+      } catch {
+        return new Response('Bad Request', { status: 400 })
+      }
       if (pathname === '' || pathname === '/') pathname = '/index.html'
       const filePath = path.join(DIST_DIR, pathname)
 
-      // Nunca serve nada fora da pasta dist/ (evita path traversal tipo "../../../etc/passwd")
-      if (!filePath.startsWith(DIST_DIR)) {
+      // Nunca serve nada fora da pasta dist/ (evita path traversal tipo "../../../etc/passwd").
+      // AUDITORIA: a checagem antiga era `filePath.startsWith(DIST_DIR)`,
+      // que deixava passar pastas IRMÃS com o mesmo prefixo — um
+      // "..%2fdist-qualquer/arquivo" (a barra codificada só vira "/"
+      // DEPOIS do decodeURIComponent, então o parser de URL não a
+      // normaliza) resolvia pra ".../dist-qualquer/arquivo", que começa
+      // com ".../dist" e passava. path.relative resolve isso de vez.
+      const relative = path.relative(DIST_DIR, filePath)
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || filePath.includes('\0')) {
         return new Response('Forbidden', { status: 403 })
       }
       return net.fetch(pathToFileURL(filePath).toString())
@@ -1558,13 +1895,23 @@ app.whenReady().then(() => {
   // uma vez aqui na configuração do processo principal — qualquer
   // permissão fora dessa lista (geolocalização, sensores, etc.) é
   // negada por padrão, mesmo que algum código tente pedir.
-  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     // "fullscreen" precisa estar aqui pro botão de tela cheia da
     // transmissão funcionar — sem ela, o navegador nega o pedido de
     // element.requestFullscreen() em silêncio (sem erro nenhum no
     // console), e o botão simplesmente não fazia nada.
     const allowed = ['media', 'display-capture', 'notifications', 'fullscreen']
-    callback(allowed.includes(permission))
+    // AUDITORIA: antes a permissão era concedida pra QUALQUER origem que
+    // pedisse (inclusive um iframe de terceiros embutido numa mensagem,
+    // que ganharia microfone/câmera/captura de tela sem perguntar nada).
+    // Agora só a própria página do app (app://bundle ou o Vite em dev).
+    let requestingUrl = ''
+    try {
+      requestingUrl = details?.requestingUrl || webContents?.getURL() || ''
+    } catch {
+      requestingUrl = ''
+    }
+    callback(allowed.includes(permission) && isAllowedNavigation(requestingUrl))
   })
 
   // OITAVA RODADA — mudança de arquitetura importante: esse trecho inteiro
@@ -1607,12 +1954,15 @@ app.whenReady().then(() => {
   // nada. O ScreenSharePicker.tsx passou a PEDIR essa lista ativamente
   // (em vez de esperar um evento chegar sozinho) assim que a pessoa clica
   // em "Compartilhar tela".
-  ipcMain.handle('screen-share:get-sources', async () => {
+  handleTrusted('screen-share:get-sources', async () => {
     try {
       const sources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
         thumbnailSize: { width: 320, height: 200 },
-        fetchWindowIcons: true,
+        // AUDITORIA: os ícones de janela (appIcon) nunca eram enviados pro
+        // renderer (ver o `sources.map` no retorno abaixo) — pedir eles só
+        // gastava tempo extra do Windows a cada abertura do seletor.
+        fetchWindowIcons: false,
       })
       // Em telas múltiplas, precisamos saber qual delas é a PRINCIPAL —
       // sem isso, o atalho "Compartilhar seu jogo" (quando cai no
@@ -1852,7 +2202,7 @@ app.whenReady().then(() => {
   // verdade (senão o próximo screen-share:get-sources rodaria rápido
   // demais e ainda pegaria ela como minimizada). Best-effort: `ok: false`
   // só significa "segue mostrando o aviso de sempre", nunca quebra nada.
-  ipcMain.handle('screen-share:restore-window', async (_event, hwnd) => {
+  handleTrusted('screen-share:restore-window', async (_event, hwnd) => {
     if (process.platform !== 'win32' || !Number.isFinite(hwnd) || hwnd <= 0) return { ok: false }
     const result = await scannerQuery(`R|${Math.trunc(hwnd)}`)
     await new Promise((resolve) => setTimeout(resolve, 350))
@@ -1868,7 +2218,7 @@ app.whenReady().then(() => {
   // essa janela pra frente sozinho (comportamento da própria API de
   // captura do sistema), então precisamos tentar recuperar o foco do app
   // de volta em seguida.
-  ipcMain.handle('screen-share:select', (_event, sourceId) => {
+  handleTrusted('screen-share:select', (_event, sourceId) => {
     if (sourceId) scheduleFocusReclaim()
   })
 
@@ -1960,7 +2310,14 @@ app.whenReady().then(() => {
       }
     }
     try {
-      if (!fallbackPinnedSourceId) {
+      // AUDITORIA: só atende pedidos vindos da própria página do app.
+      let requestUrl = ''
+      try {
+        requestUrl = _request?.frame?.url || _request?.securityOrigin || ''
+      } catch {
+        requestUrl = _request?.securityOrigin || ''
+      }
+      if (!fallbackPinnedSourceId || !isAllowedNavigation(requestUrl)) {
         respond({})
         return
       }
@@ -1974,8 +2331,8 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('screen-share:pin-fallback-source', (_event, sourceId) => {
-    fallbackPinnedSourceId = sourceId || null
+  handleTrusted('screen-share:pin-fallback-source', (_event, sourceId) => {
+    fallbackPinnedSourceId = typeof sourceId === 'string' && sourceId.length < 256 ? sourceId : null
   })
   } // fim do `if (process.platform !== 'linux')` — ver DÉCIMA PRIMEIRA RODADA acima
 
@@ -1983,7 +2340,7 @@ app.whenReady().then(() => {
   // o MediaStream do compartilhamento realmente começa a fluir (pode
   // acontecer um pouco depois do resolve() acima) — cobre o caso do
   // Windows focar a janela de novo nesse meio-tempo.
-  ipcMain.on('app:focus-window', () => {
+  onTrusted('app:focus-window', () => {
     scheduleFocusReclaim()
   })
 
@@ -1994,7 +2351,7 @@ app.whenReady().then(() => {
   createTray(win)
 
   win.once('ready-to-show', () => {
-    splash.close()
+    if (!splash.isDestroyed()) splash.close()
     win.show()
   })
 
@@ -2018,14 +2375,19 @@ app.whenReady().then(() => {
   })
 
   // --- Overlay dentro de jogos -----------------------------------
-  overlayWindow = createOverlayWindow()
+  // AUDITORIA: a janela da sobreposição agora é criada só na primeira vez
+  // que for mostrada (ver ensureOverlayWindow) — não mais aqui na abertura.
 
   // O app principal manda o estado atual da call pra cá sempre que
-  // muda (quem tá na sala, quem tá falando, quem tá mudo) — só
-  // repassa pra janela do overlay, sem guardar nada aqui.
-  ipcMain.on('overlay:update-state', (_event, state) => {
-    if (overlayWindow && !overlayWindow.isDestroyed()) {
-      overlayWindow.webContents.send('overlay:voice-state', state)
+  // muda (quem tá na sala, quem tá falando, quem tá mudo). Guarda só o
+  // ÚLTIMO estado (pra sobreposição já abrir atualizada) e só repassa
+  // quando ela está VISÍVEL — o indicador de "falando" muda várias vezes
+  // por segundo numa call, e repassar isso pra uma janela escondida era
+  // trabalho jogado fora.
+  onTrusted('overlay:update-state', (_event, state) => {
+    lastOverlayState = state ?? null
+    if (overlayVisible && overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send('overlay:voice-state', lastOverlayState)
     }
   })
 
@@ -2034,10 +2396,19 @@ app.whenReady().then(() => {
   // (não depende do módulo nativo do push-to-talk), já que só precisa
   // reagir a "tecla apertada", não "segurando ou não".
   const registered = globalShortcut.register('Control+Shift+O', () => {
-    if (!overlayWindow || overlayWindow.isDestroyed()) return
     overlayVisible = !overlayVisible
-    if (overlayVisible) overlayWindow.showInactive()
-    else overlayWindow.hide()
+    if (overlayVisible) {
+      const overlay = ensureOverlayWindow()
+      // Se a página já carregou, manda o estado mais recente agora (ele
+      // pode ter mudado enquanto ela estava escondida); se ainda está
+      // carregando, o 'did-finish-load' em createOverlayWindow entrega.
+      if (!overlay.webContents.isLoading() && lastOverlayState !== null) {
+        overlay.webContents.send('overlay:voice-state', lastOverlayState)
+      }
+      overlay.showInactive()
+    } else if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.hide()
+    }
   })
   if (!registered) {
     console.error('Não foi possível registrar o atalho da sobreposição (Ctrl+Shift+O) — pode já estar em uso por outro programa.')
@@ -2065,15 +2436,15 @@ app.whenReady().then(() => {
 
   startGameDetection()
 
-  ipcMain.handle('app:getVersion', () => app.getVersion())
-  ipcMain.handle('app:getCurrentGame', () => currentGame)
+  handleTrusted('app:getVersion', () => app.getVersion())
+  handleTrusted('app:getCurrentGame', () => currentGame)
 
   // Ver o bloco grande "Vigia de foco do jogo" (perto de
   // startGameDetection) pra entender o que isso faz e por quê. Recebe os
   // nomes de processo diretamente agora (não mais um label do
   // KNOWN_GAMES) — ver startForegroundWatch.
-  ipcMain.handle('game-foreground-watch:start', (_event, processNames) => startForegroundWatch(processNames))
-  ipcMain.handle('game-foreground-watch:stop', () => {
+  handleTrusted('game-foreground-watch:start', (_event, processNames) => startForegroundWatch(processNames))
+  handleTrusted('game-foreground-watch:stop', () => {
     stopForegroundWatch()
   })
 
@@ -2082,11 +2453,13 @@ app.whenReady().then(() => {
   // é o vigia acima) — ver watchedProcessNames/watchedProcessWasSeen no
   // laço de startGameDetection, e VoiceContext.tsx (toggleScreenShare)
   // pra como o renderer usa isso.
-  ipcMain.handle('game-share:watch-process-exit', (_event, processNames) => {
-    watchedProcessNames = Array.isArray(processNames) ? processNames.map((n) => String(n).toLowerCase()) : []
+  handleTrusted('game-share:watch-process-exit', (_event, processNames) => {
+    watchedProcessNames = Array.isArray(processNames)
+      ? processNames.slice(0, 32).map((n) => String(n).toLowerCase()).filter(Boolean)
+      : []
     watchedProcessWasSeen = false
   })
-  ipcMain.handle('game-share:stop-watch-process-exit', () => {
+  handleTrusted('game-share:stop-watch-process-exit', () => {
     watchedProcessNames = []
     watchedProcessWasSeen = false
   })
@@ -2140,7 +2513,15 @@ app.whenReady().then(() => {
     if (processAudioPendingChunks.length === 0) return
     const merged = Buffer.concat(processAudioPendingChunks)
     processAudioPendingChunks = []
-    mainWindow?.webContents.send('process-audio:chunk', merged)
+    sendToMain('process-audio:chunk', merged)
+  }
+
+  // (Não descartamos pedaços antigos aqui de propósito: o fluxo de PCM não
+  // tem separação entre amostras, e jogar fora um pedaço de tamanho
+  // arbitrário desalinharia todas as amostras seguintes — ruído puro.)
+  function queueProcessAudioChunk(chunk) {
+    processAudioPendingChunks.push(chunk)
+    scheduleProcessAudioFlush()
   }
 
   function scheduleProcessAudioFlush() {
@@ -2172,12 +2553,12 @@ app.whenReady().then(() => {
     if (process.platform !== 'win32') {
       return { ok: false, error: 'Captura de áudio por processo só existe no Windows.' }
     }
-    if (!pid || !Number.isFinite(pid) || pid <= 0) {
+    if (!pid || !Number.isSafeInteger(pid) || pid <= 0) {
       appendDebugLog('main', `startProcessAudioCapture: pid inválido (${pid})`)
       return { ok: false, error: 'PID inválido.' }
     }
     const exePath = resolveProcessAudioCaptureExePath()
-    if (!require('node:fs').existsSync(exePath)) {
+    if (!fs.existsSync(exePath)) {
       appendDebugLog('main', `startProcessAudioCapture: exe não encontrado em ${exePath}`)
       return {
         ok: false,
@@ -2190,7 +2571,13 @@ app.whenReady().then(() => {
       processAudioCaptureProc = proc
       appendDebugLog('main', `startProcessAudioCapture: spawn ok (exe=${exePath}, pid=${pid})`)
 
+      // AUDITORIA: stop() + start() em sequência rápida (trocar de janela
+      // compartilhada) deixava o processo ANTIGO ainda despejando dados
+      // no mesmo buffer/cabeçalho compartilhado do processo NOVO —
+      // misturando o áudio dos dois ou corrompendo o cabeçalho. Tudo que
+      // chega de um processo que não é mais o atual agora é ignorado.
       proc.stdout.on('data', (chunk) => {
+        if (processAudioCaptureProc !== proc) return
         if (!processAudioHeaderParsed) {
           processAudioHeaderBuffer = Buffer.concat([processAudioHeaderBuffer, chunk])
           if (processAudioHeaderBuffer.length < PROCESS_AUDIO_HEADER_SIZE) return
@@ -2202,7 +2589,7 @@ app.whenReady().then(() => {
           const magic = header.readUInt32LE(0)
           if (magic !== 0x4d43504c) {
             appendDebugLog('main', `startProcessAudioCapture: cabeçalho com magic inesperado (0x${magic.toString(16)})`)
-            mainWindow?.webContents.send('process-audio:error', 'Formato de cabeçalho inesperado.')
+            sendToMain('process-audio:error', 'Formato de cabeçalho inesperado.')
             stopProcessAudioCapture()
             return
           }
@@ -2213,16 +2600,14 @@ app.whenReady().then(() => {
             'main',
             `startProcessAudioCapture: formato confirmado (sampleRate=${sampleRate}, channels=${channels}, sampleFormat=${sampleFormat})`
           )
-          mainWindow?.webContents.send('process-audio:format', { sampleRate, channels, sampleFormat })
+          sendToMain('process-audio:format', { sampleRate, channels, sampleFormat })
 
           if (rest.length > 0) {
-            processAudioPendingChunks.push(Buffer.from(rest))
-            scheduleProcessAudioFlush()
+            queueProcessAudioChunk(Buffer.from(rest))
           }
           return
         }
-        processAudioPendingChunks.push(Buffer.from(chunk))
-        scheduleProcessAudioFlush()
+        queueProcessAudioChunk(chunk)
       })
 
       // stderr é só texto de diagnóstico (ver capture.cpp) — repassa
@@ -2232,13 +2617,16 @@ app.whenReady().then(() => {
       let stderrBuffer = ''
       proc.stderr?.on('data', (chunk) => {
         stderrBuffer += chunk.toString('utf8')
+        // Linha gigante sem quebra (não deveria acontecer) — não deixa crescer sem limite.
+        if (stderrBuffer.length > 64 * 1024) stderrBuffer = stderrBuffer.slice(-8 * 1024)
         let newlineIndex
         while ((newlineIndex = stderrBuffer.indexOf('\n')) >= 0) {
           const line = stderrBuffer.slice(0, newlineIndex).trim()
           stderrBuffer = stderrBuffer.slice(newlineIndex + 1)
           if (line.startsWith('ERROR')) {
             appendDebugLog('main', `startProcessAudioCapture: capture.cpp reportou erro — ${line}`)
-            mainWindow?.webContents.send('process-audio:error', line.replace(/^ERROR\s*/, ''))
+            if (processAudioCaptureProc !== proc) continue
+            sendToMain('process-audio:error', line.replace(/^ERROR\s*/, ''))
           } else if (line.startsWith('STATUS')) {
             // Só pra esse log de diagnóstico — não precisa incomodar
             // quem está usando com isso (ver comentário original acima).
@@ -2249,7 +2637,11 @@ app.whenReady().then(() => {
 
       proc.on('error', (err) => {
         appendDebugLog('main', `startProcessAudioCapture: evento 'error' do processo — ${err?.message}`)
-        mainWindow?.webContents.send('process-audio:error', err?.message || 'Falha ao iniciar a captura de áudio.')
+        // AUDITORIA: antes zerava a referência SEMPRE — se esse erro viesse
+        // de um processo antigo, o processo novo ficava sem referência e
+        // nunca mais era encerrado (nem ao fechar o app).
+        if (processAudioCaptureProc !== proc) return
+        sendToMain('process-audio:error', err?.message || 'Falha ao iniciar a captura de áudio.')
         processAudioCaptureProc = null
       })
       proc.on('exit', (code, signal) => {
@@ -2264,8 +2656,8 @@ app.whenReady().then(() => {
     }
   }
 
-  ipcMain.handle('process-audio:start', (_event, pid) => startProcessAudioCapture(pid))
-  ipcMain.handle('process-audio:stop', () => stopProcessAudioCapture())
+  handleTrusted('process-audio:start', (_event, pid) => startProcessAudioCapture(pid))
+  handleTrusted('process-audio:stop', () => stopProcessAudioCapture())
 
   // ============================================================
   // Fallbacks de captura de tela nativos (VIGÉSIMA TERCEIRA e TRIGÉSIMA
@@ -2297,8 +2689,20 @@ app.whenReady().then(() => {
     // quadro: colar dois JPEGs sem separação não abriria como imagem
     // nenhuma do lado do renderer. Esse buffer acumula bytes até ter
     // quadro(s) COMPLETO(s) pra repassar.
-    let frameBuffer = Buffer.alloc(0)
+    //
+    // AUDITORIA — desempenho: antes cada pedaço lido do stdout (tipicamente
+    // 64KB) fazia `Buffer.concat([frameBuffer, chunk])`, copiando TODO o
+    // quadro parcial de novo a cada pedaço — custo quadrático por quadro
+    // (um JPEG de 1MB em 16 pedaços = ~8MB copiados), na thread principal,
+    // dezenas de vezes por segundo. Agora os pedaços ficam numa lista e só
+    // são juntados UMA vez, quando já existe um quadro inteiro disponível.
+    let pendingChunks = []
+    let pendingBytes = 0
     const HEADER_SIZE = 16
+    // Um JPEG de um monitor 4K em qualidade 85 fica bem abaixo de 10MB —
+    // um "tamanho" acima disso só pode ser fluxo corrompido/dessincronizado,
+    // e esperar por ele faria o buffer crescer sem limite.
+    const MAX_FRAME_BYTES = 64 * 1024 * 1024
 
     function resolveExePath() {
       // Mesmo truque do resolveProcessAudioCaptureExePath (o .exe
@@ -2310,7 +2714,8 @@ app.whenReady().then(() => {
     function stop() {
       headerBuffer = Buffer.alloc(0)
       headerParsed = false
-      frameBuffer = Buffer.alloc(0)
+      pendingChunks = []
+      pendingBytes = 0
       if (proc) {
         try {
           proc.kill()
@@ -2319,6 +2724,13 @@ app.whenReady().then(() => {
         }
         proc = null
       }
+    }
+
+    // Junta os pedaços pendentes num buffer só (quando há mais de um).
+    function takePending() {
+      const merged = pendingChunks.length === 1 ? pendingChunks[0] : Buffer.concat(pendingChunks, pendingBytes)
+      pendingChunks = [merged]
+      return merged
     }
 
     function drainFrames() {
@@ -2340,15 +2752,33 @@ app.whenReady().then(() => {
       // native/screen-capture-wgc/capture.cpp) — só faltava replicar
       // aqui também, nesta outra ponta do cano (processo principal →
       // renderer), que é onde esse acúmulo específico podia acontecer.
+      if (pendingBytes < 4) return
+      let buffer = takePending()
       let latestFrame = null
-      while (frameBuffer.length >= 4) {
-        const frameSize = frameBuffer.readUInt32LE(0)
-        if (frameBuffer.length < 4 + frameSize) break // quadro ainda incompleto, espera mais dados
-        latestFrame = frameBuffer.subarray(4, 4 + frameSize)
-        frameBuffer = frameBuffer.subarray(4 + frameSize)
+      let offset = 0
+      while (buffer.length - offset >= 4) {
+        const frameSize = buffer.readUInt32LE(offset)
+        if (frameSize > MAX_FRAME_BYTES) {
+          appendDebugLog('main', `${channelPrefix}: tamanho de quadro inválido (${frameSize}) — fluxo corrompido, encerrando`)
+          sendToMain(`${channelPrefix}:error`, 'Fluxo de vídeo corrompido.')
+          stop()
+          return
+        }
+        if (buffer.length - offset < 4 + frameSize) break // quadro ainda incompleto, espera mais dados
+        latestFrame = buffer.subarray(offset + 4, offset + 4 + frameSize)
+        offset += 4 + frameSize
+      }
+      if (offset > 0) {
+        // Copia o resto (quadro parcial) pra um buffer próprio — sem isso,
+        // o subarray manteria viva na memória a região inteira já consumida.
+        const rest = Buffer.from(buffer.subarray(offset))
+        pendingChunks = rest.length > 0 ? [rest] : []
+        pendingBytes = rest.length
       }
       if (latestFrame) {
-        mainWindow?.webContents.send(`${channelPrefix}:frame`, Buffer.from(latestFrame))
+        // Cópia exata do quadro — um `subarray` levaria pelo IPC o
+        // ArrayBuffer inteiro por baixo dele, não só o trecho do quadro.
+        sendToMain(`${channelPrefix}:frame`, Buffer.from(latestFrame))
       }
     }
 
@@ -2359,40 +2789,49 @@ app.whenReady().then(() => {
         return { ok: false, error: `${channelPrefix} só existe no Windows.` }
       }
       const exePath = resolveExePath()
-      if (!require('node:fs').existsSync(exePath)) {
+      if (!fs.existsSync(exePath)) {
         appendDebugLog('main', `${channelPrefix}: exe não encontrado em ${exePath}`)
         return { ok: false, error: `${exeFileName} não encontrado nesta instalação (build sem esse componente).` }
       }
       try {
-        const args = Number.isFinite(monitorIndex) && monitorIndex > 0 ? [String(Math.trunc(monitorIndex))] : []
+        const args =
+          Number.isFinite(monitorIndex) && monitorIndex > 0 && monitorIndex < 64 ? [String(Math.trunc(monitorIndex))] : []
         const child = spawn(exePath, args, { windowsHide: true })
         proc = child
         appendDebugLog('main', `${channelPrefix}: spawn ok (exe=${exePath}, args=${JSON.stringify(args)})`)
 
         child.stdout.on('data', (chunk) => {
+          // AUDITORIA: stop() + start() em sequência (trocar de monitor)
+          // deixava o processo ANTIGO ainda despejando bytes no mesmo
+          // buffer do processo NOVO — o cabeçalho/tamanhos dos quadros
+          // se misturavam e o fluxo inteiro ficava corrompido.
+          if (proc !== child) return
           if (!headerParsed) {
             headerBuffer = Buffer.concat([headerBuffer, chunk])
             if (headerBuffer.length < HEADER_SIZE) return
             const header = headerBuffer.subarray(0, HEADER_SIZE)
-            frameBuffer = Buffer.from(headerBuffer.subarray(HEADER_SIZE))
+            const rest = Buffer.from(headerBuffer.subarray(HEADER_SIZE))
+            pendingChunks = rest.length > 0 ? [rest] : []
+            pendingBytes = rest.length
             headerBuffer = Buffer.alloc(0)
             headerParsed = true
 
             const magic = header.readUInt32LE(0)
             if (magic !== expectedMagic) {
               appendDebugLog('main', `${channelPrefix}: cabeçalho com magic inesperado (0x${magic.toString(16)})`)
-              mainWindow?.webContents.send(`${channelPrefix}:error`, 'Formato de cabeçalho inesperado.')
+              sendToMain(`${channelPrefix}:error`, 'Formato de cabeçalho inesperado.')
               stop()
               return
             }
             const width = header.readUInt32LE(4)
             const height = header.readUInt32LE(8)
             appendDebugLog('main', `${channelPrefix}: formato confirmado (${width}x${height})`)
-            mainWindow?.webContents.send(`${channelPrefix}:format`, { width, height })
+            sendToMain(`${channelPrefix}:format`, { width, height })
             drainFrames()
             return
           }
-          frameBuffer = Buffer.concat([frameBuffer, chunk])
+          pendingChunks.push(chunk)
+          pendingBytes += chunk.length
           drainFrames()
         })
 
@@ -2402,13 +2841,14 @@ app.whenReady().then(() => {
         let stderrBuffer = ''
         child.stderr?.on('data', (chunk) => {
           stderrBuffer += chunk.toString('utf8')
+          if (stderrBuffer.length > 64 * 1024) stderrBuffer = stderrBuffer.slice(-8 * 1024)
           let newlineIndex
           while ((newlineIndex = stderrBuffer.indexOf('\n')) >= 0) {
             const line = stderrBuffer.slice(0, newlineIndex).trim()
             stderrBuffer = stderrBuffer.slice(newlineIndex + 1)
             if (line.startsWith('ERROR')) {
               appendDebugLog('main', `${channelPrefix}: reportou erro — ${line}`)
-              mainWindow?.webContents.send(`${channelPrefix}:error`, line.replace(/^ERROR\s*/, ''))
+              if (proc === child) sendToMain(`${channelPrefix}:error`, line.replace(/^ERROR\s*/, ''))
             } else if (line.startsWith('STATUS')) {
               appendDebugLog('main', `${channelPrefix}: ${line}`)
             }
@@ -2417,8 +2857,9 @@ app.whenReady().then(() => {
 
         child.on('error', (err) => {
           appendDebugLog('main', `${channelPrefix}: evento 'error' do processo — ${err?.message}`)
-          mainWindow?.webContents.send(`${channelPrefix}:error`, err?.message || 'Falha ao iniciar a captura.')
-          if (proc === child) proc = null
+          if (proc !== child) return
+          sendToMain(`${channelPrefix}:error`, err?.message || 'Falha ao iniciar a captura.')
+          proc = null
         })
         child.on('exit', (code, signal) => {
           appendDebugLog('main', `${channelPrefix}: processo encerrou (code=${code}, signal=${signal})`)
@@ -2438,21 +2879,22 @@ app.whenReady().then(() => {
   const wgcCapture = createNativeFrameCaptureChannel('screen-capture-wgc', 'screen-capture-wgc.exe', 0x4d435747)
   const gdiCapture = createNativeFrameCaptureChannel('screen-capture-gdi', 'screen-capture-gdi.exe', 0x4d434746)
 
-  ipcMain.handle('screen-capture-wgc:start', (_event, monitorIndex) => wgcCapture.start(monitorIndex))
-  ipcMain.handle('screen-capture-wgc:stop', () => wgcCapture.stop())
-  ipcMain.handle('screen-capture-gdi:start', (_event, monitorIndex) => gdiCapture.start(monitorIndex))
-  ipcMain.handle('screen-capture-gdi:stop', () => gdiCapture.stop())
+  handleTrusted('screen-capture-wgc:start', (_event, monitorIndex) => wgcCapture.start(monitorIndex))
+  handleTrusted('screen-capture-wgc:stop', () => wgcCapture.stop())
+  handleTrusted('screen-capture-gdi:start', (_event, monitorIndex) => gdiCapture.start(monitorIndex))
+  handleTrusted('screen-capture-gdi:stop', () => gdiCapture.stop())
 
   // Ver o bloco grande "DÉCIMA QUARTA RODADA" perto do topo do arquivo —
   // deixa o RENDERER (VoiceContext.tsx) escrever no mesmo arquivo de log
   // que o processo principal já usa, sem depender do DevTools.
-  ipcMain.on('debug:log', (_event, message) => {
+  onTrusted('debug:log', (_event, message) => {
     appendDebugLog('renderer', String(message))
   })
 
   // --- Push-to-talk global -----------------------------------------
   let pttGlobalKeycode = null
   let pttCaptureResolver = null
+  let pttKeyDown = false
   let uiohookStarted = false
   let uiohookListenersAttached = false
 
@@ -2467,13 +2909,19 @@ app.whenReady().then(() => {
         resolve({ keycode: e.keycode, name })
         return
       }
-      if (pttGlobalKeycode !== null && e.keycode === pttGlobalKeycode) {
-        mainWindow?.webContents.send('ptt-state', true)
+      // AUDITORIA: segurar a tecla gera keydown REPETIDO (auto-repetição
+      // do teclado, ~30 vezes por segundo) — antes cada um virava uma
+      // mensagem IPC + atualização de estado no React. Agora só a
+      // TRANSIÇÃO (soltou → apertou) é enviada.
+      if (pttGlobalKeycode !== null && e.keycode === pttGlobalKeycode && !pttKeyDown) {
+        pttKeyDown = true
+        sendToMain('ptt-state', true)
       }
     })
     uIOhook.on('keyup', (e) => {
       if (pttGlobalKeycode !== null && e.keycode === pttGlobalKeycode) {
-        mainWindow?.webContents.send('ptt-state', false)
+        pttKeyDown = false
+        sendToMain('ptt-state', false)
       }
     })
   }
@@ -2496,10 +2944,18 @@ app.whenReady().then(() => {
     }
   }
 
-  ipcMain.handle('ptt:is-global-available', () => tryLoadUiohook())
+  handleTrusted('ptt:is-global-available', () => tryLoadUiohook())
 
-  ipcMain.handle('ptt:start-capture', () => {
+  handleTrusted('ptt:start-capture', () => {
     if (!ensureUiohookStarted()) return Promise.resolve(null)
+    // AUDITORIA: se já existia uma captura pendente (a pessoa clicou em
+    // "definir tecla" duas vezes), a Promise anterior ficava pendurada pra
+    // sempre — agora ela é resolvida como "cancelada" antes da nova.
+    if (pttCaptureResolver) {
+      const previous = pttCaptureResolver
+      pttCaptureResolver = null
+      previous(null)
+    }
     return new Promise((resolve) => {
       pttCaptureResolver = resolve
       // Se ninguém apertar nada em 10s, desiste — evita ficar
@@ -2514,13 +2970,49 @@ app.whenReady().then(() => {
     })
   })
 
-  ipcMain.handle('ptt:set-active-key', (_event, keycode) => {
-    pttGlobalKeycode = typeof keycode === 'number' ? keycode : null
+  handleTrusted('ptt:set-active-key', (_event, keycode) => {
+    pttGlobalKeycode = Number.isSafeInteger(keycode) ? keycode : null
+    pttKeyDown = false
     if (pttGlobalKeycode !== null) ensureUiohookStarted()
+  })
+
+  // AUDITORIA: encerra TUDO que existe só por causa da página atual
+  // (processos de captura, vigias, captura de tecla pendente). Antes isso
+  // só acontecia ao FECHAR o app — se a página recarregasse ou o processo
+  // de renderização travasse no meio de um compartilhamento, os .exe de
+  // captura continuavam rodando e mandando quadros/áudio pra uma página
+  // que já não sabia mais deles (CPU/GPU gastos à toa até fechar o app).
+  function stopRendererBoundWork(reason) {
+    appendDebugLog('main', `stopRendererBoundWork: ${reason}`)
+    stopForegroundWatch()
+    stopProcessAudioCapture()
+    wgcCapture.stop()
+    gdiCapture.stop()
+    watchedProcessNames = []
+    watchedProcessWasSeen = false
+    pttKeyDown = false
+    if (pttCaptureResolver) {
+      const resolve = pttCaptureResolver
+      pttCaptureResolver = null
+      resolve(null)
+    }
+  }
+  win.webContents.on('render-process-gone', () => stopRendererBoundWork('render-process-gone'))
+  // 'did-navigate' só dispara quando uma navegação da página PRINCIPAL é
+  // de fato concluída (recarga incluída) — nunca pra troca de rota interna
+  // do React (hash/pushState) nem pra navegações barradas em will-navigate.
+  let firstMainNavigationDone = false
+  win.webContents.on('did-navigate', () => {
+    if (!firstMainNavigationDone) {
+      firstMainNavigationDone = true
+      return
+    }
+    stopRendererBoundWork('página principal recarregada/navegou')
   })
 
   app.once('before-quit', () => {
     isQuitting = true
+    stopGameDetection()
     if (uiohookAvailable && uiohookStarted) {
       try {
         uIOhook.stop()
@@ -2540,8 +3032,18 @@ app.whenReady().then(() => {
     // ver o bloco grande logo acima.
     wgcCapture.stop()
     gdiCapture.stop()
+    globalShortcut.unregisterAll()
+  })
+  app.once('will-quit', () => {
+    flushDebugLogSync()
   })
   // -------------------------------------------------------------------
+
+  // Consulta do estado atual do auto-updater (ver lastUpdateStatus mais
+  // abaixo). Registrado SEMPRE — em desenvolvimento só devolve null — pra
+  // chamada do renderer nunca falhar com "no handler registered".
+  let lastUpdateStatus = null
+  handleTrusted('app:get-update-status', () => lastUpdateStatus)
 
   if (!isDev) {
     // Checa, baixa e aplica atualizações — cada etapa é avisada pra
@@ -2553,18 +3055,123 @@ app.whenReady().then(() => {
     // de aplicar a atualização (veja seção de assinatura de código no
     // README) — sem isso, atualizações automáticas são um vetor de
     // ataque em vez de proteção.
+    //
+    // AUDITORIA — melhorias no sistema de atualização:
+    //  - Checagens AUTOMÁTICAS (a cada 30min, ao voltar da suspensão)
+    //    agora são SILENCIOSAS: antes, a cada 30 minutos o selo
+    //    "Verificando atualizações..." → "App atualizado" piscava no
+    //    canto da tela (e, sem internet, um alerta vermelho de erro).
+    //    Só a checagem da abertura do app e a manual (Configurações)
+    //    mostram esses estados; download e "pronta pra instalar"
+    //    continuam aparecendo sempre.
+    //  - Não dispara uma checagem nova enquanto outra checagem/download
+    //    ainda está em andamento, nem depois que a atualização já foi
+    //    baixada (antes, a checagem de 30 em 30 min podia começar outro
+    //    download por cima do primeiro).
+    //  - Sem internet / falha de rede: tenta de novo sozinho com espera
+    //    crescente (1, 2, 5, 10 min) em vez de só daqui a 30 min.
+    //  - O progresso do download só é enviado quando o PERCENTUAL muda —
+    //    antes era a cada pedacinho baixado (centenas de mensagens IPC e
+    //    re-renderizações do React por segundo numa conexão rápida).
+    //  - O último estado relevante (baixando/pronta) fica guardado e o
+    //    renderer pode pedir ele de novo (app:get-update-status) — se a
+    //    página recarregar depois do download terminar, o botão
+    //    "Reiniciar" não some mais.
+    //  - Tudo que o electron-updater registra vai pro mamacos-debug.log.
+    const UPDATE_DOWNLOAD_PAGE = 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest'
+    const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
+    const NETWORK_RETRY_DELAYS_MS = [60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000]
+
+    let updateCheckSilent = false
+    let updateCheckInFlight = false
+    let updateDownloadInFlight = false
+    let lastUpdateCheckAt = 0
+    let lastSentPercent = -1
+    let availableVersion = null
+    let updateRetryTimer = null
+    let networkRetryCount = 0
+    let updateIntervalTimer = null
+
+    autoUpdater.logger = {
+      info: (msg) => appendDebugLog('updater', msg),
+      warn: (msg) => appendDebugLog('updater:warn', msg),
+      error: (msg) => appendDebugLog('updater:error', msg),
+      debug: () => {},
+    }
+    // O instalador NSIS daqui não é um "web installer" — deixar isso
+    // explícito só evita um aviso a cada download no log.
+    autoUpdater.disableWebInstaller = true
+
     function sendUpdateStatus(status, extra = {}) {
-      mainWindow?.webContents.send('update-status', { status, ...extra })
+      const payload = { status, ...extra }
+      // Só "baixando" e "pronta" valem a pena ser reapresentados depois
+      // (ver app:get-update-status) — "verificando"/"atualizado"/"erro"
+      // são avisos passageiros.
+      lastUpdateStatus = status === 'downloading' || status === 'ready' ? payload : null
+      sendToMain('update-status', payload)
     }
 
-    autoUpdater.on('checking-for-update', () => sendUpdateStatus('checking'))
-    autoUpdater.on('update-available', (info) => sendUpdateStatus('downloading', { version: info.version }))
-    autoUpdater.on('update-not-available', () => sendUpdateStatus('up-to-date'))
-    autoUpdater.on('download-progress', (progress) =>
-      sendUpdateStatus('downloading', { percent: Math.round(progress.percent) })
-    )
+    function clearUpdateRetryTimer() {
+      if (updateRetryTimer) clearTimeout(updateRetryTimer)
+      updateRetryTimer = null
+    }
+
+    function scheduleUpdateRetry(delayMs) {
+      clearUpdateRetryTimer()
+      updateRetryTimer = setTimeout(() => {
+        updateRetryTimer = null
+        runUpdateCheck({ silent: true, isRetry: true })
+      }, delayMs)
+    }
+
+    function runUpdateCheck({ silent, isRetry = false }) {
+      if (updateReadyToInstall || updateDownloadInFlight) {
+        // Já tem algo em andamento/pronto — num pedido manual, só
+        // reapresenta o estado atual em vez de começar tudo de novo.
+        if (!silent && lastUpdateStatus) sendToMain('update-status', lastUpdateStatus)
+        return
+      }
+      if (updateCheckInFlight) return
+      if (!isRetry) clearUpdateRetryTimer()
+      updateCheckSilent = silent
+      updateCheckInFlight = true
+      lastUpdateCheckAt = Date.now()
+      autoUpdater
+        .checkForUpdates()
+        .catch(() => {
+          // sem conexão ou nenhum release publicado ainda — o evento
+          // 'error' abaixo já trata/avisa, aqui só não deixa a Promise
+          // rejeitada solta.
+        })
+        .finally(() => {
+          updateCheckInFlight = false
+        })
+    }
+
+    autoUpdater.on('checking-for-update', () => {
+      if (!updateCheckSilent) sendUpdateStatus('checking')
+    })
+    autoUpdater.on('update-available', (info) => {
+      networkRetryCount = 0
+      updateDownloadInFlight = true
+      lastSentPercent = -1
+      availableVersion = info?.version ?? null
+      sendUpdateStatus('downloading', { version: availableVersion })
+    })
+    autoUpdater.on('update-not-available', () => {
+      networkRetryCount = 0
+      if (!updateCheckSilent) sendUpdateStatus('up-to-date')
+    })
+    autoUpdater.on('download-progress', (progress) => {
+      const percent = Math.max(0, Math.min(100, Math.floor(progress?.percent ?? 0)))
+      if (percent === lastSentPercent) return
+      lastSentPercent = percent
+      sendUpdateStatus('downloading', { percent, version: availableVersion })
+    })
     autoUpdater.on('update-downloaded', (info) => {
+      updateDownloadInFlight = false
       updateReadyToInstall = true
+      clearUpdateRetryTimer()
       sendUpdateStatus('ready', { version: info.version })
       // Como o app pode estar escondido na bandeja (minimizado) quando
       // isso acontece, a pessoa não veria o aviso na tela — o tooltip
@@ -2584,8 +3191,13 @@ app.whenReady().then(() => {
     // de segundos, não minutos. Reduzido bem: só 2 tentativas rápidas.
     const MAX_UPDATE_RETRIES = 2
     const UPDATE_RETRY_DELAY_MS = 4_000
+    const NETWORK_ERROR_PATTERN =
+      /ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_(REFUSED|RESET|TIMED_OUT|CLOSED|ABORTED|FAILED)|ERR_TIMED_OUT|ERR_ADDRESS_UNREACHABLE|ERR_PROXY_CONNECTION_FAILED|ERR_NETWORK_IO_SUSPENDED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|socket hang up|net::ERR_/i
 
     autoUpdater.on('error', (err) => {
+      const wasDownloading = updateDownloadInFlight
+      updateDownloadInFlight = false
+
       // Antes a gente só olhava err.message, que às vezes vem bem curto
       // ("404" sozinho) sem dizer QUAL endpoint falhou. Isso pega todas
       // as propriedades do erro (inclusive as que não aparecem em
@@ -2596,6 +3208,7 @@ app.whenReady().then(() => {
       } catch {
         raw = err?.message ?? String(err)
       }
+      appendDebugLog('updater:error-event', raw.slice(0, 2000))
 
       // Um release recém-publicado pode demorar alguns segundos pra o
       // GitHub "enxergar" ele como o mais recente (atraso normal de
@@ -2606,8 +3219,11 @@ app.whenReady().then(() => {
       // não deixar a pessoa esperando minutos vendo "verificando".
       if (raw.includes('404') && updateRetryCount < MAX_UPDATE_RETRIES) {
         updateRetryCount++
-        setTimeout(() => {
-          autoUpdater.checkForUpdates().catch(() => {})
+        clearUpdateRetryTimer()
+        const silent = updateCheckSilent
+        updateRetryTimer = setTimeout(() => {
+          updateRetryTimer = null
+          runUpdateCheck({ silent, isRetry: true })
         }, UPDATE_RETRY_DELAY_MS)
         return
       }
@@ -2622,7 +3238,25 @@ app.whenReady().then(() => {
       // erro) é enganoso; mostra o mesmo aviso tranquilo de "App
       // atualizado" que aparece quando não tem nada novo mesmo.
       if (/latest\.yml|Cannot find channel/i.test(raw)) {
-        sendUpdateStatus('up-to-date')
+        if (!updateCheckSilent) sendUpdateStatus('up-to-date')
+        return
+      }
+
+      // Falha de REDE (sem internet, Wi-Fi caiu no meio do download,
+      // DNS, proxy...): tenta de novo sozinho, com espera crescente.
+      if (NETWORK_ERROR_PATTERN.test(raw)) {
+        const delay = NETWORK_RETRY_DELAYS_MS[Math.min(networkRetryCount, NETWORK_RETRY_DELAYS_MS.length - 1)]
+        networkRetryCount++
+        scheduleUpdateRetry(delay)
+        // Só incomoda a pessoa se ELA pediu a checagem (abertura/manual)
+        // ou se um download que ela estava VENDO acontecer foi interrompido
+        // (senão o selo "Baixando..." ficaria travado na tela).
+        if (!updateCheckSilent || wasDownloading) {
+          sendUpdateStatus('error', {
+            message: `Sem conexão com o servidor de atualizações. Vou tentar de novo sozinho em ${Math.round(delay / 60_000)} min.`,
+            downloadUrl: UPDATE_DOWNLOAD_PAGE,
+          })
+        }
         return
       }
 
@@ -2638,12 +3272,16 @@ app.whenReady().then(() => {
         sendUpdateStatus('error', {
           message:
             'A atualização foi baixada mas não pôde ser verificada automaticamente (provavelmente porque o instalador não tem assinatura digital — isso exige um certificado pago). Baixe a versão mais recente manualmente pelo site.',
-          downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest',
+          downloadUrl: UPDATE_DOWNLOAD_PAGE,
         })
         return
       }
 
-      sendUpdateStatus('error', { message: raw.slice(0, 400), downloadUrl: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest' })
+      // Erro genérico numa checagem automática silenciosa (e sem download
+      // visível em andamento): já foi pro log acima, não precisa de alerta.
+      if (updateCheckSilent && !wasDownloading) return
+
+      sendUpdateStatus('error', { message: raw.slice(0, 400), downloadUrl: UPDATE_DOWNLOAD_PAGE })
     })
 
     // Sem os dois `true`, o electron-updater roda o instalador no modo
@@ -2654,10 +3292,33 @@ app.whenReady().then(() => {
     // janela aparecer) e reabre o app sozinho assim que terminar — junto
     // com "oneClick: true" no nsis (package.json), fica igual o Discord
     // de verdade: a pessoa nem percebe que uma instalação aconteceu.
-    ipcMain.handle('app:restartToUpdate', () => autoUpdater.quitAndInstall(true, true))
-    ipcMain.on('app:check-for-updates-now', () => {
+    //
+    // AUDITORIA: só aceita o pedido se já existe uma atualização baixada
+    // (antes, chamar isso sem nada baixado lançava exceção no processo
+    // principal) e marca isQuitting ANTES — sem isso, dependendo da ordem
+    // dos eventos, o 'close' da janela principal (que só esconde na
+    // bandeja) podia segurar o fechamento e a instalação não acontecia.
+    handleTrusted('app:restartToUpdate', () => {
+      if (!updateReadyToInstall) return false
+      isQuitting = true
+      setImmediate(() => {
+        try {
+          autoUpdater.quitAndInstall(true, true)
+        } catch (err) {
+          isQuitting = false
+          appendDebugLog('updater:error', `quitAndInstall falhou — ${err?.message ?? err}`)
+          sendUpdateStatus('error', {
+            message: 'Não foi possível aplicar a atualização agora. Feche e abra o app pra tentar de novo.',
+            downloadUrl: UPDATE_DOWNLOAD_PAGE,
+          })
+        }
+      })
+      return true
+    })
+    onTrusted('app:check-for-updates-now', () => {
       updateRetryCount = 0
-      autoUpdater.checkForUpdates().catch(() => {})
+      networkRetryCount = 0
+      runUpdateCheck({ silent: false })
     })
 
     // O provedor "github" padrão usa o feed releases.atom do GitHub pra
@@ -2681,13 +3342,7 @@ app.whenReady().then(() => {
     // terminar de montar e começar a escutar essas mensagens, e se
     // perderiam no caminho (por isso nenhum aviso aparecia na tela).
     win.once('ready-to-show', () => {
-      setTimeout(() => {
-        autoUpdater.checkForUpdates().catch(() => {
-          // sem conexão ou nenhum release publicado ainda — o evento 'error'
-          // acima já avisa a janela, então não precisa fazer nada aqui além
-          // de não deixar isso impedir o app de abrir
-        })
-      }, 1500)
+      setTimeout(() => runUpdateCheck({ silent: false }), 1500)
 
       // Checar só quando o app abre não é suficiente — muita gente
       // deixa o app aberto o dia inteiro, e nesse caso uma atualização
@@ -2695,32 +3350,61 @@ app.whenReady().then(() => {
       // (que podia demorar dias). Rechecando a cada 30 minutos, uma
       // atualização nova chega bem mais rápido pra quem já está com o
       // app aberto, sem precisar fechar e abrir de novo.
-      setInterval(
-        () => {
-          if (!updateReadyToInstall) {
-            autoUpdater.checkForUpdates().catch(() => {})
-          }
-        },
-        30 * 60 * 1000
-      )
+      updateIntervalTimer = setInterval(() => runUpdateCheck({ silent: true }), UPDATE_CHECK_INTERVAL_MS)
+    })
+
+    // Voltando da suspensão/hibernação (PC "dormiu" a noite inteira): o
+    // intervalo de 30 min acima fica congelado enquanto o PC dorme —
+    // checa logo depois de acordar (com uma folga pra rede voltar), se a
+    // última checagem já tem mais de 10 minutos.
+    powerMonitor.on('resume', () => {
+      if (Date.now() - lastUpdateCheckAt < 10 * 60_000) return
+      setTimeout(() => runUpdateCheck({ silent: true }), 15_000)
+    })
+
+    app.once('before-quit', () => {
+      if (updateIntervalTimer) clearInterval(updateIntervalTimer)
+      updateIntervalTimer = null
+      clearUpdateRetryTimer()
     })
   }
 
+  // AUDITORIA: no macOS, clicar no ícone do Dock com a janela fechada
+  // criava uma janela nova com `show: false` que NUNCA aparecia (o
+  // 'ready-to-show' que a mostra só foi ligado na janela original).
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+      return
+    }
+    const newWin = createWindow()
+    newWin.once('ready-to-show', () => newWin.show())
   })
 })
 
 // Segunda camada de defesa contra novas janelas fora de controle —
 // mesmo que algo escape do setWindowOpenHandler, qualquer BrowserWindow
 // criada nasce com as mesmas restrições de segurança do app inteiro.
+// AUDITORIA: antes isso só bloqueava <webview>. Agora TODO webContents
+// criado (splash, sobreposição, e qualquer outro que venha a existir)
+// também nasce com: navegação pra fora do app barrada, e window.open
+// negado por padrão (a janela principal troca esse padrão pelo dela, que
+// abre links externos no navegador — ver createWindow).
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-attach-webview', (event) => event.preventDefault())
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  contents.on('will-navigate', (event, url) => {
+    // A janela principal tem o próprio handler (que também abre o link
+    // no navegador); aqui só garante que NENHUM outro webContents saia
+    // da página em que nasceu.
+    if (contents === mainWindow?.webContents) return
+    if (url !== contents.getURL()) event.preventDefault()
+  })
 })
 
 app.on('window-all-closed', () => {
-  if (gameCheckTimer) clearInterval(gameCheckTimer)
-  if (foregroundCheckTimer) clearInterval(foregroundCheckTimer)
+  stopGameDetection()
   stopForegroundWatch()
   killScanner()
   globalShortcut.unregisterAll()
@@ -2734,10 +3418,10 @@ app.on('window-all-closed', () => {
       // Mesmo motivo do outro quitAndInstall acima: sem os `true, true`,
       // isso abriria a tela de instalação visível bem na hora de fechar o
       // app, em vez de trocar a versão em silêncio e já reabrir sozinho.
+      isQuitting = true
       autoUpdater.quitAndInstall(true, true)
     } else {
       app.quit()
     }
   }
 })
-

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { useAuth } from '../../hooks/useAuth'
 import {
@@ -11,8 +11,14 @@ import {
   DECORATION_ACCEPT,
   DECORATION_HELP,
   DECORATION_MAX_BYTES,
-  validateProfileAsset,
+  validateProfileAssetDeep,
 } from '../../lib/profileAssetLimits'
+
+// Libera a URL temporária (blob:) da prévia anterior — sem isso cada
+// arquivo escolhido ficava preso na memória até fechar o app.
+function revokeIfBlob(url: string | null) {
+  if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+}
 
 type Tab = 'perfil' | 'banner' | 'decoracao'
 const TABS: { id: Tab; label: string }[] = [
@@ -60,64 +66,91 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Libera as prévias temporárias ao fechar o modal.
+  const previewsRef = useRef<(string | null)[]>([])
+  previewsRef.current = [avatarPreview, bannerPreview, decorationPreview]
+  useEffect(() => () => previewsRef.current.forEach(revokeIfBlob), [])
+
   if (!profile) return null
 
-  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target
+    const file = input.files?.[0]
     if (!file) return
-    const validationError = validateProfileAsset(file, AVATAR_MAX_BYTES, AVATAR_ACCEPT)
+    const validationError = await validateProfileAssetDeep(file, AVATAR_MAX_BYTES, AVATAR_ACCEPT)
     if (validationError) {
       setAvatarError(validationError)
+      input.value = ''
       return
     }
     setAvatarError(null)
     setAvatarFile(file)
-    setAvatarPreview(URL.createObjectURL(file))
+    setAvatarPreview((prev) => {
+      revokeIfBlob(prev)
+      return URL.createObjectURL(file)
+    })
   }
 
-  function handleBannerChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
+  async function handleBannerChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target
+    const file = input.files?.[0]
     if (!file) return
-    const validationError = validateProfileAsset(file, BANNER_MAX_BYTES, BANNER_ACCEPT)
+    const validationError = await validateProfileAssetDeep(file, BANNER_MAX_BYTES, BANNER_ACCEPT)
     if (validationError) {
       setBannerError(validationError)
+      input.value = ''
       return
     }
     setBannerError(null)
     setBannerFile(file)
     setRemoveBanner(false)
-    setBannerPreview(URL.createObjectURL(file))
+    setBannerPreview((prev) => {
+      revokeIfBlob(prev)
+      return URL.createObjectURL(file)
+    })
   }
 
-  function handleDecorationChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
+  async function handleDecorationChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target
+    const file = input.files?.[0]
     if (!file) return
-    const validationError = validateProfileAsset(file, DECORATION_MAX_BYTES, DECORATION_ACCEPT)
+    const validationError = await validateProfileAssetDeep(file, DECORATION_MAX_BYTES, DECORATION_ACCEPT)
     if (validationError) {
       setDecorationError(validationError)
+      input.value = ''
       return
     }
     setDecorationError(null)
     setDecorationFile(file)
     setRemoveDecoration(false)
-    setDecorationPreview(URL.createObjectURL(file))
+    setDecorationPreview((prev) => {
+      revokeIfBlob(prev)
+      return URL.createObjectURL(file)
+    })
   }
 
   function handleRemoveBanner() {
     setBannerFile(null)
-    setBannerPreview(null)
+    setBannerPreview((prev) => {
+      revokeIfBlob(prev)
+      return null
+    })
     setRemoveBanner(true)
     if (bannerInputRef.current) bannerInputRef.current.value = ''
   }
 
   function handleRemoveDecoration() {
     setDecorationFile(null)
-    setDecorationPreview(null)
+    setDecorationPreview((prev) => {
+      revokeIfBlob(prev)
+      return null
+    })
     setRemoveDecoration(true)
     if (decorationInputRef.current) decorationInputRef.current.value = ''
   }
 
   async function handleSave() {
+    if (loading) return // evita duplo envio
     setError(null)
     setLoading(true)
     const { error } = await updateProfile(
@@ -145,16 +178,34 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Editar perfil" onClose={onClose} maxWidth="max-w-lg">
-      <div className="flex gap-1 mb-4 border-b border-white/10 pb-0">
+    <Modal
+      title="Editar perfil"
+      description="Como as outras pessoas veem você no Mamacos."
+      onClose={onClose}
+      maxWidth="max-w-lg"
+      footer={
+        <>
+          {error && <p className="text-sm text-rose-400 mr-auto">{error}</p>}
+          <button onClick={onClose} className="btn-secondary h-9 px-4 text-sm">
+            Cancelar
+          </button>
+          <button onClick={handleSave} disabled={loading} className="btn-primary h-9 px-4 text-sm">
+            {loading ? 'Salvando...' : 'Salvar alterações'}
+          </button>
+        </>
+      }
+    >
+      <div role="tablist" aria-label="Seções do perfil" className="flex gap-1 p-1 mb-5 rounded-xl bg-discord-darker border border-[var(--color-line)]">
         {TABS.map((t) => (
           <button
             key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
               tab === t.id
-                ? 'text-white border-discord-blurple'
-                : 'text-discord-text-muted border-transparent hover:text-white'
+                ? 'bg-discord-lighter text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
+                : 'text-discord-text-muted hover:text-discord-text'
             }`}
           >
             {t.label}
@@ -172,7 +223,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
                 overlay escuro com lápis + "Trocar". */}
             <button
               onClick={() => avatarInputRef.current?.click()}
-              className="relative w-20 h-20 rounded-full bg-discord-darker border-2 border-dashed border-discord-text-muted/60 flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors group"
+              className="relative w-20 h-20 rounded-full bg-discord-darker border-2 border-dashed border-white/[0.18] flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors group"
             >
               {avatarPreview ? (
                 <>
@@ -203,23 +254,24 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
               <p className="text-xs font-medium text-discord-text-muted text-center">Enviar foto</p>
             )}
             <p className="text-[11px] text-discord-text-muted text-center max-w-[280px]">{AVATAR_HELP}</p>
-            {avatarError && <p className="text-xs text-red-400">{avatarError}</p>}
+            {avatarError && <p className="text-xs text-rose-400">{avatarError}</p>}
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+            <label className="field-label">
               Nome de exibição
             </label>
             <input
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              maxLength={32}
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+            <label className="field-label">
               Status personalizado
             </label>
             <input
@@ -228,19 +280,19 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setCustomStatus(e.target.value)}
               placeholder="O que você está pensando?"
               maxLength={100}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Jogando agora</label>
+            <label className="field-label">Jogando agora</label>
             <input
               type="text"
               value={playing}
               onChange={(e) => setPlaying(e.target.value)}
               placeholder="Nome do jogo (opcional)"
               maxLength={60}
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
             />
             <p className="text-xs text-discord-text-muted mt-1.5">
               No site, esse campo é manual — detectar automaticamente qual jogo está aberto só é possível no app
@@ -255,14 +307,14 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
         <div className="space-y-3">
           <button
             onClick={() => bannerInputRef.current?.click()}
-            className="w-full h-40 rounded-lg overflow-hidden border-2 border-dashed border-discord-text-muted hover:border-discord-blurple transition-colors relative group"
+            className="w-full h-40 rounded-xl overflow-hidden border border-[var(--color-line-strong)] hover:border-discord-blurple/70 transition-colors relative group"
             style={!bannerPreview ? { background: gradientFor(profile.username) } : undefined}
           >
             {bannerPreview && (
               <img src={bannerPreview} alt="Banner" className="absolute inset-0 w-full h-full object-cover" />
             )}
             <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 transition-colors">
-              <span className="text-xs font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-2.5 py-1 rounded">
+              <span className="text-xs font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/55 px-3 py-1 rounded-full">
                 {bannerPreview ? 'Trocar banner' : 'Sem banner — clique pra enviar'}
               </span>
             </span>
@@ -275,11 +327,11 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
             onChange={handleBannerChange}
           />
           <p className="text-[11px] text-discord-text-muted">{BANNER_HELP}</p>
-          {bannerError && <p className="text-xs text-red-400">{bannerError}</p>}
+          {bannerError && <p className="text-xs text-rose-400">{bannerError}</p>}
           {bannerPreview && (
             <button
               onClick={handleRemoveBanner}
-              className="text-xs text-red-400 hover:text-red-300 transition-colors"
+              className="text-xs font-medium text-rose-400 hover:text-rose-300 transition-colors"
             >
               Remover banner (voltar ao gradiente automático)
             </button>
@@ -317,7 +369,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
           </div>
           <button
             onClick={() => decorationInputRef.current?.click()}
-            className="w-full py-2.5 rounded btn-secondary text-sm"
+            className="w-full h-10 btn-secondary text-sm"
           >
             {decorationPreview ? 'Trocar decoração' : 'Enviar decoração'}
           </button>
@@ -329,11 +381,11 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
             onChange={handleDecorationChange}
           />
           <p className="text-[11px] text-discord-text-muted">{DECORATION_HELP}</p>
-          {decorationError && <p className="text-xs text-red-400">{decorationError}</p>}
+          {decorationError && <p className="text-xs text-rose-400">{decorationError}</p>}
           {decorationPreview && (
             <button
               onClick={handleRemoveDecoration}
-              className="text-xs text-red-400 hover:text-red-300 transition-colors block"
+              className="text-xs font-medium text-rose-400 hover:text-rose-300 transition-colors block"
             >
               Remover decoração
             </button>
@@ -341,16 +393,6 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      <div className="mt-5 space-y-3">
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        <button
-          onClick={handleSave}
-          disabled={loading}
-          className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-        >
-          {loading ? 'Salvando...' : 'Salvar alterações'}
-        </button>
-      </div>
     </Modal>
   )
 }

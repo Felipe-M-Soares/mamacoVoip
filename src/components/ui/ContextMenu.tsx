@@ -48,18 +48,52 @@ export function ContextMenu({
     let left = x
     if (left + rect.width > window.innerWidth - 8) left = window.innerWidth - rect.width - 8
     if (top + rect.height > window.innerHeight - 8) top = window.innerHeight - rect.height - 8
-    setPosition({ top, left, visibility: 'visible' })
+    setPosition({ top, left: Math.max(8, left), visibility: 'visible' })
   }, [x, y])
+
+  // Foca o primeiro item ao abrir — permite navegar com as setas logo de
+  // cara (e o leitor de tela anuncia o menu).
+  useEffect(() => {
+    const node = ref.current
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    const first = node?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])')
+    first?.focus({ preventScroll: true })
+    // Devolve o foco pra onde estava (ex.: o campo de mensagem) ao fechar —
+    // mas só se ele ainda estiver "perdido" no menu (ou no body): se a ação
+    // escolhida já focou outra coisa (ex.: caixa de edição), não rouba.
+    return () => {
+      const active = document.activeElement
+      const focusLost = !active || active === document.body || (node?.contains(active) ?? false)
+      if (focusLost && previouslyFocused && previouslyFocused !== document.body && document.contains(previouslyFocused)) {
+        previouslyFocused.focus?.({ preventScroll: true })
+      }
+    }
+  }, [])
+
+  function handleMenuKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
+    const items = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])') ?? [])
+    if (items.length === 0) return
+    e.preventDefault()
+    const idx = items.indexOf(document.activeElement as HTMLButtonElement)
+    let next = 0
+    if (e.key === 'ArrowDown') next = idx < 0 ? 0 : (idx + 1) % items.length
+    else if (e.key === 'ArrowUp') next = idx <= 0 ? items.length - 1 : idx - 1
+    else if (e.key === 'End') next = items.length - 1
+    items[next].focus()
+  }
 
   return createPortal(
     <div
       ref={ref}
       style={{ position: 'fixed', top: position.top, left: position.left, visibility: position.visibility }}
-      className="z-[200] min-w-[190px] bg-discord-darker rounded-md shadow-xl border border-black/40 py-1.5"
+      role="menu"
+      onKeyDown={handleMenuKeyDown}
+      className="z-[200] min-w-[208px] max-w-[280px] surface-elevated rounded-xl animate-pop-in p-1.5 outline-none"
     >
       {items.map((item, i) => (
         <div key={i}>
-          {item.divider && <div className="h-px bg-white/10 my-1.5" />}
+          {item.divider && <div role="separator" className="h-px bg-[var(--color-line)] my-1.5 mx-1.5" />}
           <button
             onClick={() => {
               if (item.disabled) return
@@ -67,12 +101,24 @@ export function ContextMenu({
               onClose()
             }}
             disabled={item.disabled}
-            className={`w-full flex items-center gap-2.5 text-left px-3 py-2 text-sm transition-colors ${
-              item.danger ? 'text-red-400 hover:bg-red-500/10' : 'text-discord-text hover:bg-white/5'
+            role="menuitem"
+            className={`group w-full flex items-center gap-2.5 text-left px-2.5 py-[7px] rounded-lg text-[14px] font-medium outline-none transition-colors ${
+              item.danger
+                ? 'text-rose-400 hover:bg-rose-500/12 focus-visible:bg-rose-500/12'
+                : 'text-discord-text hover:bg-discord-blurple hover:text-white focus-visible:bg-discord-blurple focus-visible:text-white'
             } ${item.disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
-            {item.icon}
-            {item.label}
+            {item.icon && (
+              <span
+                aria-hidden="true"
+                className={`w-4 h-4 shrink-0 flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4 ${
+                  item.danger ? '' : 'text-discord-text-muted group-hover:text-white group-focus-visible:text-white'
+                }`}
+              >
+                {item.icon}
+              </span>
+            )}
+            <span className="flex-1 truncate">{item.label}</span>
           </button>
         </div>
       ))}

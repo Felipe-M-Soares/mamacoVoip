@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
+import { EmptyState, ListSkeleton } from './settingsUI'
 import { Avatar } from '../ui/Avatar'
 import { useModeration, type LogWithProfiles } from '../../hooks/useModeration'
 
@@ -36,62 +37,72 @@ export function ModerationLogModal({ serverId, onClose }: { serverId: string; on
   const { logs, bans, permissions, loading, unbanMember } = useModeration(serverId)
   const [tab, setTab] = useState<'log' | 'bans'>('log')
 
+  const tabClass = (active: boolean) =>
+    `flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
+      active ? 'bg-discord-lighter text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]' : 'text-discord-text-muted hover:text-discord-text'
+    }`
+
   return (
     <Modal title="Moderação" onClose={onClose} maxWidth="max-w-lg">
-      <div className="flex gap-2 mb-4 bg-discord-darker rounded-lg p-1">
-        <button
-          onClick={() => setTab('log')}
-          className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            tab === 'log' ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:text-white'
-          }`}
-        >
+      <div role="tablist" aria-label="Moderação" className="flex gap-1 p-1 mb-4 rounded-xl bg-discord-darker border border-[var(--color-line)]">
+        <button role="tab" aria-selected={tab === 'log'} onClick={() => setTab('log')} className={tabClass(tab === 'log')}>
           Registro
         </button>
         {permissions.ban_members && (
-          <button
-            onClick={() => setTab('bans')}
-            className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              tab === 'bans' ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:text-white'
-            }`}
-          >
+          <button role="tab" aria-selected={tab === 'bans'} onClick={() => setTab('bans')} className={tabClass(tab === 'bans')}>
             Banidos ({bans.length})
           </button>
         )}
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-8">
-          <div className="w-6 h-6 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
-        </div>
+        <ListSkeleton rows={5} avatar={tab === 'bans'} />
       ) : tab === 'log' ? (
         logs.length === 0 ? (
-          <p className="text-sm text-discord-text-muted">Nenhuma ação de moderação registrada ainda.</p>
+          <EmptyState
+            icon={
+              <>
+                <path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6L12 3z" />
+                <path d="M9 12h6" />
+              </>
+            }
+            title="Tudo tranquilo por aqui"
+            hint="Nenhuma ação de moderação registrada ainda."
+          />
         ) : (
-          <div className="space-y-1 max-h-96 overflow-y-auto">
+          <div className="space-y-0.5 max-h-96 overflow-y-auto">
             {logs.map((log) => (
-              <div key={log.id} className="px-3 py-2 rounded hover:bg-white/5">
-                <p className="text-sm text-discord-text">{formatLog(log)}</p>
-                {log.reason && <p className="text-xs text-discord-text-muted mt-0.5">Motivo: {log.reason}</p>}
-                <p className="text-xs text-discord-text-muted mt-0.5">{formatDate(log.created_at)}</p>
+              <div key={log.id} className="flex gap-3 px-3 py-2.5 rounded-[10px] hover:bg-white/[0.04] transition-colors">
+                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-discord-blurple shrink-0" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] text-discord-text">{formatLog(log)}</p>
+                  {log.reason && <p className="text-[12.5px] text-discord-text-muted mt-0.5">Motivo: {log.reason}</p>}
+                  <p className="text-[11.5px] text-discord-text-muted mt-0.5">{formatDate(log.created_at)}</p>
+                </div>
               </div>
             ))}
           </div>
         )
       ) : bans.length === 0 ? (
-        <p className="text-sm text-discord-text-muted">Ninguém banido.</p>
+        <EmptyState
+          icon={
+            <>
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="m6 6 12 12" />
+            </>
+          }
+          title="Ninguém banido"
+        />
       ) : (
-        <div className="space-y-1 max-h-96 overflow-y-auto">
+        <div className="space-y-0.5 max-h-96 overflow-y-auto">
           {bans.map((b) => (
-            <div key={b.user_id} className="flex items-center gap-3 px-3 py-2 rounded hover:bg-white/5">
+            <div key={b.user_id} className="flex items-center gap-3 px-3 py-2 rounded-[10px] hover:bg-white/[0.04] transition-colors">
               <Avatar name={b.profile.username} avatarUrl={b.profile.avatar_url} size={32} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-white truncate">{b.profile.display_name || b.profile.username}</p>
-                {b.reason && <p className="text-xs text-discord-text-muted truncate">Motivo: {b.reason}</p>}
+                <p className="text-[14px] text-white truncate">{b.profile.display_name || b.profile.username}</p>
+                {b.reason && <p className="text-[12px] text-discord-text-muted truncate">Motivo: {b.reason}</p>}
               </div>
-              <button
-                onClick={() => unbanMember(b.user_id)}
-                className="text-xs px-3 py-1 rounded bg-discord-darker text-discord-text hover:bg-discord-lighter transition-colors shrink-0"
-              >
+              <button onClick={() => unbanMember(b.user_id)} className="btn-secondary h-8 px-3 text-[13px] shrink-0">
                 Desbanir
               </button>
             </div>

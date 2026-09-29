@@ -48,98 +48,161 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
     if (conversation) onOpenConversation(conversation.id)
   }
 
-  const tabs: { id: Tab; label: string }[] = [
+  const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'online', label: 'Online' },
     { id: 'all', label: 'Todos' },
-    { id: 'pending', label: `Pendentes${pendingCount > 0 ? ` (${pendingCount})` : ''}` },
+    { id: 'pending', label: 'Pendentes', count: pendingCount },
     { id: 'blocked', label: 'Bloqueados' },
   ]
 
   return (
-    <section className="flex-1 flex flex-col min-w-0 bg-discord-channels">
-      <header className="h-12 px-4 flex items-center gap-4 border-b border-black/20 shadow-sm shrink-0">
-        <div className="flex items-center gap-2 text-white font-semibold">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-text-muted">
-            <path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zM8 11c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-          </svg>
-          Amigos
+    <section className="flex-1 flex flex-col min-w-0 bg-discord-channels border-t border-l border-[var(--color-line)]">
+      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-4 border-b border-[var(--color-line)] shrink-0 min-w-0">
+        <div className="flex items-center gap-2.5 text-white shrink-0">
+          <span className="w-8 h-8 rounded-lg bg-white/[0.05] border border-[var(--color-line)] flex items-center justify-center" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px] text-discord-text-muted">
+              <path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zM8 11c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
+            </svg>
+          </span>
+          <h2 className="font-display font-semibold text-[15px] hidden sm:block">Amigos</h2>
         </div>
-        <div className="flex gap-1">
+        <div className="w-px h-5 bg-[var(--color-line-strong)] shrink-0 hidden sm:block" />
+        <div
+          role="tablist"
+          aria-label="Filtrar amigos"
+          className="flex items-center gap-0.5 p-1 rounded-xl bg-discord-darker/70 border border-[var(--color-line)] overflow-x-auto min-w-0"
+        >
           {tabs.map((t) => (
             <button
               key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
-              className={`px-2 py-1 rounded text-sm font-medium transition-colors ${
-                tab === t.id ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:text-white'
+              className={`h-7 px-3 rounded-lg text-[13px] font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                tab === t.id
+                  ? 'bg-discord-lighter text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
+                  : 'text-discord-text-muted hover:text-discord-text hover:bg-white/[0.04]'
               }`}
             >
               {t.label}
+              {t.count ? <span className="badge-count !shadow-none !h-4 !min-w-4 !leading-4 !text-[10px]">{t.count}</span> : null}
             </button>
           ))}
         </div>
       </header>
 
-      <div className="p-4 border-b border-black/20">
-        <p className="text-xs font-bold uppercase text-discord-text-muted mb-2">Adicionar amigo</p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={addUsername}
-            onChange={(e) => setAddUsername(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSendRequest()}
-            placeholder="Digite um nome de usuário"
-            className="flex-1 px-3 py-2 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm"
-          />
-          <button
-            onClick={handleSendRequest}
-            className="px-4 py-2 rounded btn-primary text-sm shrink-0"
-          >
-            Enviar pedido
-          </button>
+      <div className="flex-1 overflow-y-auto">
+      <div className="p-4 sm:p-6 max-w-4xl">
+        <div className="rounded-2xl border border-[var(--color-line)] bg-white/[0.02] p-4 sm:p-5 mb-6">
+          <div className="flex items-start gap-3 mb-3">
+            <span className="w-9 h-9 rounded-xl bg-brand-gradient flex items-center justify-center shrink-0" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px] text-white">
+                <path d="M15 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+              </svg>
+            </span>
+            <div className="min-w-0">
+              <h3 className="font-display font-semibold text-white">Adicionar amigo</h3>
+              <p className="text-[13px] text-discord-text-muted">Envie um pedido usando o nome de usuário da pessoa.</p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <label htmlFor="add-friend-input" className="sr-only">Nome de usuário</label>
+            <input
+              id="add-friend-input"
+              type="text"
+              value={addUsername}
+              onChange={(e) => setAddUsername(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendRequest()}
+              placeholder="Digite um nome de usuário"
+              className="flex-1 min-w-0 px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm"
+            />
+            <button
+              onClick={handleSendRequest}
+              disabled={addUsername.trim().length === 0}
+              className="h-10 px-5 btn-primary text-sm shrink-0"
+            >
+              Enviar pedido
+            </button>
+          </div>
+          {addError && (
+            <p role="alert" className="text-sm text-rose-400 mt-2.5 flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4 shrink-0" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8v5M12 16.5v.01" />
+              </svg>
+              {addError}
+            </p>
+          )}
+          {addSuccess && (
+            <p role="status" className="text-sm text-discord-green mt-2.5 flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 shrink-0" aria-hidden="true">
+                <path d="m5 12 5 5L20 7" />
+              </svg>
+              {addSuccess}
+            </p>
+          )}
         </div>
-        {addError && <p className="text-sm text-red-400 mt-2">{addError}</p>}
-        {addSuccess && <p className="text-sm text-discord-green mt-2">{addSuccess}</p>}
-      </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
         {tab === 'online' && (
-          <FriendGrid friends={onlineFriends} emptyText="Ninguém online agora." onMessage={handleMessage} onRemove={removeFriend} />
+          <FriendGrid
+            friends={onlineFriends}
+            label="Online"
+            empty={<EmptyState kind="online" title="Ninguém online agora" hint="Quando seus amigos entrarem, eles aparecem aqui." />}
+            onMessage={handleMessage}
+            onRemove={removeFriend}
+          />
         )}
         {tab === 'all' && (
-          <FriendGrid friends={friends} emptyText="Você ainda não tem amigos. Adicione alguém acima!" onMessage={handleMessage} onRemove={removeFriend} />
+          <FriendGrid
+            friends={friends}
+            label="Todos os amigos"
+            empty={<EmptyState kind="friends" title="Você ainda não tem amigos" hint="Adicione alguém pelo nome de usuário aqui em cima." />}
+            onMessage={handleMessage}
+            onRemove={removeFriend}
+          />
         )}
         {tab === 'pending' && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             {incoming.length > 0 && (
               <div>
-                <p className="text-xs font-bold uppercase text-discord-text-muted mb-2">
+                <p className={`${SECTION_LABEL} px-2 mb-2`}>
                   Pedidos recebidos — {incoming.length}
                 </p>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {incoming.map((req) => (
-                    <div key={req.id} className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5">
-                      <Avatar name={req.profile.username} avatarUrl={req.profile.avatar_url} decorationUrl={req.profile.avatar_decoration_url} size={36} />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm text-white truncate block">
+                    <div key={req.id} className="flex items-center gap-3 px-2.5 py-2 rounded-xl hover:bg-white/[0.04] transition-colors border-t border-[var(--color-line)] first:border-t-0">
+                      <Avatar name={req.profile.username} avatarUrl={req.profile.avatar_url} decorationUrl={req.profile.avatar_decoration_url} size={40} />
+                      <div className="flex-1 min-w-0 leading-tight">
+                        <span className="text-[14px] font-semibold text-white truncate block">
                           {req.profile.display_name || req.profile.username}
                         </span>
-                        {req.request_note && (
-                          <span className="text-xs text-discord-text-muted italic truncate block">
+                        {req.request_note ? (
+                          <span className="text-xs text-discord-text-muted italic truncate block mt-0.5">
                             "{req.request_note}"
                           </span>
+                        ) : (
+                          <span className="text-xs text-discord-text-muted truncate block mt-0.5">Pedido de amizade recebido</span>
                         )}
                       </div>
                       <button
                         onClick={() => acceptRequest(req.id)}
-                        className="px-3 py-1 rounded bg-discord-green text-white text-xs font-medium hover:bg-green-600"
+                        title="Aceitar"
+                        aria-label={`Aceitar pedido de ${req.profile.display_name || req.profile.username}`}
+                        className="icon-btn w-9 h-9 !rounded-full bg-white/[0.05] hover:!bg-discord-green/15 hover:!text-discord-green"
                       >
-                        Aceitar
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
+                          <path d="m5 12 5 5L20 7" />
+                        </svg>
                       </button>
                       <button
                         onClick={() => declineRequest(req.id)}
-                        className="px-3 py-1 rounded bg-discord-darker text-discord-text text-xs font-medium hover:bg-discord-lighter"
+                        title="Recusar"
+                        aria-label={`Recusar pedido de ${req.profile.display_name || req.profile.username}`}
+                        className="icon-btn w-9 h-9 !rounded-full bg-white/[0.05] hover:!bg-rose-500/15 hover:!text-rose-400"
                       >
-                        Recusar
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-[18px] h-[18px]">
+                          <path d="M6 6l12 12M18 6 6 18" />
+                        </svg>
                       </button>
                     </div>
                   ))}
@@ -148,57 +211,129 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
             )}
             {outgoing.length > 0 && (
               <div>
-                <p className="text-xs font-bold uppercase text-discord-text-muted mb-2">
+                <p className={`${SECTION_LABEL} px-2 mb-2`}>
                   Pedidos enviados — {outgoing.length}
                 </p>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {outgoing.map((req) => (
-                    <div key={req.id} className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5">
-                      <Avatar name={req.profile.username} avatarUrl={req.profile.avatar_url} decorationUrl={req.profile.avatar_decoration_url} size={36} />
-                      <span className="flex-1 text-sm text-white truncate">
-                        {req.profile.display_name || req.profile.username}
-                      </span>
-                      <span className="text-xs text-discord-text-muted">Pendente</span>
+                    <div key={req.id} className="flex items-center gap-3 px-2.5 py-2 rounded-xl hover:bg-white/[0.04] transition-colors border-t border-[var(--color-line)] first:border-t-0">
+                      <Avatar name={req.profile.username} avatarUrl={req.profile.avatar_url} decorationUrl={req.profile.avatar_decoration_url} size={40} />
+                      <div className="flex-1 min-w-0 leading-tight">
+                        <span className="text-[14px] font-semibold text-white truncate block">
+                          {req.profile.display_name || req.profile.username}
+                        </span>
+                        <span className="text-xs text-discord-text-muted truncate block mt-0.5">@{req.profile.username}</span>
+                      </div>
+                      <span className="chip">Aguardando</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
             {incoming.length === 0 && outgoing.length === 0 && (
-              <p className="text-discord-text-muted text-sm">Nenhum pedido pendente.</p>
+              <EmptyState kind="pending" title="Nenhum pedido pendente" hint="Pedidos que você enviar ou receber aparecem aqui." />
             )}
           </div>
         )}
         {tab === 'blocked' && (
-          <div className="space-y-1">
+          <div>
             {blocked.length === 0 ? (
-              <p className="text-discord-text-muted text-sm">Você não bloqueou ninguém.</p>
+              <EmptyState kind="blocked" title="Ninguém bloqueado" hint="Você não bloqueou ninguém. Bom sinal!" />
             ) : (
-              blocked.map((b) => (
-                <div key={b.blocked_id} className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5">
-                  <Avatar name={b.profile.username} avatarUrl={b.profile.avatar_url} decorationUrl={b.profile.avatar_decoration_url} size={36} />
-                  <span className="flex-1 text-sm text-white truncate">
-                    {b.profile.display_name || b.profile.username}
-                  </span>
+              <>
+              <p className={`${SECTION_LABEL} px-2 mb-2`}>Bloqueados — {blocked.length}</p>
+              <div className="space-y-0.5">
+              {blocked.map((b) => (
+                <div key={b.blocked_id} className="flex items-center gap-3 px-2.5 py-2 rounded-xl hover:bg-white/[0.04] transition-colors border-t border-[var(--color-line)] first:border-t-0">
+                  <Avatar name={b.profile.username} avatarUrl={b.profile.avatar_url} decorationUrl={b.profile.avatar_decoration_url} size={40} />
+                  <div className="flex-1 min-w-0 leading-tight">
+                    <span className="text-[14px] font-semibold text-white truncate block">
+                      {b.profile.display_name || b.profile.username}
+                    </span>
+                    <span className="text-xs text-discord-text-muted truncate block mt-0.5">@{b.profile.username}</span>
+                  </div>
                   <button
                     onClick={() => unblockUser(b.blocked_id)}
-                    className="px-3 py-1 rounded bg-discord-darker text-discord-text text-xs font-medium hover:bg-discord-lighter"
+                    className="h-8 px-3 btn-secondary text-xs"
                   >
                     Desbloquear
                   </button>
                 </div>
-              ))
+              ))}
+              </div>
+              </>
             )}
           </div>
         )}
+      </div>
       </div>
     </section>
   )
 }
 
+const SECTION_LABEL = 'text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted'
+
+const STATUS_LABEL: Record<string, string> = {
+  online: 'Online',
+  idle: 'Ausente',
+  dnd: 'Não perturbe',
+  offline: 'Offline',
+  invisible: 'Offline',
+}
+
+// Ilustração simples (SVG inline) + título + dica, no lugar do texto cinza solto.
+function EmptyState({ kind, title, hint }: { kind: 'online' | 'friends' | 'pending' | 'blocked'; title: string; hint: string }) {
+  return (
+    <div className="flex flex-col items-center text-center py-14 px-4 animate-fade-in">
+      <div className="relative w-28 h-28 mb-5" aria-hidden="true">
+        <div className="absolute inset-0 rounded-full bg-discord-blurple/10 blur-2xl" />
+        <svg viewBox="0 0 112 112" className="relative w-full h-full" fill="none">
+          <circle cx="56" cy="56" r="52" className="fill-white/[0.03] stroke-[var(--color-line-strong)]" strokeWidth="1.5" strokeDasharray="4 6" />
+          {kind === 'online' && (
+            <>
+              <circle cx="56" cy="46" r="14" className="fill-discord-lighter" />
+              <path d="M30 82c3-13 14-20 26-20s23 7 26 20" className="fill-discord-lighter" />
+              <circle cx="72" cy="58" r="7" className="fill-discord-channels" />
+              <circle cx="72" cy="58" r="4.5" className="fill-zinc-500" />
+            </>
+          )}
+          {kind === 'friends' && (
+            <>
+              <circle cx="44" cy="48" r="11" className="fill-discord-lighter" />
+              <path d="M24 80c2-11 10-17 20-17s18 6 20 17" className="fill-discord-lighter" />
+              <circle cx="70" cy="44" r="9" className="fill-discord-lighter opacity-60" />
+              <path d="M58 70c3-6 7-9 12-9 8 0 14 5 16 14" className="fill-discord-lighter opacity-60" />
+              <circle cx="82" cy="30" r="9" className="fill-discord-blurple" />
+              <path d="M82 25.5v9M77.5 30h9" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
+            </>
+          )}
+          {kind === 'pending' && (
+            <>
+              <rect x="28" y="36" width="56" height="40" rx="8" className="fill-discord-lighter" />
+              <path d="m30 40 26 19 26-19" className="stroke-discord-channels" strokeWidth="3" strokeLinejoin="round" />
+              <circle cx="80" cy="34" r="9" className="fill-discord-channels" />
+              <circle cx="80" cy="34" r="7" className="stroke-discord-blurple" strokeWidth="2" />
+              <path d="M80 30.5V34l2.5 1.5" className="stroke-discord-blurple" strokeWidth="2" strokeLinecap="round" />
+            </>
+          )}
+          {kind === 'blocked' && (
+            <>
+              <circle cx="56" cy="56" r="22" className="stroke-discord-lighter" strokeWidth="7" />
+              <path d="m41 71 30-30" className="stroke-discord-lighter" strokeWidth="7" strokeLinecap="round" />
+            </>
+          )}
+        </svg>
+      </div>
+      <p className="font-display font-semibold text-white">{title}</p>
+      <p className="text-sm text-discord-text-muted mt-1 max-w-xs">{hint}</p>
+    </div>
+  )
+}
+
 function FriendGrid({
   friends,
-  emptyText,
+  label,
+  empty,
   onMessage,
   onRemove,
 }: {
@@ -213,7 +348,8 @@ function FriendGrid({
       custom_status: string | null
     }
   }[]
-  emptyText: string
+  label: string
+  empty: React.ReactNode
   onMessage: (userId: string) => void
   onRemove: (userId: string) => void
 }) {
@@ -224,6 +360,8 @@ function FriendGrid({
   const { menuState, openMenu, closeMenu } = useContextMenuState()
   const [contextFriendId, setContextFriendId] = useState<string | null>(null)
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null)
+  // Confirmação inline de "remover amigo" (antes removia num clique só)
+  const [confirmingRemoveId, setConfirmingRemoveId] = useState<string | null>(null)
   const feedbackTimeoutRef = useRef<number | null>(null)
 
   // Clicar com o botão direito num amigo online e chamá-lo direto pra um
@@ -271,7 +409,7 @@ function FriendGrid({
   }
 
   if (friends.length === 0) {
-    return <p className="text-discord-text-muted text-sm">{emptyText}</p>
+    return <>{empty}</>
   }
 
   const contextTarget = friends.find((f) => f.profile.id === contextFriendId) ?? null
@@ -288,17 +426,21 @@ function FriendGrid({
           label: 'Remover amigo',
           danger: true,
           divider: true,
-          onClick: () => onRemove(contextTarget.profile.id),
+          onClick: () => setConfirmingRemoveId(contextTarget.profile.id),
         },
       ]
     : []
 
   return (
-    <div className="space-y-1">
+    <div>
+      <p className={`${SECTION_LABEL} px-2 mb-2`}>
+        {label} — {friends.length}
+      </p>
+      <div className="space-y-0.5">
       {friends.map((f) => (
+        <div key={f.profile.id}>
         <div
-          key={f.profile.id}
-          className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5 group"
+          className="flex items-center gap-3 px-2.5 py-2 rounded-xl hover:bg-white/[0.04] transition-colors group border-t border-[var(--color-line)] hover:border-transparent"
           onContextMenu={(e) => {
             setContextFriendId(f.profile.id)
             openMenu(e)
@@ -310,39 +452,66 @@ function FriendGrid({
             decorationUrl={f.profile.avatar_decoration_url}
             status={f.profile.status}
             userId={f.profile.id}
-            size={36}
+            size={40}
           />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-white truncate">{f.profile.display_name || f.profile.username}</p>
-            <p className="text-xs text-discord-text-muted truncate">
-              {f.profile.custom_status || f.profile.status}
+          <div className="flex-1 min-w-0 leading-tight">
+            <p className="text-[14px] font-semibold text-white truncate">
+              {f.profile.display_name || f.profile.username}
+              <span className="ml-1.5 text-xs font-normal text-discord-text-muted opacity-0 group-hover:opacity-100 transition-opacity">@{f.profile.username}</span>
+            </p>
+            <p className="text-xs text-discord-text-muted truncate mt-0.5">
+              {f.profile.custom_status || STATUS_LABEL[f.profile.status] || f.profile.status}
             </p>
           </div>
           <button
             onClick={() => onMessage(f.profile.id)}
             title="Enviar mensagem"
-            className="opacity-0 group-hover:opacity-100 w-8 h-8 flex items-center justify-center rounded-full bg-discord-darker hover:bg-discord-lighter text-discord-text-muted hover:text-white transition-opacity"
+            aria-label={`Enviar mensagem para ${f.profile.display_name || f.profile.username}`}
+            className="icon-btn w-9 h-9 !rounded-full bg-white/[0.05] group-hover:bg-discord-darker"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-              <path d="M5.5 4.5c.5-.5 1.2-.8 2-.8h1.4l-.3 15h-1c-.8 0-1.5-.3-2-.8-.6-.5-.9-1.2-.9-2v-9.4c0-.8.3-1.5.8-2zm10 0c.5.5.8 1.2.8 2v9.4c0 .8-.3 1.5-.8 2-.5.5-1.2.8-2 .8h-1l-.3-15h1.4c.8 0 1.5.3 2 .8z" />
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
+              <path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm3 5v2h10V9H7zm0 4v2h7v-2H7z" />
             </svg>
           </button>
           <button
-            onClick={() => onRemove(f.profile.id)}
+            onClick={() => setConfirmingRemoveId(f.profile.id)}
             title="Remover amigo"
-            className="opacity-0 group-hover:opacity-100 w-8 h-8 flex items-center justify-center rounded-full bg-discord-darker hover:bg-red-600/20 text-discord-text-muted hover:text-red-400 transition-opacity"
+            aria-label={`Remover ${f.profile.display_name || f.profile.username} dos amigos`}
+            className="icon-btn w-9 h-9 !rounded-full bg-white/[0.05] group-hover:bg-discord-darker hover:!text-rose-400 hover:!bg-rose-500/15"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-              <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
+              <path d="M10 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm6-4h6v2h-6z" />
             </svg>
           </button>
         </div>
+        {confirmingRemoveId === f.profile.id && (
+          <div role="alertdialog" aria-label="Confirmar remoção" className="ml-14 mr-2 mb-2 mt-1 flex flex-wrap items-center gap-2 rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-3 py-2 animate-fade-in">
+            <span className="text-sm text-discord-text flex-1 min-w-[10rem]">
+              Remover <strong className="font-semibold">{f.profile.display_name || f.profile.username}</strong> dos amigos?
+            </span>
+            <button onClick={() => setConfirmingRemoveId(null)} className="btn-ghost h-8 px-3 text-sm">
+              Cancelar
+            </button>
+            <button
+              autoFocus
+              onClick={() => {
+                setConfirmingRemoveId(null)
+                onRemove(f.profile.id)
+              }}
+              className="btn-danger h-8 px-3 text-sm"
+            >
+              Remover
+            </button>
+          </div>
+        )}
+        </div>
       ))}
+      </div>
 
       {menuState && contextTarget && <ContextMenu x={menuState.x} y={menuState.y} items={menuItems} onClose={closeMenu} />}
 
       {inviteFeedback && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[210] bg-discord-dark border border-black/40 text-white text-sm px-4 py-2 rounded-lg shadow-xl">
+        <div role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[210] surface-elevated text-white text-sm px-4 py-2.5 rounded-xl animate-pop-in">
           {inviteFeedback}
         </div>
       )}

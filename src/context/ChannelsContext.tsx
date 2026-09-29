@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { describeError } from '../lib/errors'
 import type { Category, Channel, ChannelType } from '../types/database'
@@ -52,8 +52,14 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   // try/catch garante que loading sempre termina e que, se algo falhar
   // de verdade, o motivo aparece pra quem está usando (e pra quem for
   // depurar depois) em vez de falhar em silêncio.
+  const loadSeqRef = useRef(0)
+  const hasLoadedRef = useRef(false)
   const refresh = useCallback(async () => {
-    setLoading(true)
+    const seq = ++loadSeqRef.current
+    // Skeleton só na PRIMEIRA carga (ou depois de um erro). Antes toda
+    // ação (criar/renomear/mover canal) trocava a barra lateral inteira
+    // pelo skeleton por um instante.
+    if (!hasLoadedRef.current) setLoading(true)
     try {
       const [catsRes, chansRes] = await Promise.all([
         supabase.from('categories').select('*').eq('server_id', serverId).order('position'),
@@ -61,13 +67,18 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
       ])
       if (catsRes.error) throw catsRes.error
       if (chansRes.error) throw chansRes.error
+      // Duas ações seguidas (ex.: mover canal duas vezes rápido) disparam
+      // dois refresh — só a resposta mais nova vale.
+      if (seq !== loadSeqRef.current) return
       setCategories(catsRes.data ?? [])
       setChannels(chansRes.data ?? [])
       setLoadError(null)
+      hasLoadedRef.current = true
     } catch (err) {
+      if (seq !== loadSeqRef.current) return
       setLoadError(describeError(err, 'Não foi possível carregar os canais.'))
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
   }, [serverId])
 
@@ -232,26 +243,30 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
-  return (
-    <ChannelsContext.Provider
-      value={{
-        categories,
-        channels,
-        loading,
-        loadError,
-        refresh,
-        createChannel,
-        updateChannel,
-        deleteChannel,
-        createCategory,
-        updateCategory,
-        deleteCategory,
-        moveChannel,
-        moveChannelToCategory,
-        moveCategory,
-      }}
-    >
-      {children}
-    </ChannelsContext.Provider>
+  // Valor memoizado: antes era um objeto novo a cada render do provider,
+  // re-renderizando todo consumidor de useChannels() (sidebar, chat, modais)
+  // sem necessidade. As ações dependem só de channels/categories/serverId/
+  // refresh, que estão nas dependências.
+  const value = useMemo(
+    () => ({
+      categories,
+      channels,
+      loading,
+      loadError,
+      refresh,
+      createChannel,
+      updateChannel,
+      deleteChannel,
+      createCategory,
+      updateCategory,
+      deleteCategory,
+      moveChannel,
+      moveChannelToCategory,
+      moveCategory,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [categories, channels, loading, loadError, refresh]
   )
+
+  return <ChannelsContext.Provider value={value}>{children}</ChannelsContext.Provider>
 }

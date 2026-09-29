@@ -68,6 +68,16 @@ function playPattern(tones: ToneSpec[]) {
   master.gain.value = 1
   master.connect(ctx.destination)
   tones.forEach((t) => tone(ctx, master, t))
+  // Desliga o nó mestre depois que o último tom acabou — antes cada som
+  // de interface deixava um GainNode pendurado no destino pra sempre.
+  const totalMs = Math.max(...tones.map((t) => (t.delay ?? 0) + t.duration)) * 1000 + 100
+  setTimeout(() => {
+    try {
+      master.disconnect()
+    } catch {
+      // já desconectado
+    }
+  }, totalMs)
 }
 
 export function playConnectSound() {

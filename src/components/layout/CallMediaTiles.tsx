@@ -34,7 +34,7 @@ export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sin
         autoPlay
         playsInline
         muted
-        className={`w-full h-full rounded-lg bg-black ${fit === 'contain' ? 'object-contain' : 'object-cover'}`}
+        className={`w-full h-full rounded-[inherit] bg-black ${fit === 'contain' ? 'object-contain' : 'object-cover'}`}
       />
     )
   }
@@ -79,9 +79,35 @@ export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sin
 let sharedRemoteAudioContext: AudioContext | null = null
 export function getSharedRemoteAudioContext(): AudioContext {
   if (!sharedRemoteAudioContext || sharedRemoteAudioContext.state === 'closed') {
-    sharedRemoteAudioContext = new AudioContext()
+    sharedRemoteAudioContext = new AudioContext({ latencyHint: 'interactive' })
   }
   return sharedRemoteAudioContext
+}
+
+// Quantos <RemoteAudio> estão usando o contexto compartilhado agora.
+// Quando chega a zero (fim da call), o contexto é SUSPENSO — antes ele
+// ficava rodando pra sempre depois da primeira call, mantendo a thread
+// de áudio e o dispositivo de saída ativos à toa (CPU/bateria).
+let sharedRemoteAudioUsers = 0
+let suspendTimer: ReturnType<typeof setTimeout> | null = null
+function retainSharedRemoteAudioContext() {
+  sharedRemoteAudioUsers++
+  if (suspendTimer) {
+    clearTimeout(suspendTimer)
+    suspendTimer = null
+  }
+}
+function releaseSharedRemoteAudioContext() {
+  sharedRemoteAudioUsers = Math.max(0, sharedRemoteAudioUsers - 1)
+  if (sharedRemoteAudioUsers > 0 || suspendTimer) return
+  // Pequena espera: numa troca de stream (desmonta e monta de novo no
+  // mesmo instante) não vale suspender e acordar o contexto.
+  suspendTimer = setTimeout(() => {
+    suspendTimer = null
+    if (sharedRemoteAudioUsers === 0 && sharedRemoteAudioContext?.state === 'running') {
+      sharedRemoteAudioContext.suspend().catch(() => {})
+    }
+  }, 2000)
 }
 
 export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; sinkId?: string | null; volume: number }) {
@@ -89,10 +115,32 @@ export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; s
   const audioContextRef = useRef<AudioContext | null>(null)
   const gainNodeRef = useRef<GainNode | null>(null)
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const volumeRef = useRef(volume)
+  volumeRef.current = volume
 
   useEffect(() => {
+    // Stream sem nenhuma track de áudio (ex.: só câmera) — nada pra
+    // tocar. Antes, createMediaStreamSource() lançava InvalidStateError
+    // nesse caso e caía no fallback, que tocava a stream "crua" direto.
+    if (stream.getAudioTracks().length === 0) {
+      if (ref.current) ref.current.srcObject = null
+      return
+    }
+    // Contorno de um bug antigo e conhecido do Chromium (crbug 933677):
+    // uma MediaStream REMOTA do WebRTC ligada só no Web Audio (via
+    // createMediaStreamSource) pode sair MUDA se ela não estiver também
+    // tocando em algum elemento de mídia. Um <audio> mudo, fora do DOM,
+    // "segura" o fluxo de áudio ativo sem tocar nada de verdade (quem
+    // toca é o elemento abaixo, com o áudio já passando pelo GainNode).
+    const keepAlive = new Audio()
+    keepAlive.muted = true
+    keepAlive.srcObject = stream
+    keepAlive.play().catch(() => {})
+    let retained = false
     try {
       const ctx = getSharedRemoteAudioContext()
+      retainSharedRemoteAudioContext()
+      retained = true
       const source = ctx.createMediaStreamSource(stream)
       const gain = ctx.createGain()
       const destination = ctx.createMediaStreamDestination()
@@ -105,6 +153,12 @@ export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; s
       audioContextRef.current = ctx
       sourceNodeRef.current = source
       gainNodeRef.current = gain
+      // Aplica o volume atual JÁ na criação — antes o GainNode nascia em
+      // 1.0 e só recebia o volume certo se `volume` mudasse depois (o
+      // efeito de volume abaixo roda antes deste na troca de stream),
+      // então uma pessoa com volume em 0% (ou "ensurdecido") voltava a
+      // ser ouvida a 100% toda vez que a stream dela era recriada.
+      gain.gain.value = Math.max(0, Math.min(2, volumeRef.current))
       if (ref.current) {
         ref.current.srcObject = destination.stream
         ref.current.volume = 1
@@ -116,7 +170,10 @@ export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; s
       audioContextRef.current = null
       gainNodeRef.current = null
       sourceNodeRef.current = null
-      if (ref.current) ref.current.srcObject = stream
+      if (ref.current) {
+        ref.current.srcObject = stream
+        ref.current.volume = Math.max(0, Math.min(1, volumeRef.current))
+      }
     }
     return () => {
       try {
@@ -129,6 +186,9 @@ export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; s
       } catch {
         // já desconectado — sem problema
       }
+      keepAlive.pause()
+      keepAlive.srcObject = null
+      if (retained) releaseSharedRemoteAudioContext()
       // NÃO fecha o AudioContext aqui — ele é COMPARTILHADO entre
       // todos os <RemoteAudio> montados (ver getSharedRemoteAudioContext
       // acima); fechar ao desmontar UM participante silenciaria todos

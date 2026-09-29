@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
+import { Toggle } from '../ui/Toggle'
+import { CheckMark, ToggleRow } from './settingsUI'
 import { useChannels } from '../../hooks/useChannels'
 import { useRoles } from '../../hooks/useRoles'
 import { useChannelRoleAccess } from '../../hooks/useChannelRoleAccess'
@@ -79,8 +81,22 @@ export function EditChannelModal({
 
   if (confirmingDelete) {
     return (
-      <Modal title={`Excluir canal '${channel.name}'`} onClose={onClose}>
-        <p className="text-sm text-discord-text-muted">
+      <Modal
+        title={`Excluir canal '${channel.name}'`}
+        onClose={onClose}
+        maxWidth="max-w-sm"
+        footer={
+          <>
+            <button onClick={() => setConfirmingDelete(false)} className="btn-secondary h-9 px-4 text-sm">
+              Cancelar
+            </button>
+            <button onClick={handleDelete} disabled={loading} className="btn-danger h-9 px-4 text-sm">
+              {loading ? 'Excluindo...' : 'Excluir canal'}
+            </button>
+          </>
+        }
+      >
+        <p className="text-[14px] text-discord-text-muted leading-relaxed">
           Tem certeza que deseja excluir{' '}
           <span className="text-white font-medium">
             {channel.type === 'text' ? '#' : '🔊 '}
@@ -88,74 +104,78 @@ export function EditChannelModal({
           </span>
           ? Essa ação não pode ser desfeita.
         </p>
-        {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
-        <div className="flex justify-end gap-3 mt-5">
-          <button
-            onClick={() => setConfirmingDelete(false)}
-            className="px-4 py-2 text-sm text-discord-text-muted hover:underline"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={loading}
-            className="px-4 py-2 text-sm rounded btn-danger disabled:opacity-60"
-          >
-            {loading ? 'Excluindo...' : 'Excluir canal'}
-          </button>
-        </div>
+        {error && <p className="text-sm text-rose-400 mt-3">{error}</p>}
       </Modal>
     )
   }
 
   return (
-    <Modal title="Editar canal" onClose={onClose}>
+    <Modal
+      title="Editar canal"
+      onClose={onClose}
+      footer={
+        <>
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            className="mr-auto h-9 px-3 -ml-2 rounded-[10px] text-sm font-medium text-rose-400 hover:bg-rose-500/10 transition-colors"
+          >
+            Excluir canal
+          </button>
+          <button onClick={onClose} className="btn-secondary h-9 px-4 text-sm">
+            Cancelar
+          </button>
+          <button onClick={handleSave} disabled={loading} className="btn-primary h-9 px-4 text-sm">
+            {loading ? 'Salvando...' : 'Salvar'}
+          </button>
+        </>
+      }
+    >
       <div className="space-y-4">
         <div>
-          <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+          <label htmlFor="edit-channel-name" className="field-label">
             Nome do canal
           </label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-discord-text-muted">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-discord-text-muted pointer-events-none" aria-hidden="true">
               {channel.type === 'text' ? '#' : '🔊'}
             </span>
             <input
+              id="edit-channel-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full pl-8 pr-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full pl-8 pr-3 py-2.5 bg-discord-darker text-discord-text outline-none"
             />
           </div>
         </div>
 
         {channel.type === 'text' && (
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+            <label htmlFor="edit-channel-topic" className="field-label">
               Tópico do canal
             </label>
             <textarea
+              id="edit-channel-topic"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               maxLength={200}
               rows={2}
               placeholder="Uma frase curta descrevendo o assunto do canal (opcional)"
-              className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple resize-none"
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none resize-none"
             />
           </div>
         )}
 
         {channel.type === 'text' && (
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
+            <label htmlFor="edit-channel-slowmode" className="field-label">
               Modo lento
             </label>
-            <p className="text-[10px] text-discord-text-muted mb-2">
-              Tempo mínimo entre mensagens da mesma pessoa neste canal. Donos do servidor não são afetados.
-            </p>
             <select
+              id="edit-channel-slowmode"
               value={slowmodeSeconds}
               onChange={(e) => setSlowmodeSeconds(Number(e.target.value))}
-              className="w-full px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
             >
               <option value={0}>Desativado</option>
               <option value={5}>5 segundos</option>
@@ -165,48 +185,40 @@ export function EditChannelModal({
               <option value={300}>5 minutos</option>
               <option value={900}>15 minutos</option>
             </select>
+            <p className="text-[12px] text-discord-text-muted mt-1.5">
+              Tempo mínimo entre mensagens da mesma pessoa neste canal. Donos do servidor não são afetados.
+            </p>
           </div>
         )}
 
         {channel.type === 'text' && (
-          <label className="flex items-start gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isSpoiler}
-              onChange={(e) => setIsSpoiler(e.target.checked)}
-              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
-            />
-            <span className="text-xs text-discord-text-muted">
-              <span className="text-discord-text font-medium">Canal spoiler</span> — o conteúdo fica borrado até a
-              pessoa clicar pra revelar (bom pra spoiler de jogo, filme, série)
-            </span>
-          </label>
+          <ToggleRow
+            title="Canal spoiler"
+            description="O conteúdo fica borrado até a pessoa clicar pra revelar (bom pra spoiler de jogo, filme, série)"
+          >
+            <Toggle label="Canal spoiler" checked={isSpoiler} onChange={setIsSpoiler} />
+          </ToggleRow>
         )}
 
         {channel.type === 'voice' && (
-          <label className="flex items-start gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isStage}
-              onChange={(e) => setIsStage(e.target.checked)}
-              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
-            />
-            <span className="text-xs text-discord-text-muted">
-              <span className="text-discord-text font-medium">Canal Palco</span> — só donos/moderadores podem
-              falar, o resto só escuta (bom pra anúncios, palestras, eventos)
-            </span>
-          </label>
+          <ToggleRow
+            title="Canal Palco"
+            description="Só donos/moderadores podem falar, o resto só escuta (bom pra anúncios, palestras, eventos)"
+          >
+            <Toggle label="Canal Palco" checked={isStage} onChange={setIsStage} />
+          </ToggleRow>
         )}
 
         {channel.type === 'voice' && (
           <div>
-            <label className="block text-xs font-bold uppercase text-discord-text-muted mb-1.5">
+            <label htmlFor="edit-channel-limit" className="field-label">
               Limite de pessoas
             </label>
             <select
+              id="edit-channel-limit"
               value={userLimit}
               onChange={(e) => setUserLimit(Number(e.target.value))}
-              className="w-full px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple"
+              className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
             >
               <option value={0}>Sem limite</option>
               {[2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 50].map((n) => (
@@ -218,64 +230,63 @@ export function EditChannelModal({
           </div>
         )}
 
-        <div>
-          <label className="flex items-start gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isRestricted}
-              onChange={(e) => setIsRestricted(e.target.checked)}
-              className="w-4 h-4 mt-0.5 accent-discord-blurple shrink-0"
-            />
-            <span className="text-xs text-discord-text-muted">
-              <span className="text-discord-text font-medium">Canal restrito</span> — só cargos escolhidos abaixo
-              conseguem ver esse canal (donos e quem gerencia canais sempre veem)
-            </span>
-          </label>
+        <div className="rounded-xl bg-white/[0.02] border border-[var(--color-line)]">
+          <div className="flex items-center justify-between gap-4 px-3.5 py-3">
+            <div className="min-w-0">
+              <p className="text-[14px] font-medium text-white flex items-center gap-1.5">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-discord-text-muted" aria-hidden="true">
+                  <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
+                  <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+                </svg>
+                Canal restrito
+              </p>
+              <p className="text-[12.5px] text-discord-text-muted mt-0.5 leading-snug">
+                Só cargos escolhidos abaixo conseguem ver esse canal (donos e quem gerencia canais sempre veem)
+              </p>
+            </div>
+            <Toggle label="Canal restrito" checked={isRestricted} onChange={setIsRestricted} />
+          </div>
 
           {isRestricted && (
-            <div className="mt-2.5 pl-6 space-y-1.5 max-h-40 overflow-y-auto">
+            <div className="border-t border-[var(--color-line)] p-2 space-y-0.5 max-h-44 overflow-y-auto animate-fade-slide-in">
               {roles.length === 0 ? (
-                <p className="text-xs text-discord-text-muted">
+                <p className="text-[12.5px] text-discord-text-muted px-2 py-2">
                   Esse servidor ainda não tem cargos — crie um cargo primeiro na aba "Cargos".
                 </p>
               ) : (
-                roles.map((role) => (
-                  <label key={role.id} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedRoleIds.includes(role.id)}
-                      onChange={(e) =>
-                        setSelectedRoleIds((prev) =>
-                          e.target.checked ? [...prev, role.id] : prev.filter((id) => id !== role.id)
-                        )
-                      }
-                      className="w-3.5 h-3.5 accent-discord-blurple shrink-0"
-                    />
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: role.color }} />
-                    <span className="text-xs text-discord-text">{role.name}</span>
-                  </label>
-                ))
+                roles.map((role) => {
+                  const checked = selectedRoleIds.includes(role.id)
+                  return (
+                    <label
+                      key={role.id}
+                      className={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                        checked ? 'bg-white/[0.05]' : 'hover:bg-white/[0.04]'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) =>
+                          setSelectedRoleIds((prev) =>
+                            e.target.checked ? [...prev, role.id] : prev.filter((id) => id !== role.id)
+                          )
+                        }
+                        className="sr-only peer"
+                      />
+                      <span className="rounded-md peer-focus-visible:ring-2 peer-focus-visible:ring-discord-blurple">
+                        <CheckMark checked={checked} />
+                      </span>
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: role.color }} />
+                      <span className="text-[13.5px] text-discord-text">{role.name}</span>
+                    </label>
+                  )
+                })
               )}
             </div>
           )}
         </div>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
-
-        <button
-          onClick={handleSave}
-          disabled={loading}
-          className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-        >
-          {loading ? 'Salvando...' : 'Salvar alterações'}
-        </button>
-
-        <button
-          onClick={() => setConfirmingDelete(true)}
-          className="w-full py-2.5 rounded border border-red-600 text-red-500 font-medium hover:bg-red-600/10 transition-colors"
-        >
-          Excluir canal
-        </button>
+        {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>
     </Modal>
   )

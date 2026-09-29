@@ -1,8 +1,10 @@
-import { createContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { isElectron } from '../hooks/useGamePresence'
 import type { Profile, ProfileStatus } from '../types/database'
+import { normalizeEmail, normalizeTotpCode } from '../lib/authValidation'
+import { clearLinkPreviewCache } from '../hooks/useLinkPreview'
 
 // Esquema de URL customizado que o app desktop registra no sistema
 // operacional (ver "protocols" em package.json e o bloco grande no
@@ -43,7 +45,12 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string, username: string) => Promise<{ error: string | null }>
   signInWithGoogle: () => Promise<{ error: string | null }>
+  // Sai só deste aparelho (outros aparelhos continuam logados).
   signOut: () => Promise<void>
+  // Encerra a sessão em TODOS os aparelhos, inclusive este.
+  signOutEverywhere: () => Promise<void>
+  // Mantém este aparelho e derruba todas as outras sessões.
+  signOutOtherSessions: () => Promise<{ error: string | null }>
   refreshProfile: () => Promise<void>
   updateProfile: (
     updates: {
@@ -87,6 +94,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(data ?? null)
   }
 
+  // Id do usuário da sessão atual — usado pra descartar respostas
+  // atrasadas de fetchProfile/checkMfaLevel que chegam depois de um
+  // logout ou troca de conta.
+  const currentUserIdRef = useRef<string | null>(null)
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       // O link de confirmação de e-mail já vem com uma sessão válida
@@ -109,26 +121,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       isEmailConfirmationRef.current = false
+      currentUserIdRef.current = session?.user?.id ?? null
       setSession(session)
       if (session?.user) {
         fetchProfile(session.user.id)
-        checkMfaLevel()
+        // Espera saber se falta o 2º fator ANTES de liberar a tela —
+        // antes o app chegava a renderizar (e disparar consultas) por um
+        // instante com a sessão aal1, até o checkMfaLevel responder.
+        await checkMfaLevel()
       }
       setLoading(false)
     })
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       // Ignora eventos disparados enquanto ainda estamos processando o
       // caso de confirmação de e-mail acima, pra não piscar "logado" na tela
       if (isEmailConfirmationRef.current) return
 
+      const previousUserId = currentUserIdRef.current
+      currentUserIdRef.current = session?.user?.id ?? null
       setSession(session)
       if (session?.user) {
-        fetchProfile(session.user.id)
-        checkMfaLevel()
+        // Renovação de token não muda perfil nem nível de MFA — evita
+        // uma consulta extra a cada ~1h.
+        if (event === 'TOKEN_REFRESHED' && previousUserId === session.user.id) return
+        const userId = session.user.id
+        // A documentação do Supabase pede pra não chamar outras funções
+        // do cliente de dentro deste callback (pode travar o lock de
+        // auth) — adia pro próximo tick.
+        setTimeout(() => {
+          if (currentUserIdRef.current !== userId) return
+          fetchProfile(userId)
+          checkMfaLevel()
+        }, 0)
       } else {
         setProfile(null)
         setMfaPending(false)
+        if (previousUserId) clearLocalUserData()
       }
     })
 
@@ -140,19 +169,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Alguém com 2FA ativado fica preso em "mfaPending" até completar o
   // desafio — o app não deixa entrar antes disso.
   async function checkMfaLevel() {
-    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (error) return
     setMfaPending(Boolean(data && data.currentLevel === 'aal1' && data.nextLevel === 'aal2'))
   }
 
   async function verifyMfaChallenge(code: string): Promise<{ error: string | null }> {
-    const { data: factors } = await supabase.auth.mfa.listFactors()
-    const factor = factors?.totp?.[0]
-    if (!factor) return { error: 'Nenhum fator de autenticação encontrado' }
+    const normalized = normalizeTotpCode(code)
+    if (normalized.length !== 6) return { error: 'Digite os 6 dígitos do código.' }
 
-    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code: code.trim() })
+    const { data: factors, error: listError } = await supabase.auth.mfa.listFactors()
+    if (listError) return { error: traduzErro(listError.message) }
+    // Só fator JÁ VERIFICADO — um cadastro de 2FA abandonado no meio
+    // deixa um fator "unverified" que nunca vai aceitar código nenhum.
+    const factor = factors?.totp?.find((f) => f.status === 'verified')
+    if (!factor) return { error: 'Nenhum autenticador ativo encontrado nesta conta.' }
+
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code: normalized })
     if (error) return { error: traduzErro(error.message) }
 
-    setMfaPending(false)
+    await checkMfaLevel()
     return { error: null }
   }
 
@@ -200,17 +236,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [session?.user])
 
   async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.signInWithPassword({ email: normalizeEmail(email), password })
     return { error: error ? traduzErro(error.message) : null }
   }
 
   async function signUp(email: string, password: string, username: string) {
     const { error } = await supabase.auth.signUp({
-      email,
+      email: normalizeEmail(email),
       password,
-      options: { data: { username } },
+      options: {
+        data: { username: username.trim() },
+        // No site, o link de confirmação volta pro próprio domínio. No
+        // app desktop (app://, file://) isso não é uma URL que o
+        // navegador consiga abrir, então fica o "Site URL" do projeto.
+        ...(!isElectron() && /^https?:$/.test(window.location.protocol)
+          ? { emailRedirectTo: window.location.origin }
+          : {}),
+      },
     })
-    return { error: error ? traduzErro(error.message) : null }
+    if (error) return { error: traduzErro(error.message) }
+    // Com confirmação de e-mail ligada, o Supabase NÃO devolve erro pra
+    // e-mail já cadastrado (pra não revelar quem tem conta) — devolve um
+    // usuário "falso" sem identidades. Mostramos a mesma tela de
+    // "confirme seu e-mail" nos dois casos, de propósito.
+    return { error: null }
   }
 
   // No app desktop, não dá pra deixar o Supabase redirecionar a própria
@@ -296,11 +345,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  async function signOut() {
-    if (session?.user) {
-      await supabase.from('profiles').update({ status: 'offline' }).eq('id', session.user.id)
+  // Limpa tudo que é da conta e fica guardado no aparelho — num
+  // computador compartilhado, a próxima pessoa não pode ver notas,
+  // itens fixados ou o destino pós-login de quem saiu.
+  function clearLocalUserData() {
+    clearLinkPreviewCache()
+    for (const key of ['mamacos-pinned-items', 'mamacos-user-notes', 'mamacos-server-order', 'mamacos-participant-volumes']) {
+      try {
+        localStorage.removeItem(key)
+      } catch {
+        // best-effort
+      }
     }
-    await supabase.auth.signOut()
+    try {
+      sessionStorage.removeItem('mamacos-post-login-redirect')
+    } catch {
+      // best-effort
+    }
+    // Outros módulos (rascunhos, caches de contexto) podem escutar isso
+    // pra se limparem também.
+    try {
+      window.dispatchEvent(new Event('mamacos:signed-out'))
+    } catch {
+      // best-effort
+    }
+  }
+
+  // Obs.: signOut/signOutEverywhere não recebem parâmetro de propósito —
+  // são usados direto como onClick={signOut}, e o evento do clique não
+  // pode ser confundido com uma opção.
+  function signOut() {
+    return performSignOut('local')
+  }
+
+  function signOutEverywhere() {
+    return performSignOut('global')
+  }
+
+  async function performSignOut(scope: 'local' | 'global') {
+    const userId = session?.user?.id
+    if (userId) {
+      // Não deixa uma falha de rede aqui impedir o logout.
+      try {
+        await supabase.from('profiles').update({ status: 'offline' }).eq('id', userId)
+      } catch {
+        // ignora
+      }
+    }
+    // Fecha todas as assinaturas de Realtime ANTES de derrubar a sessão —
+    // senão os canais continuam abertos com o token antigo até expirar.
+    try {
+      await supabase.removeAllChannels()
+    } catch {
+      // ignora
+    }
+    const { error } = await supabase.auth.signOut({ scope })
+    if (error) {
+      // Mesmo se o servidor não responder, a sessão local tem que sumir.
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
+    }
+    currentUserIdRef.current = null
+    setSession(null)
+    setProfile(null)
+    setMfaPending(false)
+    clearLocalUserData()
+  }
+
+  async function signOutOtherSessions(): Promise<{ error: string | null }> {
+    const { error } = await supabase.auth.signOut({ scope: 'others' })
+    return { error: error ? traduzErro(error.message) : null }
   }
 
   async function refreshProfile() {
@@ -322,6 +435,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) {
     if (!session?.user) return { error: 'Não autenticado' }
 
+    // Limites de tamanho (o banco também confere — migration 013).
+    if (updates.display_name !== undefined) {
+      const name = updates.display_name.trim()
+      if (name.length > 32) return { error: 'O nome de exibição pode ter no máximo 32 caracteres.' }
+      updates = { ...updates, display_name: name }
+    }
+    if (typeof updates.custom_status === 'string' && updates.custom_status.length > 128) {
+      return { error: 'O status personalizado pode ter no máximo 128 caracteres.' }
+    }
+    if (typeof updates.playing === 'string' && updates.playing.length > 128) {
+      return { error: 'O texto de "jogando" pode ter no máximo 128 caracteres.' }
+    }
+
     const patch: {
       display_name?: string
       custom_status?: string | null
@@ -333,12 +459,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = { ...updates }
 
     if (avatarFile) {
-      const ext = avatarFile.name.split('.').pop()
+      const ext = imageExtension(avatarFile)
+      if (!ext) return { error: 'Formato de imagem não aceito.' }
       const path = `${session.user.id}/avatar-${Date.now()}.${ext}`
       const { error: uploadError } = await supabase.storage.from('avatars').upload(path, avatarFile, {
-        upsert: true,
+        upsert: false,
+        contentType: avatarFile.type,
       })
-      if (uploadError) return { error: uploadError.message }
+      if (uploadError) return { error: traduzErroUpload(uploadError.message) }
       const { data } = supabase.storage.from('avatars').getPublicUrl(path)
       patch.avatar_url = data.publicUrl
     }
@@ -349,29 +477,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // fica valendo, arquivos antigos não são apagados do Storage (mesmo
     // comportamento que o avatar já tinha, por simplicidade).
     if (bannerFile) {
-      const ext = bannerFile.name.split('.').pop()
+      const ext = imageExtension(bannerFile)
+      if (!ext) return { error: 'Formato de imagem não aceito.' }
       const path = `${session.user.id}/banner-${Date.now()}.${ext}`
       const { error: uploadError } = await supabase.storage.from('profile-banners').upload(path, bannerFile, {
-        upsert: true,
+        upsert: false,
+        contentType: bannerFile.type,
       })
-      if (uploadError) return { error: uploadError.message }
+      if (uploadError) return { error: traduzErroUpload(uploadError.message) }
       const { data } = supabase.storage.from('profile-banners').getPublicUrl(path)
       patch.banner_url = data.publicUrl
     }
 
     if (decorationFile) {
-      const ext = decorationFile.name.split('.').pop()
+      const ext = imageExtension(decorationFile)
+      if (!ext || ext === 'jpg') return { error: 'Formato de imagem não aceito.' }
       const path = `${session.user.id}/decoration-${Date.now()}.${ext}`
       const { error: uploadError } = await supabase.storage
         .from('avatar-decorations')
-        .upload(path, decorationFile, { upsert: true })
-      if (uploadError) return { error: uploadError.message }
+        .upload(path, decorationFile, { upsert: false, contentType: decorationFile.type })
+      if (uploadError) return { error: traduzErroUpload(uploadError.message) }
       const { data } = supabase.storage.from('avatar-decorations').getPublicUrl(path)
       patch.avatar_decoration_url = data.publicUrl
     }
 
     const { error } = await supabase.from('profiles').update(patch).eq('id', session.user.id)
-    if (error) return { error: error.message }
+    if (error) return { error: traduzErro(error.message) }
     await refreshProfile()
     return { error: null }
   }
@@ -382,27 +513,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshProfile()
   }
 
+  // Funções com identidade estável (sempre chamam a versão mais recente)
+  // + value memoizado: sem isso, TODO render do AuthProvider (e cada
+  // renovação de token) re-renderizava o app inteiro.
+  const actions = useStableActions({
+    verifyMfaChallenge,
+    signIn,
+    signUp,
+    signInWithGoogle,
+    signOut,
+    signOutEverywhere,
+    signOutOtherSessions,
+    refreshProfile,
+    updateProfile,
+    updateStatus,
+  })
+  const value = useMemo(
+    () => ({ session, user: session?.user ?? null, profile, loading, mfaPending, ...actions }),
+    [session, profile, loading, mfaPending, actions],
+  )
+
   return (
-    <AuthContext.Provider
-      value={{
-        session,
-        user: session?.user ?? null,
-        profile,
-        loading,
-        mfaPending,
-        verifyMfaChallenge,
-        signIn,
-        signUp,
-        signInWithGoogle,
-        signOut,
-        refreshProfile,
-        updateProfile,
-        updateStatus,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   )
+}
+
+// Extensão do arquivo derivada do TIPO (mime) real, não do nome — o
+// nome vem do sistema da pessoa e pode ter qualquer coisa ("foto.php",
+// "a.b.c", sem extensão...). null = tipo não aceito.
+function imageExtension(file: File): string | null {
+  const map: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+  }
+  return map[file.type] ?? null
+}
+
+function traduzErroUpload(message: string): string {
+  if (/exceeded the maximum allowed size|payload too large|too large/i.test(message)) {
+    return 'Arquivo muito grande.'
+  }
+  if (/mime type|invalid.*type/i.test(message)) return 'Formato de arquivo não aceito.'
+  if (/row-level security|unauthorized|not authorized/i.test(message)) {
+    return 'Sem permissão pra enviar esse arquivo. Entre de novo e tente outra vez.'
+  }
+  return 'Não foi possível enviar a imagem. Tente de novo.'
 }
 
 // Mensagens de erro do Supabase Auth vêm em inglês — traduzimos as mais comuns
@@ -413,8 +572,37 @@ export function traduzErro(message: string): string {
     'Password should be at least 6 characters': 'A senha precisa ter no mínimo 6 caracteres.',
     'Email not confirmed': 'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.',
     'Unable to validate email address: invalid format': 'Formato de e-mail inválido.',
+    'New password should be different from the old password.': 'A senha nova precisa ser diferente da atual.',
+    'Signups not allowed for this instance': 'Novos cadastros estão desativados no momento.',
+    'Invalid TOTP code entered': 'Código inválido. Confira o app autenticador e tente de novo.',
+    'Token has expired or is invalid': 'Esse link ou código expirou. Peça um novo.',
+    'Email link is invalid or has expired': 'Esse link expirou ou já foi usado. Peça um novo.',
+    'Auth session missing!': 'Sua sessão expirou. Entre de novo.',
+    'User not found': 'E-mail ou senha incorretos.',
   }
   if (mapa[message]) return mapa[message]
+
+  if (/password is known to be weak|pwned|leaked/i.test(message)) {
+    return 'Essa senha apareceu em vazamentos de dados conhecidos. Escolha outra.'
+  }
+  if (/password should (be at least|contain)/i.test(message)) {
+    return 'A senha não atende aos requisitos mínimos (pelo menos 8 caracteres, com letras e números).'
+  }
+  if (/AAL2 (session )?is required|aal2/i.test(message)) {
+    return 'Confirme o código do seu autenticador (2FA) antes de fazer isso.'
+  }
+  if (/invalid.*(totp|mfa)|mfa.*(invalid|verification failed)|challenge.*expired/i.test(message)) {
+    return 'Código inválido ou expirado. Tente de novo.'
+  }
+  if (/request rate limit|too many requests|rate limit/i.test(message) && !/email rate limit/i.test(message)) {
+    return 'Muitas tentativas em pouco tempo. Aguarde um pouco e tente de novo.'
+  }
+  if (/profiles_username|duplicate key.*username/i.test(message)) {
+    return 'Esse nome de usuário já está em uso.'
+  }
+  if (/failed to fetch|network ?error|load failed/i.test(message)) {
+    return 'Sem conexão com o servidor. Verifique sua internet e tente de novo.'
+  }
 
   // Esses dois vêm com texto variável (número de segundos, etc.), então
   // não dá pra bater exato no mapa acima — o Supabase limita quantos
@@ -435,4 +623,19 @@ export function traduzErro(message: string): string {
   }
 
   return message
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function useStableActions<T extends Record<string, (...args: any[]) => any>>(fns: T): T {
+  const ref = useRef(fns)
+  useLayoutEffect(() => {
+    ref.current = fns
+  })
+  return useMemo(() => {
+    const out = {} as Record<string, unknown>
+    for (const key of Object.keys(ref.current)) {
+      out[key] = (...args: unknown[]) => ref.current[key](...args)
+    }
+    return out as T
+  }, [])
 }

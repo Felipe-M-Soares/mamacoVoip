@@ -1,16 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { useVoice } from '../../hooks/useVoice'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
 import { useTheme } from '../../hooks/useTheme'
-import { THEMES } from '../../context/ThemeContext'
+import { THEMES, type ThemeId } from '../../context/ThemeContext'
 import { getNotificationPermission, requestNotificationPermission } from '../../lib/notifications'
 import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sounds'
 import { SecurityTab } from './SecurityTab'
 import { exportUserData } from '../../lib/exportUserData'
+import { validatePassword } from '../../lib/authValidation'
+import { traduzErro } from '../../context/AuthContext'
 import { NetworkDiagnosticsPanel } from './NetworkDiagnosticsPanel'
+import { Avatar } from '../ui/Avatar'
+import { Toggle } from '../ui/Toggle'
+import { TabHeader, SettingsCard, SettingRow, RowList, RangeSlider, Segmented, Kbd, InlineMessage } from './settingsUI'
 import {
   createNoiseSuppressor,
   type NoiseSuppressor,
@@ -20,18 +25,87 @@ import {
 
 type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'notifications' | 'privacy'
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'account', label: 'Minha conta' },
-  { id: 'security', label: 'Segurança' },
-  { id: 'appearance', label: 'Aparência' },
-  { id: 'audio', label: 'Voz e Vídeo' },
-  { id: 'notifications', label: 'Notificações' },
-  { id: 'privacy', label: 'Privacidade' },
+// Ícones de traço fino (estilo Lucide) pro menu lateral — 24x24, herdam a cor.
+const TAB_ICONS: Record<Tab, ReactNode> = {
+  account: (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </>
+  ),
+  security: (
+    <>
+      <path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6L12 3z" />
+      <path d="m9 12 2 2 4-4" />
+    </>
+  ),
+  privacy: (
+    <>
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </>
+  ),
+  appearance: (
+    <>
+      <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.8-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.3 0-1 .8-1.8 1.9-1.8H17a4 4 0 0 0 4-4C21 6.4 17 3 12 3z" />
+      <circle cx="7.5" cy="11.5" r="1" fill="currentColor" />
+      <circle cx="10.5" cy="7.5" r="1" fill="currentColor" />
+      <circle cx="15.5" cy="8" r="1" fill="currentColor" />
+    </>
+  ),
+  audio: (
+    <>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+    </>
+  ),
+  notifications: (
+    <>
+      <path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16z" />
+      <path d="M10 20.5a2 2 0 0 0 4 0" />
+    </>
+  ),
+}
+
+const TAB_GROUPS: { label: string; tabs: { id: Tab; label: string }[] }[] = [
+  {
+    label: 'Conta',
+    tabs: [
+      { id: 'account', label: 'Minha conta' },
+      { id: 'security', label: 'Segurança' },
+      { id: 'privacy', label: 'Privacidade' },
+    ],
+  },
+  {
+    label: 'Aplicativo',
+    tabs: [
+      { id: 'appearance', label: 'Aparência' },
+      { id: 'audio', label: 'Voz e Vídeo' },
+      { id: 'notifications', label: 'Notificações' },
+    ],
+  },
 ]
 
+function NavIcon({ tab, className = 'w-[18px] h-[18px]' }: { tab: Tab; className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      {TAB_ICONS[tab]}
+    </svg>
+  )
+}
+
+function CloseGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-[18px] h-[18px]" aria-hidden="true">
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  )
+}
+
 export function SettingsModal({ onClose, initialTab }: { onClose: () => void; initialTab?: Tab }) {
-  const { user, signOut } = useAuth()
+  const { user, profile, signOut } = useAuth()
   const [tab, setTab] = useState<Tab>(initialTab ?? 'account')
+  const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -41,59 +115,132 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
     return () => window.removeEventListener('keydown', handleKey)
   }, [onClose])
 
+  // Trocar de aba volta a rolagem pro topo (senão abre no meio da aba nova).
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 })
+  }, [tab])
+
   return createPortal(
     // Mesmo z-[500] do Modal.tsx — ver comentário lá. Configurações é uma
     // tela cheia que também deve ficar acima de qualquer painel lateral
     // (thread, mensagens fixadas) aberto antes dela.
-    <div className="fixed inset-0 z-[500] bg-discord-darker flex">
-      {/* Navegação — só do lado esquerdo, igual ao Discord de verdade */}
-      <div className="w-56 shrink-0 bg-discord-sidebar flex flex-col py-8 px-3 overflow-y-auto">
-        <p className="px-2.5 text-xs font-bold uppercase text-discord-text-muted tracking-wide mb-1.5">
-          Configurações do usuário
-        </p>
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`text-left px-2.5 py-1.5 rounded text-sm font-medium mb-0.5 transition-colors ${
-              tab === t.id ? 'bg-discord-lighter text-white' : 'text-discord-text-muted hover:bg-white/5 hover:text-discord-text'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Configurações"
+      className="fixed inset-0 z-[500] bg-discord-channels flex flex-col md:flex-row animate-fade-in"
+    >
+      {/* Navegação — coluna à esquerda no desktop; no celular vira uma
+          faixa de abas roláveis no topo. */}
+      <nav
+        aria-label="Seções das configurações"
+        className="shrink-0 bg-discord-sidebar border-b md:border-b-0 md:border-r border-[var(--color-line)] md:flex-[1_0_250px] md:h-full md:overflow-y-auto flex flex-col"
+      >
+        <div className="md:ml-auto w-full md:max-w-[232px] px-3 md:px-3 pt-3 md:pt-14 md:pb-8">
+          {/* Topo mobile: título + fechar */}
+          <div className="flex md:hidden items-center justify-between px-1 pb-2">
+            <p className="font-display text-[17px] font-semibold text-white">Configurações</p>
+            <button onClick={onClose} className="icon-btn w-9 h-9" aria-label="Fechar" title="Fechar (Esc)">
+              <CloseGlyph />
+            </button>
+          </div>
+
+          {profile && (
+            <div className="hidden md:flex items-center gap-2.5 px-2 pb-4 mb-3 border-b border-[var(--color-line)]">
+              <Avatar name={profile.username} avatarUrl={profile.avatar_url} size={36} />
+              <div className="min-w-0">
+                <p className="text-[14px] font-semibold text-white truncate">{profile.display_name || profile.username}</p>
+                <p className="text-[12px] text-discord-text-muted truncate">@{profile.username}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex md:flex-col gap-1 md:gap-5 overflow-x-auto md:overflow-visible pb-2 md:pb-0 -mx-1 px-1">
+            {TAB_GROUPS.map((group) => (
+              <div key={group.label} className="flex md:flex-col gap-1 md:gap-0.5 shrink-0">
+                <p className="hidden md:block px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">
+                  {group.label}
+                </p>
+                {group.tabs.map((t) => {
+                  const active = tab === t.id
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setTab(t.id)}
+                      aria-current={active ? 'page' : undefined}
+                      className={`relative shrink-0 flex items-center gap-2.5 whitespace-nowrap text-left px-2.5 py-[7px] rounded-lg text-[14px] font-medium transition-colors ${
+                        active
+                          ? 'bg-white/[0.08] text-white'
+                          : 'text-discord-text-muted hover:bg-white/[0.04] hover:text-discord-text'
+                      }`}
+                    >
+                      {active && (
+                        <span aria-hidden="true" className="hidden md:block absolute -left-3 top-1.5 bottom-1.5 w-1 rounded-r-full bg-brand-gradient" />
+                      )}
+                      <span className={active ? 'text-discord-blurple' : ''}>
+                        <NavIcon tab={t.id} />
+                      </span>
+                      {t.label}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block mt-5 pt-4 border-t border-[var(--color-line)]">
+            <button
+              onClick={signOut}
+              className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[14px] font-medium text-rose-400 hover:bg-rose-500/10 transition-colors"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden="true">
+                <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4" />
+              </svg>
+              Sair
+            </button>
+          </div>
+        </div>
+      </nav>
 
       {/* Conteúdo */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-xl mx-auto px-6 py-8">
-          {tab === 'account' && <AccountTab email={user?.email} onSignOut={signOut} />}
-          {tab === 'security' && <SecurityTab />}
-          {tab === 'appearance' && <AppearanceTab />}
-          {tab === 'audio' && <AudioTab />}
-          {tab === 'notifications' && <NotificationsTab />}
-          {tab === 'privacy' && <PrivacyTab />}
+      <div ref={contentRef} className="flex-1 md:flex-[1_1_800px] min-w-0 overflow-y-auto">
+        <div className="flex">
+          <div key={tab} className="flex-1 min-w-0 max-w-[680px] px-4 sm:px-8 lg:px-10 py-6 md:py-14 animate-fade-slide-in">
+            {tab === 'account' && <AccountTab email={user?.email} onSignOut={signOut} />}
+            {tab === 'security' && <SecurityTab />}
+            {tab === 'appearance' && <AppearanceTab />}
+            {tab === 'audio' && <AudioTab />}
+            {tab === 'notifications' && <NotificationsTab />}
+            {tab === 'privacy' && <PrivacyTab />}
+          </div>
+
+          {/* Fechar estilo Discord: círculo + "ESC" embaixo. Fica na coluna
+              ao lado do conteúdo e acompanha a rolagem (sticky).
+              top-14 (não top-6) — essa tela cobre a janela inteira (fixed
+              inset-0) desde y=0, mas os botões NATIVOS de
+              minimizar/maximizar/fechar do Windows ficam desenhados por
+              cima dos primeiros 40px (ver titleBarOverlay em
+              electron/main.cjs). Com top-6 (24px) esse botão ficava bem
+              embaixo dessa faixa, cortado/"vazando" por trás dos botões
+              nativos — descendo pra depois dos 40px (com uma folga) ele
+              para de disputar esse espaço com o sistema. */}
+          <div className="hidden md:block shrink-0 w-24 pl-2">
+            <div className="sticky top-14 flex flex-col items-center gap-1.5">
+              <button
+                onClick={onClose}
+                className="w-10 h-10 rounded-full border-2 border-[var(--color-line-strong)] text-discord-text-muted hover:border-discord-text-muted hover:text-white hover:bg-white/[0.04] flex items-center justify-center transition-colors"
+                aria-label="Fechar"
+                title="Fechar (Esc)"
+              >
+                <CloseGlyph />
+              </button>
+              <span aria-hidden="true" className="text-[11px] font-semibold tracking-wider text-discord-text-muted">
+                ESC
+              </span>
+            </div>
+          </div>
         </div>
       </div>
-
-      <button
-        onClick={onClose}
-        // top-14 (não top-6) — essa tela cobre a janela inteira (fixed
-        // inset-0) desde y=0, mas os botões NATIVOS de
-        // minimizar/maximizar/fechar do Windows ficam desenhados por
-        // cima dos primeiros 40px (ver titleBarOverlay em
-        // electron/main.cjs). Com top-6 (24px) esse botão ficava bem
-        // embaixo dessa faixa, cortado/"vazando" por trás dos botões
-        // nativos — subindo pra depois dos 40px (com uma folga) ele para
-        // de disputar esse espaço com o sistema.
-        className="fixed top-14 right-6 w-10 h-10 rounded-full border-2 border-discord-text-muted text-discord-text-muted hover:border-white hover:text-white flex items-center justify-center transition-colors"
-        aria-label="Fechar"
-        title="Fechar (Esc)"
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-          <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
-        </svg>
-      </button>
     </div>,
     document.body
   )
@@ -113,8 +260,8 @@ function AppVersionInfo() {
   if (!version) return null
 
   return (
-    <div className="text-center pt-2 space-y-1.5">
-      <p className="text-xs text-discord-text-muted">Mamacos Voip — versão {version}</p>
+    <div className="flex items-center justify-between gap-3 px-1 pt-1">
+      <p className="text-[12px] text-discord-text-muted">Mamacos Voip — versão {version}</p>
       <button
         onClick={() => {
           setChecking(true)
@@ -122,7 +269,7 @@ function AppVersionInfo() {
           setTimeout(() => setChecking(false), 3000)
         }}
         disabled={checking}
-        className="text-xs text-discord-blurple hover:underline disabled:opacity-60"
+        className="text-[12px] font-medium text-discord-blurple hover:underline disabled:opacity-60"
       >
         {checking ? 'Verificando...' : 'Verificar atualização agora'}
       </button>
@@ -130,8 +277,17 @@ function AppVersionInfo() {
   )
 }
 
+function gradientFor(seed: string) {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash)
+  const hue = Math.abs(hash) % 360
+  return `linear-gradient(135deg, hsl(${hue} 70% 40%), hsl(${(hue + 45) % 360} 65% 22%))`
+}
+
 function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut: () => void }) {
+  const { profile } = useAuth()
   const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -139,60 +295,133 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
   async function handleChangePassword() {
     setError(null)
     setSuccess(false)
-    if (newPassword.length < 6) {
-      setError('A senha precisa ter no mínimo 6 caracteres.')
+    if (loading) return
+    const invalid = validatePassword(newPassword, { email })
+    if (invalid) {
+      setError(invalid)
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('As senhas não conferem.')
       return
     }
     setLoading(true)
     const { error } = await supabase.auth.updateUser({ password: newPassword })
     setLoading(false)
     if (error) {
-      setError(error.message)
+      setError(traduzErro(error.message))
       return
     }
+    setConfirmPassword('')
     setSuccess(true)
     setNewPassword('')
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">E-mail</label>
-        <p className="text-sm text-discord-text">{email}</p>
-      </div>
+    <div className="space-y-5">
+      <TabHeader title="Minha conta" description="Seus dados de acesso e o que acontece com a sua conta." />
 
-      <div>
-        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Nova senha</label>
-        <input
-          type="password"
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-          placeholder="Mínimo 6 caracteres"
-          className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm"
+      {/* Cartão de identidade */}
+      <section className="rounded-2xl border border-[var(--color-line)] bg-white/[0.02] overflow-hidden">
+        <div
+          className="h-20 bg-cover bg-center"
+          style={
+            profile?.banner_url
+              ? { backgroundImage: `url(${profile.banner_url})` }
+              : { background: gradientFor(profile?.username ?? email ?? 'x') }
+          }
         />
-      </div>
+        <div className="px-5 pb-5 flex items-start gap-4">
+          <div className="-mt-9 shrink-0 rounded-full ring-[5px] ring-[var(--color-discord-channels)] bg-discord-channels">
+            <Avatar name={profile?.username ?? email ?? '?'} avatarUrl={profile?.avatar_url} size={72} />
+          </div>
+          <div className="min-w-0 pt-2.5">
+            <p className="font-display text-lg font-semibold text-white truncate">
+              {profile?.display_name || profile?.username || 'Você'}
+            </p>
+            {profile && <p className="text-[13px] text-discord-text-muted truncate">@{profile.username}</p>}
+          </div>
+        </div>
+        <div className="mx-5 mb-5 rounded-xl bg-discord-darker/60 border border-[var(--color-line)] divide-y divide-[var(--color-line)]">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">E-mail</p>
+              <p className="text-[14px] text-discord-text truncate mt-0.5">{email}</p>
+            </div>
+          </div>
+          {profile && (
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">Nome de usuário</p>
+                <p className="text-[14px] text-discord-text truncate mt-0.5">{profile.username}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {success && <p className="text-sm text-discord-green">Senha alterada com sucesso.</p>}
+      <SettingsCard title="Alterar senha" description="Use pelo menos 8 caracteres, com letras e números.">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="settings-new-password" className="field-label">
+              Nova senha
+            </label>
+            <input
+              id="settings-new-password"
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Mínimo 8 caracteres, com letra e número"
+              autoComplete="new-password"
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm"
+            />
+          </div>
+          <div>
+            <label htmlFor="settings-confirm-password" className="field-label">
+              Confirmar nova senha
+            </label>
+            <input
+              id="settings-confirm-password"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm"
+            />
+          </div>
+        </div>
 
-      <button
-        onClick={handleChangePassword}
-        disabled={loading}
-        className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-      >
-        {loading ? 'Salvando...' : 'Alterar senha'}
-      </button>
+        {(error || success) && (
+          <div className="mt-3">
+            {error && <InlineMessage tone="error">{error}</InlineMessage>}
+            {success && <InlineMessage tone="success">Senha alterada com sucesso.</InlineMessage>}
+          </div>
+        )}
 
-      <div className="h-px bg-white/10" />
+        <div className="flex justify-end mt-4">
+          <button onClick={handleChangePassword} disabled={loading} className="btn-primary h-10 px-5 text-sm">
+            {loading ? 'Salvando...' : 'Alterar senha'}
+          </button>
+        </div>
+      </SettingsCard>
 
-      <button
-        onClick={onSignOut}
-        className="w-full py-2.5 rounded border border-red-600 text-red-500 hover:bg-red-600/10 transition-colors"
-      >
-        Sair da conta
-      </button>
-
-      <DeleteAccountSection />
+      <SettingsCard tone="danger" title="Zona de perigo" description="Ações que afetam o acesso à sua conta.">
+        <RowList>
+          <SettingRow
+            title="Sair da conta"
+            description="Encerra a sessão neste aparelho."
+            control={
+              <button
+                onClick={onSignOut}
+                className="shrink-0 h-9 px-4 rounded-[10px] text-sm font-medium text-rose-300 border border-rose-500/40 hover:bg-rose-500/10 transition-colors"
+              >
+                Sair
+              </button>
+            }
+          />
+          <DeleteAccountSection />
+        </RowList>
+      </SettingsCard>
 
       <AppVersionInfo />
     </div>
@@ -213,61 +442,65 @@ function DeleteAccountSection() {
     const { error } = await supabase.rpc('delete_own_account')
     if (error) {
       setLoading(false)
-      setError(error.message)
+      setError(traduzErro(error.message))
       return
     }
     await signOut()
   }
 
   return (
-    <div className="pt-2">
-      {!confirming ? (
-        <button
-          onClick={() => setConfirming(true)}
-          className="w-full py-2.5 rounded border border-red-900 text-red-500/70 hover:bg-red-600/10 hover:text-red-500 transition-colors text-sm"
-        >
-          Excluir minha conta
-        </button>
-      ) : (
-        <div className="bg-red-950/20 border border-red-900/50 rounded-lg p-3 space-y-2.5">
-          <p className="text-sm text-red-400 font-medium">Isso não pode ser desfeito.</p>
-          <p className="text-xs text-discord-text-muted">
+    <SettingRow
+      title="Excluir conta"
+      description="Apaga sua conta, mensagens e os servidores dos quais você é dono."
+      control={
+        !confirming ? (
+          <button onClick={() => setConfirming(true)} className="btn-danger shrink-0 h-9 px-4 text-sm">
+            Excluir conta
+          </button>
+        ) : undefined
+      }
+    >
+      {confirming && (
+        <div className="mt-3 rounded-xl bg-rose-500/[0.06] border border-rose-500/25 p-4 space-y-3 animate-fade-slide-in">
+          <p className="text-[14px] text-rose-300 font-semibold">Isso não pode ser desfeito.</p>
+          <p className="text-[13px] text-discord-text-muted leading-relaxed">
             Sua conta, mensagens e servidores que você é dono são apagados de vez. Se você é dono de algum
             servidor, ele é apagado inteiro pra todo mundo — considere transferir a propriedade antes, se quiser
             manter o servidor de pé.
           </p>
-          <p className="text-xs text-discord-text-muted">
+          <label htmlFor="settings-delete-confirm" className="block text-[13px] text-discord-text-muted">
             Digite <span className="text-white font-mono">excluir</span> pra confirmar.
-          </p>
+          </label>
           <input
+            id="settings-delete-confirm"
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
             placeholder="excluir"
-            className="w-full px-3 py-2 text-sm rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-red-600"
+            className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
           />
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <div className="flex gap-2">
+          {error && <InlineMessage tone="error">{error}</InlineMessage>}
+          <div className="flex justify-end gap-2">
             <button
               onClick={() => {
                 setConfirming(false)
                 setConfirmText('')
                 setError(null)
               }}
-              className="flex-1 py-2 rounded btn-secondary text-sm"
+              className="btn-secondary h-9 px-4 text-sm"
             >
               Cancelar
             </button>
             <button
               onClick={handleDelete}
               disabled={confirmText.trim().toLowerCase() !== 'excluir' || loading}
-              className="flex-1 py-2 rounded bg-red-600 text-white text-sm font-medium hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="btn-danger h-9 px-4 text-sm"
             >
               {loading ? 'Excluindo...' : 'Excluir de vez'}
             </button>
           </div>
         </div>
       )}
-    </div>
+    </SettingRow>
   )
 }
 
@@ -283,29 +516,95 @@ function NotificationsTab() {
     setPermission(result)
   }
 
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-discord-text-muted">
-        Receba notificações do navegador quando novas mensagens chegarem em uma conversa aberta e a aba estiver em
-        segundo plano.
-      </p>
+  const state =
+    permission === 'unsupported'
+      ? { chip: 'Indisponível', chipClass: '', text: 'Seu navegador não suporta notificações.' }
+      : permission === 'granted'
+        ? { chip: 'Ativadas', chipClass: '!text-discord-green !border-discord-green/30 !bg-discord-green/10', text: 'Tudo certo — você vai ser avisado de novas mensagens.' }
+        : permission === 'denied'
+          ? {
+              chip: 'Bloqueadas',
+              chipClass: '!text-rose-300 !border-rose-500/30 !bg-rose-500/10',
+              text: 'Notificações bloqueadas. Habilite manualmente nas configurações do navegador pra este site.',
+            }
+          : { chip: 'Desativadas', chipClass: '', text: 'Ative pra ser avisado quando chegar mensagem.' }
 
-      {permission === 'unsupported' ? (
-        <p className="text-sm text-discord-text-muted">Seu navegador não suporta notificações.</p>
-      ) : permission === 'granted' ? (
-        <p className="text-sm text-discord-green">✓ Notificações ativadas.</p>
-      ) : permission === 'denied' ? (
-        <p className="text-sm text-red-400">
-          Notificações bloqueadas. Habilite manualmente nas configurações do navegador pra este site.
-        </p>
-      ) : (
-        <button
-          onClick={handleEnable}
-          className="px-4 py-2.5 rounded btn-primary text-sm"
-        >
-          Ativar notificações
-        </button>
-      )}
+  return (
+    <div className="space-y-5">
+      <TabHeader
+        title="Notificações"
+        description="Receba notificações do navegador quando novas mensagens chegarem em uma conversa aberta e a aba estiver em segundo plano."
+      />
+      <SettingsCard>
+        <div className="flex items-center gap-4">
+          <span className="w-11 h-11 shrink-0 rounded-xl bg-discord-blurple/15 text-discord-blurple flex items-center justify-center">
+            <NavIcon tab="notifications" className="w-5 h-5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-[14px] font-medium text-white">Notificações na área de trabalho</p>
+              <span className={`chip ${state.chipClass}`}>{state.chip}</span>
+            </div>
+            <p className="text-[13px] text-discord-text-muted mt-0.5">{state.text}</p>
+          </div>
+          {permission !== 'unsupported' && permission !== 'granted' && permission !== 'denied' && (
+            <button onClick={handleEnable} className="btn-primary h-9 px-4 text-sm shrink-0">
+              Ativar notificações
+            </button>
+          )}
+        </div>
+      </SettingsCard>
+    </div>
+  )
+}
+
+// Os valores do tema padrão (vermelho) moram no @theme do index.css, que
+// vale pro :root — não existe um bloco [data-theme='vermelho'] pra
+// "reaplicar" dentro da prévia quando outro tema está ativo. Por isso a
+// prévia dele recebe as mesmas variáveis explicitamente (espelho do
+// @theme; se mudar lá, mudar aqui).
+const VERMELHO_PREVIEW_VARS = {
+  '--color-discord-darker': '#07070a',
+  '--color-discord-channels': '#121218',
+  '--color-discord-sidebar': '#0d0d12',
+  '--color-discord-lighter': '#25252e',
+  '--color-discord-blurple': '#ee3a34',
+  '--color-accent-2': '#ff8a3d',
+  '--color-discord-text-muted': '#9d9dab',
+} as React.CSSProperties
+
+function ThemePreview({ id }: { id: ThemeId }) {
+  return (
+    <div
+      data-theme={id === 'vermelho' ? undefined : id}
+      style={id === 'vermelho' ? VERMELHO_PREVIEW_VARS : undefined}
+      aria-hidden="true"
+      className="h-[104px] rounded-xl overflow-hidden flex bg-discord-darker border border-[var(--color-line)]"
+    >
+      <div className="w-7 flex flex-col items-center gap-1.5 pt-2">
+        <span className="w-4 h-4 rounded-[6px] bg-brand-gradient" />
+        <span className="w-4 h-4 rounded-full bg-discord-lighter" />
+        <span className="w-4 h-4 rounded-full bg-discord-lighter" />
+      </div>
+      <div className="w-16 bg-discord-sidebar rounded-tl-lg mt-1.5 p-1.5 space-y-1.5">
+        <span className="block h-1.5 w-10 rounded-full bg-discord-text-muted/40" />
+        <span className="block h-2.5 w-full rounded bg-discord-lighter" />
+        <span className="block h-1.5 w-9 rounded-full bg-discord-text-muted/30" />
+        <span className="block h-1.5 w-11 rounded-full bg-discord-text-muted/30" />
+      </div>
+      <div className="flex-1 bg-discord-channels mt-1.5 p-2 flex flex-col justify-end gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="w-3.5 h-3.5 rounded-full bg-discord-lighter shrink-0" />
+          <span className="h-1.5 w-16 rounded-full bg-discord-text-muted/40" />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3.5 h-3.5 rounded-full bg-discord-blurple shrink-0" />
+          <span className="h-1.5 w-20 rounded-full bg-discord-text-muted/30" />
+        </div>
+        <div className="h-4 rounded-md bg-discord-lighter/70 flex items-center justify-end px-1">
+          <span className="w-2.5 h-2.5 rounded-full bg-discord-blurple" />
+        </div>
+      </div>
     </div>
   )
 }
@@ -314,60 +613,48 @@ function AppearanceTab() {
   const { theme, setTheme } = useTheme()
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-discord-text-muted">Escolha a paleta de cores do app.</p>
-      <div className="grid grid-cols-1 gap-3">
-        {THEMES.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTheme(t.id)}
-            className={`flex items-center gap-3 p-3 rounded-lg border-2 text-left transition-colors ${
-              theme === t.id ? 'border-discord-blurple bg-discord-darker' : 'border-transparent bg-discord-darker/60 hover:bg-discord-darker'
-            }`}
-          >
-            <span
-              className="w-10 h-10 rounded-full shrink-0 border border-white/10"
-              style={{
-                background: `radial-gradient(circle at 30% 30%, ${t.swatch}, #000000 120%)`,
-              }}
-            />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white">{t.label}</p>
-              <p className="text-xs text-discord-text-muted">{t.description}</p>
-            </div>
-            {theme === t.id && (
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-blurple shrink-0">
-                <path d="M9 16.2l-3.5-3.5-1.4 1.4L9 19 20 8l-1.4-1.4z" />
-              </svg>
-            )}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-5">
+      <TabHeader title="Aparência" description="Escolha a paleta de cores do app. A troca é na hora e vale só pra este aparelho." />
+      <SettingsCard title="Tema">
+        <div role="radiogroup" aria-label="Tema" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {THEMES.map((t) => {
+            const active = theme === t.id
+            return (
+              <button
+                key={t.id}
+                role="radio"
+                aria-checked={active}
+                onClick={() => setTheme(t.id)}
+                className={`group text-left rounded-2xl p-2 transition-all ${
+                  active
+                    ? 'bg-discord-blurple/[0.08] shadow-[0_0_0_2px_var(--color-discord-blurple)]'
+                    : 'bg-white/[0.02] shadow-[0_0_0_1px_var(--color-line)] hover:shadow-[0_0_0_1px_var(--color-line-strong)] hover:bg-white/[0.04]'
+                }`}
+              >
+                <ThemePreview id={t.id} />
+                <div className="flex items-center gap-2.5 px-1.5 pt-2.5 pb-1">
+                  <span
+                    className={`w-[18px] h-[18px] rounded-full shrink-0 flex items-center justify-center border-2 transition-colors ${
+                      active ? 'border-discord-blurple bg-discord-blurple' : 'border-[var(--color-line-strong)]'
+                    }`}
+                  >
+                    {active && (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" className="w-2.5 h-2.5">
+                        <path d="M5 12.5l4.5 4.5L19 7.5" />
+                      </svg>
+                    )}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[14px] font-medium text-white">{t.label}</p>
+                    <p className="text-[12px] text-discord-text-muted truncate">{t.description}</p>
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </SettingsCard>
     </div>
-  )
-}
-
-// Switch em formato de pílula, igual o que o Discord usa em
-// Configurações — o checkbox quadrado padrão do navegador não tem nada a
-// ver com a cara do resto do app. Usado nos três controles de
-// processamento de voz abaixo.
-function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative w-10 h-6 rounded-full shrink-0 transition-colors ${
-        checked ? 'bg-discord-green' : 'bg-discord-lighter'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
-    </button>
   )
 }
 
@@ -601,289 +888,286 @@ function AudioTab() {
     audio.micSensitivityMode,
   ])
 
+
+  // "Sons de interface" era um checkbox não controlado (defaultChecked) —
+  // agora é um Toggle, que precisa de estado pra desenhar a posição.
+  const [soundsOn, setSoundsOn] = useState(() => isSoundEnabled())
+
+  const selectClass = 'w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm disabled:opacity-50'
+
   return (
     <div className="space-y-5">
       <audio ref={echoAudioRef} className="hidden" />
+      <TabHeader title="Voz e Vídeo" description="Dispositivos, processamento de voz e testes rápidos pra deixar a call redonda." />
+
       {!audio.permissionGranted && (
-        <div className="bg-discord-darker rounded-lg p-3">
-          <p className="text-sm text-discord-text-muted mb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-discord-blurple/30 bg-discord-blurple/[0.07] p-4">
+          <span className="w-10 h-10 shrink-0 rounded-xl bg-discord-blurple/15 text-discord-blurple flex items-center justify-center">
+            <NavIcon tab="audio" className="w-5 h-5" />
+          </span>
+          <p className="flex-1 text-[13px] text-discord-text">
             Autorize o acesso ao microfone pra ver os nomes dos seus dispositivos de áudio.
           </p>
-          <button
-            onClick={handleRequestPermission}
-            className="text-sm px-3 py-1.5 rounded btn-primary"
-          >
+          <button onClick={handleRequestPermission} className="btn-primary h-9 px-4 text-sm shrink-0">
             Permitir acesso ao microfone
           </button>
         </div>
       )}
 
-      <div>
-        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Microfone de entrada</label>
-        <select
-          value={audio.micId ?? ''}
-          onChange={(e) => voice.changeMicrophone(e.target.value)}
-          className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm"
-        >
-          <option value="">Padrão do sistema</option>
-          {audio.microphones.map((m) => (
-            <option key={m.deviceId} value={m.deviceId}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-          Alto-falante de saída {!audio.supportsOutputSelection && '(não suportado neste navegador)'}
-        </label>
-        <select
-          value={audio.speakerId ?? ''}
-          onChange={(e) => audio.setSpeakerId(e.target.value || null)}
-          disabled={!audio.supportsOutputSelection}
-          className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm disabled:opacity-50"
-        >
-          <option value="">Padrão do sistema</option>
-          {audio.speakers.map((s) => (
-            <option key={s.deviceId} value={s.deviceId}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Câmera</label>
-        <select
-          value={audio.cameraId ?? ''}
-          onChange={(e) => audio.setCameraId(e.target.value || null)}
-          className="w-full px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm"
-        >
-          <option value="">Padrão do sistema</option>
-          {audio.cameras.map((c) => (
-            <option key={c.deviceId} value={c.deviceId}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-        <p className="text-[11px] text-discord-text-muted mt-1.5">
-          Se você usa OBS (ou outro programa de captura) e liga a "Câmera Virtual" dele, pode escolher ela aqui — a
-          câmera do app passa a mostrar o que o OBS estiver capturando, em vez da sua webcam de verdade. Útil se o
-          compartilhamento de tela normal não funcionar bem com algum jogo específico, mas o OBS captura ele sem
-          problema.
-        </p>
-      </div>
-
-      <div>
-        <p className="text-xs font-bold uppercase text-discord-text-muted tracking-wide mb-2">
-          Processamento de voz
-        </p>
-        <div className="bg-discord-darker rounded-lg divide-y divide-white/5">
-          <div className="flex items-center justify-between gap-4 p-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white">Redução de ruído</p>
-              <p className="text-xs text-discord-text-muted mt-0.5">
-                Reduz ruído de fundo constante (ventoinha, teclado, ar-condicionado) enquanto você fala.
-              </p>
-            </div>
-            <ToggleSwitch
-              checked={audio.noiseSuppression}
-              onChange={(checked) => {
-                audio.setNoiseSuppression(checked)
-                voice.refreshAudioConstraints({ noiseSuppression: checked })
-              }}
-            />
+      <SettingsCard title="Dispositivos">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="settings-mic" className="field-label">
+              Microfone de entrada
+            </label>
+            <select
+              id="settings-mic"
+              value={audio.micId ?? ''}
+              onChange={(e) => voice.changeMicrophone(e.target.value)}
+              className={selectClass}
+            >
+              <option value="">Padrão do sistema</option>
+              {audio.microphones.map((m) => (
+                <option key={m.deviceId} value={m.deviceId}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="flex items-center justify-between gap-4 p-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white">Cancelamento de eco</p>
-              <p className="text-xs text-discord-text-muted mt-0.5">
-                Evita que o som que sai do seu alto-falante volte pelo microfone.
-              </p>
-            </div>
-            <ToggleSwitch
-              checked={audio.echoCancellation}
-              onChange={(checked) => {
-                audio.setEchoCancellation(checked)
-                voice.refreshAudioConstraints({ echoCancellation: checked })
-              }}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-4 p-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white">Controle automático de ganho</p>
-              <p className="text-xs text-discord-text-muted mt-0.5">
-                Ajusta o volume de captura sozinho, pra sua voz não ficar baixa nem estourar.
-              </p>
-            </div>
-            <ToggleSwitch
-              checked={audio.autoGainControl}
-              onChange={(checked) => {
-                audio.setAutoGainControl(checked)
-                voice.refreshAudioConstraints({ autoGainControl: checked })
-              }}
-            />
-          </div>
-          <div className="p-3">
-            <div className="min-w-0 mb-2">
-              <p className="text-sm font-medium text-white">Sensibilidade do microfone</p>
-              <p className="text-xs text-discord-text-muted mt-0.5">
-                Corta o microfone quando o volume está abaixo desse nível — bom pra parar de captar o teclado ou
-                sons baixos da mesa entre uma fala e outra.
-              </p>
-            </div>
-            <div className="flex gap-1 mb-3 bg-discord-dark rounded-md p-0.5">
-              <button
-                onClick={() => handleSensitivityModeChange('auto')}
-                className={`flex-1 text-xs font-medium py-1.5 rounded transition-colors ${
-                  audio.micSensitivityMode === 'auto'
-                    ? 'bg-discord-blurple text-white'
-                    : 'text-discord-text-muted hover:text-white'
-                }`}
-              >
-                Automática
-              </button>
-              <button
-                onClick={() => handleSensitivityModeChange('manual')}
-                className={`flex-1 text-xs font-medium py-1.5 rounded transition-colors ${
-                  audio.micSensitivityMode === 'manual'
-                    ? 'bg-discord-blurple text-white'
-                    : 'text-discord-text-muted hover:text-white'
-                }`}
-              >
-                Manual
-              </button>
-            </div>
-            {audio.micSensitivityMode === 'auto' ? (
-              <p className="text-xs text-discord-text-muted">
-                O app mede o ruído do seu ambiente sozinho e ajusta o corte automaticamente enquanto você está numa
-                chamada — não precisa mexer em nada.
-              </p>
-            ) : (
-              <>
-                <input
-                  type="range"
-                  min={MIN_MIC_SENSITIVITY}
-                  max={MAX_MIC_SENSITIVITY}
-                  value={audio.micSensitivity}
-                  onChange={(e) => handleSensitivityChange(Number(e.target.value))}
-                  className="w-full accent-discord-blurple"
-                />
-                <div className="flex justify-between text-[10px] text-discord-text-muted mt-1">
-                  <span>Menos sensível</span>
-                  <span>Mais sensível</span>
-                </div>
-              </>
+
+          <div>
+            <label htmlFor="settings-speaker" className="field-label">
+              Alto-falante de saída
+            </label>
+            <select
+              id="settings-speaker"
+              value={audio.speakerId ?? ''}
+              onChange={(e) => audio.setSpeakerId(e.target.value || null)}
+              disabled={!audio.supportsOutputSelection}
+              className={selectClass}
+            >
+              <option value="">Padrão do sistema</option>
+              {audio.speakers.map((s) => (
+                <option key={s.deviceId} value={s.deviceId}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            {!audio.supportsOutputSelection && (
+              <p className="text-[11px] text-discord-text-muted mt-1.5">Não suportado neste navegador.</p>
             )}
           </div>
-        </div>
-      </div>
 
-      <div>
-        <p className="text-xs font-bold uppercase text-discord-text-muted tracking-wide mb-2">
-          Transmissão de tela
-        </p>
-        <div className="bg-discord-darker rounded-lg divide-y divide-white/5">
-          <div className="flex items-center justify-between gap-4 p-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white">Redução de ruído da transmissão</p>
-              <p className="text-xs text-discord-text-muted mt-0.5">
-                Ajuda com chiado/estática constante no áudio da tela/jogo compartilhado — mas como é uma
-                tecnologia feita pra isolar VOZ, ela pode cortar ou abafar sons não-vocais do jogo (tiros,
-                explosões, música). Deixe desligado se quiser o áudio do jogo completo; ligue só se estiver
-                incomodado com chiado.
-              </p>
-            </div>
-            <ToggleSwitch
-              checked={audio.screenAudioNoiseSuppression}
-              onChange={(checked) => audio.setScreenAudioNoiseSuppression(checked)}
-            />
+          <div className="sm:col-span-2">
+            <label htmlFor="settings-camera" className="field-label">
+              Câmera
+            </label>
+            <select
+              id="settings-camera"
+              value={audio.cameraId ?? ''}
+              onChange={(e) => audio.setCameraId(e.target.value || null)}
+              className={selectClass}
+            >
+              <option value="">Padrão do sistema</option>
+              {audio.cameras.map((c) => (
+                <option key={c.deviceId} value={c.deviceId}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[12px] text-discord-text-muted mt-2 leading-relaxed">
+              Se você usa OBS (ou outro programa de captura) e liga a "Câmera Virtual" dele, pode escolher ela aqui — a
+              câmera do app passa a mostrar o que o OBS estiver capturando, em vez da sua webcam de verdade. Útil se o
+              compartilhamento de tela normal não funcionar bem com algum jogo específico, mas o OBS captura ele sem
+              problema.
+            </p>
           </div>
         </div>
-      </div>
+      </SettingsCard>
 
-      <div>
-        <button
-          onClick={testing ? stopTest : startTest}
-          className="text-sm px-4 py-2 rounded btn-primary"
-        >
-          {testing ? 'Parar teste' : 'Testar microfone'}
-        </button>
-        {testing && (
-          <>
-            <p className="text-xs text-discord-text-muted mt-2">
-              Fala alguma coisa — a barra reage ao volume captado. Dá pra ligar/desligar os controles acima com o
-              teste rodando pra ouvir a diferença na hora.
-            </p>
-            <div className="mt-2 h-2.5 bg-discord-darker rounded-full overflow-hidden">
+      <SettingsCard title="Testes" description="Confira se o microfone e o fone estão funcionando antes de entrar na call.">
+        <RowList>
+          <SettingRow
+            title="Testar microfone"
+            description={
+              testing
+                ? 'Fala alguma coisa — a barra reage ao volume captado. Dá pra ligar/desligar os controles abaixo com o teste rodando pra ouvir a diferença na hora.'
+                : 'Mostra o nível do que o microfone está captando.'
+            }
+            control={
+              <button
+                onClick={testing ? stopTest : startTest}
+                className={`${testing ? 'btn-secondary' : 'btn-primary'} h-9 px-4 text-sm shrink-0`}
+              >
+                {testing ? 'Parar teste' : 'Testar microfone'}
+              </button>
+            }
+          >
+            <div
+              className="mt-3 h-2.5 rounded-full bg-discord-darker border border-[var(--color-line)] overflow-hidden"
+              role="meter"
+              aria-label="Nível do microfone"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={level}
+            >
               <div
-                className="h-full bg-discord-green transition-all duration-75"
+                className="h-full rounded-full bg-gradient-to-r from-discord-green via-discord-green to-amber-400 transition-[width] duration-75"
                 style={{ width: `${level}%` }}
               />
             </div>
-          </>
-        )}
-      </div>
-
-      <div className="bg-discord-darker rounded-lg p-3 space-y-2">
-        <label className="flex items-center justify-between cursor-pointer">
-          <div>
-            <p className="text-sm font-medium text-white">Sons de interface</p>
-            <p className="text-xs text-discord-text-muted">
-              Toques originais ao conectar/desconectar da voz, mutar e quando alguém entra ou sai da chamada.
-            </p>
-          </div>
-          <input
-            type="checkbox"
-            defaultChecked={isSoundEnabled()}
-            onChange={(e) => {
-              setSoundEnabled(e.target.checked)
-              if (e.target.checked) playConnectSound()
-            }}
-            className="w-4 h-4 accent-discord-blurple shrink-0 ml-3"
+          </SettingRow>
+          <SettingRow
+            title="Testar mic + fone juntos (eco)"
+            description="Fala alguma coisa e escuta sua própria voz voltando com um pequeno atraso — se você se ouvir, o microfone e o alto-falante/fone escolhidos estão funcionando juntos. Use fone de ouvido pra evitar microfonia."
+            control={
+              <button
+                onClick={echoing ? stopEcho : startEcho}
+                className={`${echoing ? 'btn-danger' : 'btn-secondary'} h-9 px-4 text-sm shrink-0`}
+              >
+                {echoing ? 'Parar eco' : 'Ouvir a si mesmo'}
+              </button>
+            }
           />
-        </label>
-      </div>
+        </RowList>
+      </SettingsCard>
 
-      <div className="bg-discord-darker rounded-lg p-3 space-y-2">
-        <p className="text-sm font-medium text-white">Testar mic + fone juntos (eco)</p>
-        <p className="text-xs text-discord-text-muted">
-          Fala alguma coisa e escuta sua própria voz voltando com um pequeno atraso — se você se ouvir, o microfone
-          e o alto-falante/fone escolhidos estão funcionando juntos. Use fone de ouvido pra evitar microfonia.
-        </p>
-        <button
-          onClick={echoing ? stopEcho : startEcho}
-          className={`text-sm px-4 py-2 rounded font-medium transition-colors ${
-            echoing ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-discord-lighter text-white hover:opacity-90'
-          }`}
-        >
-          {echoing ? 'Parar eco' : 'Ouvir a si mesmo (eco)'}
-        </button>
-      </div>
+      <SettingsCard title="Processamento de voz">
+        <RowList>
+          <SettingRow
+            title="Redução de ruído"
+            description="Reduz ruído de fundo constante (ventoinha, teclado, ar-condicionado) enquanto você fala."
+            control={
+              <Toggle
+                label="Redução de ruído"
+                checked={audio.noiseSuppression}
+                onChange={(checked) => {
+                  audio.setNoiseSuppression(checked)
+                  voice.refreshAudioConstraints({ noiseSuppression: checked })
+                }}
+              />
+            }
+          />
+          <SettingRow
+            title="Cancelamento de eco"
+            description="Evita que o som que sai do seu alto-falante volte pelo microfone."
+            control={
+              <Toggle
+                label="Cancelamento de eco"
+                checked={audio.echoCancellation}
+                onChange={(checked) => {
+                  audio.setEchoCancellation(checked)
+                  voice.refreshAudioConstraints({ echoCancellation: checked })
+                }}
+              />
+            }
+          />
+          <SettingRow
+            title="Controle automático de ganho"
+            description="Ajusta o volume de captura sozinho, pra sua voz não ficar baixa nem estourar."
+            control={
+              <Toggle
+                label="Controle automático de ganho"
+                checked={audio.autoGainControl}
+                onChange={(checked) => {
+                  audio.setAutoGainControl(checked)
+                  voice.refreshAudioConstraints({ autoGainControl: checked })
+                }}
+              />
+            }
+          />
+          <SettingRow
+            title="Sensibilidade do microfone"
+            description="Corta o microfone quando o volume está abaixo desse nível — bom pra parar de captar o teclado ou sons baixos da mesa entre uma fala e outra."
+          >
+            <div className="mt-3 space-y-3">
+              <Segmented
+                label="Modo de sensibilidade"
+                value={audio.micSensitivityMode}
+                onChange={handleSensitivityModeChange}
+                options={[
+                  { value: 'auto', label: 'Automática' },
+                  { value: 'manual', label: 'Manual' },
+                ]}
+              />
+              {audio.micSensitivityMode === 'auto' ? (
+                <p className="text-[12.5px] text-discord-text-muted leading-relaxed">
+                  O app mede o ruído do seu ambiente sozinho e ajusta o corte automaticamente enquanto você está numa
+                  chamada — não precisa mexer em nada.
+                </p>
+              ) : (
+                <div className="pt-1">
+                  <RangeSlider
+                    label="Sensibilidade do microfone"
+                    min={MIN_MIC_SENSITIVITY}
+                    max={MAX_MIC_SENSITIVITY}
+                    value={audio.micSensitivity}
+                    onChange={handleSensitivityChange}
+                  />
+                  <div className="flex justify-between text-[11px] text-discord-text-muted mt-2">
+                    <span>Menos sensível</span>
+                    <span>Mais sensível</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </SettingRow>
+        </RowList>
+      </SettingsCard>
 
-      <div className="bg-discord-darker rounded-lg p-3 space-y-3">
-        <PushToTalkSection />
-      </div>
+      <SettingsCard title="Entrada e interface">
+        <RowList>
+          <PushToTalkSection />
+          <SettingRow
+            title="Sons de interface"
+            description="Toques originais ao conectar/desconectar da voz, mutar e quando alguém entra ou sai da chamada."
+            control={
+              <Toggle
+                label="Sons de interface"
+                checked={soundsOn}
+                onChange={(checked) => {
+                  setSoundsOn(checked)
+                  setSoundEnabled(checked)
+                  if (checked) playConnectSound()
+                }}
+              />
+            }
+          />
+          {window.electronAPI?.isElectron && (
+            <SettingRow
+              title="Sobreposição em jogos"
+              description={
+                <>
+                  Aperte <Kbd>Ctrl+Shift+O</Kbd> a qualquer momento (mesmo com o jogo em foco) pra mostrar/esconder quem
+                  está falando na call, por cima do jogo. Funciona com o jogo em janela sem borda — não aparece por cima
+                  de jogos em tela cheia exclusiva.
+                </>
+              }
+            />
+          )}
+        </RowList>
+      </SettingsCard>
 
-      {window.electronAPI?.isElectron && (
-        <div className="bg-discord-darker rounded-lg p-3">
-          <p className="text-sm font-medium text-white">Sobreposição em jogos</p>
-          <p className="text-xs text-discord-text-muted mt-1">
-            Aperte <kbd className="bg-discord-lighter px-1.5 py-0.5 rounded font-mono text-[10px]">Ctrl+Shift+O</kbd>{' '}
-            a qualquer momento (mesmo com o jogo em foco) pra mostrar/esconder quem está falando na call, por cima
-            do jogo. Funciona com o jogo em janela sem borda — não aparece por cima de jogos em tela cheia
-            exclusiva.
-          </p>
-        </div>
-      )}
+      <SettingsCard title="Transmissão de tela">
+        <SettingRow
+          title="Redução de ruído da transmissão"
+          description="Ajuda com chiado/estática constante no áudio da tela/jogo compartilhado — mas como é uma tecnologia feita pra isolar VOZ, ela pode cortar ou abafar sons não-vocais do jogo (tiros, explosões, música). Deixe desligado se quiser o áudio do jogo completo; ligue só se estiver incomodado com chiado."
+          control={
+            <Toggle
+              label="Redução de ruído da transmissão"
+              checked={audio.screenAudioNoiseSuppression}
+              onChange={(checked) => audio.setScreenAudioNoiseSuppression(checked)}
+            />
+          }
+        />
+      </SettingsCard>
 
-      <p className="text-xs text-discord-text-muted">
+      <InlineMessage tone="info">
         As mudanças aqui valem pra próxima vez que você entrar em um canal de voz. Trocar o microfone durante uma
         chamada já em andamento também dá — use o seletor que aparece na barra de controles da chamada.
-      </p>
+      </InlineMessage>
 
-      <div className="h-px bg-white/10" />
+      <div className="h-px bg-[var(--color-line)]" />
 
       <NetworkDiagnosticsPanel />
     </div>
@@ -923,39 +1207,36 @@ function PushToTalkSection() {
     : formatKeyCode(voice.pushToTalkKey)
 
   return (
-    <>
-      <label className="flex items-center justify-between cursor-pointer">
-        <div>
-          <p className="text-sm font-medium text-white">Push-to-talk</p>
-          <p className="text-xs text-discord-text-muted">
-            Microfone fica desligado o tempo todo — só transmite enquanto você segura a tecla escolhida.{' '}
-            {voice.globalPushToTalkAvailable
-              ? 'Funciona mesmo com outro programa (o jogo, por exemplo) em foco.'
-              : 'Só funciona com o Mamacos Voip em foco (não funciona por cima de um jogo em tela cheia).'}
-          </p>
-        </div>
-        <input
-          type="checkbox"
-          checked={voice.pushToTalkEnabled}
-          onChange={(e) => voice.setPushToTalkEnabled(e.target.checked)}
-          className="w-4 h-4 accent-discord-blurple shrink-0 ml-3"
-        />
-      </label>
-
+    <SettingRow
+      title="Push-to-talk"
+      description={
+        <>
+          Microfone fica desligado o tempo todo — só transmite enquanto você segura a tecla escolhida.{' '}
+          {voice.globalPushToTalkAvailable
+            ? 'Funciona mesmo com outro programa (o jogo, por exemplo) em foco.'
+            : 'Só funciona com o Mamacos Voip em foco (não funciona por cima de um jogo em tela cheia).'}
+        </>
+      }
+      control={
+        <Toggle label="Push-to-talk" checked={voice.pushToTalkEnabled} onChange={(checked) => voice.setPushToTalkEnabled(checked)} />
+      }
+    >
       {voice.pushToTalkEnabled && (
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-xs text-discord-text-muted">Tecla</span>
+        <div className="flex items-center justify-between gap-3 mt-3 rounded-xl bg-discord-darker/70 border border-[var(--color-line)] px-3 py-2.5">
+          <span className="text-[13px] text-discord-text-muted">Tecla de atalho</span>
           <button
             onClick={handleCaptureClick}
-            className={`text-xs px-3 py-1.5 rounded font-mono transition-colors ${
-              capturing ? 'bg-discord-blurple text-white animate-pulse' : 'bg-discord-lighter text-discord-text hover:opacity-90'
+            className={`min-w-[7rem] h-8 px-3 rounded-lg font-mono text-[12px] transition-colors border ${
+              capturing
+                ? 'bg-discord-blurple/15 border-discord-blurple text-white animate-pulse'
+                : 'bg-discord-lighter border-[var(--color-line-strong)] border-b-2 text-discord-text hover:text-white'
             }`}
           >
             {capturing ? 'Pressione uma tecla...' : currentKeyLabel}
           </button>
         </div>
       )}
-    </>
+    </SettingRow>
   )
 }
 
@@ -994,65 +1275,81 @@ function PrivacyTab() {
     }
   }
 
-  return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-          Quem pode ver seu perfil completo
-        </label>
-        <div className="space-y-2">
-          <button
-            onClick={() => handleChange('everyone')}
-            disabled={saving}
-            className={`w-full text-left px-3 py-2.5 rounded border transition-colors ${
-              (profile?.profile_visibility ?? 'everyone') === 'everyone'
-                ? 'border-discord-blurple bg-discord-blurple/10'
-                : 'border-transparent bg-discord-darker hover:bg-discord-lighter'
-            }`}
-          >
-            <p className="text-sm text-white font-medium">Todo mundo</p>
-            <p className="text-xs text-discord-text-muted">
-              Qualquer pessoa que compartilha um servidor com você vê seu perfil completo.
-            </p>
-          </button>
-          <button
-            onClick={() => handleChange('friends_only')}
-            disabled={saving}
-            className={`w-full text-left px-3 py-2.5 rounded border transition-colors ${
-              profile?.profile_visibility === 'friends_only'
-                ? 'border-discord-blurple bg-discord-blurple/10'
-                : 'border-transparent bg-discord-darker hover:bg-discord-lighter'
-            }`}
-          >
-            <p className="text-sm text-white font-medium">Só amigos</p>
-            <p className="text-xs text-discord-text-muted">
-              Quem não é seu amigo vê só seu nome e foto — nada de status, "jogando" ou outros detalhes.
-            </p>
-          </button>
-        </div>
-      </div>
-      <p className="text-sm text-discord-text-muted">
-        Para gerenciar quem pode te adicionar como amigo, use a lista de bloqueados na aba{' '}
-        <span className="text-white">Amigos</span> na tela inicial.
-      </p>
-      <p className="text-sm text-discord-text-muted">
-        Seus dados (perfil, mensagens, servidores) são protegidos por Row Level Security no banco — só você e quem
-        compartilha um servidor com você consegue ver seu conteúdo.
-      </p>
+  const current = profile?.profile_visibility ?? 'everyone'
+  const options: { value: 'everyone' | 'friends_only'; title: string; text: string }[] = [
+    { value: 'everyone', title: 'Todo mundo', text: 'Qualquer pessoa que compartilha um servidor com você vê seu perfil completo.' },
+    {
+      value: 'friends_only',
+      title: 'Só amigos',
+      text: 'Quem não é seu amigo vê só seu nome e foto — nada de status, "jogando" ou outros detalhes.',
+    },
+  ]
 
-      <div>
-        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">Seus dados</label>
-        <button
-          onClick={handleExport}
-          disabled={exporting}
-          className="w-full py-2.5 rounded btn-secondary text-sm disabled:opacity-60"
-        >
-          {exporting ? 'Preparando arquivo...' : 'Baixar meus dados'}
-        </button>
-        <p className="text-[10px] text-discord-text-muted mt-1.5">
-          Gera um arquivo com seu perfil, servidores, amizades e mensagens que você mandou.
-        </p>
-      </div>
+  return (
+    <div className="space-y-5">
+      <TabHeader title="Privacidade" description="Controle quem vê o quê e baixe uma cópia dos seus dados." />
+
+      <SettingsCard title="Quem pode ver seu perfil completo">
+        <div role="radiogroup" aria-label="Visibilidade do perfil" className="space-y-2">
+          {options.map((o) => {
+            const active = current === o.value
+            return (
+              <button
+                key={o.value}
+                role="radio"
+                aria-checked={active}
+                onClick={() => handleChange(o.value)}
+                disabled={saving}
+                className={`w-full flex items-start gap-3 text-left px-3.5 py-3 rounded-xl border transition-colors disabled:opacity-60 ${
+                  active
+                    ? 'border-discord-blurple/60 bg-discord-blurple/[0.08]'
+                    : 'border-[var(--color-line)] bg-discord-darker/50 hover:bg-white/[0.04]'
+                }`}
+              >
+                <span
+                  className={`mt-0.5 w-[18px] h-[18px] rounded-full shrink-0 border-2 flex items-center justify-center ${
+                    active ? 'border-discord-blurple' : 'border-[var(--color-line-strong)]'
+                  }`}
+                >
+                  {active && <span className="w-2 h-2 rounded-full bg-discord-blurple" />}
+                </span>
+                <span>
+                  <span className="block text-[14px] text-white font-medium">{o.title}</span>
+                  <span className="block text-[12.5px] text-discord-text-muted mt-0.5">{o.text}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard>
+        <div className="flex gap-3">
+          <span className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.05] text-discord-text-muted flex items-center justify-center">
+            <NavIcon tab="security" className="w-[18px] h-[18px]" />
+          </span>
+          <div className="space-y-2 text-[13px] text-discord-text-muted leading-relaxed">
+            <p>
+              Para gerenciar quem pode te adicionar como amigo, use a lista de bloqueados na aba{' '}
+              <span className="text-white">Amigos</span> na tela inicial.
+            </p>
+            <p>
+              Seus dados (perfil, mensagens, servidores) são protegidos por Row Level Security no banco — só você e quem
+              compartilha um servidor com você consegue ver seu conteúdo.
+            </p>
+          </div>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Seus dados"
+        description="Gera um arquivo com seu perfil, servidores, amizades e mensagens que você mandou."
+        action={
+          <button onClick={handleExport} disabled={exporting} className="btn-secondary h-9 px-4 text-sm shrink-0">
+            {exporting ? 'Preparando arquivo...' : 'Baixar meus dados'}
+          </button>
+        }
+      />
     </div>
   )
 }

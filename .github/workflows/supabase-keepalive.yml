@@ -24,13 +24,26 @@ on:
     - cron: '0 4 */3 * *'
   workflow_dispatch: {} # permite disparar manualmente pela aba Actions, pra testar
 
+# AUDITORIA: este workflow não precisa de NENHUMA permissão do token do
+# GitHub (só faz uma requisição HTTP pra fora) — sem essa linha ele
+# herdava as permissões padrão do repositório.
+permissions: {}
+
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
+      # AUDITORIA: segredos passados por variável de ambiente em vez de
+      # interpolados direto no script (evita que um valor com caracteres
+      # especiais quebre/injete comandos no shell), e --retry pra uma
+      # falha passageira de rede não perder o "ping" daquela rodada.
       - name: Pingar a API REST do Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
-            "${{ secrets.SUPABASE_URL }}/rest/v1/" \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+          curl -sS --retry 3 --retry-delay 10 --max-time 30 -o /dev/null -w "HTTP %{http_code}\n" \
+            "${SUPABASE_URL}/rest/v1/" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}"

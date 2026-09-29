@@ -31,14 +31,21 @@ export function ServerHoverCard({ server, anchorRect }: { server: Server; anchor
       // pointer-events-none: é só uma prévia, não precisa ser clicável
       // — e assim o mouse "atravessa" o card sem disparar um
       // mouseleave falso no ícone por causa de sobreposição.
-      className="z-[190] w-64 bg-discord-dark border border-black/40 rounded-lg shadow-2xl p-3 pointer-events-none"
+      className="z-[190] w-64 surface-elevated rounded-xl p-3.5 pointer-events-none animate-pop-in"
     >
-      <p className="text-sm font-semibold text-white truncate">{server.name}</p>
-      <p className="text-xs text-discord-text-muted mb-2">
-        {loading ? 'Carregando...' : `${onlineMembers.length} online`}
-      </p>
+      <p className="font-display text-sm font-semibold text-white truncate">{server.name}</p>
+      <div className="flex items-center gap-1.5 mt-1 mb-2.5 text-xs text-discord-text-muted">
+        {loading ? (
+          <span className="h-2.5 w-16 rounded-full bg-white/[0.06] animate-pulse" />
+        ) : (
+          <>
+            <span className="w-2 h-2 rounded-full bg-discord-green" aria-hidden="true" />
+            {onlineMembers.length} online
+          </>
+        )}
+      </div>
       {!loading && onlineMembers.length === 0 && (
-        <p className="text-xs text-discord-text-muted">Ninguém online agora.</p>
+        <p className="text-xs text-discord-text-muted px-2.5 py-2 rounded-lg bg-white/[0.03] border border-[var(--color-line)]">Ninguém online agora.</p>
       )}
       <div className="space-y-1.5 max-h-52 overflow-hidden">
         {onlineMembers.slice(0, 12).map((m) => (
@@ -50,7 +57,7 @@ export function ServerHoverCard({ server, anchorRect }: { server: Server; anchor
               userId={m.profile.id}
               size={22}
             />
-            <span className="text-xs text-discord-text truncate">
+            <span className="text-[13px] text-discord-text truncate">
               {m.profile.display_name || m.profile.username}
             </span>
           </div>

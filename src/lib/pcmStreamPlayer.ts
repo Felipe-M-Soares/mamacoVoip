@@ -12,6 +12,27 @@
 // qualquer tocador de áudio em streaming via Web Audio API. Sem esse
 // agendamento preciso, pequenas variações no tempo de entrega de cada
 // pedaço (comum em qualquer IPC) causariam microcortes constantes.
+// Atraso máximo tolerado entre "agora" e o fim do áudio já agendado. O
+// relógio do processo nativo (WASAPI) e o do AudioContext nunca batem
+// 100% — se os pedaços chegam um tiquinho mais rápido do que tocam, o
+// agendamento abaixo ia acumulando atraso SEM LIMITE (depois de uma
+// hora de transmissão, o som do jogo chegava segundos atrasado em
+// relação ao vídeo). Passou desse teto, o pedaço novo é DESCARTADO (em
+// vez de realinhar — realinhar pra "agora" com áudio ainda agendado na
+// frente faria dois pedaços tocarem sobrepostos, soando embolado).
+export const PCM_MAX_SCHEDULE_AHEAD_S = 0.3
+// Folga usada ao (re)alinhar — pequena o bastante pra não somar latência
+// perceptível, grande o bastante pra absorver a variação normal do IPC.
+export const PCM_REALIGN_LEAD_S = 0.04
+
+// Decide ONDE o próximo pedaço deve começar a tocar (função pura,
+// testável). `null` = descartar esse pedaço (fila adiantada demais).
+export function nextPcmStartTime(nextStartTime: number, now: number): number | null {
+  if (nextStartTime < now) return now + PCM_REALIGN_LEAD_S
+  if (nextStartTime - now > PCM_MAX_SCHEDULE_AHEAD_S) return null
+  return nextStartTime
+}
+
 export class PcmStreamPlayer {
   private ctx: AudioContext
   private destination: MediaStreamAudioDestinationNode
@@ -20,8 +41,11 @@ export class PcmStreamPlayer {
   private closed = false
 
   constructor() {
-    this.ctx = new AudioContext()
+    this.ctx = new AudioContext({ latencyHint: 'interactive' })
     this.destination = this.ctx.createMediaStreamDestination()
+    // Contexto criado fora de um gesto do usuário pode nascer suspenso
+    // (autoplay) — aí nada toca e a transmissão sai muda.
+    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {})
   }
 
   get stream(): MediaStream {
@@ -62,16 +86,29 @@ export class PcmStreamPlayer {
       }
     }
 
+    const startAt = nextPcmStartTime(this.nextStartTime, this.ctx.currentTime)
+    if (startAt === null) return
+
     const source = this.ctx.createBufferSource()
     source.buffer = audioBuffer
     source.connect(this.destination)
+    // Solta o nó do gráfico assim que terminar de tocar — são dezenas de
+    // pedaços por segundo, não vale depender só do GC pra isso.
+    source.onended = () => {
+      try {
+        source.disconnect()
+      } catch {
+        // já desconectado
+      }
+    }
 
-    const now = this.ctx.currentTime
     // Se a gente ficou pra trás (pedaços chegando mais devagar que o
     // consumo, ex: uma pausa momentânea do processo principal), realinha
     // pra "agora + uma folguinha" em vez de tentar tocar tudo que ficou
     // acumulado de uma vez (o que soaria como um áudio acelerado/robótico).
-    if (this.nextStartTime < now) this.nextStartTime = now + 0.02
+    // E se ficou ADIANTADO demais (deriva de relógio), idem — ver
+    // PCM_MAX_SCHEDULE_AHEAD_S.
+    this.nextStartTime = startAt
     source.start(this.nextStartTime)
     this.nextStartTime += audioBuffer.duration
   }

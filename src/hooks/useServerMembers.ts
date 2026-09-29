@@ -1,81 +1,165 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { uniqueTopic } from '../lib/realtimeChannel'
 import type { Profile, ServerMember } from '../types/database'
 
 export type ServerMemberWithProfile = ServerMember & { profile: Profile }
 
-export function useServerMembers(serverId: string | null) {
-  const [members, setMembers] = useState<ServerMemberWithProfile[]>([])
-  const [loading, setLoading] = useState(true)
+// Armazenamento COMPARTILHADO por servidor.
+//
+// useServerMembers() é chamado ao mesmo tempo por vários componentes pro
+// MESMO servidor (ChatArea, ChannelSidebar, MemberList, OverlayStateSync,
+// ServerHoverCard, VoiceChannelView, SearchModal…). Antes cada chamada
+// fazia a sua própria busca (server_members + profiles) E abria a sua
+// própria assinatura de tempo real — com o servidor aberto eram 4–5 cópias
+// idênticas de tudo, e cada entrada/saída de membro disparava 4–5 recargas
+// completas. Agora existe uma entrada por servidor, com uma busca e uma
+// assinatura só, compartilhadas por todo mundo que pedir aquele servidor.
+// Quando o último componente solta o servidor, a entrada fica em cache por
+// alguns segundos (ex.: passar o mouse de novo no mesmo ícone do
+// ServerHoverCard não refaz a busca) e depois é descartada.
 
-  const refresh = useCallback(async () => {
-    if (!serverId) {
-      setMembers([])
-      setLoading(false)
-      return
+interface Snapshot {
+  members: ServerMemberWithProfile[]
+  loading: boolean
+}
+
+interface Entry {
+  snapshot: Snapshot
+  listeners: Set<() => void>
+  channel: RealtimeChannel | null
+  loadSeq: number
+  releaseTimer: ReturnType<typeof setTimeout> | null
+  reloadTimer: ReturnType<typeof setTimeout> | null
+}
+
+const RELEASE_DELAY_MS = 30_000
+const EMPTY_SNAPSHOT: Snapshot = { members: [], loading: false }
+const store = new Map<string, Entry>()
+
+function emit(entry: Entry, next: Snapshot) {
+  entry.snapshot = next
+  entry.listeners.forEach((l) => l())
+}
+
+function scheduleRelease(serverId: string, entry: Entry) {
+  if (entry.releaseTimer) clearTimeout(entry.releaseTimer)
+  entry.releaseTimer = setTimeout(() => {
+    if (entry.listeners.size > 0) return
+    if (entry.channel) void supabase.removeChannel(entry.channel)
+    if (entry.reloadTimer) clearTimeout(entry.reloadTimer)
+    entry.channel = null
+    store.delete(serverId)
+  }, RELEASE_DELAY_MS)
+}
+
+function getEntry(serverId: string): Entry {
+  let entry = store.get(serverId)
+  if (!entry) {
+    entry = {
+      snapshot: { members: [], loading: true },
+      listeners: new Set(),
+      channel: null,
+      loadSeq: 0,
+      releaseTimer: null,
+      reloadTimer: null,
     }
-    setLoading(true)
+    store.set(serverId, entry)
+    // Se ninguém chegar a assinar (render descartado), não fica pra sempre.
+    scheduleRelease(serverId, entry)
+  }
+  return entry
+}
 
-    const { data: memberRows } = await supabase.from('server_members').select('*').eq('server_id', serverId)
-
-    if (!memberRows || memberRows.length === 0) {
-      setMembers([])
-      setLoading(false)
-      return
-    }
-
-    const userIds = memberRows.map((m) => m.user_id)
-    const { data: profiles } = await supabase.from('profiles').select('*').in('id', userIds)
-
-    const merged = memberRows
-      .map((m) => {
-        const profile = profiles?.find((p) => p.id === m.user_id)
-        return profile ? { ...m, profile } : null
+async function load(serverId: string) {
+  const entry = store.get(serverId)
+  if (!entry) return
+  const seq = ++entry.loadSeq
+  try {
+    const { data: memberRows, error } = await supabase.from('server_members').select('*').eq('server_id', serverId)
+    if (error) throw error
+    let merged: ServerMemberWithProfile[] = []
+    if (memberRows && memberRows.length > 0) {
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('*')
+        .in(
+          'id',
+          memberRows.map((m) => m.user_id)
+        )
+      if (profilesError) throw profilesError
+      // Map em vez de `profiles.find()` dentro do loop (era O(n²)).
+      const byId = new Map((profiles ?? []).map((p) => [p.id, p]))
+      merged = memberRows.flatMap((m) => {
+        const profile = byId.get(m.user_id)
+        return profile ? [{ ...m, profile }] : []
       })
-      .filter((m): m is ServerMemberWithProfile => m !== null)
+    }
+    if (store.get(serverId) !== entry || seq !== entry.loadSeq) return
+    emit(entry, { members: merged, loading: false })
+  } catch (err) {
+    console.error('[useServerMembers] Falha ao carregar membros:', err)
+    if (store.get(serverId) === entry && seq === entry.loadSeq) emit(entry, { ...entry.snapshot, loading: false })
+  }
+}
 
-    setMembers(merged)
-    setLoading(false)
-  }, [serverId])
+// Várias mudanças seguidas (ex.: alguém entra e recebe cargo) viram uma
+// recarga só.
+function scheduleReload(serverId: string, entry: Entry) {
+  if (entry.reloadTimer) clearTimeout(entry.reloadTimer)
+  entry.reloadTimer = setTimeout(() => {
+    entry.reloadTimer = null
+    void load(serverId)
+  }, 300)
+}
 
-  useEffect(() => {
-    refresh()
-  }, [refresh])
+function subscribe(serverId: string, listener: () => void): () => void {
+  const entry = getEntry(serverId)
+  entry.listeners.add(listener)
+  if (entry.releaseTimer) {
+    clearTimeout(entry.releaseTimer)
+    entry.releaseTimer = null
+  }
 
-  // Sem isso, a lista de membros só era buscada UMA VEZ (quando você
-  // entra no servidor/abre o chat) e nunca mais — então quando alguém
-  // NOVO entrava enquanto você já estava com o servidor aberto, o app
-  // não tinha o perfil dessa pessoa em mãos pra mostrar o nome dela. O
-  // aviso de "entrou no servidor" (MessageItem.tsx) cai no nome genérico
-  // "Alguém" exatamente por isso: o author_id da mensagem de sistema não
-  // batia com ninguém na lista de membros carregada. Escutando mudanças
-  // em `server_members` deste servidor, a lista se atualiza sozinha.
-  useEffect(() => {
-    if (!serverId) return
-    // useServerMembers() é chamado de vários componentes ao mesmo tempo pro
-    // MESMO servidor (ChatArea, painel de membros, VoiceChannelView, etc.)
-    // — cada um monta seu próprio efeito. Se todos pedissem um canal com o
-    // MESMO nome, o cliente do Supabase devolveria o canal já existente (já
-    // inscrito) em vez de criar um novo, e encadear `.on()` num canal que já
-    // chamou `.subscribe()` derruba o app com "cannot add postgres_changes
-    // callbacks ... after subscribe()". Mesmo problema (e mesma correção) já
-    // resolvido antes em useConversations.ts — por isso o sufixo aleatório
-    // aqui também.
-    const uniqueSuffix = Math.random().toString(36).slice(2)
+  if (!entry.channel) {
+    void load(serverId)
+    // Sem isso, quem entrasse no servidor com ele já aberto não tinha o
+    // perfil carregado (o aviso "entrou no servidor" mostrava "Alguém").
+    let hadProblem = false
     const channel = supabase
-      .channel(`server_members:${serverId}:${uniqueSuffix}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'server_members', filter: `server_id=eq.${serverId}` },
-        () => refresh()
+      .channel(uniqueTopic(`server_members:${serverId}`))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'server_members', filter: `server_id=eq.${serverId}` }, () =>
+        scheduleReload(serverId, entry)
       )
       .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') refresh()
+        if (entry.channel !== channel) return // canal já descartado
+        if (status === 'SUBSCRIBED') {
+          // voltou depois de uma queda: pega o que mudou enquanto estava fora
+          if (hadProblem) scheduleReload(serverId, entry)
+          hadProblem = false
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          hadProblem = true
+          scheduleReload(serverId, entry)
+        }
       })
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [serverId, refresh])
+    entry.channel = channel
+  }
 
-  return { members, loading, refresh }
+  return () => {
+    entry.listeners.delete(listener)
+    if (entry.listeners.size === 0) scheduleRelease(serverId, entry)
+  }
+}
+
+export function useServerMembers(serverId: string | null) {
+  const subscribeFn = useCallback((listener: () => void) => (serverId ? subscribe(serverId, listener) : () => {}), [serverId])
+  const getSnapshot = useCallback(() => (serverId ? getEntry(serverId).snapshot : EMPTY_SNAPSHOT), [serverId])
+  const snapshot = useSyncExternalStore(subscribeFn, getSnapshot, getSnapshot)
+  const refresh = useCallback(async () => {
+    if (!serverId) return
+    getEntry(serverId)
+    await load(serverId)
+  }, [serverId])
+  return { members: snapshot.members, loading: snapshot.loading, refresh }
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
+import { EmptyState } from './settingsUI'
 import { useServerReports } from '../../hooks/useReports'
 import { supabase } from '../../lib/supabase'
 import type { Profile, Message, ReportStatus } from '../../types/database'
@@ -11,9 +12,9 @@ const STATUS_LABEL: Record<ReportStatus, string> = {
 }
 
 const STATUS_COLOR: Record<ReportStatus, string> = {
-  pending: 'bg-yellow-500/20 text-yellow-400',
-  reviewed: 'bg-discord-green/20 text-discord-green',
-  dismissed: 'bg-discord-text-muted/20 text-discord-text-muted',
+  pending: '!bg-amber-400/12 !text-amber-300 !border-amber-400/25',
+  reviewed: '!bg-discord-green/12 !text-discord-green !border-discord-green/25',
+  dismissed: '',
 }
 
 function formatDate(iso: string) {
@@ -63,15 +64,17 @@ export function ReportsPanel({ serverId, onClose }: { serverId: string; onClose:
 
   return (
     <Modal title="Denúncias do servidor" onClose={onClose} maxWidth="max-w-2xl">
-      <div className="flex gap-1.5 mb-4">
+      <div role="tablist" aria-label="Filtrar denúncias" className="flex flex-wrap gap-1.5 mb-4">
         {(['pending', 'all', 'reviewed', 'dismissed'] as const).map((f) => (
           <button
             key={f}
+            role="tab"
+            aria-selected={filter === f}
             onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+            className={`h-8 px-3.5 rounded-full text-[13px] font-medium border transition-colors ${
               filter === f
-                ? 'bg-discord-blurple text-white'
-                : 'bg-discord-darker text-discord-text-muted hover:text-white'
+                ? 'bg-discord-blurple/15 border-discord-blurple/50 text-white'
+                : 'bg-white/[0.02] border-[var(--color-line)] text-discord-text-muted hover:text-discord-text hover:bg-white/[0.05]'
             }`}
           >
             {f === 'all' ? 'Todas' : STATUS_LABEL[f]}
@@ -80,48 +83,59 @@ export function ReportsPanel({ serverId, onClose }: { serverId: string; onClose:
       </div>
 
       {loading ? (
-        <p className="text-sm text-discord-text-muted text-center py-8">Carregando...</p>
+        <div className="space-y-3" aria-busy="true" aria-label="Carregando">
+          {[0, 1, 2].map((k) => (
+            <div key={k} className="rounded-2xl border border-[var(--color-line)] p-4 space-y-2.5">
+              <div className="h-4 w-20 rounded-full animate-pulse bg-white/[0.05]" />
+              <div className="h-2.5 w-3/4 rounded animate-pulse bg-white/[0.05]" />
+              <div className="h-2.5 w-1/2 rounded animate-pulse bg-white/[0.04]" />
+            </div>
+          ))}
+        </div>
       ) : visible.length === 0 ? (
-        <p className="text-sm text-discord-text-muted text-center py-8">Nenhuma denúncia por aqui.</p>
+        <EmptyState
+          icon={
+            <>
+              <path d="M5 21V4h11l-1.5 4L16 12H5" />
+            </>
+          }
+          title="Nenhuma denúncia por aqui"
+          hint="Quando alguém denunciar uma mensagem ou usuário, aparece aqui."
+        />
       ) : (
         <div className="space-y-3 max-h-[60vh] overflow-y-auto">
           {visible.map((r) => (
-            <div key={r.id} className="bg-discord-darker rounded-lg p-3.5">
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${STATUS_COLOR[r.status]}`}>
-                  {STATUS_LABEL[r.status]}
-                </span>
-                <span className="text-[10px] text-discord-text-muted">{formatDate(r.created_at)}</span>
+            <div key={r.id} className="rounded-2xl bg-white/[0.02] border border-[var(--color-line)] p-4">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className={`chip ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+                <span className="text-[11.5px] text-discord-text-muted">{formatDate(r.created_at)}</span>
               </div>
 
-              <p className="text-sm text-discord-text">
+              <p className="text-[14px] text-discord-text">
                 <span className="text-discord-text-muted">{nameFor(r.reporter_id)}</span> denunciou{' '}
                 {r.target_type === 'message' ? 'uma mensagem de ' : ''}
-                <span className="font-medium">{r.reported_user_id ? nameFor(r.reported_user_id) : 'usuário'}</span>
+                <span className="font-medium text-white">{r.reported_user_id ? nameFor(r.reported_user_id) : 'usuário'}</span>
               </p>
-              <p className="text-sm text-discord-text mt-1">
+              <p className="text-[13.5px] text-discord-text mt-1">
                 <span className="text-discord-text-muted">Motivo:</span> {r.reason}
               </p>
-              {r.details && <p className="text-sm text-discord-text-muted mt-1 italic">"{r.details}"</p>}
+              {r.details && <p className="text-[13px] text-discord-text-muted mt-1 italic">"{r.details}"</p>}
               {r.message_id && (
-                <p className="text-xs text-discord-text-muted mt-1.5 bg-black/20 rounded px-2 py-1.5 line-clamp-3">
+                <p className="text-[12.5px] text-discord-text-muted mt-2 rounded-lg bg-discord-darker/70 border-l-2 border-[var(--color-line-strong)] px-3 py-2 line-clamp-3">
                   {messagesById[r.message_id]?.content || '(mensagem não encontrada — pode já ter sido excluída)'}
                 </p>
               )}
 
               {r.status === 'pending' && (
-                <div className="flex gap-2 mt-2.5">
-                  <button
-                    onClick={() => setStatus(r.id, 'reviewed')}
-                    className="text-xs px-2.5 py-1 rounded bg-discord-green/20 text-discord-green hover:bg-discord-green/30 transition-colors"
-                  >
-                    Marcar como revisada
+                <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-[var(--color-line)]">
+                  <button onClick={() => setStatus(r.id, 'dismissed')} className="btn-ghost h-8 px-3 text-[13px]">
+                    Descartar
                   </button>
                   <button
-                    onClick={() => setStatus(r.id, 'dismissed')}
-                    className="text-xs px-2.5 py-1 rounded bg-white/5 text-discord-text-muted hover:bg-white/10 transition-colors"
+                    onClick={() => setStatus(r.id, 'reviewed')}
+                    className="h-8 px-3 rounded-[10px] text-[13px] font-medium bg-discord-green/15 text-discord-green border border-discord-green/30 hover:bg-discord-green/25 transition-colors"
                   >
-                    Descartar
+                    Marcar como revisada
                   </button>
                 </div>
               )}

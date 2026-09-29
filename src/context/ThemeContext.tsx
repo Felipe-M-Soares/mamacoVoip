@@ -1,9 +1,10 @@
-import { createContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 export const THEMES = [
-  { id: 'vermelho', label: 'Vermelho', description: 'O padrão da Mamacos Voip', swatch: '#e0201b' },
+  { id: 'vermelho', label: 'Vermelho', description: 'O padrão da Mamacos Voip', swatch: '#ee3a34' },
   { id: 'azul', label: 'Clássico', description: 'O visual tradicional, estilo Discord', swatch: '#5865f2' },
   { id: 'roxo', label: 'Roxo Meia-noite', description: 'Escuro e roxo', swatch: '#8b5cf6' },
+  { id: 'oceano', label: 'Oceano', description: 'Azul-petróleo, calmo pra longas sessões', swatch: '#14b8a6' },
 ] as const
 
 export type ThemeId = (typeof THEMES)[number]['id']
@@ -43,14 +44,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
-  function setTheme(next: ThemeId) {
+  const setTheme = useCallback((next: ThemeId) => {
     setThemeState(next)
     try {
       localStorage.setItem(STORAGE_KEY, next)
     } catch {
       // best-effort — se não der pra persistir, vale só pra essa sessão
     }
-  }
+  }, [])
 
-  return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>
+  // Memoizado: o ThemeProvider fica no topo do app — um objeto novo a cada
+  // render forçaria todo consumidor de tema a re-renderizar junto.
+  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme])
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }

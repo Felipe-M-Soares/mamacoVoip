@@ -89,6 +89,15 @@ function buildPreset(resolution: ScreenShareResolution, frameRate: ScreenShareFr
   }
 }
 
+// Dica de conteúdo pro encoder (MediaStreamTrack.contentHint). Antes era
+// SEMPRE 'motion', inclusive em 15fps — que na prática é escolhido pra
+// compartilhar texto/código/planilha, justamente o caso em que 'motion'
+// borra letras miúdas pra manter fluidez que ninguém pediu. Regra:
+// 15fps → 'detail' (nitidez de texto); 30/60fps → 'motion' (jogo/vídeo).
+export function contentHintForPreset(preset: Pick<QualityPreset, 'frameRate'>): 'detail' | 'motion' {
+  return preset.frameRate <= 15 ? 'detail' : 'motion'
+}
+
 // Exportadas (não só internas ao hook) pra permitir uma LEITURA somente-
 // exibição do valor atual em lugares fora do VoiceProvider — ver
 // ScreenSharePicker.tsx, que mostra "qualidade selecionada" antes de

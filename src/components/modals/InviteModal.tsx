@@ -41,36 +41,41 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
   }
 
   return (
-    <Modal title="Convidar amigos" onClose={onClose}>
-      <p className="text-sm text-discord-text-muted mb-4">
-        Compartilhe este link para convidar pessoas ao servidor. Ele expira em 7 dias.
-      </p>
+    <Modal
+      title="Convidar amigos"
+      description="Compartilhe este link para convidar pessoas ao servidor. Ele expira em 7 dias."
+      onClose={onClose}
+    >
 
       {!link ? (
-        <button
-          onClick={handleGenerate}
-          disabled={loading}
-          className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-        >
+        <button onClick={handleGenerate} disabled={loading} className="w-full h-10 btn-primary text-sm">
           {loading ? 'Gerando...' : 'Gerar link de convite'}
         </button>
       ) : (
-        <div className="flex items-center gap-2">
-          <input
-            readOnly
-            value={link}
-            className="flex-1 px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none text-sm"
-          />
-          <button
-            onClick={handleCopy}
-            className="px-4 py-2.5 rounded btn-primary text-sm shrink-0"
-          >
-            {copied ? 'Copiado!' : 'Copiar'}
-          </button>
+        <div>
+          <label htmlFor="invite-link" className="field-label">
+            Link de convite
+          </label>
+          <div className="flex items-center gap-1.5 p-1.5 rounded-xl bg-discord-darker border border-[var(--color-line-strong)]">
+            <input
+              id="invite-link"
+              readOnly
+              value={link}
+              onFocus={(e) => e.target.select()}
+              style={{ boxShadow: 'none' }}
+              className="flex-1 min-w-0 px-2 bg-transparent text-discord-text outline-none text-sm font-mono"
+            />
+            <button
+              onClick={handleCopy}
+              className={`h-8 px-4 text-sm shrink-0 ${copied ? 'rounded-[10px] font-semibold bg-discord-green text-white' : 'btn-primary'}`}
+            >
+              {copied ? 'Copiado!' : 'Copiar'}
+            </button>
+          </div>
         </div>
       )}
 
-      {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
+      {error && <p className="text-sm text-rose-400 mt-3">{error}</p>}
     </Modal>
   )
 }

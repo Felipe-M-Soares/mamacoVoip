@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { traduzErro } from '../../context/AuthContext'
+import { useAuth } from '../../hooks/useAuth'
+import { normalizeTotpCode } from '../../lib/authValidation'
+import { ConfirmDialog } from './ConfirmDialog'
+import { TabHeader, SettingsCard, SettingRow, RowList, InlineMessage } from './settingsUI'
 
 interface EnrolledFactor {
   id: string
   friendly_name?: string | null
   factor_type: string
+  status?: string
 }
 
 export function SecurityTab() {
+  const { signOutOtherSessions, signOutEverywhere } = useAuth()
+  const [sessionsBusy, setSessionsBusy] = useState(false)
+  const [sessionsMessage, setSessionsMessage] = useState<string | null>(null)
   const [factors, setFactors] = useState<EnrolledFactor[]>([])
   const [loading, setLoading] = useState(true)
   const [enrolling, setEnrolling] = useState(false)
@@ -17,12 +26,30 @@ export function SecurityTab() {
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Confirmação própria do app no lugar do confirm() nativo.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    title: string
+    message: string
+    confirmLabel: string
+    run: () => void | Promise<void>
+  } | null>(null)
 
   async function refreshFactors() {
     setLoading(true)
     const { data } = await supabase.auth.mfa.listFactors()
-    setFactors(data?.totp ?? [])
+    // Só conta como "ativado" o fator já verificado — um cadastro
+    // abandonado no meio deixa um fator "unverified" que não protege nada.
+    setFactors((data?.totp ?? []).filter((f) => !f.status || f.status === 'verified'))
     setLoading(false)
+  }
+
+  // Apaga fatores TOTP não verificados (cadastros abandonados). Sem isso
+  // eles se acumulam e o próximo "Ativar" pode falhar com "já existe um
+  // fator com esse nome".
+  async function cleanupUnverifiedFactors() {
+    const { data } = await supabase.auth.mfa.listFactors()
+    const stale = (data?.all ?? []).filter((f) => f.factor_type === 'totp' && f.status === 'unverified')
+    await Promise.all(stale.map((f) => supabase.auth.mfa.unenroll({ factorId: f.id }).catch(() => null)))
   }
 
   useEffect(() => {
@@ -30,10 +57,17 @@ export function SecurityTab() {
   }, [])
 
   async function startEnroll() {
+    if (busy) return
     setError(null)
-    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Autenticador' })
+    setBusy(true)
+    await cleanupUnverifiedFactors()
+    const { data, error } = await supabase.auth.mfa.enroll({
+      factorType: 'totp',
+      friendlyName: `Autenticador ${new Date().toLocaleDateString('pt-BR')}`,
+    })
+    setBusy(false)
     if (error) {
-      setError(error.message)
+      setError(traduzErro(error.message))
       return
     }
     setQrCode(data.totp.qr_code)
@@ -43,13 +77,14 @@ export function SecurityTab() {
   }
 
   async function confirmEnroll() {
-    if (!pendingFactorId || code.trim().length < 6) return
+    if (busy || !pendingFactorId || code.length !== 6) return
     setBusy(true)
     setError(null)
-    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: pendingFactorId, code: code.trim() })
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: pendingFactorId, code })
     setBusy(false)
     if (error) {
-      setError(error.message)
+      setError(traduzErro(error.message))
+      setCode('')
       return
     }
     setEnrolling(false)
@@ -61,6 +96,9 @@ export function SecurityTab() {
   }
 
   function cancelEnroll() {
+    // Remove o fator pendente no servidor também (antes ele ficava lá
+    // pra sempre como "unverified").
+    if (pendingFactorId) supabase.auth.mfa.unenroll({ factorId: pendingFactorId }).catch(() => null)
     setEnrolling(false)
     setQrCode(null)
     setSecret(null)
@@ -69,45 +107,96 @@ export function SecurityTab() {
     setError(null)
   }
 
-  async function removeFactor(factorId: string) {
-    if (!confirm('Remover a verificação em duas etapas dessa conta?')) return
+  function removeFactor(factorId: string) {
+    if (busy) return
+    setPendingConfirm({
+      title: 'Remover verificação em duas etapas',
+      message: 'Remover a verificação em duas etapas dessa conta?',
+      confirmLabel: 'Remover',
+      run: () => doRemoveFactor(factorId),
+    })
+  }
+
+  async function doRemoveFactor(factorId: string) {
+    if (busy) return
     setBusy(true)
+    setError(null)
     const { error } = await supabase.auth.mfa.unenroll({ factorId })
     setBusy(false)
     if (error) {
-      setError(error.message)
+      setError(traduzErro(error.message))
       return
     }
+    // O nível de garantia da sessão (aal) muda — renova o token.
+    await supabase.auth.refreshSession().catch(() => null)
     await refreshFactors()
   }
 
-  return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-xs font-bold uppercase text-discord-text-muted mb-2">
-          Verificação em duas etapas
-        </label>
-        <p className="text-xs text-discord-text-muted mb-3">
-          Adiciona uma camada extra de segurança — além da senha, você precisa de um código gerado por um app
-          autenticador (Google Authenticator, Authy, etc.) pra entrar na conta.
-        </p>
+  function handleSignOutOthers() {
+    if (sessionsBusy) return
+    setPendingConfirm({
+      title: 'Encerrar outras sessões',
+      message: 'Encerrar a sessão em todos os OUTROS aparelhos? Este continua conectado.',
+      confirmLabel: 'Encerrar sessões',
+      run: doSignOutOthers,
+    })
+  }
 
+  async function doSignOutOthers() {
+    if (sessionsBusy) return
+    setSessionsBusy(true)
+    setSessionsMessage(null)
+    const { error } = await signOutOtherSessions()
+    setSessionsBusy(false)
+    setSessionsMessage(error ?? 'Pronto — os outros aparelhos vão precisar entrar de novo.')
+  }
+
+  function handleSignOutEverywhere() {
+    if (sessionsBusy) return
+    setPendingConfirm({
+      title: 'Sair de todos os aparelhos',
+      message: 'Sair da conta em TODOS os aparelhos, inclusive este?',
+      confirmLabel: 'Sair de todos',
+      run: doSignOutEverywhere,
+    })
+  }
+
+  async function doSignOutEverywhere() {
+    if (sessionsBusy) return
+    setSessionsBusy(true)
+    await signOutEverywhere()
+  }
+
+  return (
+    <div className="space-y-5">
+      <TabHeader title="Segurança" description="Proteja o acesso à sua conta e controle onde você está conectado." />
+
+      <SettingsCard
+        title="Verificação em duas etapas"
+        description="Adiciona uma camada extra de segurança — além da senha, você precisa de um código gerado por um app autenticador (Google Authenticator, Authy, etc.) pra entrar na conta."
+      >
         {loading ? (
-          <div className="w-5 h-5 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+          <div className="h-12 rounded-xl animate-pulse bg-white/[0.05]" />
         ) : factors.length > 0 ? (
           <div className="space-y-2">
             {factors.map((f) => (
-              <div key={f.id} className="flex items-center justify-between bg-discord-darker rounded-lg px-3 py-2.5">
-                <span className="text-sm text-discord-text flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-discord-green">
-                    <path d="M9 16.2l-3.5-3.5-1.4 1.4L9 19 20 8l-1.4-1.4z" />
-                  </svg>
-                  {f.friendly_name || 'Autenticador'} — ativado
+              <div
+                key={f.id}
+                className="flex items-center justify-between gap-3 rounded-xl bg-discord-green/[0.06] border border-discord-green/25 px-3.5 py-3"
+              >
+                <span className="text-[14px] text-discord-text flex items-center gap-2.5 min-w-0">
+                  <span className="w-7 h-7 rounded-lg bg-discord-green/15 text-discord-green flex items-center justify-center shrink-0">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                      <path d="M5 12.5l4.5 4.5L19 7.5" />
+                    </svg>
+                  </span>
+                  <span className="truncate">{f.friendly_name || 'Autenticador'}</span>
+                  <span className="chip !text-discord-green !border-discord-green/30 !bg-discord-green/10">Ativado</span>
                 </span>
                 <button
                   onClick={() => removeFactor(f.id)}
                   disabled={busy}
-                  className="text-xs text-red-400 hover:underline disabled:opacity-60"
+                  className="shrink-0 h-8 px-3 rounded-lg text-[13px] font-medium text-rose-300 hover:bg-rose-500/10 disabled:opacity-60 transition-colors"
                 >
                   Remover
                 </button>
@@ -115,50 +204,112 @@ export function SecurityTab() {
             ))}
           </div>
         ) : enrolling ? (
-          <div className="bg-discord-darker rounded-lg p-4 space-y-3">
-            {qrCode && (
-              <div className="flex justify-center bg-white rounded-lg p-3">
-                <img src={qrCode} alt="QR code de configuração" className="w-40 h-40" />
+          <div className="rounded-xl bg-discord-darker/60 border border-[var(--color-line)] p-4 space-y-4 animate-fade-slide-in">
+            <div className="flex flex-col sm:flex-row gap-4 items-center">
+              {qrCode && (
+                <div className="shrink-0 bg-white rounded-xl p-2.5">
+                  <img src={qrCode} alt="QR code de configuração" className="w-36 h-36" />
+                </div>
+              )}
+              <div className="space-y-2 text-[13px] text-discord-text-muted">
+                <p>
+                  <span className="text-white font-medium">1.</span> Escaneie com seu app autenticador.
+                </p>
+                {secret && (
+                  <p>
+                    Não consegue escanear? Digite o código manualmente:{' '}
+                    <span className="font-mono text-discord-text break-all">{secret}</span>
+                  </p>
+                )}
+                <p>
+                  <span className="text-white font-medium">2.</span> Digite o código de 6 dígitos gerado:
+                </p>
               </div>
-            )}
-            {secret && (
-              <p className="text-xs text-discord-text-muted text-center">
-                Não consegue escanear? Digite o código manualmente:{' '}
-                <span className="font-mono text-discord-text break-all">{secret}</span>
-              </p>
-            )}
-            <p className="text-xs text-discord-text-muted">
-              Escaneie com seu app autenticador e digite o código de 6 dígitos gerado:
-            </p>
+            </div>
             <input
               value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onChange={(e) => setCode(normalizeTotpCode(e.target.value))}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              aria-label="Código de 6 dígitos"
               onKeyDown={(e) => e.key === 'Enter' && confirmEnroll()}
               placeholder="000000"
               autoFocus
-              className="w-full px-3 py-2.5 text-center text-xl tracking-[0.3em] rounded bg-discord-lighter text-white border-none outline-none focus:ring-2 focus:ring-discord-blurple font-mono"
+              className="w-full px-3 py-3 text-center text-2xl tracking-[0.4em] bg-discord-darker text-white outline-none font-mono"
             />
-            {error && <p className="text-xs text-red-400">{error}</p>}
-            <div className="flex gap-2">
-              <button onClick={cancelEnroll} className="flex-1 py-2 rounded btn-secondary text-sm">
+            {error && <InlineMessage tone="error">{error}</InlineMessage>}
+            <div className="flex justify-end gap-2">
+              <button onClick={cancelEnroll} className="btn-secondary h-9 px-4 text-sm">
                 Cancelar
               </button>
-              <button
-                onClick={confirmEnroll}
-                disabled={code.length < 6 || busy}
-                className="flex-1 py-2 rounded btn-primary text-sm disabled:opacity-60"
-              >
+              <button onClick={confirmEnroll} disabled={code.length < 6 || busy} className="btn-primary h-9 px-4 text-sm">
                 {busy ? 'Confirmando...' : 'Confirmar'}
               </button>
             </div>
           </div>
         ) : (
-          <button onClick={startEnroll} className="w-full py-2.5 rounded btn-primary text-sm">
-            Ativar verificação em duas etapas
-          </button>
+          <div className="flex justify-end">
+            <button onClick={startEnroll} disabled={busy} className="btn-primary h-10 px-5 text-sm">
+              {busy ? 'Preparando...' : 'Ativar verificação em duas etapas'}
+            </button>
+          </div>
         )}
-        {error && !enrolling && <p className="text-xs text-red-400 mt-2">{error}</p>}
-      </div>
+        {error && !enrolling && (
+          <div className="mt-3">
+            <InlineMessage tone="error">{error}</InlineMessage>
+          </div>
+        )}
+      </SettingsCard>
+
+      <SettingsCard
+        title="Sessões ativas"
+        description="Se você entrou em um computador que não é seu, ou acha que alguém sabe sua senha, encerre as outras sessões (e troque a senha)."
+      >
+        <RowList>
+          <SettingRow
+            title="Outros aparelhos"
+            description="Desconecta todos os aparelhos menos este."
+            control={
+              <button onClick={handleSignOutOthers} disabled={sessionsBusy} className="btn-secondary h-9 px-4 text-sm shrink-0">
+                {sessionsBusy ? 'Encerrando...' : 'Sair dos outros'}
+              </button>
+            }
+          />
+          <SettingRow
+            title="Todos os aparelhos"
+            description="Desconecta todo lugar, inclusive este aparelho."
+            control={
+              <button
+                onClick={handleSignOutEverywhere}
+                disabled={sessionsBusy}
+                className="shrink-0 h-9 px-4 rounded-[10px] text-sm font-medium text-rose-300 border border-rose-500/40 hover:bg-rose-500/10 disabled:opacity-60 transition-colors"
+              >
+                Sair de todos
+              </button>
+            }
+          />
+        </RowList>
+        {sessionsMessage && (
+          <div className="mt-3">
+            <InlineMessage tone="info">{sessionsMessage}</InlineMessage>
+          </div>
+        )}
+      </SettingsCard>
+
+      {pendingConfirm && (
+        <ConfirmDialog
+          title={pendingConfirm.title}
+          message={pendingConfirm.message}
+          confirmLabel={pendingConfirm.confirmLabel}
+          danger
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={async () => {
+            const run = pendingConfirm.run
+            setPendingConfirm(null)
+            await run()
+          }}
+        />
+      )}
     </div>
   )
 }

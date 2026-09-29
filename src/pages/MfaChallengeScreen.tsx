@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
+import { normalizeTotpCode } from '../lib/authValidation'
+import { AuthAlert, AuthHeader, AuthIcons, AuthShell } from './AuthShell'
 
 export function MfaChallengeScreen() {
   const { verifyMfaChallenge, signOut } = useAuth()
@@ -8,44 +10,63 @@ export function MfaChallengeScreen() {
   const [error, setError] = useState<string | null>(null)
 
   async function handleVerify() {
-    if (code.trim().length < 6) return
+    if (loading || code.length !== 6) return // evita duplo envio (Enter + clique)
     setLoading(true)
     setError(null)
     const { error } = await verifyMfaChallenge(code)
     setLoading(false)
-    if (error) setError(error)
+    if (error) {
+      setError(error)
+      setCode('')
+    }
   }
 
   return (
-    <div className="min-h-full bg-discord-darker flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-discord-dark rounded-2xl shadow-2xl border border-discord-blurple/10 p-6 text-center">
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-discord-blurple mx-auto mb-3">
-          <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3z" />
-        </svg>
-        <h1 className="text-lg font-bold text-white mb-1">Verificação em duas etapas</h1>
-        <p className="text-sm text-discord-text-muted mb-4">
-          Digite o código de 6 dígitos do seu app autenticador.
-        </p>
+    <AuthShell>
+      <AuthHeader
+        icon={AuthIcons.shield}
+        title="Verificação em duas etapas"
+        subtitle="Digite o código de 6 dígitos do seu app autenticador."
+      />
+      <div className="mt-6">
+        <label htmlFor="mfa-code" className="field-label">
+          Código de verificação
+        </label>
         <input
+          id="mfa-code"
           value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          onChange={(e) => setCode(normalizeTotpCode(e.target.value))}
+          inputMode="numeric"
+          autoComplete="one-time-code"
           onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
           placeholder="000000"
           autoFocus
-          className="w-full px-3 py-3 text-center text-2xl tracking-[0.4em] rounded bg-discord-darker text-white border-none outline-none focus:ring-2 focus:ring-discord-blurple mb-3 font-mono"
+          aria-invalid={!!error}
+          className="h-14 w-full bg-discord-darker px-3 text-center font-mono text-2xl tracking-[0.5em] text-white outline-none"
         />
-        {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
-        <button
-          onClick={handleVerify}
-          disabled={code.length < 6 || loading}
-          className="w-full py-2.5 rounded btn-primary disabled:opacity-60 mb-2"
-        >
-          {loading ? 'Verificando...' : 'Verificar'}
-        </button>
-        <button onClick={() => signOut()} className="text-xs text-discord-text-muted hover:underline">
-          Usar outra conta
-        </button>
+        <div className="mt-2 flex justify-center gap-1.5" aria-hidden>
+          {Array.from({ length: 6 }, (_, n) => (
+            <span key={n} className={`h-1 w-6 rounded-full transition-colors ${n < code.length ? 'bg-discord-blurple' : 'bg-white/[0.08]'}`} />
+          ))}
+        </div>
       </div>
-    </div>
+      {error && (
+        <div className="mt-4">
+          <AuthAlert tone="error">{error}</AuthAlert>
+        </div>
+      )}
+      <button
+        onClick={handleVerify}
+        disabled={code.length < 6 || loading}
+        aria-busy={loading}
+        className="btn-primary mt-5 flex h-11 w-full items-center justify-center gap-2 text-[15px]"
+      >
+        {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />}
+        {loading ? 'Verificando...' : 'Verificar'}
+      </button>
+      <button onClick={() => signOut()} className="btn-ghost mt-2 h-10 w-full text-[13px] font-medium">
+        Usar outra conta
+      </button>
+    </AuthShell>
   )
 }

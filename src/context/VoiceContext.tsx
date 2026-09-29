@@ -2,6 +2,7 @@ import { createContext, useCallback, useEffect, useRef, useState, type ReactNode
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import {
   ConnectionQuality as LiveKitConnectionQuality,
+  DisconnectReason,
   Room,
   RoomEvent,
   Track,
@@ -17,13 +18,14 @@ import { supabase } from '../lib/supabase'
 import { fetchLiveKitToken } from '../lib/livekit'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
-import { useScreenShareQuality, type QualityPreset } from '../hooks/useScreenShareQuality'
+import { useScreenShareQuality, contentHintForPreset, type QualityPreset } from '../hooks/useScreenShareQuality'
 import { createNoiseSuppressor, type NoiseSuppressor, createScreenAudioDenoiser, type ScreenAudioDenoiser } from '../lib/noiseSuppression'
 import { takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
 import { armScreenShareChoice } from '../lib/chooseScreenShareSource'
 import { PcmStreamPlayer } from '../lib/pcmStreamPlayer'
+import { isAllowedSoundboardUrl } from '../lib/soundboardUrl'
 import {
   playConnectSound,
   playDisconnectSound,
@@ -112,7 +114,14 @@ const MAX_PARTICIPANTS = 50
 // que chega até aqui está) já é function do RNNoise + gate + AEC/AGC
 // nativos (ver lib/noiseSuppression.ts e useAudioSettings.ts), não de
 // bitrate.
-const MIC_MAX_BITRATE = 128_000
+//
+// AUDITORIA DE VOZ — baixado de 128kbps pra 64kbps. Opus mono em 64kbps
+// já é transparente pra voz (é o preset "music" do próprio LiveKit), e
+// o mic é publicado com RED (redundância, ver publishDefaults do Room),
+// que DUPLICA o bitrate efetivo: 128kbps viravam ~256kbps de upload só
+// de voz — em conexão doméstica apertada, isso é justamente o que causa
+// perda de pacote/voz picotada, o oposto do objetivo.
+const MIC_MAX_BITRATE = 64_000
 
 // Bitrate do áudio da TRANSMISSÃO DE TELA (som do jogo/sistema) —
 // diferente do preset de vídeo (que é sobre nitidez de imagem, em
@@ -126,6 +135,73 @@ const MIC_MAX_BITRATE = 128_000
 // 256kbps) — dá pra considerar isso o teto prático de "o máximo que
 // vale a pena".
 const SCREEN_SHARE_AUDIO_MAX_BITRATE = 256_000
+
+// Opções de publicação do áudio da transmissão (eram repetidas em 3
+// lugares). `red: false` é novo: o Room publica tudo com RED por padrão
+// (ótimo pra voz), mas pra um fluxo ESTÉREO de 256kbps a redundância
+// dobrava o upload (~512kbps) sem ganho audível — música/jogo tolera
+// bem uma perda ocasional, ao contrário de uma sílaba de voz.
+const SCREEN_SHARE_AUDIO_PUBLISH_OPTIONS = {
+  name: 'screen-audio',
+  source: Track.Source.ScreenShareAudio,
+  audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
+  forceStereo: true,
+  dtx: false,
+  red: false,
+}
+
+// Mensagem pt-BR padrão pra quando o servidor não deixa publicar (ouvinte
+// num canal "Palco" — ver supabase/functions/livekit-token).
+const NO_PUBLISH_PERMISSION_MESSAGE = 'Você está como ouvinte neste canal — só moderadores podem falar ou transmitir aqui.'
+
+// Erro usado internamente pra abortar um join() que ficou obsoleto
+// (a pessoa saiu, ou pediu pra entrar em outro canal, no meio do caminho).
+class JoinAbortedError extends Error {
+  constructor() {
+    super('Entrada no canal cancelada.')
+    this.name = 'JoinAbortedError'
+  }
+}
+
+// Captura o microfone e, se o dispositivo SALVO nas configurações não
+// existir mais (desplugado, trocou de USB, headset desligado), tenta de
+// novo com o microfone PADRÃO do sistema em vez de falhar a entrada
+// inteira na call com um "OverconstrainedError" incompreensível.
+async function getMicStreamWithFallback(
+  constraints: MediaTrackConstraints,
+  attempts = 2
+): Promise<{ stream: MediaStream; usedFallback: boolean }> {
+  try {
+    return { stream: await getUserMediaWithRetry({ audio: constraints }, attempts), usedFallback: false }
+  } catch (err) {
+    const name = err instanceof Error ? err.name : ''
+    if (!constraints.deviceId || (name !== 'OverconstrainedError' && name !== 'NotFoundError' && name !== 'NotReadableError')) {
+      throw err
+    }
+    const withoutDevice: MediaTrackConstraints = { ...constraints }
+    delete withoutDevice.deviceId
+    logDebug(`getMicStreamWithFallback: microfone salvo indisponível (${name}), usando o padrão do sistema`)
+    return { stream: await getUserMediaWithRetry({ audio: withoutDevice }, 1), usedFallback: true }
+  }
+}
+
+// Mensagem pt-BR pra falha ao abrir o microfone, por tipo de erro.
+function describeMicError(err: unknown): string | null {
+  const name = err instanceof Error ? err.name : ''
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'Permissão de microfone negada. Habilite o acesso ao microfone nas configurações do sistema e tente de novo.'
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return 'Nenhum microfone encontrado. Conecte um microfone e tente de novo.'
+  }
+  if (name === 'NotReadableError') {
+    return 'Não foi possível abrir o microfone — ele pode estar sendo usado por outro programa.'
+  }
+  return null
+}
+
+// Teto de efeitos tocando AO MESMO TEMPO (spam de soundboard).
+const MAX_CONCURRENT_SOUNDBOARD = 6
 
 // DÉCIMA RODADA — prazo pra confirmar que a captura de áudio por
 // processo (native, ver startAppAudioCapture) está mesmo entregando
@@ -712,6 +788,13 @@ export interface VoiceParticipant {
   userId: string
   cameraStream: MediaStream | null
   screenStream: MediaStream | null
+  // Streams SÓ de áudio (microfone / som da transmissão), estáveis
+  // enquanto a track de áudio não mudar — usadas por VoiceCallAudio.tsx
+  // pra tocar o som. `cameraStream`/`screenStream` mudam de identidade
+  // quando a câmera liga/desliga, e isso recriava o gráfico de áudio
+  // (corte audível na voz) toda vez.
+  micAudioStream: MediaStream | null
+  screenAudioStream: MediaStream | null
   speaking: boolean
 }
 
@@ -738,6 +821,11 @@ interface VoiceContextValue {
   localConnectionQuality: VoiceConnectionQuality | null
   connectedServerId: string | null
   connecting: boolean
+  // `true` enquanto o LiveKit tenta se reconectar sozinho depois de uma
+  // queda de rede (RoomEvent.Reconnecting → Reconnected).
+  reconnecting: boolean
+  // `false` quando o servidor só deixou entrar como OUVINTE (canal Palco).
+  canPublish: boolean
   error: string | null
   // Fecha o aviso de erro manualmente (ver o banner em VoiceChannelView.tsx
   // que aparece durante uma call em andamento) — sem isso não tinha
@@ -827,6 +915,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [connectionQuality, setConnectionQuality] = useState<Record<string, VoiceConnectionQuality>>({})
   const [localConnectionQuality, setLocalConnectionQuality] = useState<VoiceConnectionQuality | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
+  const [canPublish, setCanPublishState] = useState(true)
+  const canPublishRef = useRef(true)
+  function setCanPublish(value: boolean) {
+    canPublishRef.current = value
+    setCanPublishState(value)
+  }
   const [error, setError] = useState<string | null>(null)
   const [participants, setParticipants] = useState<Record<string, VoiceParticipant>>({})
   const [muted, setMuted] = useState(false)
@@ -866,7 +961,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return 'ControlLeft'
     }
   })
-  const [pushToTalkActive, setPushToTalkActive] = useState(false)
+  const [pushToTalkActive, setPushToTalkActiveState] = useState(false)
+  function setPushToTalkActive(value: boolean) {
+    pushToTalkActiveRef.current = value
+    setPushToTalkActiveState(value)
+  }
   const pushToTalkEnabledRef = useRef(pushToTalkEnabled)
   pushToTalkEnabledRef.current = pushToTalkEnabled
   const pushToTalkKeyRef = useRef(pushToTalkKey)
@@ -886,15 +985,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return null
     }
   })
-  const pushToTalkGlobalKeycodeRef = useRef<number | null>(null)
-  try {
-    const raw = localStorage.getItem('mamacos-ptt-global-keycode')
-    pushToTalkGlobalKeycodeRef.current = raw ? Number(raw) : null
-  } catch {
-    pushToTalkGlobalKeycodeRef.current = null
+  // Lido do localStorage UMA vez (antes isso rodava a cada render do
+  // provider — leitura síncrona de disco a cada mudança de estado da call).
+  const pushToTalkGlobalKeycodeRef = useRef<number | null | undefined>(undefined)
+  if (pushToTalkGlobalKeycodeRef.current === undefined) {
+    try {
+      const raw = localStorage.getItem('mamacos-ptt-global-keycode')
+      pushToTalkGlobalKeycodeRef.current = raw ? Number(raw) : null
+    } catch {
+      pushToTalkGlobalKeycodeRef.current = null
+    }
   }
   const usingGlobalPTTRef = useRef(false)
-  usingGlobalPTTRef.current = globalPushToTalkAvailable && pushToTalkGlobalKeycodeRef.current !== null
+  usingGlobalPTTRef.current =
+    globalPushToTalkAvailable && pushToTalkGlobalKeycodeRef.current !== null && pushToTalkGlobalKeycodeRef.current !== undefined
+  // Espelho em ref de `pushToTalkActive` — toggleMute usava o valor
+  // capturado no render (closure velha quando chamado logo depois de um
+  // await, ex.: VoiceChannelView chamando toggleMute após join()).
+  const pushToTalkActiveRef = useRef(false)
 
   // Combina mudo manual + push-to-talk numa única fonte de verdade pra
   // saber se a track de áudio deve estar transmitindo ou não.
@@ -960,9 +1068,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Se já tinha uma tecla global configurada de uma sessão
       // anterior, reativa ela agora — o processo principal não guarda
       // isso sozinho entre reinícios do app.
-      if (available && pushToTalkGlobalKeycodeRef.current !== null) {
+      if (available && typeof pushToTalkGlobalKeycodeRef.current === 'number') {
         window.electronAPI?.setGlobalPTTKey?.(pushToTalkGlobalKeycodeRef.current)
       }
+    }).catch(() => {
+      // IPC indisponível — segue só com o push-to-talk local
     })
   }, [])
 
@@ -983,8 +1093,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       if (usingGlobalPTTRef.current) return
       if (!pushToTalkEnabledRef.current || e.code !== pushToTalkKeyRef.current) return
       e.preventDefault()
+      // Auto-repeat do teclado (tecla segurada) dispara keydown dezenas
+      // de vezes por segundo — não precisa reaplicar nada.
+      if (e.repeat && pushToTalkActiveRef.current) return
       setPushToTalkActive(true)
       applyMicEnabledState(true)
+    }
+    // BUG: segurar a tecla e trocar de janela (alt-tab, clicar no jogo)
+    // fazia o keyup acontecer FORA do app — ele nunca chegava aqui e o
+    // microfone ficava ABERTO até apertar a tecla de novo. Perder o foco
+    // agora solta o push-to-talk local.
+    function handleBlur() {
+      if (usingGlobalPTTRef.current || !pushToTalkActiveRef.current) return
+      setPushToTalkActive(false)
+      applyMicEnabledState(false)
     }
     function handleKeyUp(e: KeyboardEvent) {
       if (usingGlobalPTTRef.current) return
@@ -994,9 +1116,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', handleBlur)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', handleBlur)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -1075,6 +1199,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const soundboardVolumeRef = useRef(soundboardVolume)
+  soundboardVolumeRef.current = soundboardVolume
   function setSoundboardVolume(volume: number) {
     const clamped = Math.max(0, Math.min(100, volume))
     setSoundboardVolumeState(clamped)
@@ -1145,7 +1271,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   userIdRef.current = user?.id ?? null
 
   const connectedRef = useRef(false)
-  const channelUserLimitRef = useRef(0)
   // Horário (relativo, só usado pra ORDENAR) em que essa pessoa mandou o
   // próprio `track()` de presença ao entrar no canal — ver o comentário
   // grande no handler de 'sync' logo abaixo pra entender por que isso
@@ -1255,6 +1380,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (!audioTrack) return
     try {
       const audioContext = new AudioContext()
+      // Nascendo "suspended" (autoplay), o analisador só lê zeros e a luz
+      // de "falando" do próprio usuário nunca acende.
+      if (audioContext.state === 'suspended') audioContext.resume().catch(() => {})
       const source = audioContext.createMediaStreamSource(new MediaStream([audioTrack]))
       const analyser = audioContext.createAnalyser()
       analyser.fftSize = 512
@@ -1318,7 +1446,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // pra adivinhar, do lado de quem recebe, qual stream era a tela.
   const remoteTracksRef = useRef<Map<string, Map<Track.Source, MediaStreamTrack>>>(new Map())
   const combinedStreamsRef = useRef<
-    Map<string, { camera: MediaStream | null; screen: MediaStream | null; trackIds: string }>
+    Map<
+      string,
+      {
+        camera: MediaStream | null
+        screen: MediaStream | null
+        micAudio: MediaStream | null
+        screenAudio: MediaStream | null
+        trackIds: string
+      }
+    >
   >(new Map())
   // Cancela a inscrição em onWatchedProcessExited usada pra auto-parar o
   // compartilhamento de TELA CHEIA quando o jogo/app fecha (ver
@@ -1647,13 +1784,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (screenAudioPublicationRef.current?.track) {
       await (screenAudioPublicationRef.current.track as LocalAudioTrack).replaceTrack(prepared.track, true)
     } else if (roomRef.current) {
-      screenAudioPublicationRef.current = await roomRef.current.localParticipant.publishTrack(prepared.track, {
-        name: 'screen-audio',
-        source: Track.Source.ScreenShareAudio,
-        audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
-        forceStereo: true,
-        dtx: false,
-      })
+      screenAudioPublicationRef.current = await roomRef.current.localParticipant.publishTrack(
+        prepared.track,
+        SCREEN_SHARE_AUDIO_PUBLISH_OPTIONS
+      )
     }
     setError(
       'A captura de áudio só deste app parou (o jogo/app foi fechado?) — a transmissão passou a usar o áudio de todo o sistema automaticamente.'
@@ -1743,7 +1877,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // auto/manual ou ajustar constraints não deveria jogar fora um
       // aprendizado que já estava bom.
       if (isNewSuppressor) resetAutoSensitivity()
-      return noiseSuppressorRef.current.setInputTrack(rawTrack, sensitivity)
+      const processed = noiseSuppressorRef.current.setInputTrack(rawTrack, sensitivity)
+      // BUG: no modo automático o gráfico novo nasce com o gate ABERTO
+      // (sensitivity null), mas `lastAppliedThresholdDbRef` continuava
+      // com o limiar antigo — o loop automático só reaplica quando o
+      // limiar calculado muda ≥1.5dB, então depois de qualquer toggle
+      // (eco/ganho) ou troca de mic o gate ficava aberto indefinidamente.
+      // Reaplica o último limiar aprendido na hora.
+      if (mode === 'auto' && lastAppliedThresholdDbRef.current !== null) {
+        noiseSuppressorRef.current.setSensitivityDb(lastAppliedThresholdDbRef.current)
+      }
+      return processed
     } catch (err) {
       console.error('[VoiceContext] Redutor de ruído (RNNoise) indisponível, seguindo sem ele:', err)
       noiseSuppressorRef.current = null
@@ -1805,13 +1949,32 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const activeSoundboardAudiosRef = useRef<Set<HTMLAudioElement>>(new Set())
 
   function playLocalSoundboardAudio(url: string) {
+    if (!isAllowedSoundboardUrl(url)) {
+      logDebug('playLocalSoundboardAudio: URL fora do bucket do soundboard recusada')
+      return
+    }
+    // Anti-spam: com muitos efeitos já tocando, ignora os novos.
+    if (activeSoundboardAudiosRef.current.size >= MAX_CONCURRENT_SOUNDBOARD) return
     try {
       const audio = new Audio(url)
-      audio.volume = soundboardVolume / 100
+      // Ref, não o estado: esta função é chamada pelo handler do Realtime
+      // registrado dentro de join() — com o estado, os sons vindos dos
+      // OUTROS tocavam sempre com o volume de quando você entrou na call.
+      audio.volume = soundboardVolumeRef.current / 100
+      // Respeita o alto-falante escolhido nas configurações (antes os
+      // efeitos iam sempre pro dispositivo padrão do sistema).
+      const sinkId = audioSettingsRef.current.speakerId
+      const withSink = audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+      if (sinkId && withSink.setSinkId) withSink.setSinkId(sinkId).catch(() => {})
       activeSoundboardAudiosRef.current.add(audio)
-      const forget = () => activeSoundboardAudiosRef.current.delete(audio)
-      audio.addEventListener('ended', forget)
-      audio.addEventListener('error', forget)
+      const forget = () => {
+        activeSoundboardAudiosRef.current.delete(audio)
+        // Solta o buffer do arquivo já tocado.
+        audio.removeAttribute('src')
+        audio.load()
+      }
+      audio.addEventListener('ended', forget, { once: true })
+      audio.addEventListener('error', forget, { once: true })
       audio.play().catch(() => {
         // navegador pode bloquear play() sem interação recente — sem
         // problema, quem clicou no botão do som É a interação
@@ -1840,6 +2003,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // (publishData), mas trocar isso não traria nenhum benefício aqui e só
   // aumentaria o escopo da migração sem necessidade.
   function playSoundboardSound(url: string) {
+    if (!isAllowedSoundboardUrl(url)) return
     playLocalSoundboardAudio(url)
     const from = userIdRef.current
     if (presenceRef.current && from) {
@@ -1885,7 +2049,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const screenTracks = [screenVideoTrack, screenAudioTrack].filter((t): t is MediaStreamTrack => Boolean(t))
     const screen = screenTracks.length > 0 ? new MediaStream(screenTracks) : null
 
-    combinedStreamsRef.current.set(participantId, { camera, screen, trackIds })
+    // Reaproveita a stream só-áudio anterior se a track de áudio não
+    // mudou (ver VoiceParticipant.micAudioStream).
+    const reuseAudio = (prevStream: MediaStream | null | undefined, track: MediaStreamTrack | null) => {
+      if (!track) return null
+      if (prevStream && prevStream.getAudioTracks()[0] === track) return prevStream
+      return new MediaStream([track])
+    }
+    const micAudio = reuseAudio(cached?.micAudio, micTrack)
+    const screenAudio = reuseAudio(cached?.screenAudio, screenAudioTrack)
+
+    combinedStreamsRef.current.set(participantId, { camera, screen, micAudio, screenAudio, trackIds })
     setParticipants((prev) => ({
       ...prev,
       [participantId]: {
@@ -1893,6 +2067,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         speaking: prev[participantId]?.speaking ?? false,
         cameraStream: camera,
         screenStream: screen,
+        micAudioStream: micAudio,
+        screenAudioStream: screenAudio,
       },
     }))
   }
@@ -1959,12 +2135,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // "fulano entrou", "fulano saiu", "chegou uma track nova de fulano" e
   // "fulano está falando" prontos, sem precisar negociar nada na mão.
   function attachRoomEvents(room: Room, myId: string) {
+    // AUDITORIA DE VOZ — todo handler abaixo ignora eventos de uma sala
+    // que já não é a atual. Motivo real: `room.disconnect()` (chamado por
+    // leave()) é assíncrono e, ao terminar, o LiveKit emite
+    // TrackUnsubscribed pra cada track remota — isso chegava DEPOIS de
+    // leave() ter zerado `participants`, e `setRemoteTrack` recriava
+    // participantes "fantasma" (sem stream) no estado. Na call seguinte
+    // eles apareciam como se estivessem na sala nova. Idem pra uma sala
+    // de uma tentativa de join() abortada: o evento Disconnected dela
+    // podia chamar leave() e derrubar a call NOVA.
+    const isCurrent = () => roomRef.current === room
+
     room.on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
-      if (participant.identity === myId) return
+      if (!isCurrent() || participant.identity === myId) return
       playUserJoinSound()
     })
 
     room.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+      if (!isCurrent()) return
       remoteTracksRef.current.delete(participant.identity)
       combinedStreamsRef.current.delete(participant.identity)
       setParticipants((prev) => {
@@ -1985,9 +2173,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     room.on(
       RoomEvent.TrackSubscribed,
       (track: RemoteTrack, _publication: RemoteTrackPublication, participant: RemoteParticipant) => {
-        logDebug(
-          `TrackSubscribed de ${participant.identity}: source=${track.source}, kind=${track.kind}`
-        )
+        if (!isCurrent()) return
+        // Log só no console (não no arquivo de debug via logDebug, que é
+        // console.error + IPC síncrono de escrita em disco a cada track).
+        console.debug(`[VoiceContext] TrackSubscribed de ${participant.identity}: source=${track.source}, kind=${track.kind}`)
         setRemoteTrack(participant.identity, track.source, track.mediaStreamTrack)
       }
     )
@@ -1995,6 +2184,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     room.on(
       RoomEvent.TrackUnsubscribed,
       (_track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        if (!isCurrent()) return
         setRemoteTrack(participant.identity, publication.source, null)
       }
     )
@@ -2019,6 +2209,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // aquela detecção local (instantânea), nunca mais por este evento
     // de rede (que ficaria brigando com ela e reintroduzindo o atraso).
     room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+      if (!isCurrent()) return
       const speakingIds = new Set(speakers.map((s) => s.identity))
       setParticipants((prev) => {
         let changed = false
@@ -2041,6 +2232,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     room.on(
       RoomEvent.ConnectionQualityChanged,
       (quality: LiveKitConnectionQuality, participant: Participant) => {
+        if (!isCurrent()) return
         if (participant.identity === myId) {
           setLocalConnectionQuality(mapConnectionQuality(quality))
           return
@@ -2049,216 +2241,217 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
     )
 
-    room.on(RoomEvent.Disconnected, () => {
+    // Queda breve de rede: o LiveKit tenta se reconectar sozinho (ICE
+    // restart / resume) antes de desistir. Antes nada disso aparecia na
+    // tela — a call simplesmente "congelava" em silêncio por alguns
+    // segundos sem explicação.
+    room.on(RoomEvent.Reconnecting, () => {
+      if (!isCurrent()) return
+      logDebug('LiveKit: reconectando...')
+      setReconnecting(true)
+      setLocalConnectionQuality('lost')
+    })
+    room.on(RoomEvent.Reconnected, () => {
+      if (!isCurrent()) return
+      logDebug('LiveKit: reconectado')
+      setReconnecting(false)
+      setLocalConnectionQuality(mapConnectionQuality(room.localParticipant.connectionQuality))
+      // Uma reconexão completa recria o RTCRtpSender do microfone — a
+      // prioridade alta de rede aplicada na mão precisa ser refeita.
+      applyMicSenderPriority()
+    })
+
+    room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
       // Desconexão vinda do SERVIDOR (não de um leave() nosso — esse já
       // chama room.disconnect() e limpa tudo por conta própria antes
       // disso disparar) — ex.: LiveKit derrubou a sessão, ou a rede caiu
       // de vez. Trata como uma saída normal pra não deixar a UI presa
       // num estado "conectado" que não reflete mais a realidade.
-      if (connectedRef.current) {
-        setError('A conexão com o canal de voz caiu.')
-        leave()
-      }
+      if (!isCurrent() || !connectedRef.current) return
+      logDebug(`LiveKit: desconectado pelo servidor/rede (motivo=${reason ?? 'desconhecido'})`)
+      const message =
+        reason === DisconnectReason.DUPLICATE_IDENTITY
+          ? 'Você entrou nesse canal de voz em outro dispositivo/janela — esta conexão foi encerrada.'
+          : reason === DisconnectReason.PARTICIPANT_REMOVED
+            ? 'Você foi removido do canal de voz.'
+            : reason === DisconnectReason.ROOM_DELETED
+              ? 'O canal de voz foi encerrado.'
+              : 'A conexão com o canal de voz caiu. Verifique sua internet e entre de novo.'
+      leave()
+      setError(message)
     })
   }
 
+  // AUDITORIA DE VOZ — controle de concorrência do join():
+  //  - `joinInFlightRef` impede DOIS join() em paralelo (duplo clique,
+  //    clicar em outro canal enquanto o primeiro ainda conecta, AFK +
+  //    clique manual). Antes só `connectedRef` era checado, que só vira
+  //    true no FIM do join — dois cliques rápidos capturavam o microfone
+  //    duas vezes e abriam duas salas do LiveKit, e uma delas vazava
+  //    (mic aceso, sala conectada sem ninguém saber).
+  //  - `joinSeqRef` é um "número da tentativa": leave() incrementa, e o
+  //    join() em andamento confere depois de cada `await` se ainda é a
+  //    tentativa atual. Antes, clicar em "Sair" durante o "Conectando..."
+  //    não cancelava nada: o join terminava sozinho logo depois e a
+  //    pessoa acabava CONECTADA mesmo tendo saído.
+  const joinSeqRef = useRef(0)
+  const joinInFlightRef = useRef(false)
+
   const join = useCallback(async (channelId: string, serverId: string | null, options?: { displayName?: string; userLimit?: number }) => {
-    if (!user || connectedRef.current) return
-    // Ver o comentário grande em leaveTeardownRef — espera o
-    // desligamento em segundo plano de uma saída recente terminar antes
-    // de assinar o MESMO tópico Realtime de novo, senão o presence
-    // 'sync' que volta pode vir incompleto.
-    if (leaveTeardownRef.current) {
-      await leaveTeardownRef.current
+    if (!user || connectedRef.current || joinInFlightRef.current) return
+    joinInFlightRef.current = true
+    const seq = ++joinSeqRef.current
+    const isStale = () => joinSeqRef.current !== seq
+    // `abandoned`: esta tentativa já falhou (caiu no catch) — etapas
+    // paralelas que ainda estão rodando (ex.: a presença, cujo timeout
+    // venceu) não devem mais criar nada.
+    let abandoned = false
+    const assertActive = () => {
+      if (isStale() || abandoned) throw new JoinAbortedError()
     }
+
     // Avisa a UI (a lista de canais) IMEDIATAMENTE que estamos prestes a
-    // entrar nesse canal, antes de qualquer trabalho assíncrono (pedir
-    // microfone, etc.) — isso dá tempo do observador de presença na
-    // barra lateral (useVoicePresence) se desinscrever do mesmo canal
-    // Realtime ANTES da gente tentar se inscrever de verdade nele.
-    // Sem isso, a primeira tentativa de entrar sempre colidia com essa
-    // inscrição de observação já existente.
+    // entrar nesse canal, antes de qualquer trabalho assíncrono — isso dá
+    // tempo do observador de presença na barra lateral (useVoicePresence)
+    // se desinscrever do mesmo canal Realtime ANTES da gente tentar se
+    // inscrever de verdade nele.
     setJoiningChannelId(channelId)
     setConnecting(true)
     setError(null)
-    channelUserLimitRef.current = 0
+    // Garante que não sobra nenhum participante/qualidade de uma call
+    // anterior (ver o comentário em attachRoomEvents sobre "fantasmas").
+    setParticipants({})
+    setConnectionQuality({})
+    remoteTracksRef.current.clear()
+    combinedStreamsRef.current.clear()
     joinedAtRef.current = Date.now()
 
-    // TRIGÉSIMA OITAVA RODADA — bug relatado: mesmo depois de paralelizar
-    // mic/presença/token (RODADA 37), ainda sobravam uns bons segundos de
-    // espera antes de tudo isso começar, porque essa busca de nome/limite
-    // do canal (só existe quando serverId != null — DM/grupo já recebe
-    // tudo pronto em `options`) rodava sozinha, em SÉRIE, ANTES do
-    // Promise.all de baixo — o próprio Promise.all só começava depois
-    // dela terminar. Ela vira mais uma promise resolvida em paralelo com
-    // o mic e a presença; a única coisa que realmente PRECISA esperar
-    // ela terminar é o pedido do token do LiveKit (precisa do userLimit
-    // pra mandar pra Edge Function), então esse pedido é encadeado com
-    // `.then()` em cima dela em vez de simplesmente ser mais uma entrada
-    // solta no Promise.all.
-    const channelInfoPromise = (async () => {
-      if (serverId) {
-        // TRIGÉSIMA NONA RODADA — antes, o erro dessa consulta era
-        // ignorado (`const { data } = await ...`, sem checar `error`).
-        // Se a RLS bloqueasse (ex.: canal de um servidor de onde você
-        // acabou de ser expulso/banido, mas a UI ainda não atualizou),
-        // isso silenciosamente seguia com limite 0/nome nulo — e só ia
-        // falhar de verdade lá na frente, ao pedir o token do LiveKit
-        // (que agora TAMBÉM reforça essa checagem, ver
-        // supabase/functions/livekit-token/index.ts). Melhor falhar
-        // JÁ AQUI, com uma mensagem clara, em vez de gastar tempo
-        // pedindo microfone pra uma entrada que vai ser recusada de
-        // qualquer jeito.
-        const { data: channelRow, error: channelErr } = await supabase
-          .from('channels')
-          .select('user_limit, name')
-          .eq('id', channelId)
-          .single()
-        if (channelErr || !channelRow) {
-          throw new Error('Você não tem mais acesso a esse canal de voz.')
-        }
-        channelUserLimitRef.current = channelRow.user_limit ?? 0
-        setConnectedChannelName(channelRow.name ?? null)
-      } else {
-        channelUserLimitRef.current = options?.userLimit ?? 0
-        setConnectedChannelName(options?.displayName ?? null)
-      }
-    })()
-
+    // Recursos criados por ESTA tentativa — só vão pros refs globais no
+    // "commit" (depois que tudo deu certo). Assim uma tentativa abortada
+    // limpa só o que é dela, sem risco de derrubar uma tentativa NOVA.
+    type MicResult = {
+      stream: MediaStream
+      raw: MediaStreamTrack
+      processed: MediaStreamTrack
+      suppressor: NoiseSuppressor | null
+      usedFallback: boolean
+    }
+    const presence: { channel: RealtimeChannel | null } = { channel: null }
     let room: Room | null = null
-    try {
-      // Canal Realtime do Supabase — hoje serve só pra DUAS coisas, bem
-      // mais simples do que antes: (1) anunciar "estou nesse canal de
-      // voz" pra sidebar conseguir mostrar quem está numa call sem
-      // precisar entrar nela (ver useVoicePresence.ts, que observa esse
-      // MESMO tópico de fora); (2) o broadcast do soundboard. Tudo o
-      // mais que esse canal fazia antes (sinalização WebRTC, meta de
-      // compartilhamento de tela, e a checagem de limite de vagas) foi
-      // pro LiveKit — a mídia em si nem passa mais por aqui, e o limite
-      // de vagas agora é checado do lado do SERVIDOR (ver
-      // supabase/functions/livekit-token), sem risco de corrida entre
-      // dois cliques quase simultâneos.
-      //
-      // TRIGÉSIMA NONA RODADA — causa REAL do "Conectando..." preso pra
-      // sempre (achada depois de investigar o cliente Realtime por
-      // dentro): a barra lateral também se inscreve nesse MESMO tópico
-      // `voice:${channelId}` só pra mostrar "quem está na sala" sem
-      // entrar nela de verdade (ver useVoicePresence.ts). O cliente
-      // Realtime REAPROVEITA o mesmo objeto de canal pra tópicos iguais
-      // (`RealtimeClient.channel()`) — então `supabase.channel(topic)`
-      // aqui embaixo podia devolver o canal que a sidebar já tinha
-      // assinado. E chamar `.subscribe(callback)` numa conexão que já
-      // está entrando/entrou é um NO-OP SILENCIOSO no cliente da
-      // Supabase — sem erro, sem aviso, o `callback` novo (o nosso, que
-      // resolve a `presencePromise` abaixo) simplesmente nunca é
-      // chamado. Isso sempre foi um risco em teoria, mas a RODADA 37
-      // (que trocou a busca de nome/limite do canal por uma promise não
-      // esperada, pra rodar em paralelo) removeu sem querer o único
-      // `await` que existia ANTES desse ponto — era ele que dava tempo
-      // do React re-renderizar e a sidebar se desinscrever primeiro.
-      //
-      // QUADRAGÉSIMA RODADA — a primeira correção (remover o canal
-      // duplicado ANTES de criar o nosso, esperando a confirmação)
-      // FUNCIONAVA, mas deixou a entrada mais lenta: como a sidebar
-      // observa todo canal de voz visível, essa colisão acontece quase
-      // sempre, e remover um canal espera uma ida-e-volta de rede
-      // própria — isso rodava sozinho, ANTES de tudo o mais (mic,
-      // token), somando ao tempo total em vez de sobrepor.
-      //
-      // (Cheguei a tentar REAPROVEITAR o canal da sidebar em vez de
-      // remover — zero ida-e-volta extra — mas isso quebra a presença
-      // de verdade: a "key" de presença de um canal é fixada na
-      // criação/subscribe e vale pra QUALQUER `.track()` feito nele
-      // depois; o canal da sidebar usa uma key `observer-...` aleatória
-      // — se a gente reaproveitasse ele, nossa própria presença ficaria
-      // registrada sob essa key de observador, e todo mundo que
-      // filtra "observer-..." pra não contar como gente de verdade na
-      // sala (ver useVoicePresence.ts) deixaria de nos ver como
-      // conectados. Então tem que ser um canal NOVO, com nossa própria
-      // key (`user.id`) — sem meio-termo aí.)
-      //
-      // A correção agora é só de ORDEM: a remoção + recriação do canal
-      // vira parte da PRÓPRIA `presencePromise` (ver mais abaixo),
-      // entrando no MESMO Promise.all que já espera o mic e o token —
-      // roda ao mesmo tempo que eles, não mais sozinha antes de tudo.
-      const topic = `voice:${channelId}`
+    let micCommitted = false
 
-      // TRIGÉSIMA SÉTIMA RODADA — bug relatado: entrar num canal de voz
-      // sempre demorava uns bons 2-3 segundos, mesmo em conexões boas.
-      // Causa: pedir o microfone, assinar+anunciar presença no Realtime,
-      // e pedir o token de acesso do LiveKit rodavam em SÉRIE, um
-      // esperando o anterior terminar — cada um é uma ida-e-volta de
-      // rede própria (ou, no caso do mic, o carregamento do WASM do
-      // RNNoise na primeira vez), e o tempo total sentido era a SOMA
-      // dos três. Nenhum desses três depende do RESULTADO dos outros
-      // dois (só precisam do channelId/user, que já temos) — rodando os
-      // três ao mesmo tempo (Promise.all), o tempo total vira o do MAIS
-      // LENTO dos três, não a soma de todos.
-      // TRIGÉSIMA NONA RODADA — bug relatado: depois das mudanças da
-      // rodada anterior, o botão ficava preso em "Conectando..." pra
-      // sempre, sem NENHUM erro aparecer — ou seja, uma das promises do
-      // Promise.all abaixo nunca resolve E nunca rejeita (se rejeitasse,
-      // cairia no catch e mostraria mensagem). Isso é impossível de
-      // diagnosticar só lendo o código (pode ser o mic preso esperando
-      // permissão, o Realtime nunca confirmando inscrição, ou o LiveKit
-      // nunca terminando o handshake) — por isso cada etapa abaixo agora
-      // grava no log de debug (mamacos-debug.log, em
-      // %APPDATA%/mamacos-voip no Windows) o exato momento em que
-      // começa e termina. Da próxima vez que travar, esse arquivo mostra
-      // exatamente qual etapa nunca imprimiu o "concluído" — é ela que
-      // está presa.
+    // Microfone + RNNoise montados LOCALMENTE (sem tocar em
+    // rawMicTrackRef/noiseSuppressorRef até o commit).
+    const micInner: Promise<MicResult> = (async () => {
       logDebug(`join(${channelId}): pedindo microfone...`)
-      const micPromise = withTimeout(
-        (async () => {
-          const stream = await getUserMediaWithRetry({ audio: audioSettingsRef.current.getAudioConstraints() })
-          logDebug(`join(${channelId}): microfone obtido, aplicando redução de ruído...`)
-          const rawTrack = stream.getAudioTracks()[0]
-          const processedTrack = await applyNoiseSuppression(rawTrack)
-          if (processedTrack !== rawTrack) {
-            stream.removeTrack(rawTrack)
-            stream.addTrack(processedTrack)
-          }
-          logDebug(`join(${channelId}): microfone pronto.`)
-          return { stream, processedTrack }
-        })(),
-        20_000,
-        'acesso ao microfone'
-      )
+      const { stream, usedFallback } = await getMicStreamWithFallback(audioSettingsRef.current.getAudioConstraints())
+      const raw = stream.getAudioTracks()[0]
+      let processed = raw
+      let suppressor: NoiseSuppressor | null = null
+      if (audioSettingsRef.current.noiseSuppression) {
+        try {
+          suppressor = await createNoiseSuppressor()
+          const mode = audioSettingsRef.current.micSensitivityMode
+          processed = suppressor.setInputTrack(raw, mode === 'auto' ? null : audioSettingsRef.current.micSensitivity)
+        } catch (err) {
+          console.error('[VoiceContext] Redutor de ruído (RNNoise) indisponível, seguindo sem ele:', err)
+          suppressor?.destroy()
+          suppressor = null
+          processed = raw
+        }
+      }
+      if (processed !== raw) {
+        stream.removeTrack(raw)
+        stream.addTrack(processed)
+      }
+      logDebug(`join(${channelId}): microfone pronto.`)
+      return { stream, raw, processed, suppressor, usedFallback }
+    })()
+    const disposeMic = (mic: MicResult) => {
+      mic.stream.getTracks().forEach((t) => t.stop())
+      mic.raw.stop()
+      mic.suppressor?.destroy()
+      if (rawMicTrackRef.current === mic.raw) rawMicTrackRef.current = null
+      if (noiseSuppressorRef.current === mic.suppressor) noiseSuppressorRef.current = null
+      if (localStreamRef.current === mic.stream) {
+        localStreamRef.current = null
+        teardownLocalSpeakingDetection()
+      }
+    }
 
+    try {
+      // Ver o comentário grande em leaveTeardownRef — espera o
+      // desligamento em segundo plano de uma saída recente terminar antes
+      // de assinar o MESMO tópico Realtime de novo (o mic já está sendo
+      // pedido em paralelo acima, então isso não atrasa a entrada).
+      if (leaveTeardownRef.current) await leaveTeardownRef.current
+      assertActive()
+
+      // Nome/limite do canal — em paralelo com mic e presença; só o
+      // pedido de token depende dele. (Antes gravava num ref global
+      // `channelUserLimitRef`, que uma tentativa concorrente podia
+      // sobrescrever.) Se a RLS bloquear (expulso/banido), falha JÁ AQUI
+      // com uma mensagem clara.
+      const channelInfoPromise = (async () => {
+        if (serverId) {
+          const { data: channelRow, error: channelErr } = await supabase
+            .from('channels')
+            .select('user_limit, name')
+            .eq('id', channelId)
+            .single()
+          if (channelErr || !channelRow) {
+            throw new Error('Você não tem mais acesso a esse canal de voz.')
+          }
+          if (!isStale()) setConnectedChannelName(channelRow.name ?? null)
+          return { userLimit: channelRow.user_limit ?? 0 }
+        }
+        if (!isStale()) setConnectedChannelName(options?.displayName ?? null)
+        return { userLimit: options?.userLimit ?? 0 }
+      })()
+
+      const micPromise = withTimeout(micInner, 20_000, 'acesso ao microfone')
+
+      // Canal Realtime do Supabase — hoje serve só pra (1) anunciar "estou
+      // nesse canal de voz" pra sidebar (ver useVoicePresence.ts) e (2) o
+      // broadcast do soundboard. Precisa ser um canal 100% NOVO com nossa
+      // própria key de presença (`user.id`) — o da sidebar usa uma key
+      // `observer-...` e reaproveitá-lo nos esconderia da lista. Como o
+      // cliente Realtime reaproveita o objeto de canal por tópico (e
+      // `.subscribe()` num canal já inscrito é NO-OP silencioso — era a
+      // causa do "Conectando..." eterno), remove o duplicado antes.
+      const topic = `voice:${channelId}`
       logDebug(`join(${channelId}): inscrevendo no canal de presença...`)
       const presencePromise = withTimeout(
         (async () => {
-          // Remove qualquer canal já registrado sob esse tópico (quase
-          // sempre o observador da sidebar, ver useVoicePresence.ts)
-          // ANTES de criar o nosso — precisa ser um canal 100% novo,
-          // com nossa própria key de presença (ver comentário grande
-          // acima pro motivo de não dar pra só reaproveitar). Isso roda
-          // dentro do Promise.all lá embaixo, ao mesmo tempo que o mic
-          // e o token — não é mais um passo sozinho antes de tudo.
           const existingChannel = supabase.getChannels().find((c) => c.topic === `realtime:${topic}`)
           if (existingChannel && existingChannel.state !== 'closed') {
             logDebug(`join(${channelId}): removendo canal de presença duplicado (estado anterior: ${existingChannel.state})...`)
             await supabase.removeChannel(existingChannel)
           }
+          assertActive()
           const rt = supabase.channel(topic, {
             config: { broadcast: { self: false }, presence: { key: user.id } },
           })
-          presenceRef.current = rt
+          presence.channel = rt
           rt.on('broadcast', { event: 'soundboard-play' }, ({ payload }) => {
-            const { url } = payload as { from: string; url: string }
-            playLocalSoundboardAudio(url)
+            const url = (payload as { url?: unknown } | null)?.url
+            // Validação de URL dentro de playLocalSoundboardAudio.
+            if (typeof url === 'string') playLocalSoundboardAudio(url)
           })
 
           await new Promise<void>((resolve, reject) => {
-            rt.subscribe(async (status) => {
+            rt.subscribe((status) => {
               logDebug(`join(${channelId}): status do canal de presença = ${status}`)
               if (status === 'SUBSCRIBED') {
-                await rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
-                logDebug(`join(${channelId}): presença anunciada.`)
-                resolve()
+                rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
+                  .then(() => {
+                    logDebug(`join(${channelId}): presença anunciada.`)
+                    resolve()
+                  })
+                  .catch(reject)
               }
               if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                reject(new Error('Falha ao conectar ao canal de voz'))
+                reject(new Error('Falha ao conectar ao canal de voz.'))
               }
             })
           })
@@ -2267,128 +2460,188 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         'canal de presença'
       )
 
-      // Conecta de verdade na sala do LiveKit (a mídia em si) — o token
-      // já vem com a checagem de limite de vagas feita do lado do
-      // servidor (ver supabase/functions/livekit-token); `RoomFullError`
-      // é o sinal específico disso, tratado no catch abaixo pra mostrar
-      // a mesma mensagem de antes ("Esse canal de voz já está cheio.").
-      // Só pode montar esse pedido DEPOIS de `channelInfoPromise`
-      // resolver (é ela quem preenche `channelUserLimitRef.current`) —
-      // por isso o `.then()` em vez de entrar solto no Promise.all.
-      const tokenPromise = channelInfoPromise.then(() => {
+      // Token do LiveKit — o servidor confere acesso, limite de vagas e
+      // permissão de falar (canal Palco). `name` não é mais enviado: era
+      // `options.displayName`, que numa DM é o nome da OUTRA pessoa (o
+      // título da conversa), não o seu — a identidade já é o user.id.
+      const tokenPromise = channelInfoPromise.then((info) => {
         logDebug(`join(${channelId}): info do canal ok, pedindo token do LiveKit...`)
         return withTimeout(
-          fetchLiveKitToken({
-            room: channelId,
-            name: options?.displayName,
-            userLimit: channelUserLimitRef.current,
-          }),
+          fetchLiveKitToken({ room: channelId, userLimit: info.userLimit }),
           15_000,
           'pedido de token do LiveKit'
         )
       })
 
-      const [{ stream, processedTrack }, , , { token, url: livekitUrl }] = await Promise.all([
-        micPromise,
-        presencePromise,
-        channelInfoPromise,
-        tokenPromise,
-      ])
-      logDebug(`join(${channelId}): mic + presença + token todos prontos, conectando na sala LiveKit (${livekitUrl})...`)
+      const [mic, , tokenResult] = await Promise.all([micPromise, presencePromise, tokenPromise])
+      assertActive()
+      logDebug(`join(${channelId}): mic + presença + token todos prontos, conectando na sala LiveKit (${tokenResult.url})...`)
 
-      localStreamRef.current = stream
+      // Commit do microfone nos refs globais.
+      micCommitted = true
+      localStreamRef.current = mic.stream
+      rawMicTrackRef.current = mic.raw
+      noiseSuppressorRef.current?.destroy()
+      noiseSuppressorRef.current = mic.suppressor
+      resetAutoSensitivity()
+      watchRawMicTrack(mic.raw)
       mutedRef.current = false
-      applyMicEnabledState(false)
-      setupLocalSpeakingDetection(stream)
+      setMuted(false)
+      presenceRef.current = presence.channel
 
+      // adaptiveStream DESLIGADO de propósito (era `true`): o
+      // adaptiveStream do LiveKit decide a qualidade/pausa de cada vídeo
+      // remoto observando os elementos <video> ligados via
+      // `track.attach()` — só que este app usa a MediaStreamTrack crua
+      // (ver recomputeParticipant/CallMediaTiles.tsx), nunca attach().
+      // Sem nenhum elemento "visível" registrado, o LiveKit considerava
+      // TODO vídeo remoto invisível e pedia pro servidor PAUSAR o envio
+      // (documentado no próprio `mediaStreamTrack` do RemoteVideoTrack:
+      // "your video tracks might never start") — câmera/tela dos outros
+      // podiam simplesmente não aparecer ou congelar. `dynacast`
+      // continua: ele é do lado de quem PUBLICA (para de codificar
+      // camadas que ninguém está assistindo) e não depende disso.
       room = new Room({
-        adaptiveStream: true,
+        adaptiveStream: false,
         dynacast: true,
         publishDefaults: {
           dtx: true,
           red: true,
         },
       })
-      attachRoomEvents(room, user.id)
-      await withTimeout(room.connect(livekitUrl, token), 15_000, 'conexão com o servidor de voz')
+      // roomRef recebe a sala ANTES do connect: assim um leave() durante
+      // o handshake desconecta ESTA sala (connect rejeita na hora) em vez
+      // de esperar os 15s do timeout, e os handlers de evento já sabem
+      // que ela é a "atual".
       roomRef.current = room
-      logDebug(`join(${channelId}): conectado na sala LiveKit, publicando microfone...`)
+      attachRoomEvents(room, user.id)
+      await withTimeout(room.connect(tokenResult.url, tokenResult.token), 15_000, 'conexão com o servidor de voz')
+      assertActive()
 
-      // Publica o microfone (já tratado pelo RNNoise/gate — ver
-      // applyNoiseSuppression acima) e guarda a publicação, usada
-      // depois por toggleMute/changeMicrophone/refreshAudioConstraints
-      // pra trocar/mutar a track sem precisar procurar em lugar nenhum.
-      micPublicationRef.current = await withTimeout(
-        room.localParticipant.publishTrack(processedTrack, {
-          name: 'microphone',
-          source: Track.Source.Microphone,
-          audioPreset: { maxBitrate: MIC_MAX_BITRATE },
-        }),
-        15_000,
-        'publicação do microfone'
-      )
-      applyMicSenderPriority()
-      logDebug(`join(${channelId}): microfone publicado — entrada concluída.`)
+      const allowedToPublish = tokenResult.canPublish && room.localParticipant.permissions?.canPublish !== false
+      setCanPublish(allowedToPublish)
+      if (allowedToPublish) {
+        logDebug(`join(${channelId}): conectado na sala LiveKit, publicando microfone...`)
+        setupLocalSpeakingDetection(mic.stream)
+        // Publica o microfone (já tratado pelo RNNoise/gate).
+        micPublicationRef.current = await withTimeout(
+          room.localParticipant.publishTrack(mic.processed, {
+            name: 'microphone',
+            source: Track.Source.Microphone,
+            audioPreset: { maxBitrate: MIC_MAX_BITRATE },
+          }),
+          15_000,
+          'publicação do microfone'
+        )
+        assertActive()
+        // O LiveKit reescreve `track.enabled` ao publicar/trocar track
+        // (sincroniza com o próprio estado de mute dele) — reaplica o
+        // estado real (mute + push-to-talk) DEPOIS, senão com
+        // push-to-talk ligado o mic começava ABERTO até a 1ª tecla.
+        applyMicEnabledState(pushToTalkActiveRef.current)
+        applyMicSenderPriority()
+      } else {
+        // Ouvinte (canal Palco sem permissão de falar): não precisa do
+        // microfone — solta o dispositivo (luz do mic apaga) e entra mudo.
+        logDebug(`join(${channelId}): conectado como OUVINTE (sem permissão de publicar).`)
+        disposeMic(mic)
+        localStreamRef.current = new MediaStream()
+        mutedRef.current = true
+        setMuted(true)
+      }
+      logDebug(`join(${channelId}): entrada concluída.`)
 
       connectedRef.current = true
       setConnectedChannelId(channelId)
       setConnectedServerId(serverId)
       setConnectedAt(Date.now())
+      setReconnecting(false)
+      if (mic.usedFallback && allowedToPublish) {
+        setError('O microfone escolhido nas configurações não está disponível — usando o microfone padrão do sistema.')
+      }
       playConnectSound()
     } catch (err) {
+      abandoned = true
+      const aborted = err instanceof JoinAbortedError || isStale()
       const isRoomFull = err instanceof Error && err.name === 'RoomFullError'
       const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-      logDebug(`join(${channelId}): falhou — ${detail}`)
-      setError(
-        isRoomFull
-          ? 'Esse canal de voz já está cheio.'
-          : err instanceof Error && err.name === 'NotAllowedError'
-            ? 'Permissão de microfone negada. Habilite o acesso ao microfone e tente de novo.'
-            // TRIGÉSIMA QUINTA RODADA — antes disso, QUALQUER falha ao
-            // conectar no LiveKit (secret faltando, função não
-            // publicada, servidor fora do ar) caía sempre nesta mesma
-            // mensagem genérica, obrigando quem está diagnosticando a
-            // abrir o DevTools/log pra descobrir o motivo real. Agora
-            // mostra a mensagem de erro de verdade (ver
-            // extractFunctionErrorMessage em lib/livekit.ts, que já lê o
-            // corpo da resposta da Edge Function) direto na tela.
-            : err instanceof Error && err.message
-              ? err.message
-              : 'Não foi possível entrar no canal de voz.'
-      )
-      teardownLocalSpeakingDetection()
-      localStreamRef.current?.getTracks().forEach((t) => t.stop())
-      localStreamRef.current = null
-      rawMicTrackRef.current?.stop()
-      rawMicTrackRef.current = null
-      noiseSuppressorRef.current?.destroy()
-      noiseSuppressorRef.current = null
-      micPublicationRef.current = null
-      if (room) {
-        room.disconnect()
-        roomRef.current = null
+      logDebug(`join(${channelId}): ${aborted ? 'cancelado' : 'falhou'} — ${detail}`)
+      if (!aborted) {
+        setError(
+          isRoomFull
+            ? 'Esse canal de voz já está cheio.'
+            : (describeMicError(err) ??
+                // Mostra a mensagem REAL (ex.: vinda da Edge Function, ver
+                // lib/livekit.ts) em vez de um texto genérico.
+                (err instanceof Error && err.message ? err.message : 'Não foi possível entrar no canal de voz.'))
+        )
       }
-      if (presenceRef.current) {
-        supabase.removeChannel(presenceRef.current)
-        presenceRef.current = null
+      // Limpa SÓ o que esta tentativa criou.
+      if (room) {
+        if (roomRef.current === room) {
+          roomRef.current = null
+          micPublicationRef.current = null
+        }
+        void room.disconnect()
+      }
+      if (presence.channel) {
+        const channelToRemove = presence.channel
+        if (presenceRef.current === channelToRemove) presenceRef.current = null
+        void supabase.removeChannel(channelToRemove).catch(() => {})
+      }
+      // O microfone pode ainda nem ter chegado (ex.: o token falhou
+      // primeiro) — quando chegar, é descartado; antes ele ficava ABERTO
+      // pra sempre (luz do mic acesa sem call nenhuma).
+      micInner.then(disposeMic, () => {})
+      if (micCommitted && !isStale()) {
+        // Falhou DEPOIS do commit (ex.: connect/publish) — solta também o
+        // que já estava nos refs globais (inclui o stream vazio de ouvinte).
+        localStreamRef.current?.getTracks().forEach((t) => t.stop())
+        localStreamRef.current = null
+        teardownLocalSpeakingDetection()
+        setCanPublish(true)
+      }
+      if (!aborted) {
+        mutedRef.current = false
+        setMuted(false)
       }
     } finally {
-      setConnecting(false)
-      setJoiningChannelId(null)
+      if (!isStale()) {
+        joinInFlightRef.current = false
+        setConnecting(false)
+        setJoiningChannelId(null)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   const leave = useCallback(() => {
     const wasConnected = connectedRef.current
+    // Cancela qualquer join() em andamento (ver joinSeqRef).
+    joinSeqRef.current++
+    joinInFlightRef.current = false
+    // Encerra a transmissão de tela ANTES de soltar a sala — antes, sair
+    // da call compartilhando tela só parava o vídeo: o processo nativo de
+    // captura de áudio por app continuava rodando, o loopback de áudio do
+    // sistema continuava aberto (indicador do Windows aceso), o
+    // AudioContext do redutor de ruído da transmissão vazava e o vigia de
+    // foco/fechamento do jogo continuava ativo.
+    if (screenStreamRef.current || appAudioPlayerRef.current || systemAudioTrackRef.current) {
+      stopScreenShareState()
+    }
+    screenShareOpRef.current = false
+    setScreenShareConnecting(false)
     if (roomRef.current) {
       // Desconecta a sala do LiveKit — isso já para/despublica todas as
       // tracks locais sozinho (mic, câmera, tela), mas paramos elas
       // explicitamente também logo abaixo (idempotente, sem custo) pra
       // garantir que o dispositivo físico (luzinha do mic/câmera) seja
       // liberado mesmo se a desconexão em si falhar por algum motivo.
-      roomRef.current.disconnect()
+      // roomRef é zerado ANTES do disconnect: os eventos que o LiveKit
+      // emite durante o disconnect são ignorados (ver attachRoomEvents).
+      const roomToClose = roomRef.current
       roomRef.current = null
+      void roomToClose.disconnect().finally(() => roomToClose.removeAllListeners())
     }
     micPublicationRef.current = null
     cameraPublicationRef.current = null
@@ -2408,8 +2661,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     noiseSuppressorRef.current?.destroy()
     noiseSuppressorRef.current = null
     resetAutoSensitivity()
-    screenStreamRef.current?.getTracks().forEach((t) => t.stop())
-    screenStreamRef.current = null
     gameShareWatchRef.current?.()
     gameShareWatchRef.current = null
     setLocalScreenStream(null)
@@ -2442,12 +2693,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setParticipants({})
     setConnectionQuality({})
     setLocalConnectionQuality(null)
+    setReconnecting(false)
+    setCanPublish(true)
     connectedRef.current = false
     setConnectedChannelId(null)
     setConnectedChannelName(null)
     setConnectedServerId(null)
     setConnectedAt(null)
     setConnecting(false)
+    setJoiningChannelId(null)
+    mutedRef.current = false
     setMuted(false)
     // Se a pessoa saiu da call já "desativada" (deafened), o volume geral
     // ficou em 0 — sem isso aqui, a próxima call começaria sem áudio
@@ -2457,7 +2712,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setVideoEnabled(false)
     setScreenSharing(false)
     setSpeaking(false)
+    setPushToTalkActive(false)
     if (wasConnected) playDisconnectSound()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Só desconecta quando o Provider inteiro desmonta (ex: logout) —
@@ -2465,7 +2722,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // comportamento que corrige o bug de "sair da call ao trocar de tela".
   useEffect(() => {
     return () => {
-      if (connectedRef.current) leave()
+      // Também cancela uma entrada AINDA em andamento (logout durante o
+      // "Conectando...") — antes ela terminava sozinha depois do
+      // provider desmontado, deixando mic e sala do LiveKit abertos.
+      if (connectedRef.current || joinInFlightRef.current) leave()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -2573,63 +2833,121 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval)
   }, [connectedChannelId, connectedServerId, leave, join])
 
+  // Operações que trocam o microfone (trocar dispositivo, reaplicar
+  // constraints, recuperar de um mic desplugado) rodam em FILA, uma por
+  // vez. Antes, mexer rápido em dois toggles (ex.: eco + ruído) disparava
+  // duas recapturas em paralelo, que brigavam pelos mesmos refs — uma
+  // delas deixava a track bruta ABERTA sem ninguém pra pará-la.
+  const micOpChainRef = useRef<Promise<void>>(Promise.resolve())
+  function runMicOp(op: () => Promise<void>): Promise<void> {
+    const next = micOpChainRef.current.then(op, op)
+    micOpChainRef.current = next.catch(() => {})
+    return next
+  }
+
+  // Recaptura o microfone com `constraints`, passa pelo RNNoise/gate e
+  // troca a track publicada sem renegociar nada.
+  async function swapMicrophone(
+    constraints: MediaTrackConstraints,
+    nsOverrides?: { noiseSuppression?: boolean; micSensitivity?: number; micSensitivityMode?: 'auto' | 'manual' }
+  ): Promise<{ usedFallback: boolean }> {
+    const { stream: newStream, usedFallback } = await getMicStreamWithFallback(constraints, 1)
+    const rawTrack = newStream.getAudioTracks()[0]
+    // Saiu da call (ou virou ouvinte) enquanto o mic era capturado.
+    if (!connectedRef.current || !canPublishRef.current || !localStreamRef.current) {
+      newStream.getTracks().forEach((t) => t.stop())
+      return { usedFallback }
+    }
+    const newTrack = await applyNoiseSuppression(rawTrack, nsOverrides)
+    if (!connectedRef.current || !localStreamRef.current) {
+      // Saiu durante o carregamento do RNNoise — leave() já limpou o
+      // resto; solta só o que acabou de ser criado aqui.
+      rawTrack.stop()
+      newTrack.stop()
+      if (rawMicTrackRef.current === rawTrack) rawMicTrackRef.current = null
+      noiseSuppressorRef.current?.destroy()
+      noiseSuppressorRef.current = null
+      return { usedFallback }
+    }
+    watchRawMicTrack(rawTrack)
+
+    const stream = localStreamRef.current
+    const oldTrack = stream.getAudioTracks()[0]
+    if (oldTrack && oldTrack !== newTrack) stream.removeTrack(oldTrack)
+    if (!stream.getAudioTracks().includes(newTrack)) stream.addTrack(newTrack)
+    // A troca de dispositivo cria uma track NOVA — o AnalyserNode da
+    // detecção local de fala precisa ser religado nela, senão a luz de
+    // "falando" para de acender.
+    setupLocalSpeakingDetection(stream)
+
+    // `true` marca a track como "fornecida pelo usuário" pro LiveKit —
+    // ele não tenta gerenciar/recriar essa track sozinho (o que
+    // ignoraria todo o pipeline de RNNoise/gate acima).
+    const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
+    if (micTrack) await micTrack.replaceTrack(newTrack, true)
+    // Só para a track antiga DEPOIS da troca no sender — parar antes
+    // deixava um buraco de silêncio (e o sender com uma track encerrada).
+    if (oldTrack && oldTrack !== newTrack) oldTrack.stop()
+    // O LiveKit reescreve `enabled` na troca (com o mute DELE, que não
+    // conhece push-to-talk) — antes isto usava só `!muted` (do render), e
+    // trocar de mic com push-to-talk ligado deixava o mic ABERTO.
+    applyMicEnabledState(pushToTalkActiveRef.current)
+    applyMicSenderPriority()
+    return { usedFallback }
+  }
+
+  // Microfone físico desplugado/desativado no meio da call: a track
+  // bruta dispara 'ended' (o que NÃO acontece num .stop() nosso) — antes
+  // a call seguia muda sem aviso nenhum. Tenta o microfone padrão.
+  function watchRawMicTrack(track: MediaStreamTrack) {
+    track.addEventListener(
+      'ended',
+      () => {
+        if (rawMicTrackRef.current !== track || !connectedRef.current) return
+        logDebug('microfone encerrado pelo sistema (desplugado?) — tentando o microfone padrão')
+        void runMicOp(async () => {
+          if (rawMicTrackRef.current !== track || !connectedRef.current) return
+          try {
+            await swapMicrophone(audioSettingsRef.current.getAudioConstraints(''))
+            setError('O microfone foi desconectado — passamos a usar o microfone padrão do sistema.')
+          } catch (err) {
+            logDebug(`recuperação do microfone falhou — ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
+            setError('O microfone foi desconectado e nenhum outro microfone foi encontrado. Conecte um microfone e escolha-o nas configurações de voz.')
+          }
+        })
+      },
+      { once: true }
+    )
+  }
+
   async function changeMicrophone(deviceId: string) {
     // "" representa "Padrão do sistema" no <select> — normaliza pra null
     // pra bater com o tipo que StoredSettings.micId realmente usa (ver
-    // useAudioSettings.ts). getAudioConstraints já trata os dois como
-    // "sem preferência de dispositivo" na prática, mas persistir null é
-    // mais correto do que uma string vazia.
+    // useAudioSettings.ts).
     audioSettingsRef.current.setMicId(deviceId || null)
     if (!connectedRef.current) return
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        audio: audioSettingsRef.current.getAudioConstraints(deviceId),
-      })
-      const rawTrack = newStream.getAudioTracks()[0]
-      const newTrack = await applyNoiseSuppression(rawTrack)
-      newTrack.enabled = !muted
-
-      const oldTrack = localStreamRef.current?.getAudioTracks()[0]
-      if (oldTrack) {
-        oldTrack.stop()
-        localStreamRef.current?.removeTrack(oldTrack)
+    await runMicOp(async () => {
+      if (!connectedRef.current) return
+      try {
+        const { usedFallback } = await swapMicrophone(audioSettingsRef.current.getAudioConstraints(deviceId))
+        if (usedFallback) setError('O microfone escolhido não está disponível — usando o microfone padrão do sistema.')
+      } catch (err) {
+        logDebug(`changeMicrophone falhou — ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
+        setError(describeMicError(err) ?? 'Não foi possível trocar de microfone.')
       }
-      localStreamRef.current?.addTrack(newTrack)
-      // A troca de dispositivo cria uma track NOVA — o AnalyserNode da
-      // detecção local de fala (ver setupLocalSpeakingDetection) fica
-      // conectado na track antiga, que parou; sem reconectar aqui, a luz
-      // de "falando" simplesmente para de acender depois de trocar de mic.
-      if (localStreamRef.current) setupLocalSpeakingDetection(localStreamRef.current)
-
-      // `true` marca a track como "fornecida pelo usuário" pro LiveKit —
-      // ele não tenta gerenciar/recriar essa track sozinho (o que
-      // ignoraria todo o pipeline de RNNoise/gate acima), só a usa e
-      // troca no sender de verdade, exatamente como o antigo
-      // `sender.replaceTrack()` fazia em cada RTCPeerConnection.
-      const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
-      if (micTrack) await micTrack.replaceTrack(newTrack, true)
-      applyMicSenderPriority()
-    } catch {
-      setError('Não foi possível trocar de microfone.')
-    }
+    })
   }
 
   // Reaplica as configurações de áudio atuais (cancelamento de eco,
-  // redução de ruído, ganho automático) no microfone já conectado —
-  // usado pelos botões de liga/desliga (ao lado do perfil e em
+  // redução de ruído, ganho automático, sensibilidade) no microfone já
+  // conectado — usado pelos toggles (ao lado do perfil e em
   // Configurações → Áudio), pra a mudança valer na call em andamento
   // sem precisar reconectar.
   //
-  // `overrides` é opcional e existe só pra evitar uma corrida com o
-  // React: quem chama essa função normalmente acabou de chamar
-  // setNoiseSuppression/setEchoCancellation/setAutoGainControl um
-  // instante antes, mas a atualização de estado é assíncrona — nesse
-  // mesmo clique, `audioSettingsRef.current` ainda reflete o valor
-  // ANTIGO (de antes do clique), porque o React só re-renderiza (e
-  // atualiza o ref) depois. Sem passar o valor novo explicitamente
-  // aqui, o toggle sempre aplicava a configuração de um clique atrás —
-  // dava a impressão de que o redutor de ruído simplesmente não fazia
-  // nada.
+  // `overrides` existe só pra evitar uma corrida com o React: quem chama
+  // normalmente acabou de chamar setNoiseSuppression/etc. um instante
+  // antes, mas `audioSettingsRef.current` ainda reflete o valor ANTIGO
+  // nesse mesmo tick.
   async function refreshAudioConstraints(
     overrides?: Partial<
       Pick<
@@ -2639,43 +2957,58 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     >
   ) {
     if (!connectedRef.current) return
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        audio: audioSettingsRef.current.getAudioConstraints(undefined, overrides),
-      })
-      const rawTrack = newStream.getAudioTracks()[0]
-      const newTrack = await applyNoiseSuppression(rawTrack, {
-        noiseSuppression: overrides?.noiseSuppression,
-        micSensitivity: overrides?.micSensitivity,
-        micSensitivityMode: overrides?.micSensitivityMode,
-      })
-      newTrack.enabled = !muted
-
-      const oldTrack = localStreamRef.current?.getAudioTracks()[0]
-      if (oldTrack) {
-        oldTrack.stop()
-        localStreamRef.current?.removeTrack(oldTrack)
+    // Caminho RÁPIDO: se só mudou a sensibilidade (slider ou auto/manual)
+    // e o RNNoise já está rodando, basta reconfigurar o gate — antes isso
+    // recapturava o microfone inteiro (getUserMedia + gráfico novo +
+    // replaceTrack), com um corte audível na voz a cada ajuste do slider.
+    const onlyGateChanged =
+      overrides !== undefined &&
+      Object.keys(overrides).length > 0 &&
+      Object.keys(overrides).every((k) => k === 'micSensitivity' || k === 'micSensitivityMode')
+    if (onlyGateChanged && noiseSuppressorRef.current && audioSettingsRef.current.noiseSuppression) {
+      const mode = overrides.micSensitivityMode ?? audioSettingsRef.current.micSensitivityMode
+      if (mode === 'auto') {
+        // Recomeça o auto-ajuste com o gate aberto; o loop de
+        // sensibilidade automática recalcula o limiar em ~1s.
+        lastAppliedThresholdDbRef.current = null
+        noiseSuppressorRef.current.setSensitivity(null)
+      } else {
+        noiseSuppressorRef.current.setSensitivity(overrides.micSensitivity ?? audioSettingsRef.current.micSensitivity)
       }
-      localStreamRef.current?.addTrack(newTrack)
-      // Mesmo motivo do changeMicrophone acima: track nova, precisa
-      // reconectar o AnalyserNode da detecção local de fala nela.
-      if (localStreamRef.current) setupLocalSpeakingDetection(localStreamRef.current)
-
-      const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
-      if (micTrack) await micTrack.replaceTrack(newTrack, true)
-      applyMicSenderPriority()
-    } catch {
-      // se falhar, o microfone atual continua funcionando com as configs antigas
+      return
     }
+    await runMicOp(async () => {
+      if (!connectedRef.current) return
+      try {
+        await swapMicrophone(audioSettingsRef.current.getAudioConstraints(undefined, overrides), {
+          noiseSuppression: overrides?.noiseSuppression,
+          micSensitivity: overrides?.micSensitivity,
+          micSensitivityMode: overrides?.micSensitivityMode,
+        })
+      } catch (err) {
+        // Se falhar, o microfone atual continua funcionando com as configs antigas.
+        logDebug(`refreshAudioConstraints falhou — ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
+      }
+    })
   }
 
   function toggleMute() {
     const track = localStreamRef.current?.getAudioTracks()[0]
     if (!track) return
-    const newMuted = !muted
+    // Lê dos REFS, não do estado capturado no render: quem chama logo
+    // depois de um await (ex.: VoiceChannelView faz `await join(); if
+    // (!isSpeaker) toggleMute()`) tinha nas mãos uma versão velha desta
+    // função, com `muted` de ANTES do join — e o "mutar ouvinte do palco"
+    // podia acabar DESmutando.
+    const newMuted = !mutedRef.current
+    // Ouvinte (sem permissão de publicar) não tem o que desmutar.
+    if (!newMuted && !canPublishRef.current) {
+      setError(NO_PUBLISH_PERMISSION_MESSAGE)
+      return
+    }
     mutedRef.current = newMuted
     setMuted(newMuted)
-    applyMicEnabledState(pushToTalkActive)
+    applyMicEnabledState(pushToTalkActiveRef.current)
     // TRIGÉSIMA OITAVA RODADA — bug relatado: clicar em mutar às vezes
     // não fazia efeito nenhum pra quem está ouvindo. Antes disso, o
     // mute só mexia direto em `track.enabled` — o LiveKit nunca ficava
@@ -2690,18 +3023,39 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const micTrack = micPublicationRef.current?.track as LocalAudioTrack | undefined
     if (micTrack) {
       if (newMuted) micTrack.mute().catch(() => {})
-      else micTrack.unmute().catch(() => {})
+      // `unmute()` do LiveKit força `enabled = true` — com push-to-talk
+      // ligado isso abria o microfone sem a tecla pressionada. Reaplica o
+      // estado real depois que ele termina.
+      else
+        micTrack
+          .unmute()
+          .then(() => applyMicEnabledState(pushToTalkActiveRef.current))
+          .catch(() => {})
     }
     if (newMuted) playMuteSound()
     else playUnmuteSound()
   }
 
+  // Trava contra duplo clique na câmera: antes, dois cliques rápidos
+  // enquanto o getUserMedia ainda resolvia abriam DUAS câmeras e
+  // publicavam as duas (a segunda ficava órfã, com a luz acesa).
+  const cameraOpRef = useRef(false)
   async function toggleVideo() {
+    if (cameraOpRef.current) return
+    cameraOpRef.current = true
+    try {
+      await toggleVideoInner()
+    } finally {
+      cameraOpRef.current = false
+    }
+  }
+
+  async function toggleVideoInner() {
     if (videoEnabled) {
       const track = localStreamRef.current?.getVideoTracks()[0]
       if (track) {
         if (cameraPublicationRef.current) {
-          await roomRef.current?.localParticipant.unpublishTrack(track)
+          await roomRef.current?.localParticipant.unpublishTrack(track).catch(() => {})
           cameraPublicationRef.current = null
         }
         track.stop()
@@ -2710,6 +3064,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setVideoEnabled(false)
       return
     }
+    if (!connectedRef.current) return
+    if (!canPublishRef.current) {
+      setError(NO_PUBLISH_PERMISSION_MESSAGE)
+      return
+    }
+    let camTrack: MediaStreamTrack | null = null
     try {
       // VIGÉSIMA QUARTA RODADA — ver StoredSettings.cameraId
       // (useAudioSettings.ts) pro porquê: deixa escolher uma câmera
@@ -2718,19 +3078,41 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // escolhido não existir mais (ex.: OBS fechado) em vez de cair
       // silenciosamente na webcam padrão sem avisar ninguém.
       const cameraId = audioSettingsRef.current.cameraId
+      // Pede 720p/30 como IDEAL (não obrigatório): sem isso o Chromium
+      // abre a webcam no padrão dele, 640×480 — imagem pior do que a
+      // câmera entrega de graça. O LiveKit já gera as camadas de
+      // simulcast menores a partir daqui pra quem tem conexão fraca.
       const camStream = await navigator.mediaDevices.getUserMedia({
-        video: cameraId ? { deviceId: { exact: cameraId } } : true,
+        video: {
+          ...(cameraId ? { deviceId: { exact: cameraId } } : {}),
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
       })
       const track = camStream.getVideoTracks()[0]
-      localStreamRef.current?.addTrack(track)
-      if (roomRef.current) {
-        cameraPublicationRef.current = await roomRef.current.localParticipant.publishTrack(track, {
-          name: 'camera',
-          source: Track.Source.Camera,
-        })
+      camTrack = track
+      // Saiu da call enquanto a câmera abria — não publica nada.
+      if (!connectedRef.current || !roomRef.current || !localStreamRef.current) {
+        track.stop()
+        return
       }
+      track.contentHint = 'motion'
+      localStreamRef.current.addTrack(track)
+      cameraPublicationRef.current = await roomRef.current.localParticipant.publishTrack(track, {
+        name: 'camera',
+        source: Track.Source.Camera,
+        simulcast: true,
+      })
       setVideoEnabled(true)
     } catch (err) {
+      // Falhou DEPOIS de abrir a câmera (ex.: publish recusado) — solta o
+      // dispositivo em vez de deixar a luz da câmera acesa.
+      if (camTrack) {
+        camTrack.stop()
+        localStreamRef.current?.removeTrack(camTrack)
+        cameraPublicationRef.current = null
+      }
       // TRIGÉSIMA RODADA — "Não foi possível acessar a câmera" sozinho,
       // sem mais detalhe nenhum, é inútil pra diagnosticar à distância
       // (é literalmente a MESMA mensagem pra "câmera virtual do OBS
@@ -2826,19 +3208,79 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Vigia de foco do jogo (troca o vídeo por uma "cortina" quando a
+  // pessoa dá alt-tab) — era o MESMO bloco copiado em toggleScreenShare e
+  // switchScreenShareSource. Agora também confere, quando o vigia termina
+  // de iniciar (é assíncrono), se a transmissão ainda é a mesma: antes,
+  // parar/trocar a transmissão nesse meio-tempo deixava um listener de
+  // IPC órfão ligado pra sempre.
+  function startGameForegroundWatch(processNames: string[], forVideoTrack: MediaStreamTrack) {
+    if (!window.electronAPI?.startForegroundWatch) return
+    window.electronAPI
+      .startForegroundWatch(processNames)
+      .then((started) => {
+        if (!started || !window.electronAPI) return
+        if (realScreenVideoTrackRef.current !== forVideoTrack) {
+          window.electronAPI.stopForegroundWatch?.().catch(() => {})
+          return
+        }
+        foregroundWatchUnsubRef.current?.()
+        foregroundWatchUnsubRef.current = window.electronAPI.onGameForegroundChanged((focused) => {
+          const realTrack = realScreenVideoTrackRef.current
+          const publishedTrack = screenVideoPublicationRef.current?.track as LocalVideoTrack | undefined
+          if (!realTrack || !publishedTrack) return
+          if (focused) {
+            // Voltou pro jogo — restaura o vídeo de verdade e descarta
+            // a cortina (não precisa mais dela até a próxima vez que a
+            // pessoa alternar pra fora).
+            publishedTrack.replaceTrack(realTrack, true).catch(() => {})
+            if (placeholderTrackRef.current) {
+              placeholderTrackRef.current.stop()
+              placeholderTrackRef.current = null
+            }
+          } else {
+            // Saiu do jogo (alt-tab) — troca pela cortina antes que
+            // qualquer frame do resto da tela chegue a ser enviado.
+            if (!placeholderTrackRef.current) placeholderTrackRef.current = createPlaceholderVideoTrack()
+            publishedTrack.replaceTrack(placeholderTrackRef.current, true).catch(() => {})
+          }
+        })
+      })
+      .catch(() => {
+        // Sem sorte iniciando o vigia (PowerShell bloqueado por política
+        // do sistema, por exemplo) — segue sem essa camada extra.
+      })
+  }
+
+  // Trava contra duplo clique/cliques concorrentes em compartilhar tela
+  // (a cadeia de captura pode levar vários segundos) — antes, clicar de
+  // novo durante o "Conectando..." abria uma SEGUNDA captura em paralelo.
+  const screenShareOpRef = useRef(false)
+
   async function toggleScreenShare(opts?: { auto?: boolean }) {
+    if (screenShareOpRef.current) return
     if (screenSharing) {
       stopScreenShareState()
       return
     }
+    if (!connectedRef.current) return
+    if (!canPublishRef.current) {
+      setError(NO_PUBLISH_PERMISSION_MESSAGE)
+      return
+    }
+    screenShareOpRef.current = true
     setScreenShareConnecting(true)
+    let stream: MediaStream | null = null
+    let started = false
+    // A call acabou (leave) em algum ponto da cadeia assíncrona abaixo?
+    const callEnded = () => !connectedRef.current || !roomRef.current
     try {
       const preset = screenShareQualityRef.current
       // OITAVA RODADA: getDisplayMedia() foi abandonado — ver o
       // comentário grande em captureScreenShareStream acima pro
       // raciocínio completo. A qualidade (resolução/taxa de quadros)
       // continua sendo ajustada DEPOIS, na track já ativa.
-      const stream = await captureScreenShareStream(preset, opts)
+      stream = await captureScreenShareStream(preset, opts)
       // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
       // no atalho "Compartilhar seu jogo/janela" E caiu no caso de tela
       // cheia (sem janela própria pra detectar o fechamento sozinha) — ver
@@ -2857,9 +3299,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const appAudioChoice = takePendingAppAudioPid()
       const appAudioPid = appAudioChoice?.pid ?? null
       logDebug(`toggleScreenShare: appAudioChoice=${JSON.stringify(appAudioChoice)}`)
+      if (callEnded()) {
+        // Saiu da call enquanto escolhia a fonte — não deixa a captura
+        // (e o indicador de "compartilhando" do sistema) ligada à toa.
+        stream.getTracks().forEach((t) => t.stop())
+        return
+      }
       screenStreamRef.current = stream
       setLocalScreenStream(stream)
       const videoTrack = stream.getVideoTracks()[0]
+      if (!videoTrack) throw new DOMException('A captura não retornou nenhum vídeo.', 'NotReadableError')
       // Ajuste de qualidade best-effort, à parte — ver
       // applyVideoQualityConstraints acima. Não bloqueia nem arrisca a
       // transmissão: se falhar, só continua na resolução/taxa nativa.
@@ -2922,10 +3371,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         teardownScreenAudioDenoiser()
       }
       screenAudioOutputTrackRef.current = audioTrack
-      // "motion" prioriza fluidez de movimento em vez de nitidez de
-      // texto estático — melhor pra compartilhar jogo/vídeo do que a
-      // opção padrão, que otimiza pra tela parada (documento, planilha)
-      videoTrack.contentHint = 'motion'
+      if (callEnded() || screenStreamRef.current !== stream) {
+        // Saiu da call durante a captura de áudio — leave() já chamou
+        // stopScreenShareState, mas a track de áudio pode ter chegado
+        // DEPOIS disso: limpa de novo o que sobrou.
+        stopScreenShareState()
+        return
+      }
+      // "motion" prioriza fluidez (jogo/vídeo); "detail" prioriza
+      // nitidez de texto (15fps — documento/código). Ver
+      // contentHintForPreset em useScreenShareQuality.ts.
+      videoTrack.contentHint = contentHintForPreset(preset)
       videoTrack.onended = () => {
         stopScreenShareState()
       }
@@ -3000,18 +3456,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // (forceStereo substitui o antigo SDP munging manual de
           // sdpStereo.ts — o LiveKit já negocia isso nativamente).
           audioTrack
-            ? roomRef.current.localParticipant.publishTrack(audioTrack, {
-                name: 'screen-audio',
-                source: Track.Source.ScreenShareAudio,
-                audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
-                forceStereo: true,
-                dtx: false,
-              })
+            ? roomRef.current.localParticipant.publishTrack(audioTrack, SCREEN_SHARE_AUDIO_PUBLISH_OPTIONS)
             : Promise.resolve(null),
         ])
         screenVideoPublicationRef.current = videoPublication
         if (audioPublication) screenAudioPublicationRef.current = audioPublication
       }
+      started = true
       setScreenSharing(true)
 
       // Mitigação de vazamento pro caso "compartilhar seu jogo" em tela
@@ -3023,39 +3474,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // voltar. Em Mac/Linux, ou se o vigia não conseguir iniciar (volta
       // `false`), simplesmente não faz nada — o compartilhamento
       // continua igual ao de antes (sempre visível), sem quebrar nada.
-      if (gameShareHint && window.electronAPI?.startForegroundWatch) {
-        window.electronAPI
-          .startForegroundWatch(gameShareHint.processNames)
-          .then((started) => {
-            if (!started || !window.electronAPI) return
-            foregroundWatchUnsubRef.current = window.electronAPI.onGameForegroundChanged((focused) => {
-              const realTrack = realScreenVideoTrackRef.current
-              const publishedTrack = screenVideoPublicationRef.current?.track as LocalVideoTrack | undefined
-              if (!realTrack || !publishedTrack) return
-              if (focused) {
-                // Voltou pro jogo — restaura o vídeo de verdade e descarta
-                // a cortina (não precisa mais dela até a próxima vez que a
-                // pessoa alternar pra fora).
-                publishedTrack.replaceTrack(realTrack, true).catch(() => {})
-                if (placeholderTrackRef.current) {
-                  placeholderTrackRef.current.stop()
-                  placeholderTrackRef.current = null
-                }
-              } else {
-                // Saiu do jogo (alt-tab) — troca pela cortina antes que
-                // qualquer frame do resto da tela chegue a ser enviado.
-                if (!placeholderTrackRef.current) placeholderTrackRef.current = createPlaceholderVideoTrack()
-                const placeholder = placeholderTrackRef.current
-                publishedTrack.replaceTrack(placeholder, true).catch(() => {})
-              }
-            })
-          })
-          .catch(() => {
-            // Sem sorte iniciando o vigia (PowerShell bloqueado por
-            // política do sistema, por exemplo) — segue sem essa camada
-            // extra de proteção, sem interromper o compartilhamento.
-          })
-      }
+      if (gameShareHint) startGameForegroundWatch(gameShareHint.processNames, videoTrack)
       // No app desktop, capturar uma janela específica faz o Windows
       // trazer ela pra frente sozinho (comportamento do sistema, não do
       // nosso código) — a pessoa clica em "compartilhar tela" e se vê
@@ -3086,6 +3505,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // trecho (ex.: pc.addTrack, sender.setParameters) virava sempre o
       // mesmo aviso genérico, sem pista nenhuma de qual foi o motivo de
       // verdade — impossível de diagnosticar à distância.
+      // Falhou DEPOIS da captura já ter começado (ex.: publishTrack
+      // recusou/caiu) — antes a captura continuava rodando (indicador do
+      // sistema aceso, processo de áudio nativo vivo) com a UI dizendo
+      // "não está compartilhando". Desfaz tudo.
+      if (stream && !started) {
+        if (screenStreamRef.current === stream) stopScreenShareState()
+        else stream.getTracks().forEach((t) => t.stop())
+      }
       if (err instanceof Error && err.name === 'NotAllowedError') return
       // QUARTA RODADA: "Invalid capture constraints" continuou aparecendo
       // mesmo depois de tirar o "max" do frameRate — ou seja, a causa era
@@ -3122,6 +3549,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           : base
       )
     } finally {
+      screenShareOpRef.current = false
       setScreenShareConnecting(false)
     }
   }
@@ -3136,13 +3564,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // não dispara uma renegociação nem um piscar de "parou/começou de novo"
   // pra quem está assistindo, diferente de um stop+start completo.
   async function switchScreenShareSource() {
-    if (!screenSharing || !screenStreamRef.current) return
+    if (!screenSharing || !screenStreamRef.current || screenShareOpRef.current) return
+    screenShareOpRef.current = true
     setScreenShareConnecting(true)
+    let newStream: MediaStream | null = null
+    let adopted = false
     try {
       const preset = screenShareQualityRef.current
       // OITAVA RODADA: idem toggleScreenShare acima — ver
       // captureScreenShareStream.
-      const newStream = await captureScreenShareStream(preset)
+      newStream = await captureScreenShareStream(preset)
+      // A transmissão (ou a call) acabou enquanto o seletor estava aberto.
+      if (!screenStreamRef.current || !connectedRef.current) {
+        newStream.getTracks().forEach((t) => t.stop())
+        return
+      }
       // Mesma lógica de toggleScreenShare acima — só dá pra ler o recado
       // do picker DEPOIS do getDisplayMedia resolver.
       const gameShareHint = takePendingGameShareHint()
@@ -3161,7 +3597,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // `newStream` já pode vir com a track de áudio embutida (seletor
       // nativo do sistema, ver captureScreenShareStream).
       let newAudioTrack: MediaStreamTrack | null = newStream.getAudioTracks()[0] ?? null
-      newVideoTrack.contentHint = 'motion'
+      newVideoTrack.contentHint = contentHintForPreset(preset)
 
       const oldVideoTrack = realScreenVideoTrackRef.current
 
@@ -3240,13 +3676,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // Ganhou áudio que não existia antes (ex: trocou de "só uma
         // janela" pra "tela inteira" com o áudio do sistema marcado) —
         // precisa de uma publicação nova.
-        screenAudioPublicationRef.current = await roomRef.current.localParticipant.publishTrack(newAudioTrack, {
-          name: 'screen-audio',
-          source: Track.Source.ScreenShareAudio,
-          audioPreset: { maxBitrate: SCREEN_SHARE_AUDIO_MAX_BITRATE },
-          forceStereo: true,
-          dtx: false,
-        })
+        screenAudioPublicationRef.current = await roomRef.current.localParticipant.publishTrack(
+          newAudioTrack,
+          SCREEN_SHARE_AUDIO_PUBLISH_OPTIONS
+        )
       } else if (!newAudioTrack && screenAudioPublicationRef.current) {
         // Perdeu o áudio que existia antes (ex: trocou de "tela inteira
         // com áudio do sistema" pra "só uma janela específica", que nunca
@@ -3262,8 +3695,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // ANTES de parar, senão ele ainda dispararia stopScreenShareState()
       // e derrubaria a transmissão NOVA que acabou de assumir o lugar.
       if (oldVideoTrack) oldVideoTrack.onended = null
-      screenStreamRef.current.getTracks().forEach((t) => t.stop())
+      screenStreamRef.current?.getTracks().forEach((t) => t.stop())
 
+      adopted = true
       screenStreamRef.current = newStream
       setLocalScreenStream(newStream)
       realScreenVideoTrackRef.current = newVideoTrack
@@ -3281,39 +3715,25 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           stopScreenShareState()
         })
       }
-      if (gameShareHint && window.electronAPI?.startForegroundWatch) {
-        window.electronAPI
-          .startForegroundWatch(gameShareHint.processNames)
-          .then((started) => {
-            if (!started || !window.electronAPI) return
-            foregroundWatchUnsubRef.current = window.electronAPI.onGameForegroundChanged((focused) => {
-              const realTrack = realScreenVideoTrackRef.current
-              const publishedTrack = screenVideoPublicationRef.current?.track as LocalVideoTrack | undefined
-              if (!realTrack || !publishedTrack) return
-              if (focused) {
-                publishedTrack.replaceTrack(realTrack, true).catch(() => {})
-                if (placeholderTrackRef.current) {
-                  placeholderTrackRef.current.stop()
-                  placeholderTrackRef.current = null
-                }
-              } else {
-                if (!placeholderTrackRef.current) placeholderTrackRef.current = createPlaceholderVideoTrack()
-                const placeholder = placeholderTrackRef.current
-                publishedTrack.replaceTrack(placeholder, true).catch(() => {})
-              }
-            })
-          })
-          .catch(() => {})
-      }
+      if (gameShareHint) startGameForegroundWatch(gameShareHint.processNames, newVideoTrack)
       window.electronAPI?.focusAppWindow?.()
-    } catch {
+    } catch (err) {
       // Cancelou o seletor, ou algo deu errado — mantém a transmissão
       // ATUAL rodando normalmente, sem interromper nada por causa de uma
-      // troca que não deu certo.
+      // troca que não deu certo. Mas a captura NOVA (se chegou a abrir)
+      // precisa ser solta — antes ela ficava rodando órfã.
+      if (newStream && !adopted) newStream.getTracks().forEach((t) => t.stop())
+      if (!(err instanceof Error && err.name === 'NotAllowedError')) {
+        logDebug(`switchScreenShareSource falhou — ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
+        setError('Não foi possível trocar a fonte da transmissão — a transmissão anterior continua no ar.')
+      }
     } finally {
+      screenShareOpRef.current = false
       setScreenShareConnecting(false)
     }
   }
+
+  const clearError = useCallback(() => setError(null), [])
 
   // TRIGÉSIMA QUARTA RODADA — o polling de "quem está falando" (analyser
   // por participante, a cada 100ms) foi removido: já é tratado dentro de
@@ -3331,8 +3751,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         localConnectionQuality,
         connectedServerId,
         connecting,
+        reconnecting,
+        canPublish,
         error,
-        clearError: () => setError(null),
+        clearError,
         participants,
         muted,
         deafened,

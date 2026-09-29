@@ -11,18 +11,18 @@ export function MessageListSkeleton() {
   ]
 
   return (
-    <div className="flex-1 overflow-hidden px-4 py-4 space-y-4">
+    <div className="flex-1 overflow-hidden px-4 py-5 space-y-5" role="status" aria-label="Carregando mensagens">
       {rows.map((row, i) => (
         <div key={i} className="flex items-start gap-3 animate-pulse" style={{ animationDelay: `${i * 60}ms` }}>
           {row.avatar ? (
-            <div className="w-10 h-10 rounded-full bg-white/5 shrink-0" />
+            <div className="w-10 h-10 rounded-full bg-white/[0.05] shrink-0" />
           ) : (
             <div className="w-10 shrink-0" />
           )}
           <div className="flex-1 space-y-2 pt-1">
-            {row.avatar && <div className="h-3 rounded bg-white/5" style={{ width: '30%' }} />}
+            {row.avatar && <div className="h-3 rounded bg-white/[0.08]" style={{ width: '22%' }} />}
             {row.lines.map((w, j) => (
-              <div key={j} className="h-3 rounded bg-white/5" style={{ width: `${w}%` }} />
+              <div key={j} className="h-2.5 rounded-full bg-white/[0.05]" style={{ width: `${w}%` }} />
             ))}
           </div>
         </div>

@@ -2,7 +2,10 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'" />
     <style>
+      /* Mamacos Neo — mesma paleta do tema padrão (src/index.css):
+         fundo #07070a, marca #ee3a34 → #ff8a3d, texto #f4f4f7 / #9d9dab. */
       * {
         margin: 0;
         padding: 0;
@@ -12,24 +15,44 @@
       body {
         width: 100%;
         height: 100%;
-        background: #09090a;
+        background: #07070a;
         overflow: hidden;
         -webkit-user-select: none;
         user-select: none;
       }
       body {
+        position: relative;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 22px;
-        font-family: 'Segoe UI', system-ui, sans-serif;
+        font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
       .glow-bg {
         position: absolute;
         inset: 0;
-        background: radial-gradient(ellipse 500px 350px at 50% 42%, rgba(224, 32, 27, 0.22), transparent 70%);
+        background:
+          radial-gradient(420px 300px at 30% 20%, rgba(238, 58, 52, 0.22), transparent 70%),
+          radial-gradient(380px 280px at 80% 100%, rgba(255, 138, 61, 0.14), transparent 70%);
         pointer-events: none;
+      }
+      .grid-bg {
+        position: absolute;
+        inset: 0;
+        background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+        background-size: 32px 32px;
+        -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 45%, black 20%, transparent 75%);
+        mask-image: radial-gradient(ellipse 60% 55% at 50% 45%, black 20%, transparent 75%);
+        pointer-events: none;
+      }
+      .content {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        animation: rise 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
       }
       .logo-wrap {
         position: relative;
@@ -37,57 +60,109 @@
         height: 84px;
       }
       .logo-wrap img {
+        position: relative;
         width: 100%;
         height: 100%;
-        border-radius: 999px;
+        border-radius: 24px;
         object-fit: cover;
-        box-shadow: 0 0 32px 0 rgba(224, 32, 27, 0.55);
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 18px 40px -12px rgba(238, 58, 52, 0.55);
       }
       .ring {
         position: absolute;
-        inset: 0;
+        inset: -6px;
+        border-radius: 30px;
+        border: 2px solid rgba(238, 58, 52, 0.45);
+        animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+      }
+      .title {
+        margin-top: 22px;
+        color: #f4f4f7;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .title span {
+        background: linear-gradient(120deg, #ee3a34, #ff8a3d);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .bar {
+        position: relative;
+        width: 148px;
+        height: 4px;
+        margin-top: 18px;
         border-radius: 999px;
-        border: 2px solid rgba(224, 32, 27, 0.4);
-        animation: ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+        background: rgba(255, 255, 255, 0.07);
+        overflow: hidden;
+      }
+      .bar::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 40%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #ee3a34, #ff8a3d);
+        animation: slide 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      }
+      .label {
+        margin-top: 12px;
+        color: #9d9dab;
+        font-size: 12px;
+        letter-spacing: 0.02em;
       }
       @keyframes ping {
         0% {
           transform: scale(1);
-          opacity: 1;
+          opacity: 0.9;
         }
         75%,
         100% {
-          transform: scale(1.7);
+          transform: scale(1.35);
           opacity: 0;
         }
       }
-      .spinner {
-        width: 26px;
-        height: 26px;
-        border: 3px solid #e0201b;
-        border-top-color: transparent;
-        border-radius: 999px;
-        animation: spin 0.8s linear infinite;
-      }
-      @keyframes spin {
+      @keyframes slide {
+        from {
+          left: -40%;
+        }
         to {
-          transform: rotate(360deg);
+          left: 100%;
         }
       }
-      .label {
-        color: #a39a9c;
-        font-size: 13px;
-        letter-spacing: 0.02em;
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ring,
+        .content {
+          animation: none;
+        }
+        .bar::after {
+          animation-duration: 2.4s;
+        }
       }
     </style>
   </head>
   <body>
     <div class="glow-bg"></div>
-    <div class="logo-wrap">
-      <img src="./splash-logo.png" alt="Mamacos Voip" />
-      <div class="ring"></div>
+    <div class="grid-bg"></div>
+    <div class="content" role="status" aria-live="polite">
+      <div class="logo-wrap">
+        <div class="ring"></div>
+        <img src="./splash-logo.png" alt="Mamacos Voip" />
+      </div>
+      <div class="title">Mamacos <span>Voip</span></div>
+      <div class="bar" aria-hidden="true"></div>
+      <div class="label">Abrindo o Mamacos Voip...</div>
     </div>
-    <div class="spinner"></div>
-    <div class="label">Abrindo o Mamacos Voip...</div>
   </body>
 </html>

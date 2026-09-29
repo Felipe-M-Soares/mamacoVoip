@@ -1,11 +1,21 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Permission, Role, ServerMemberRole } from '../types/database'
+import { safeHexColor } from '../lib/messageFormatting'
+
+// Mesmas regras do banco (migration 013): nome 1–100 caracteres, cor
+// sempre hexadecimal.
+function validateRoleInput(name: string, color: string): { name: string; color: string } | { error: string } {
+  const trimmed = name.trim()
+  if (trimmed.length < 1 || trimmed.length > 100) return { error: 'O nome do cargo precisa ter de 1 a 100 caracteres.' }
+  return { name: trimmed, color: safeHexColor(color) }
+}
 
 export function useRoles(serverId: string | null) {
   const [roles, setRoles] = useState<Role[]>([])
   const [memberRoles, setMemberRoles] = useState<ServerMemberRole[]>([])
   const [loading, setLoading] = useState(true)
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!serverId) {
@@ -15,10 +25,13 @@ export function useRoles(serverId: string | null) {
       return
     }
     setLoading(true)
+    const requestId = ++requestIdRef.current
     const [{ data: roleRows }, { data: assignments }] = await Promise.all([
       supabase.from('roles').select('*').eq('server_id', serverId).order('position', { ascending: false }),
       supabase.from('server_member_roles').select('*').eq('server_id', serverId),
     ])
+    // Resposta de um servidor anterior (troca rápida) — descarta.
+    if (requestId !== requestIdRef.current) return
     setRoles(roleRows ?? [])
     setMemberRoles(assignments ?? [])
     setLoading(false)
@@ -30,10 +43,12 @@ export function useRoles(serverId: string | null) {
 
   async function createRole(name: string, color: string, permissions: Permission[]) {
     if (!serverId) return { error: 'Nenhum servidor selecionado' }
+    const input = validateRoleInput(name, color)
+    if ('error' in input) return { error: input.error }
     const { error } = await supabase.rpc('create_role', {
       p_server_id: serverId,
-      p_name: name,
-      p_color: color,
+      p_name: input.name,
+      p_color: input.color,
       p_permissions: permissions,
     })
     if (!error) await refresh()
@@ -41,10 +56,12 @@ export function useRoles(serverId: string | null) {
   }
 
   async function updateRole(roleId: string, name: string, color: string, permissions: Permission[]) {
+    const input = validateRoleInput(name, color)
+    if ('error' in input) return { error: input.error }
     const { error } = await supabase.rpc('update_role', {
       p_role_id: roleId,
-      p_name: name,
-      p_color: color,
+      p_name: input.name,
+      p_color: input.color,
       p_permissions: permissions,
     })
     if (!error) await refresh()

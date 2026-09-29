@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { PresenceProvider } from './context/PresenceContext'
@@ -11,14 +12,35 @@ import { UpdateStatusBadge } from './components/ui/UpdateStatusBadge'
 import { ScreenSharePicker } from './components/ui/ScreenSharePicker'
 import { FriendRequestToast } from './components/ui/FriendRequestToast'
 import { TitleBar } from './components/layout/TitleBar'
-import { Login } from './pages/Login'
-import { ForgotPassword } from './pages/ForgotPassword'
-import { ResetPassword } from './pages/ResetPassword'
-import { Register } from './pages/Register'
-import { MainLayout } from './pages/MainLayout'
-import { InviteRedirect } from './pages/InviteRedirect'
-import { PrivacyPolicy } from './pages/legal/PrivacyPolicy'
-import { TermsOfService } from './pages/legal/TermsOfService'
+import { LoadingScreen } from './components/ui/LoadingScreen'
+
+// Divisão de código por rota: antes TUDO (telas de login/cadastro, páginas
+// legais, o layout principal inteiro com voz/LiveKit, todos os modais) ia
+// num único arquivo de ~1 MB que precisava ser baixado e interpretado
+// antes de qualquer tela aparecer. Agora cada rota carrega só o que usa.
+const loadMainLayout = () => import('./pages/MainLayout')
+const MainLayout = lazy(() => loadMainLayout().then((m) => ({ default: m.MainLayout })))
+const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })))
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then((m) => ({ default: m.ForgotPassword })))
+const ResetPassword = lazy(() => import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })))
+const Register = lazy(() => import('./pages/Register').then((m) => ({ default: m.Register })))
+const InviteRedirect = lazy(() => import('./pages/InviteRedirect').then((m) => ({ default: m.InviteRedirect })))
+const PrivacyPolicy = lazy(() => import('./pages/legal/PrivacyPolicy').then((m) => ({ default: m.PrivacyPolicy })))
+const TermsOfService = lazy(() => import('./pages/legal/TermsOfService').then((m) => ({ default: m.TermsOfService })))
+
+// Quase toda sessão termina no layout principal — começa a baixá-lo em
+// segundo plano logo após a primeira pintura (em paralelo com a checagem
+// de sessão), pra que o `lazy` acima não acrescente espera nenhuma.
+if (typeof window !== 'undefined') {
+  const preload = () => {
+    loadMainLayout().catch(() => {
+      // se falhar aqui, o lazy() tenta de novo (e mostra o erro) quando for usado
+    })
+  }
+  const w = window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }
+  if (w.requestIdleCallback) w.requestIdleCallback(preload, { timeout: 1500 })
+  else setTimeout(preload, 200)
+}
 
 // Dentro do app desktop, o documento é servido por um protocolo próprio
 // (app://bundle/index.html), então o "caminho" real da URL não é "/"
@@ -50,6 +72,7 @@ function App() {
               <UpdateStatusBadge />
               <ScreenSharePicker />
               <FriendRequestToast />
+              <Suspense fallback={<LoadingScreen />}>
               <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/esqueci-senha" element={<ForgotPassword />} />
@@ -75,6 +98,7 @@ function App() {
                 />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </Suspense>
             </div>
           </div>
         </GroupConversationsProvider>

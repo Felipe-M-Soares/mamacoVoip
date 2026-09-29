@@ -11,18 +11,23 @@ import { useEffect, useRef } from 'react'
 // some quando o usuário realmente clica em outro lugar (ou aperta Esc).
 export function useClickOutside<T extends HTMLElement>(active: boolean, onOutside: () => void) {
   const ref = useRef<T | null>(null)
+  // Guardado em ref: quem chama quase sempre passa uma arrow function nova
+  // a cada render, o que antes removia e recolocava os listeners do
+  // documento em todo re-render com o menu aberto.
+  const onOutsideRef = useRef(onOutside)
+  onOutsideRef.current = onOutside
 
   useEffect(() => {
     if (!active) return
 
     function handlePointerDown(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        onOutside()
+        onOutsideRef.current()
       }
     }
 
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onOutside()
+      if (e.key === 'Escape') onOutsideRef.current()
     }
 
     document.addEventListener('mousedown', handlePointerDown)
@@ -31,7 +36,7 @@ export function useClickOutside<T extends HTMLElement>(active: boolean, onOutsid
       document.removeEventListener('mousedown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [active, onOutside])
+  }, [active])
 
   return ref
 }

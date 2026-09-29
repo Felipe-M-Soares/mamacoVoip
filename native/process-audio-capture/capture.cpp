@@ -119,6 +119,44 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) {
   return FALSE;
 }
 
+// AUDITORIA — "cão de guarda" do processo pai. O Electron cria este .exe
+// com o stdin ligado a um pipe (padrão do spawn do Node) e nunca escreve
+// nada nele. Se o app principal MORRER sem conseguir matar este processo
+// (travamento, "Finalizar tarefa", queda de energia do lado do Electron),
+// o Windows NÃO mata os processos filhos junto — e este .exe ficava
+// capturando e codificando pra sempre em segundo plano, gastando
+// CPU/GPU até reiniciar o PC. Quando o pai morre, o pipe do stdin fecha
+// e o ReadFile abaixo retorna — aí pedimos pra sair do laço principal.
+// Só é ativado quando o stdin é de fato um pipe (rodando à mão num
+// console, nada muda).
+DWORD WINAPI ParentWatchdogThread(LPVOID) {
+  HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+  char buffer[256];
+  DWORD bytesRead = 0;
+  while (ReadFile(in, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) {
+    // ninguém deveria escrever aqui — só descarta
+  }
+  g_stopRequested.store(true);
+  return 0;
+}
+
+void StartParentWatchdog() {
+  HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+  if (in == nullptr || in == INVALID_HANDLE_VALUE) return;
+  if (GetFileType(in) != FILE_TYPE_PIPE) return;
+  HANDLE thread = CreateThread(nullptr, 0, ParentWatchdogThread, nullptr, 0, nullptr);
+  if (thread) CloseHandle(thread);
+}
+
+// AUDITORIA: antes, o resultado de fwrite/fflush no stdout era ignorado —
+// se o pipe fechasse (app principal encerrou), o laço seguia capturando e
+// codificando quadros que ninguém mais ia ler. Agora qualquer falha de
+// escrita encerra a captura.
+bool WriteAllStdout(const void* data, size_t size) {
+  if (size == 0) return true;
+  return fwrite(data, 1, size, stdout) == size;
+}
+
 // Handler de conclusão da ativação assíncrona — só existe porque
 // ActivateAudioInterfaceAsync() é uma API assíncrona (não bloqueia),
 // então precisamos de um objeto COM que implementa essa interface pra
@@ -222,6 +260,7 @@ int wmain(int argc, wchar_t* argv[]) {
   _setmode(_fileno(stdout), _O_BINARY);
 
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+  StartParentWatchdog();
 
   HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   if (FAILED(hr)) {
@@ -386,8 +425,15 @@ int wmain(int argc, wchar_t* argv[]) {
     memcpy(header + 8, &channels, 2);
     memcpy(header + 10, &sampleFormatTag, 2);
     // bytes 12..15 ficam zerados (reservado)
-    fwrite(header, 1, sizeof(header), stdout);
-    fflush(stdout);
+    if (!WriteAllStdout(header, sizeof(header)) || fflush(stdout) != 0) {
+      LogError("falha ao escrever o cabecalho no stdout");
+      captureClient->Release();
+      CloseHandle(bufferReadyEvent);
+      if (mixFormat) CoTaskMemFree(mixFormat);
+      audioClient->Release();
+      CoUninitialize();
+      return 1;
+    }
   }
 
   hr = audioClient->Start();
@@ -403,7 +449,13 @@ int wmain(int argc, wchar_t* argv[]) {
 
   LogStatus("capturando");
 
-  while (!g_stopRequested.load()) {
+  // AUDITORIA: erros de dispositivo (ex.: AUDCLNT_E_DEVICE_INVALIDATED —
+  // placa de som trocada, processo-alvo fechou) só saíam do laço INTERNO;
+  // o externo continuava rodando pra sempre, repetindo o mesmo erro a cada
+  // evento. Agora qualquer falha de GetBuffer/ReleaseBuffer/escrita
+  // encerra a captura de vez (o Electron já trata o fim do processo).
+  bool fatalError = false;
+  while (!g_stopRequested.load() && !fatalError) {
     DWORD waitRes = WaitForSingleObject(bufferReadyEvent, 500);
     if (waitRes != WAIT_OBJECT_0) {
       // Timeout normal (nada tocando no momento) — só continua o laço
@@ -427,6 +479,7 @@ int wmain(int argc, wchar_t* argv[]) {
       if (FAILED(hr)) {
         LogError("GetBuffer falhou", hr);
         packetLength = 0;
+        fatalError = true;
         break;
       }
 
@@ -440,24 +493,28 @@ int wmain(int argc, wchar_t* argv[]) {
           // manda zeros explícitos em vez do conteúdo de `data`.
           static thread_local std::vector<uint8_t> silence;
           if (silence.size() < totalBytes) silence.assign(totalBytes, 0);
-          fwrite(silence.data(), 1, totalBytes, stdout);
+          if (!WriteAllStdout(silence.data(), totalBytes)) fatalError = true;
         } else {
-          fwrite(data, 1, totalBytes, stdout);
+          if (!WriteAllStdout(data, totalBytes)) fatalError = true;
         }
-        fflush(stdout);
+        if (!fatalError && fflush(stdout) != 0) fatalError = true;
+        if (fatalError) LogStatus("stdout fechado (app principal encerrou?), parando captura");
       }
 
       hr = captureClient->ReleaseBuffer(numFrames);
       if (FAILED(hr)) {
         LogError("ReleaseBuffer falhou", hr);
         packetLength = 0;
+        fatalError = true;
         break;
       }
+      if (fatalError) break;
 
       hr = captureClient->GetNextPacketSize(&packetLength);
       if (FAILED(hr)) {
         LogError("GetNextPacketSize (laço interno) falhou", hr);
         packetLength = 0;
+        fatalError = true;
         break;
       }
     }

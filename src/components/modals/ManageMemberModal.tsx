@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
+import { Toggle } from '../ui/Toggle'
 import { useRoles } from '../../hooks/useRoles'
 import { useModeration } from '../../hooks/useModeration'
 import type { Profile } from '../../types/database'
@@ -70,55 +71,85 @@ export function ManageMemberModal({
 
   if (confirming) {
     return (
-      <Modal title={confirming === 'kick' ? 'Expulsar membro' : 'Banir membro'} onClose={onClose}>
-        <p className="text-sm text-discord-text-muted">
+      <Modal
+        title={confirming === 'kick' ? 'Expulsar membro' : 'Banir membro'}
+        onClose={onClose}
+        footer={
+          <>
+            <button onClick={() => setConfirming(null)} className="btn-secondary h-9 px-4 text-sm">
+              Cancelar
+            </button>
+            <button onClick={confirming === 'kick' ? handleKick : handleBan} disabled={loading} className="btn-danger h-9 px-4 text-sm">
+              {loading ? 'Aguarde...' : confirming === 'kick' ? 'Expulsar' : 'Banir'}
+            </button>
+          </>
+        }
+      >
+        <p className="text-[14px] text-discord-text-muted leading-relaxed">
           {confirming === 'kick' ? 'Expulsar' : 'Banir'}{' '}
           <span className="text-white font-medium">{targetProfile.display_name || targetProfile.username}</span> do
           servidor?
           {confirming === 'ban' && ' A pessoa não poderá reentrar mesmo com um convite novo.'}
         </p>
+        <label htmlFor="manage-member-reason" className="field-label mt-4">
+          Motivo (opcional)
+        </label>
         <input
+          id="manage-member-reason"
           type="text"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="Motivo (opcional)"
-          className="w-full mt-3 px-3 py-2.5 rounded bg-discord-darker text-discord-text border-none outline-none focus:ring-2 focus:ring-discord-blurple text-sm"
+          className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm"
         />
-        {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
-        <div className="flex justify-end gap-3 mt-5">
-          <button onClick={() => setConfirming(null)} className="px-4 py-2 text-sm text-discord-text-muted hover:underline">
-            Cancelar
-          </button>
-          <button
-            onClick={confirming === 'kick' ? handleKick : handleBan}
-            disabled={loading}
-            className="px-4 py-2 text-sm rounded btn-danger disabled:opacity-60"
-          >
-            {loading ? 'Aguarde...' : confirming === 'kick' ? 'Expulsar' : 'Banir'}
-          </button>
-        </div>
+        {error && <p className="text-sm text-rose-400 mt-3">{error}</p>}
       </Modal>
     )
   }
 
+  const hasDangerActions = permissions.kick_members || permissions.ban_members
+
   return (
-    <Modal title={`Gerenciar ${targetProfile.display_name || targetProfile.username}`} onClose={onClose}>
-      <div className="space-y-4">
+    <Modal
+      title={`Gerenciar ${targetProfile.display_name || targetProfile.username}`}
+      description={`@${targetProfile.username}`}
+      onClose={onClose}
+      footer={
+        hasDangerActions ? (
+          <>
+            {permissions.kick_members && (
+              <button
+                onClick={() => setConfirming('kick')}
+                className="h-9 px-4 rounded-[10px] text-sm font-medium text-rose-300 border border-rose-500/40 hover:bg-rose-500/10 transition-colors"
+              >
+                Expulsar
+              </button>
+            )}
+            {permissions.ban_members && (
+              <button onClick={() => setConfirming('ban')} className="btn-danger h-9 px-4 text-sm">
+                Banir
+              </button>
+            )}
+          </>
+        ) : undefined
+      }
+    >
+      <div className="space-y-5">
         {roles.length > 0 && permissions.manage_roles && (
           <div>
-            <p className="text-xs font-bold uppercase text-discord-text-muted mb-2">Cargos</p>
-            <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+            <p className="field-label">Cargos</p>
+            <div className="rounded-xl border border-[var(--color-line)] divide-y divide-[var(--color-line)] max-h-52 overflow-y-auto">
               {roles.map((role) => (
-                <label key={role.id} className="flex items-center gap-2.5 text-sm text-discord-text cursor-pointer">
-                  <input
-                    type="checkbox"
+                <div key={role.id} className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white/[0.015]">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: role.color }} />
+                  <span className="flex-1 text-[14px] text-discord-text truncate">{role.name}</span>
+                  <Toggle
+                    size="sm"
+                    label={`Cargo ${role.name}`}
                     checked={memberRoleIds.has(role.id)}
                     onChange={() => handleToggleRole(role.id)}
-                    className="w-4 h-4 accent-discord-blurple"
                   />
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: role.color }} />
-                  {role.name}
-                </label>
+                </div>
               ))}
             </div>
           </div>
@@ -126,13 +157,13 @@ export function ManageMemberModal({
 
         {permissions.timeout_members && (
           <div>
-            <p className="text-xs font-bold uppercase text-discord-text-muted mb-2">Silenciar (timeout)</p>
-            <div className="flex flex-wrap gap-2">
+            <p className="field-label">Silenciar (timeout)</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {TIMEOUT_PRESETS.map((preset) => (
                 <button
                   key={preset.minutes}
                   onClick={() => handleTimeout(preset.minutes)}
-                  className="px-3 py-1.5 rounded bg-discord-darker text-discord-text text-xs hover:bg-discord-lighter transition-colors"
+                  className="h-9 rounded-[10px] bg-white/[0.03] border border-[var(--color-line)] text-discord-text text-[13px] font-medium hover:bg-white/[0.07] hover:border-[var(--color-line-strong)] transition-colors"
                 >
                   {preset.label}
                 </button>
@@ -141,26 +172,7 @@ export function ManageMemberModal({
           </div>
         )}
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
-
-        <div className="flex gap-2 pt-2">
-          {permissions.kick_members && (
-            <button
-              onClick={() => setConfirming('kick')}
-              className="flex-1 py-2.5 rounded border border-red-600 text-red-500 hover:bg-red-600/10 transition-colors text-sm"
-            >
-              Expulsar
-            </button>
-          )}
-          {permissions.ban_members && (
-            <button
-              onClick={() => setConfirming('ban')}
-              className="flex-1 py-2.5 rounded bg-red-600 text-white hover:bg-red-700 transition-colors text-sm"
-            >
-              Banir
-            </button>
-          )}
-        </div>
+        {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>
     </Modal>
   )

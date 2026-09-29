@@ -4,10 +4,13 @@ import { useVoice } from '../../hooks/useVoice'
 import { useConnectionPing } from '../../hooks/useConnectionPing'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { Avatar } from '../ui/Avatar'
-import { EditProfileModal } from '../modals/EditProfileModal'
-import { SettingsModal } from '../modals/SettingsModal'
-import { SoundboardPanel } from '../ui/SoundboardPanel'
 import type { ProfileStatus } from '../../types/database'
+import { lazyModal } from '../modals/lazyModal'
+
+// Modais/painéis carregados só quando abertos (fora do pacote inicial).
+const EditProfileModal = lazyModal(() => import('../modals/EditProfileModal').then((m) => m.EditProfileModal))
+const SettingsModal = lazyModal(() => import('../modals/SettingsModal').then((m) => m.SettingsModal))
+const SoundboardPanel = lazyModal(() => import('../ui/SoundboardPanel').then((m) => m.SoundboardPanel))
 
 const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
   { value: 'online', label: 'Online', dot: 'bg-discord-green' },
@@ -180,10 +183,10 @@ function HudSquareButton({
       onClick={onClick}
       title={title}
       aria-label={title}
-      className={`aspect-square rounded-md flex items-center justify-center transition-colors ${
+      className={`h-8 rounded-lg flex items-center justify-center transition-colors ${
         active
           ? 'bg-discord-blurple/20 text-discord-blurple hover:bg-discord-blurple/30'
-          : 'bg-discord-lighter/70 text-discord-text-muted hover:bg-discord-lighter hover:text-white'
+          : 'bg-white/[0.06] text-discord-text-muted hover:bg-white/[0.1] hover:text-white'
       }`}
     >
       {children}
@@ -208,7 +211,7 @@ export function PlayingActivityCard() {
     : 'Jogando agora'
 
   return (
-    <div className="mx-2 mt-2 px-3 py-2 rounded-lg bg-discord-darker/60 flex items-center gap-2.5 shrink-0">
+    <div className="mx-2 mt-2 px-3 py-2 rounded-xl bg-white/[0.04] border border-[var(--color-line)] flex items-center gap-2.5 shrink-0">
       <span className="text-base shrink-0">🎮</span>
       <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold text-white truncate leading-tight">{profile.playing}</p>
@@ -238,7 +241,7 @@ function VoiceHud() {
   }
 
   return (
-    <div className="mx-2 mt-2 rounded-lg bg-discord-darker/60 overflow-hidden shrink-0">
+    <div className="mx-2 mt-2 rounded-xl bg-discord-green/[0.07] border border-discord-green/20 overflow-hidden shrink-0">
       <div className="px-3 py-2.5 flex items-center gap-2.5">
         <BroadcastIcon className="w-4 h-4 text-discord-green shrink-0" />
         <div className="min-w-0 flex-1">
@@ -337,13 +340,14 @@ export function UserPanel() {
   if (!profile) return null
 
   return (
-    <div className="shrink-0">
+    <div className="shrink-0 p-2 bg-discord-darker">
+      <div className="rounded-2xl bg-[var(--color-elevated)] border border-[var(--color-line)] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.7)]">
       {/* Faixa de ping — ACIMA do painel principal (pedido explícito),
           igual uma barra de status permanente. Sempre visível, não só
           durante uma call, pra sempre dar uma noção de conexão. */}
       <div
         title={pingLabel}
-        className="h-6 px-3 flex items-center gap-1.5 bg-discord-darker/40 border-t border-black/10"
+        className="h-7 px-3 flex items-center gap-1.5 border-b border-[var(--color-line)]"
       >
         <WifiSignalIcon pingMs={pingMs} size={12} />
         <span className="text-[10px] text-discord-text-muted truncate">
@@ -354,10 +358,12 @@ export function UserPanel() {
       <PlayingActivityCard />
       <VoiceHud />
 
-      <div className="relative h-16 bg-discord-darker/60 px-3 flex items-center gap-2 border-t border-black/10 mt-2" ref={menuRef}>
+      <div className="relative h-14 px-1.5 flex items-center gap-0.5" ref={menuRef}>
       <button
         onClick={() => setMenuOpen((v) => !v)}
-        className="flex items-center gap-2.5 flex-1 min-w-0 px-1.5 py-1.5 rounded hover:bg-white/5 transition-colors"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        className="flex items-center gap-2.5 flex-1 min-w-0 px-1.5 py-1.5 rounded-xl hover:bg-white/[0.06] transition-colors"
       >
         <Avatar
           name={profile.username}
@@ -393,8 +399,8 @@ export function UserPanel() {
           title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
           aria-label={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
           onClick={voice.toggleMute}
-          className={`w-9 h-9 rounded flex items-center justify-center transition-colors ${
-            voice.deafened || voice.muted ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
+          className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+            voice.deafened || voice.muted ? 'text-rose-400 bg-rose-500/10 hover:bg-rose-500/20' : 'text-discord-text-muted hover:bg-white/[0.08] hover:text-white'
           }`}
         >
           <MicIcon muted={voice.deafened || voice.muted} className="w-5 h-5" />
@@ -406,12 +412,12 @@ export function UserPanel() {
             e.stopPropagation()
             setMicMenuOpen((v) => !v)
           }}
-          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-discord-darker text-discord-text-muted hover:text-white flex items-center justify-center ring-2 ring-discord-darker"
+          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-discord-lighter text-discord-text-muted hover:text-white hover:bg-discord-blurple flex items-center justify-center ring-2 ring-[var(--color-elevated)] transition-colors"
         >
           <ChevronIcon className="w-2.5 h-2.5" />
         </button>
         {micMenuOpen && (
-          <div className="absolute bottom-full right-0 mb-2 w-56 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2 z-20">
+          <div className="absolute bottom-full right-0 mb-2 w-56 surface-elevated rounded-xl animate-pop-in p-2 z-20">
             {voice.audioSettings.microphones.length > 0 && (
               <div className="mb-1.5">
                 <p className="text-[10px] font-bold uppercase text-discord-text-muted px-1 mb-1">Microfone</p>
@@ -449,8 +455,8 @@ export function UserPanel() {
           title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
           aria-label={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
           onClick={voice.toggleDeafen}
-          className={`w-9 h-9 rounded flex items-center justify-center transition-colors ${
-            voice.deafened ? 'text-red-400 hover:bg-white/10' : 'text-discord-text-muted hover:bg-white/10 hover:text-white'
+          className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+            voice.deafened ? 'text-rose-400 bg-rose-500/10 hover:bg-rose-500/20' : 'text-discord-text-muted hover:bg-white/[0.08] hover:text-white'
           }`}
         >
           <HeadphoneIcon off={voice.deafened} className="w-5 h-5" />
@@ -462,12 +468,12 @@ export function UserPanel() {
             e.stopPropagation()
             setHeadphoneMenuOpen((v) => !v)
           }}
-          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-discord-darker text-discord-text-muted hover:text-white flex items-center justify-center ring-2 ring-discord-darker"
+          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-discord-lighter text-discord-text-muted hover:text-white hover:bg-discord-blurple flex items-center justify-center ring-2 ring-[var(--color-elevated)] transition-colors"
         >
           <ChevronIcon className="w-2.5 h-2.5" />
         </button>
         {headphoneMenuOpen && (
-          <div className="absolute bottom-full right-0 mb-2 w-56 bg-discord-darker rounded-lg shadow-xl border border-black/40 p-2 z-20">
+          <div className="absolute bottom-full right-0 mb-2 w-56 surface-elevated rounded-xl animate-pop-in p-2 z-20">
             {voice.audioSettings.supportsOutputSelection && voice.audioSettings.speakers.length > 0 && (
               <div className="mb-1.5">
                 <p className="text-[10px] font-bold uppercase text-discord-text-muted px-1 mb-1">Saída de áudio</p>
@@ -513,13 +519,13 @@ export function UserPanel() {
         title="Configurações"
         aria-label="Configurações"
         onClick={() => setShowSettings(true)}
-        className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10 text-discord-text-muted hover:text-white transition-colors shrink-0"
+        className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/[0.08] text-discord-text-muted hover:text-white hover:rotate-45 transition-all duration-300 shrink-0"
       >
         <GearIcon className="w-5 h-5" />
       </button>
 
       {menuOpen && (
-        <div className="absolute bottom-full left-2 mb-2 w-52 bg-discord-darker rounded-md shadow-xl border border-black/40 py-1.5 z-20">
+        <div className="absolute bottom-full left-2 mb-2 w-52 surface-elevated rounded-xl animate-pop-in py-1.5 z-20">
           <p className="px-3 pt-1 pb-1.5 text-xs font-bold uppercase text-discord-text-muted">Definir status</p>
           {STATUS_OPTIONS.map((opt) => (
             <button
@@ -560,6 +566,7 @@ export function UserPanel() {
 
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      </div>
       </div>
     </div>
   )

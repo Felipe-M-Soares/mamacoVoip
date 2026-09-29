@@ -1,6 +1,6 @@
 # Migrations do Mamacos Voip
 
-São **11 arquivos**, em `migrations/` (001 a 012, sem o 006 — nunca
+São **12 arquivos**, em `migrations/` (001 a 013, sem o 006 — nunca
 existiu). Rode todos eles, em ordem, no SQL Editor do Supabase. Se
 preferir rodar tudo de uma vez, use o arquivo único consolidado
 (`mamacoVoip_setup_completo.sql`, se você tiver recebido um).
@@ -18,6 +18,20 @@ preferir rodar tudo de uma vez, use o arquivo único consolidado
 | `010_google_oauth_profile.sql` | Perfil automático ao entrar com Google |
 | `011_security_hardening.sql` | Correções de segurança (RLS, permissões órfãs, funções `security definer`) |
 | `012_content_reports.sql` | Sistema de denúncias |
+| `013_audit_fixes.sql` | Auditoria de segurança: 2FA cobrado no banco, bloqueio de mover/forjar mensagens, grupos de DM fechados, hierarquia de cargos, convites fortes, validação de perfil/URLs, Storage, limites anti-flood e índices |
+
+### Depois de rodar a 013
+
+- Quem tem 2FA ativado passa a ser **obrigado** a digitar o código pra
+  a API responder (antes era só a tela do app que cobrava).
+- Funções RPC deixam de ser chamáveis sem login (papel `anon`), exceto
+  `is_username_available` (usada no cadastro).
+- Confira em **Storage → Policies** se existem políticas antigas no
+  bucket `soundboard` com nomes diferentes de `soundboard_objects_*` —
+  políticas se somam, então uma antiga mais permissiva continuaria
+  valendo.
+- Se aparecer o aviso "Existem usernames repetidos ignorando
+  maiúsculas", resolva as duplicatas e rode a 013 de novo.
 
 ## Pode rodar de novo sem medo
 

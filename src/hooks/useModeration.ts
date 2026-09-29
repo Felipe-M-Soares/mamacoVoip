@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import type { Ban, ModerationLog, Permission, Profile } from '../types/database'
 
 export type BanWithProfile = Ban & { profile: Profile }
 export type LogWithProfiles = ModerationLog & { actor: Profile | undefined; target: Profile | undefined }
+
+// Mesmo teto do banco (migration 013) e do Discord: 28 dias.
+export const MAX_TIMEOUT_MINUTES = 28 * 24 * 60
+const MAX_REASON_LENGTH = 500
+
+function cleanReason(reason: string | undefined): string | undefined {
+  const trimmed = reason?.trim()
+  return trimmed ? trimmed.slice(0, MAX_REASON_LENGTH) : undefined
+}
 
 export function useModeration(serverId: string | null) {
   const { user } = useAuth()
@@ -26,15 +35,38 @@ export function useModeration(serverId: string | null) {
       'timeout_members',
       'view_audit_log',
     ]
+    const map = {} as Record<Permission, boolean>
+
+    // Uma chamada só (my_permissions, migration 013) em vez de 9
+    // chamadas de has_permission a cada abertura/atualização. Se a
+    // função ainda não existir no banco, cai pro jeito antigo.
+    const rpcAny = supabase.rpc.bind(supabase) as unknown as (
+      fn: string,
+      args: Record<string, unknown>
+    ) => Promise<{ data: unknown; error: unknown }>
+    const { data: granted, error: grantedError } = await rpcAny('my_permissions', { p_server_id: serverId })
+    if (!grantedError && Array.isArray(granted)) {
+      const set = new Set(granted as string[])
+      const isAdmin = set.has('administrator')
+      perms.forEach((p) => {
+        map[p] = isAdmin || set.has(p)
+      })
+      return map
+    }
+
     const results = await Promise.all(
       perms.map((p) => supabase.rpc('has_permission', { p_server_id: serverId, p_user_id: user.id, p_permission: p }))
     )
-    const map = {} as Record<Permission, boolean>
     perms.forEach((p, i) => {
       map[p] = Boolean(results[i].data)
     })
     return map
   }, [serverId, user])
+
+  // Evita que a resposta atrasada de um servidor anterior sobrescreva a
+  // do servidor atual (trocar de servidor rápido mostrava banidos/log do
+  // servidor errado por um instante).
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!serverId) {
@@ -45,8 +77,10 @@ export function useModeration(serverId: string | null) {
       return
     }
     setLoading(true)
+    const requestId = ++requestIdRef.current
 
     const perms = await checkPermissions()
+    if (requestId !== requestIdRef.current) return
     setPermissions(perms)
 
     const [{ data: banRows }, { data: logRows }] = await Promise.all([
@@ -65,6 +99,7 @@ export function useModeration(serverId: string | null) {
 
     const { data: profiles } =
       userIds.size > 0 ? await supabase.from('profiles').select('*').in('id', Array.from(userIds)) : { data: [] as Profile[] }
+    if (requestId !== requestIdRef.current) return
     const profileById = new Map((profiles ?? []).map((p) => [p.id, p]))
 
     setBans(
@@ -93,6 +128,7 @@ export function useModeration(serverId: string | null) {
 
   async function kickMember(userId: string, reason?: string) {
     if (!serverId) return { error: 'Nenhum servidor selecionado' }
+    reason = cleanReason(reason)
     const { error } = await supabase.rpc('kick_member', { p_server_id: serverId, p_user_id: userId, p_reason: reason ?? null })
     if (!error) await refresh()
     return { error: error?.message ?? null }
@@ -100,6 +136,7 @@ export function useModeration(serverId: string | null) {
 
   async function banMember(userId: string, reason?: string) {
     if (!serverId) return { error: 'Nenhum servidor selecionado' }
+    reason = cleanReason(reason)
     const { error } = await supabase.rpc('ban_member', { p_server_id: serverId, p_user_id: userId, p_reason: reason ?? null })
     if (!error) await refresh()
     return { error: error?.message ?? null }
@@ -114,6 +151,10 @@ export function useModeration(serverId: string | null) {
 
   async function timeoutMember(userId: string, minutes: number, reason?: string) {
     if (!serverId) return { error: 'Nenhum servidor selecionado' }
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_TIMEOUT_MINUTES) {
+      return { error: 'Duração de silenciamento inválida (máximo 28 dias).' }
+    }
+    reason = cleanReason(reason)
     const { error } = await supabase.rpc('timeout_member', {
       p_server_id: serverId,
       p_user_id: userId,

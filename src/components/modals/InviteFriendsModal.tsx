@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
+import { CheckMark, EmptyState } from './settingsUI'
 import { Avatar } from '../ui/Avatar'
 import { useAuth } from '../../hooks/useAuth'
 import { useFriends } from '../../context/FriendsContext'
@@ -72,52 +73,69 @@ export function InviteFriendsModal({
   }
 
   return (
-    <Modal title="Chamar amigos" onClose={onClose}>
+    <Modal
+      title="Chamar amigos"
+      description={
+        channelName
+          ? `Manda um convite direto por DM pra entrar na sala "${channelName}".`
+          : 'Manda um convite direto por DM pra entrar neste servidor.'
+      }
+      onClose={onClose}
+      footer={
+        friends.length > 0 ? (
+          <>
+            <button onClick={onClose} className="btn-secondary h-9 px-4 text-sm">
+              Fechar
+            </button>
+            <button onClick={handleSend} disabled={loading || selected.size === 0} className="btn-primary h-9 px-4 text-sm">
+              {loading ? 'Enviando...' : `Chamar${selected.size > 0 ? ` (${selected.size})` : ''}`}
+            </button>
+          </>
+        ) : undefined
+      }
+    >
       <div className="space-y-4">
-        <p className="text-sm text-discord-text-muted">
-          {channelName
-            ? `Manda um convite direto por DM pra entrar na sala "${channelName}".`
-            : 'Manda um convite direto por DM pra entrar neste servidor.'}
-        </p>
 
         {friends.length === 0 ? (
-          <p className="text-sm text-discord-text-muted">
-            Você ainda não tem amigos adicionados. Adicione alguém na aba Amigos primeiro.
-          </p>
+          <EmptyState
+            icon={
+              <>
+                <circle cx="9" cy="8" r="3.5" />
+                <path d="M2.5 20a6.5 6.5 0 0 1 13 0M19 8v6M16 11h6" />
+              </>
+            }
+            title="Nenhum amigo ainda"
+            hint="Você ainda não tem amigos adicionados. Adicione alguém na aba Amigos primeiro."
+          />
         ) : (
-          <div className="space-y-1 max-h-64 overflow-y-auto">
+          <div className="space-y-0.5 max-h-72 overflow-y-auto -mx-1 px-1">
             {friends.map((f) => (
               <label
                 key={f.profile.id}
-                className="flex items-center gap-3 px-2 py-2 rounded hover:bg-white/5 cursor-pointer"
+                className={`flex items-center gap-3 px-2.5 py-2 rounded-[10px] cursor-pointer transition-colors ${
+                  selected.has(f.profile.id) ? 'bg-discord-blurple/[0.12]' : 'hover:bg-white/[0.05]'
+                }`}
               >
                 <input
                   type="checkbox"
                   checked={selected.has(f.profile.id)}
                   onChange={() => toggle(f.profile.id)}
-                  className="w-4 h-4 accent-discord-blurple"
+                  className="sr-only peer"
                 />
+                <span className="rounded-md peer-focus-visible:ring-2 peer-focus-visible:ring-discord-blurple">
+                  <CheckMark checked={selected.has(f.profile.id)} />
+                </span>
                 <Avatar name={f.profile.username} avatarUrl={f.profile.avatar_url} status={f.profile.status} userId={f.profile.id} size={32} />
                 <span className="text-sm text-white flex-1 truncate">
                   {f.profile.display_name || f.profile.username}
                 </span>
-                {sentTo.has(f.profile.id) && <span className="text-xs text-discord-green">Enviado!</span>}
+                {sentTo.has(f.profile.id) && <span className="chip !text-discord-green !border-discord-green/30 !bg-discord-green/10">Enviado</span>}
               </label>
             ))}
           </div>
         )}
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
-
-        {friends.length > 0 && (
-          <button
-            onClick={handleSend}
-            disabled={loading || selected.size === 0}
-            className="w-full py-2.5 rounded btn-primary disabled:opacity-60"
-          >
-            {loading ? 'Enviando...' : `Chamar${selected.size > 0 ? ` (${selected.size})` : ''}`}
-          </button>
-        )}
+        {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>
     </Modal>
   )

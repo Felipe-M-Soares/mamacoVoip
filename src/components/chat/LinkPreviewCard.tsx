@@ -27,7 +27,7 @@ export function LinkPreviewCard({ url }: { url: string }) {
   if (isDirectImageUrl(url)) {
     return (
       <a href={url} target="_blank" rel="noopener noreferrer" className="mt-2 block max-w-sm">
-        <img src={url} alt="" className="rounded-lg max-h-80 object-cover border border-black/20" />
+        <img src={url} alt="" className="rounded-xl max-h-80 object-cover border border-[var(--color-line)]" />
       </a>
     )
   }
@@ -44,16 +44,16 @@ function LinkPreviewCardInner({ url }: { url: string }) {
       href={data.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="mt-2 flex max-w-md rounded-lg overflow-hidden border border-white/10 bg-discord-darker hover:bg-discord-darker/70 transition-colors"
+      className="mt-2 flex max-w-md rounded-xl overflow-hidden border border-[var(--color-line)] border-l-[3px] border-l-discord-blurple bg-discord-darker/70 hover:bg-discord-darker hover:border-[var(--color-line-strong)] transition-colors"
     >
       {data.image && (
         <img src={data.image} alt="" className="w-28 shrink-0 object-cover" onError={(e) => (e.currentTarget.style.display = 'none')} />
       )}
-      <div className="min-w-0 p-3">
-        <p className="text-[10px] uppercase text-discord-text-muted truncate">{data.siteName}</p>
-        {data.title && <p className="text-sm font-medium text-discord-blurple truncate">{data.title}</p>}
+      <div className="min-w-0 px-3.5 py-3 flex-1">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-discord-text-muted truncate">{data.siteName}</p>
+        {data.title && <p className="text-sm font-semibold text-discord-text hover:underline truncate mt-0.5">{data.title}</p>}
         {data.description && (
-          <p className="text-xs text-discord-text-muted mt-0.5 line-clamp-2">{data.description}</p>
+          <p className="text-xs text-discord-text-muted mt-1 line-clamp-2 leading-relaxed">{data.description}</p>
         )}
       </div>
     </a>

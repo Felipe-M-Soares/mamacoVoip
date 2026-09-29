@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { uniqueTopic } from '../lib/realtimeChannel'
 import { useAuth } from './useAuth'
 import { useChannelMutes } from './useChannelMutes'
 import { notify } from '../lib/notifications'
@@ -7,73 +8,198 @@ import { describeError } from '../lib/errors'
 import { rateLimitError } from '../lib/rateLimit'
 import type { Message, MessageAttachment, MessageReaction } from '../types/database'
 
+// Quantas mensagens buscar por "página" (carga inicial e cada "carregar
+// mais antigas" ao rolar pro topo).
+export const MESSAGE_PAGE_SIZE = 50
+
+const EMPTY_MESSAGES: Message[] = []
+const EMPTY_MAP: Record<string, never[]> = {}
+
+type AttachmentMap = Record<string, MessageAttachment[]>
+type ReactionMap = Record<string, MessageReaction[]>
+
+function groupByMessage<T extends { message_id: string }>(rows: T[] | null | undefined): Record<string, T[]> {
+  const map: Record<string, T[]> = {}
+  for (const row of rows ?? []) (map[row.message_id] ??= []).push(row)
+  return map
+}
+
+function sameReaction(a: MessageReaction, b: Pick<MessageReaction, 'message_id' | 'user_id' | 'emoji'>) {
+  return a.message_id === b.message_id && a.user_id === b.user_id && a.emoji === b.emoji
+}
+
+async function fetchExtras(messageIds: string[]): Promise<{ attachments: AttachmentMap; reactions: ReactionMap }> {
+  if (messageIds.length === 0) return { attachments: {}, reactions: {} }
+  const [{ data: atts }, { data: reacts }] = await Promise.all([
+    supabase.from('message_attachments').select('*').in('message_id', messageIds),
+    supabase.from('message_reactions').select('*').in('message_id', messageIds),
+  ])
+  return { attachments: groupByMessage(atts), reactions: groupByMessage(reacts) }
+}
+
 export function useMessages(channelId: string | null, serverId: string | null, threadId: string | null = null) {
   const { user, profile } = useAuth()
   const { getLevel } = useChannelMutes()
   const [messages, setMessages] = useState<Message[]>([])
-  const [attachments, setAttachments] = useState<Record<string, MessageAttachment[]>>({})
-  const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({})
+  const [attachments, setAttachments] = useState<AttachmentMap>({})
+  const [reactions, setReactions] = useState<ReactionMap>({})
   const [loading, setLoading] = useState(true)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  // Qual visão (canal/thread) o estado atual realmente representa — usado
+  // pra nunca devolver, nem por um render, mensagens do canal ANTERIOR
+  // logo depois de trocar de canal.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
+
   const messagesRef = useRef<Message[]>([])
   messagesRef.current = messages
+  const reactionsRef = useRef<ReactionMap>({})
+  reactionsRef.current = reactions
+  // Valores usados DENTRO dos callbacks do tempo real ficam em refs — antes
+  // o efeito de assinatura capturava o `profile`/`getLevel` do momento em
+  // que assinou e nunca mais via atualização (ex.: silenciar o canal não
+  // parava as notificações até trocar de canal).
+  const userIdRef = useRef(user?.id)
+  userIdRef.current = user?.id
+  const usernameRef = useRef(profile?.username)
+  usernameRef.current = profile?.username
+  const getLevelRef = useRef(getLevel)
+  getLevelRef.current = getLevel
 
-  const refreshExtras = useCallback(async (messageIds: string[]) => {
-    if (messageIds.length === 0) {
-      setAttachments({})
-      setReactions({})
-      return
-    }
-    const [{ data: atts }, { data: reacts }] = await Promise.all([
-      supabase.from('message_attachments').select('*').in('message_id', messageIds),
-      supabase.from('message_reactions').select('*').in('message_id', messageIds),
-    ])
+  // "Qual visão está ativa agora" — toda resposta de rede confere isso
+  // antes de mexer no estado. Antes, trocar de canal rápido deixava a
+  // resposta ATRASADA do canal anterior sobrescrever as mensagens do canal
+  // novo (e o `CLOSED` disparado pela limpeza da assinatura antiga ainda
+  // chamava um refresh do canal antigo).
+  const viewKey = `${channelId ?? ''}|${threadId ?? ''}`
+  const viewKeyRef = useRef(viewKey)
+  viewKeyRef.current = viewKey
+  const loadSeqRef = useRef(0)
 
-    const attMap: Record<string, MessageAttachment[]> = {}
-    for (const a of atts ?? []) {
-      attMap[a.message_id] = [...(attMap[a.message_id] ?? []), a]
-    }
-    setAttachments(attMap)
-
-    const reactMap: Record<string, MessageReaction[]> = {}
-    for (const r of reacts ?? []) {
-      reactMap[r.message_id] = [...(reactMap[r.message_id] ?? []), r]
-    }
-    setReactions(reactMap)
-  }, [])
-
-  const refresh = useCallback(async () => {
-    if (!channelId) {
-      setMessages([])
-      setAttachments({})
-      setReactions({})
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    let query = supabase.from('messages').select('*').order('created_at', { ascending: true }).limit(100)
+  const buildQuery = useCallback(() => {
+    const base = supabase.from('messages').select('*')
     // Mensagens de dentro de uma thread ficam separadas das mensagens
     // "normais" do canal — sem esse filtro, elas apareceriam
     // duplicadas na visão principal do canal.
-    query = threadId ? query.eq('thread_id', threadId) : query.eq('channel_id', channelId).is('thread_id', null)
-    const { data } = await query
+    return threadId ? base.eq('thread_id', threadId) : base.eq('channel_id', channelId ?? '').is('thread_id', null)
+  }, [channelId, threadId])
 
-    const list = data ?? []
-    setMessages(list)
-    await refreshExtras(list.map((m) => m.id))
-    setLoading(false)
-  }, [channelId, threadId, refreshExtras])
+  // Busca a página MAIS RECENTE. Antes a busca era `ascending: true` +
+  // `limit(100)`, o que trazia as 100 mensagens MAIS ANTIGAS do canal — em
+  // qualquer canal com mais de 100 mensagens, as recentes simplesmente não
+  // apareciam ao abrir.
+  // `silent` = ressincronização (reconexão do tempo real): não mostra
+  // skeleton e preserva as páginas antigas já carregadas.
+  const load = useCallback(
+    async (silent: boolean) => {
+      const key = viewKey
+      const seq = ++loadSeqRef.current
+      if (!channelId) {
+        setMessages([])
+        setAttachments({})
+        setReactions({})
+        setHasMore(false)
+        setLoading(false)
+        setLoadedKey(key)
+        return
+      }
+      if (!silent) setLoading(true)
+      try {
+        const { data, error } = await buildQuery().order('created_at', { ascending: false }).limit(MESSAGE_PAGE_SIZE)
+        if (error) throw error
+        const page = (data ?? []).reverse()
+        const extras = await fetchExtras(page.map((m) => m.id))
+        if (key !== viewKeyRef.current || seq !== loadSeqRef.current) return
 
+        if (silent && page.length > 0) {
+          const oldestNew = page[0].created_at
+          setMessages((prev) => [...prev.filter((m) => m.created_at < oldestNew), ...page])
+          setAttachments((prev) => ({ ...prev, ...extras.attachments }))
+          setReactions((prev) => {
+            const next = { ...prev, ...extras.reactions }
+            // mensagens da página que ficaram SEM reação precisam ser limpas
+            for (const m of page) if (!extras.reactions[m.id]) delete next[m.id]
+            return next
+          })
+        } else {
+          setMessages(page)
+          setAttachments(extras.attachments)
+          setReactions(extras.reactions)
+          setHasMore(page.length === MESSAGE_PAGE_SIZE)
+          setLoadedKey(key)
+        }
+        setLoadError(null)
+      } catch (err) {
+        if (key !== viewKeyRef.current || seq !== loadSeqRef.current) return
+        setLoadError(describeError(err, 'Não foi possível carregar as mensagens.'))
+        if (!silent) setLoadedKey(key)
+      } finally {
+        if (key === viewKeyRef.current && seq === loadSeqRef.current) setLoading(false)
+      }
+    },
+    [viewKey, channelId, buildQuery]
+  )
+
+  // Troca de canal/thread: limpa na hora (sem mostrar as mensagens do canal
+  // anterior enquanto o novo carrega) e busca a página mais recente.
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    setMessages([])
+    setAttachments({})
+    setReactions({})
+    setHasMore(false)
+    setLoadError(null)
+    void load(false)
+  }, [load])
+
+  const refresh = useCallback(() => load(false), [load])
+
+  // Rolagem infinita pra cima: busca a página anterior à mensagem mais
+  // antiga já carregada.
+  const loadingOlderRef = useRef(false)
+  const loadOlder = useCallback(async () => {
+    const oldest = messagesRef.current[0]
+    if (!channelId || !oldest || loadingOlderRef.current) return
+    const key = viewKey
+    loadingOlderRef.current = true
+    setLoadingOlder(true)
+    try {
+      const { data, error } = await buildQuery()
+        .lt('created_at', oldest.created_at)
+        .order('created_at', { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE)
+      if (error) throw error
+      const page = (data ?? []).reverse()
+      const extras = await fetchExtras(page.map((m) => m.id))
+      if (key !== viewKeyRef.current) return
+      setMessages((prev) => {
+        const known = new Set(prev.map((m) => m.id))
+        return [...page.filter((m) => !known.has(m.id)), ...prev]
+      })
+      setAttachments((prev) => ({ ...extras.attachments, ...prev }))
+      setReactions((prev) => ({ ...extras.reactions, ...prev }))
+      setHasMore(page.length === MESSAGE_PAGE_SIZE)
+    } catch (err) {
+      if (key === viewKeyRef.current) setLoadError(describeError(err, 'Não foi possível carregar mensagens antigas.'))
+    } finally {
+      loadingOlderRef.current = false
+      if (key === viewKeyRef.current) setLoadingOlder(false)
+    }
+  }, [channelId, viewKey, buildQuery])
 
   // Realtime: novas mensagens, edições e exclusões neste canal (ou
   // nesta thread específica, se threadId estiver definido)
   useEffect(() => {
     if (!channelId) return
+    let active = true
+    let hadProblem = false
+    const belongsHere = (m: Message) => m.channel_id === channelId && (threadId ? m.thread_id === threadId : m.thread_id === null)
+    const isLoaded = (messageId: string) => messagesRef.current.some((m) => m.id === messageId)
 
     const channel = supabase
-      .channel(`messages:${channelId}${threadId ? `:${threadId}` : ''}`)
+      // Nome único por montagem: `supabase.channel(nome)` devolve um canal
+      // já existente com o mesmo nome (ver lib/realtimeChannel.ts).
+      .channel(uniqueTopic(`messages:${channelId}${threadId ? `:${threadId}` : ''}`))
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
@@ -82,14 +208,14 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           // Só aceita a mensagem se ela pertence à mesma "visão" que
           // esse hook está mostrando — canal principal (sem thread) ou
           // a thread específica que foi pedida.
-          const belongsHere = threadId ? newMessage.thread_id === threadId : newMessage.thread_id === null
-          if (!belongsHere) return
+          if (!belongsHere(newMessage)) return
           setMessages((prev) => (prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]))
-          if (newMessage.author_id !== user?.id) {
-            const level = getLevel(newMessage.channel_id)
+          if (newMessage.author_id !== userIdRef.current) {
+            const level = getLevelRef.current(newMessage.channel_id)
+            const username = usernameRef.current
             const mentionsMe =
-              level === 'mentions' && profile?.username
-                ? new RegExp(`@(everyone|here|${profile.username})\\b`, 'i').test(newMessage.content)
+              level === 'mentions' && username
+                ? new RegExp(`@(everyone|here|${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'i').test(newMessage.content)
                 : false
             if (level === 'all' || mentionsMe) {
               notify('Nova mensagem', newMessage.content.slice(0, 120))
@@ -105,133 +231,162 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           setMessages((prev) => (prev.some((m) => m.id === updated.id) ? prev.map((m) => (m.id === updated.id ? updated : m)) : prev))
         }
       )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
-        (payload) => {
-          const deletedId = (payload.old as { id: string }).id
-          setMessages((prev) => prev.filter((m) => m.id !== deletedId))
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'message_reactions' },
-        (payload) => {
-          const row = (payload.new ?? payload.old) as MessageReaction | undefined
-          if (!row) return
-          // só nos importa se a mensagem afetada estiver carregada neste canal
-          if (messagesRef.current.some((m) => m.id === row.message_id)) {
-            refreshExtras(messagesRef.current.map((m) => m.id))
-          }
-        }
-      )
+      // DELETE sem filtro de propósito: o Supabase Realtime NÃO consegue
+      // filtrar eventos de exclusão por coluna (a linha antiga só traz a
+      // chave primária, a tabela não usa REPLICA IDENTITY FULL). Com o
+      // filtro `channel_id=eq.X`, exclusões feitas por OUTRA pessoa nunca
+      // chegavam — a mensagem só sumia depois de recarregar.
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
+        const deletedId = (payload.old as { id?: string }).id
+        if (!deletedId) return
+        setMessages((prev) => (prev.some((m) => m.id === deletedId) ? prev.filter((m) => m.id !== deletedId) : prev))
+      })
+      // Reações: antes QUALQUER reação em QUALQUER canal disparava uma nova
+      // busca de todos os anexos + reações de todas as mensagens carregadas.
+      // Agora aplica só a mudança recebida, direto no estado local.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reactions' }, (payload) => {
+        const row = payload.new as MessageReaction
+        if (!isLoaded(row.message_id)) return
+        setReactions((prev) => {
+          const list = prev[row.message_id] ?? []
+          if (list.some((r) => sameReaction(r, row))) return prev
+          return { ...prev, [row.message_id]: [...list, row] }
+        })
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'message_reactions' }, (payload) => {
+        const row = payload.old as Partial<MessageReaction>
+        if (!row.message_id || !row.user_id || !row.emoji) return
+        const target = row as MessageReaction
+        setReactions((prev) => {
+          const list = prev[target.message_id]
+          if (!list || !list.some((r) => sameReaction(r, target))) return prev
+          return { ...prev, [target.message_id]: list.filter((r) => !sameReaction(r, target)) }
+        })
+      })
       // Sem isso, um anexo (imagem, áudio, arquivo) só aparecia pra
-      // quem enviou (o próprio sendMessage já força um refreshExtras
-      // depois do upload) — quem já estava com o canal aberto só via o
-      // anexo depois de trocar de canal ou recarregar a página, porque
-      // a mensagem em si chegava por tempo real mas o anexo, não. As
-      // outras duas versões desse hook (DMs e grupos) já faziam essa
-      // assinatura; faltava só aqui.
+      // quem enviou — quem já estava com o canal aberto só via o anexo
+      // depois de trocar de canal ou recarregar a página.
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_attachments' }, (payload) => {
         const att = payload.new as MessageAttachment
-        if (messagesRef.current.some((m) => m.id === att.message_id)) {
-          refreshExtras(messagesRef.current.map((m) => m.id))
-        }
+        if (!isLoaded(att.message_id)) return
+        setAttachments((prev) => {
+          const list = prev[att.message_id] ?? []
+          if (list.some((a) => a.id === att.id)) return prev
+          return { ...prev, [att.message_id]: [...list, att] }
+        })
       })
       .subscribe((status, err) => {
-        // Se a conexão em tempo real cair (rede instável, Wi-Fi
-        // oscilando, etc.), sem isso o chat ficava "travado" —
-        // parecia que nada de novo tinha chegado, quando na verdade
-        // só a conexão morreu silenciosamente. Buscando tudo de novo
-        // quando isso acontece, o chat se recupera sozinho sem
-        // precisar que a pessoa atualize a página manualmente.
-        if (status !== 'SUBSCRIBED') {
-          console.error('[useMessages] Status da inscrição em tempo real:', status, err ?? '')
+        // `CLOSED` também é disparado pela PRÓPRIA limpeza do efeito
+        // (removeChannel ao trocar de canal) — sem esse `active`, isso
+        // chamava um refresh do canal ANTIGO por cima do canal novo.
+        if (!active) return
+        if (status === 'SUBSCRIBED') {
+          // Voltou depois de uma queda: busca o que chegou enquanto a
+          // conexão estava fora, sem piscar a tela.
+          if (hadProblem) void load(true)
+          hadProblem = false
+          return
         }
+        console.error('[useMessages] Status da inscrição em tempo real:', status, err ?? '')
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          refresh()
+          hadProblem = true
+          void load(true)
         }
       })
 
     return () => {
-      supabase.removeChannel(channel)
+      active = false
+      void supabase.removeChannel(channel)
     }
-  }, [channelId, threadId, refreshExtras, refresh])
+  }, [channelId, threadId, load])
 
   // Antes, se qualquer chamada aqui dentro lançasse uma exceção (em vez
-  // de resolver normalmente com { error }) — rede instável, RLS/policy
-  // travando de um jeito inesperado, resposta que não é JSON válido —
-  // a promise de sendMessage() quebrava sem passar pelo `return { error
-  // ... }`. Quem chama (MessageComposer) ficava esperando pra sempre:
-  // nenhum erro aparecia E a mensagem não ia pro estado local, então
-  // parecia que "escrever e mandar não faz nada". O try/catch garante
-  // que sempre volta uma resposta, com o motivo real do problema.
-  async function sendMessage(content: string, replyToId: string | null, files: File[] = []) {
-    if (!channelId || !serverId || !user) return { error: 'Não foi possível enviar a mensagem' }
-    // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
-    // flood acidental — por CANAL, não global, pra mandar rápido em um
-    // canal não travar outro.
-    const limited = rateLimitError(`message:channel:${channelId}`, 8, 10_000, 'você está mandando mensagem')
-    if (limited) return { error: limited }
+  // de resolver normalmente com { error }), a promise de sendMessage()
+  // quebrava sem passar pelo `return { error ... }` e o composer ficava
+  // esperando pra sempre. O try/catch garante que sempre volta uma
+  // resposta, com o motivo real do problema.
+  const sendMessage = useCallback(
+    async (content: string, replyToId: string | null, files: File[] = []): Promise<{ error: string | null }> => {
+      const userId = userIdRef.current
+      if (!channelId || !serverId || !userId) return { error: 'Não foi possível enviar a mensagem' }
+      // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
+      // flood acidental — por CANAL, não global.
+      const limited = rateLimitError(`message:channel:${channelId}`, 8, 10_000, 'você está mandando mensagem')
+      if (limited) return { error: limited }
+      const key = viewKey
 
-    try {
-      const { data: message, error } = await supabase
-        .from('messages')
-        .insert({
-          channel_id: channelId,
-          server_id: serverId,
-          author_id: user.id,
-          content,
-          reply_to_id: replyToId ?? undefined,
-          thread_id: threadId ?? undefined,
-        })
-        .select()
-        .single()
+      try {
+        const { data: message, error } = await supabase
+          .from('messages')
+          .insert({
+            channel_id: channelId,
+            server_id: serverId,
+            author_id: userId,
+            content,
+            reply_to_id: replyToId ?? undefined,
+            thread_id: threadId ?? undefined,
+          })
+          .select()
+          .single()
 
-      if (error || !message) return { error: describeError(error, 'Erro ao enviar mensagem') }
+        if (error || !message) return { error: describeError(error, 'Erro ao enviar mensagem') }
 
-      // Mostra a mensagem na hora, sem esperar ela "voltar" pelo canal de
-      // tempo real — antes, o app dependia inteiramente do evento de
-      // tempo real chegar de volta pra mostrar a PRÓPRIA mensagem que
-      // você acabou de mandar. Se esse evento atrasasse ou falhasse, a
-      // mensagem ficava salva no banco mas nunca aparecia sozinha (só
-      // depois de atualizar a página, que busca tudo de novo do zero).
-      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
-
-      const attachmentErrors: string[] = []
-      for (const file of files) {
-        const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
-        const path = `${serverId}/${channelId}/${message.id}-${safeName}`
-        const { error: uploadError } = await supabase.storage
-          .from('attachments')
-          .upload(path, file, { contentType: file.type || 'application/octet-stream' })
-        if (uploadError) {
-          attachmentErrors.push(describeError(uploadError, 'Falha ao subir o anexo'))
-          continue
+        // Mostra a mensagem na hora, sem esperar ela "voltar" pelo canal de
+        // tempo real.
+        if (key === viewKeyRef.current) {
+          setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
         }
 
-        const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(path)
-        const { error: attError } = await supabase.from('message_attachments').insert({
-          message_id: message.id,
-          file_url: urlData.publicUrl,
-          file_name: file.name,
-          file_size: file.size,
-          mime_type: file.type || 'application/octet-stream',
-        })
-        if (attError) attachmentErrors.push(describeError(attError, 'Falha ao registrar o anexo'))
-      }
+        const attachmentErrors: string[] = []
+        const inserted: MessageAttachment[] = []
+        for (const file of files) {
+          const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
+          const path = `${serverId}/${channelId}/${message.id}-${safeName}`
+          const { error: uploadError } = await supabase.storage
+            .from('attachments')
+            .upload(path, file, { contentType: file.type || 'application/octet-stream' })
+          if (uploadError) {
+            attachmentErrors.push(describeError(uploadError, 'Falha ao subir o anexo'))
+            continue
+          }
 
-      if (files.length > 0) await refreshExtras([...messagesRef.current.map((m) => m.id), message.id])
-      if (attachmentErrors.length > 0) {
-        return { error: `Mensagem enviada, mas o anexo falhou: ${attachmentErrors[0]}` }
-      }
-      return { error: null }
-    } catch (err) {
-      return { error: describeError(err, 'Erro ao enviar mensagem') }
-    }
-  }
+          const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(path)
+          const { data: att, error: attError } = await supabase
+            .from('message_attachments')
+            .insert({
+              message_id: message.id,
+              file_url: urlData.publicUrl,
+              file_name: file.name,
+              file_size: file.size,
+              mime_type: file.type || 'application/octet-stream',
+            })
+            .select()
+            .single()
+          if (attError) attachmentErrors.push(describeError(attError, 'Falha ao registrar o anexo'))
+          else if (att) inserted.push(att)
+        }
 
-  async function editMessage(messageId: string, content: string) {
+        // Só os anexos DESTA mensagem entram no estado — antes isso buscava
+        // de novo os anexos + reações de todas as mensagens carregadas.
+        if (inserted.length > 0 && key === viewKeyRef.current) {
+          setAttachments((prev) => {
+            const list = prev[message.id] ?? []
+            const known = new Set(list.map((a) => a.id))
+            return { ...prev, [message.id]: [...list, ...inserted.filter((a) => !known.has(a.id))] }
+          })
+        }
+        if (attachmentErrors.length > 0) {
+          return { error: `Mensagem enviada, mas o anexo falhou: ${attachmentErrors[0]}` }
+        }
+        return { error: null }
+      } catch (err) {
+        return { error: describeError(err, 'Erro ao enviar mensagem') }
+      }
+    },
+    [channelId, serverId, threadId, viewKey]
+  )
+
+  const editMessage = useCallback(async (messageId: string, content: string) => {
     try {
       const { data, error } = await supabase.from('messages').update({ content }).eq('id', messageId).select().single()
       if (error) return { error: describeError(error, 'Não foi possível editar a mensagem') }
@@ -240,9 +395,9 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     } catch (err) {
       return { error: describeError(err, 'Não foi possível editar a mensagem') }
     }
-  }
+  }, [])
 
-  async function deleteMessage(messageId: string) {
+  const deleteMessage = useCallback(async (messageId: string) => {
     try {
       const { error } = await supabase.from('messages').delete().eq('id', messageId)
       if (error) return { error: describeError(error, 'Não foi possível excluir a mensagem') }
@@ -251,58 +406,108 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     } catch (err) {
       return { error: describeError(err, 'Não foi possível excluir a mensagem') }
     }
-  }
+  }, [])
 
-  async function pinMessage(messageId: string) {
-    if (!user) return { error: 'Não autenticado' }
-    const { error } = await supabase
-      .from('messages')
-      .update({ pinned_at: new Date().toISOString(), pinned_by: user.id })
-      .eq('id', messageId)
-    return { error: error?.message ?? null }
-  }
+  const pinMessage = useCallback(async (messageId: string) => {
+    const userId = userIdRef.current
+    if (!userId) return { error: 'Não autenticado' }
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .update({ pinned_at: new Date().toISOString(), pinned_by: userId })
+        .eq('id', messageId)
+        .select()
+        .single()
+      if (error) return { error: describeError(error, 'Não foi possível fixar a mensagem') }
+      if (data) setMessages((prev) => prev.map((m) => (m.id === messageId ? data : m)))
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Não foi possível fixar a mensagem') }
+    }
+  }, [])
 
-  async function unpinMessage(messageId: string) {
-    const { error } = await supabase.from('messages').update({ pinned_at: null, pinned_by: null }).eq('id', messageId)
-    return { error: error?.message ?? null }
-  }
+  const unpinMessage = useCallback(async (messageId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .update({ pinned_at: null, pinned_by: null })
+        .eq('id', messageId)
+        .select()
+        .single()
+      if (error) return { error: describeError(error, 'Não foi possível desafixar a mensagem') }
+      if (data) setMessages((prev) => prev.map((m) => (m.id === messageId ? data : m)))
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Não foi possível desafixar a mensagem') }
+    }
+  }, [])
 
   // Busca as fixadas de verdade em vez de depender das mensagens já
   // carregadas na tela — uma mensagem fixada pode ter sido enviada há
   // muito tempo, fora da janela recente que normalmente é exibida.
-  async function fetchPinnedMessages(): Promise<Message[]> {
+  const fetchPinnedMessages = useCallback(async (): Promise<Message[]> => {
     if (!channelId) return []
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('channel_id', channelId)
       .not('pinned_at', 'is', null)
       .order('pinned_at', { ascending: false })
+      .limit(100)
+    if (error) throw error
     return (data as Message[] | null) ?? []
-  }
+  }, [channelId])
 
-  async function toggleReaction(messageId: string, emoji: string) {
-    if (!user) return
-    const existing = reactions[messageId]?.find((r) => r.user_id === user.id && r.emoji === emoji)
+  // Otimista com rollback: a reação aparece/some na hora e, se o banco
+  // recusar, volta ao estado anterior. Antes cada clique esperava o banco
+  // E depois buscava de novo anexos + reações de TODAS as mensagens.
+  const toggleReaction = useCallback(async (messageId: string, emoji: string) => {
+    const userId = userIdRef.current
+    if (!userId) return
+    const target = { message_id: messageId, user_id: userId, emoji }
+    const existing = reactionsRef.current[messageId]?.find((r) => sameReaction(r, target))
 
-    if (existing) {
-      await supabase
-        .from('message_reactions')
-        .delete()
-        .eq('message_id', messageId)
-        .eq('user_id', user.id)
-        .eq('emoji', emoji)
-    } else {
-      await supabase.from('message_reactions').insert({ message_id: messageId, user_id: user.id, emoji })
+    const removeLocal = () =>
+      setReactions((prev) => ({ ...prev, [messageId]: (prev[messageId] ?? []).filter((r) => !sameReaction(r, target)) }))
+    const addLocal = (row: MessageReaction) =>
+      setReactions((prev) => {
+        const list = prev[messageId] ?? []
+        return list.some((r) => sameReaction(r, row)) ? prev : { ...prev, [messageId]: [...list, row] }
+      })
+
+    try {
+      if (existing) {
+        removeLocal()
+        const { error } = await supabase
+          .from('message_reactions')
+          .delete()
+          .eq('message_id', messageId)
+          .eq('user_id', userId)
+          .eq('emoji', emoji)
+        if (error) addLocal(existing)
+      } else {
+        const optimistic: MessageReaction = { ...target, created_at: new Date().toISOString() }
+        addLocal(optimistic)
+        const { error } = await supabase.from('message_reactions').insert(target)
+        if (error) removeLocal()
+      }
+    } catch {
+      if (existing) addLocal(existing)
+      else removeLocal()
     }
-    await refreshExtras(messagesRef.current.map((m) => m.id))
-  }
+  }, [])
 
+  const isCurrent = loadedKey === viewKey
   return {
-    messages,
-    attachments,
-    reactions,
-    loading,
+    messages: isCurrent ? messages : EMPTY_MESSAGES,
+    attachments: isCurrent ? attachments : EMPTY_MAP,
+    reactions: isCurrent ? reactions : EMPTY_MAP,
+    loading: loading || !isCurrent,
+    loadingOlder,
+    hasMore,
+    loadError,
+    refresh,
+    loadOlder,
     sendMessage,
     editMessage,
     deleteMessage,

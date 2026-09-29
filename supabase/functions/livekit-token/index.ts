@@ -24,9 +24,34 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { AccessToken, RoomServiceClient } from 'npm:livekit-server-sdk@2'
 
+// CORS aberto (`*`) é aceitável AQUI porque a autenticação é feita
+// pelo header Authorization (Bearer JWT do Supabase), nunca por cookie —
+// um site de terceiros não consegue anexar o JWT de ninguém sozinho.
+// O app desktop (Electron) roda em file:// / app://, sem origem fixa.
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+// Todas as salas (canal de voz de servidor, grupo, DM) usam o UUID da
+// linha correspondente no banco como nome — qualquer outra coisa é
+// recusada ANTES de ir pro banco (evita consulta inútil com texto
+// arbitrário e mensagens de erro de "invalid input syntax for uuid").
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// Teto de sanidade pro limite de participantes vindo do cliente (só
+// usado em grupo/DM — canal de servidor usa o valor do BANCO, ver abaixo).
+const MAX_CLIENT_USER_LIMIT = 100
+
+class HttpError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string
+  ) {
+    super(message)
+  }
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -40,10 +65,13 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
+  if (req.method !== 'POST') {
+    return jsonResponse({ error: 'Método não permitido.' }, 405)
+  }
 
   try {
     const authHeader = req.headers.get('Authorization')
-    if (!authHeader) throw new Error('Não autenticado.')
+    if (!authHeader) throw new HttpError('Não autenticado.', 401)
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
@@ -59,17 +87,17 @@ Deno.serve(async (req: Request) => {
       data: { user },
       error: userErr,
     } = await supabase.auth.getUser()
-    if (userErr || !user) throw new Error('Sessão inválida ou expirada.')
+    if (userErr || !user) throw new HttpError('Sessão inválida ou expirada.', 401)
 
     const body = await req.json().catch(() => ({}))
     const room = typeof body.room === 'string' ? body.room.trim() : ''
     const name = typeof body.name === 'string' ? body.name.trim().slice(0, 100) : undefined
-    const userLimit = typeof body.userLimit === 'number' && body.userLimit > 0 ? Math.floor(body.userLimit) : null
-    if (!room) throw new Error('Nome da sala ausente.')
-    // Mesmo limite de tamanho de tópico usado pelo Realtime (voice:<id>)
-    // — só uma validação básica de sanidade, não deixa criar uma sala com
-    // um nome absurdamente grande ou vazio.
-    if (room.length > 200) throw new Error('Nome da sala inválido.')
+    const clientUserLimit =
+      typeof body.userLimit === 'number' && Number.isFinite(body.userLimit) && body.userLimit > 0
+        ? Math.min(MAX_CLIENT_USER_LIMIT, Math.floor(body.userLimit))
+        : null
+    if (!room) throw new HttpError('Nome da sala ausente.', 400)
+    if (!UUID_RE.test(room)) throw new HttpError('Nome da sala inválido.', 400)
 
     // TRIGÉSIMA NONA RODADA — bug de segurança CRÍTICO achado em
     // auditoria: até aqui, QUALQUER usuário autenticado que soubesse
@@ -93,12 +121,44 @@ Deno.serve(async (req: Request) => {
     // `server_members`). Sem duplicar a lógica de permissão em dois
     // lugares — a fonte de verdade continua sendo a RLS do banco.
     const [{ data: channelRow }, { data: groupRow }, { data: dmRow }] = await Promise.all([
-      supabase.from('channels').select('id').eq('id', room).maybeSingle(),
+      supabase.from('channels').select('id, server_id, type, user_limit, is_stage').eq('id', room).maybeSingle(),
       supabase.from('group_conversations').select('id').eq('id', room).maybeSingle(),
       supabase.from('dm_conversations').select('id').eq('id', room).maybeSingle(),
     ])
     if (!channelRow && !groupRow && !dmRow) {
       return jsonResponse({ error: 'Você não tem acesso a essa sala de voz.', code: 'not_authorized' }, 403)
+    }
+    // Canal de TEXTO não vira sala de voz — antes qualquer canal que a
+    // pessoa enxergasse (inclusive de texto) gerava um token válido.
+    if (channelRow && channelRow.type !== 'voice') {
+      return jsonResponse({ error: 'Esse canal não é um canal de voz.', code: 'not_voice_channel' }, 403)
+    }
+
+    // Limite de vagas: pra canal de SERVIDOR vem SEMPRE do banco
+    // (channels.user_limit) — antes vinha do corpo da requisição, então
+    // um cliente modificado podia simplesmente mandar `userLimit: 0` e
+    // furar o limite do canal. Só grupo/DM (que não têm essa coluna)
+    // continuam usando o valor do cliente, com um teto de sanidade.
+    const userLimit = channelRow
+      ? typeof channelRow.user_limit === 'number' && channelRow.user_limit > 0
+        ? channelRow.user_limit
+        : null
+      : clientUserLimit
+
+    // Canal "Palco" (is_stage): só quem pode moderar canais fala — antes
+    // isso era aplicado SÓ no cliente (VoiceChannelView mutava o
+    // microfone depois de entrar), então qualquer cliente modificado
+    // podia falar/transmitir num palco. Agora o próprio token nega
+    // publicação pra quem não tem `manage_channels` (mesma regra do
+    // cliente, via a função has_permission do banco).
+    let canPublish = true
+    if (channelRow?.is_stage) {
+      const { data: isModerator, error: permErr } = await supabase.rpc('has_permission', {
+        p_server_id: channelRow.server_id,
+        p_user_id: user.id,
+        p_permission: 'manage_channels',
+      })
+      canPublish = !permErr && isModerator === true
     }
 
     const livekitUrl = Deno.env.get('LIVEKIT_URL')
@@ -142,22 +202,29 @@ Deno.serve(async (req: Request) => {
       // estabelecer a conexão WebSocket com o LiveKit logo em seguida;
       // reconectar mais tarde (ex.: depois de dormir o notebook) sempre
       // passa por aqui de novo e pega um token novo.
+      // (O próprio servidor LiveKit renova o token da sessão já
+      // conectada sozinho, então reconexões rápidas também funcionam.)
       ttl: '10m',
     })
+    // Permissões MÍNIMAS: o app não usa data channel do LiveKit (o
+    // soundboard vai pelo Realtime do Supabase) nem altera metadata do
+    // participante — `canUpdateOwnMetadata` estava ligado com um
+    // comentário errado (não tem nada a ver com reconexão) e foi
+    // removido, junto com `canPublishData`.
     at.addGrant({
       room,
       roomJoin: true,
-      canPublish: true,
+      canPublish,
       canSubscribe: true,
-      canPublishData: true,
-      // Permite recuperar a inscrição sozinho depois de uma queda breve
-      // de rede sem precisar pedir um token novo no meio do caminho.
-      canUpdateOwnMetadata: true,
+      canPublishData: false,
     })
     const token = await at.toJwt()
 
-    return jsonResponse({ token, url: livekitUrl })
+    return jsonResponse({ token, url: livekitUrl, canPublish })
   } catch (err) {
+    if (err instanceof HttpError) {
+      return jsonResponse({ error: err.message, code: err.code }, err.status)
+    }
     return jsonResponse({ error: err instanceof Error ? err.message : 'Erro desconhecido' }, 400)
   }
 })

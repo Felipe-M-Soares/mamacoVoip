@@ -1,7 +1,8 @@
-import { createContext, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { rateLimitError } from '../lib/rateLimit'
+import { uniqueTopic } from '../lib/realtimeChannel'
 import type { Server } from '../types/database'
 
 interface ServersContextValue {
@@ -63,20 +64,42 @@ async function uploadServerImage(
 // refresh() propaga pra tudo que usa useServers() ao mesmo tempo.
 export function ServersProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
+  // Só o ID (string estável): o objeto `user` muda a cada renovação do
+  // token (~1h) — antes isso recarregava a lista, recriava a assinatura do
+  // tempo real E (por causa do `loading`) trocava a tela inicial inteira
+  // por um spinner por um instante.
+  const userId = user?.id ?? null
   const [servers, setServers] = useState<Server[]>([])
   const [loading, setLoading] = useState(true)
+  const loadSeqRef = useRef(0)
+  const hasLoadedRef = useRef(false)
 
   const refresh = useCallback(async () => {
-    if (!user) {
+    const seq = ++loadSeqRef.current
+    if (!userId) {
       setServers([])
       setLoading(false)
+      hasLoadedRef.current = false
       return
     }
-    setLoading(true)
-    const { data, error } = await supabase.from('servers').select('*').order('created_at', { ascending: true })
-    if (!error) setServers(data ?? [])
-    setLoading(false)
-  }, [user])
+    // Spinner só na PRIMEIRA carga — recargas depois de criar/editar/sair
+    // de servidor atualizam a lista sem esconder a interface.
+    if (!hasLoadedRef.current) setLoading(true)
+    try {
+      const { data, error } = await supabase.from('servers').select('*').order('created_at', { ascending: true })
+      if (seq !== loadSeqRef.current) return
+      if (!error) {
+        setServers(data ?? [])
+        hasLoadedRef.current = true
+      } else {
+        console.error('[ServersContext] Falha ao carregar servidores:', error)
+      }
+    } catch (err) {
+      console.error('[ServersContext] Falha ao carregar servidores:', err)
+    } finally {
+      if (seq === loadSeqRef.current) setLoading(false)
+    }
+  }, [userId])
 
   useEffect(() => {
     refresh()
@@ -91,28 +114,31 @@ export function ServersProvider({ children }: { children: ReactNode }) {
   // GroupConversationsContext.tsx: escuta mudanças na MINHA linha de
   // `server_members` e recarrega a lista assim que algo mudar.
   useEffect(() => {
-    if (!user) return
+    if (!userId) return
+    let active = true
     // Sufixo aleatório no nome do canal — mesma proteção usada em
     // useConversations.ts/useServerMembers.ts: se por qualquer motivo esse
     // efeito rodar mais de uma vez ao mesmo tempo (StrictMode do React em
     // dev, Fast Refresh, etc.) com o MESMO nome de canal, o Supabase
     // devolveria o canal já inscrito e o segundo `.on()` derrubaria o app
     // com "cannot add postgres_changes callbacks ... after subscribe()".
-    const uniqueSuffix = Math.random().toString(36).slice(2)
     const channel = supabase
-      .channel(`server_membership:${user.id}:${uniqueSuffix}`)
+      .channel(uniqueTopic(`server_membership:${userId}`))
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'server_members', filter: `user_id=eq.${user.id}` },
-        () => refresh()
+        { event: '*', schema: 'public', table: 'server_members', filter: `user_id=eq.${userId}` },
+        () => void refresh()
       )
       .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') refresh()
+        // `CLOSED` também vem da própria limpeza do efeito — ignora
+        if (!active) return
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') void refresh()
       })
     return () => {
-      supabase.removeChannel(channel)
+      active = false
+      void supabase.removeChannel(channel)
     }
-  }, [user, refresh])
+  }, [userId, refresh])
 
   async function createServer(
     name: string,
@@ -243,21 +269,26 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null, invite: data ?? undefined }
   }
 
-  return (
-    <ServersContext.Provider
-      value={{
-        servers,
-        loading,
-        refresh,
-        createServer,
-        updateServer,
-        deleteServer,
-        leaveServer,
-        joinServerByInvite,
-        createInvite,
-      }}
-    >
-      {children}
-    </ServersContext.Provider>
+  // Valor memoizado: antes um objeto novo a cada render do provider fazia
+  // TODO consumidor de useServers() re-renderizar junto. As ações usam
+  // `user`/`refresh` do render em que foram criadas; como o memo só é
+  // refeito quando `servers`/`loading`/`refresh` mudam, elas nunca ficam
+  // com um userId desatualizado (refresh muda junto com o userId).
+  const value = useMemo(
+    () => ({
+      servers,
+      loading,
+      refresh,
+      createServer,
+      updateServer,
+      deleteServer,
+      leaveServer,
+      joinServerByInvite,
+      createInvite,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [servers, loading, refresh]
   )
+
+  return <ServersContext.Provider value={value}>{children}</ServersContext.Provider>
 }

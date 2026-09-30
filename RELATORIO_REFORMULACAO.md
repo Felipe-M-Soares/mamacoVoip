@@ -6,8 +6,10 @@ de teste novos), build web e build Electron funcionando.
 
 ## ⚠️ O que você precisa fazer antes de publicar
 
-1. **Banco:** rodar `supabase/migrations/013_audit_fixes.sql` no SQL Editor (não mexe nas 001–012). Se aparecer
-   aviso de usernames repetidos (diferença só de maiúscula), resolva as duplicatas e rode de novo.
+1. **Banco:** as migrations foram juntadas (ver "Migrations juntadas" no fim). **Se você já rodou até a 012 (ou até
+   qualquer uma das antigas 013–017), rode só `supabase/migrations/007_seguranca_e_recursos_2026.sql`** no SQL Editor —
+   é idempotente, pode rodar de novo com segurança. Se aparecer aviso de usernames repetidos (diferença só de
+   maiúscula), resolva as duplicatas e rode de novo.
 2. **Edge Functions:** `supabase functions deploy livekit-token` e `supabase functions deploy link-preview`.
 3. **Supabase → Authentication:**
    - Senha mínima 8, exigir letras e dígitos, ligar "Secure password change" e "Leaked password protection".
@@ -130,12 +132,67 @@ coisa (antes o 2FA era só uma tela e dava pra pular usando a API direto).
   (cache), menos idas ao servidor, animações mais curtas e sem desfoque de fundo pesado. Ex.: Configurações 414→222 ms,
   voltar a um canal 448→~140 ms (medido com CPU 4× mais lenta).
 - **Arrastar usuários entre salas:** dono (ou cargo com "Mover membros") arrasta o participante na barra lateral para
-  outro canal de voz, ou botão direito → "Mover para…". Validado no banco (migration **014**), respeita hierarquia de
+  outro canal de voz, ou botão direito → "Mover para…". Validado no banco (antiga migration **014**, hoje parte do `007`), respeita hierarquia de
   cargos e fica no log de moderação.
-- **GIFs +18:** canais marcados como +18 (migration **015**) com confirmação de idade; neles o GIF usa o nível máximo do
+- **GIFs +18:** canais marcados como +18 (antiga migration **015**, hoje parte do `007`) com confirmação de idade; neles o GIF usa o nível máximo do
   GIPHY (`r`). O GIPHY não oferece pornografia explícita — `r` é o limite da API. Opção em Configurações › Privacidade.
 - **Instalador:** assistente em português com imagens da marca, licença, escolha de pasta, atalho na área de trabalho e
   "abrir ao terminar"; ícone `.ico` próprio. Build opcional para a **Microsoft Store** (grátis, tira o aviso do Windows) —
   ver `COMO_TIRAR_AVISO_DO_WINDOWS.md`.
 
-Rodar no Supabase, na ordem: `014_move_members.sql` e `015_nsfw_channels.sql`.
+Rodar no Supabase: `007_seguranca_e_recursos_2026.sql` (contém as antigas 014 e 015).
+
+## Migrations juntadas, apagar grupos, capacidade e ping
+
+### Qual arquivo de migration rodar
+
+As migrations agora são **7 arquivos**: `001`–`005` (como antes), `006_ajustes_2025.sql` (= antigas 007–012,
+concatenadas sem mudar nenhuma linha de SQL) e `007_seguranca_e_recursos_2026.sql` (= antigas 013–017 sem as
+definições repetidas + as partes novas).
+
+| Você já rodou… | Rode |
+|---|---|
+| As antigas **até a 012** | **só o `007_seguranca_e_recursos_2026.sql`** |
+| Algumas ou todas as antigas 013–017 | **só o `007_seguranca_e_recursos_2026.sql`** (idempotente: pode rodar de novo com segurança) |
+| Nada (banco novo) | `001` → `007`, em ordem |
+
+Verificado num Postgres 16 descartável com um esquema simulado do Supabase: o catálogo final (`pg_dump --schema-only`:
+tabelas, funções, políticas, gatilhos, permissões, publicação do Realtime) é idêntico entre "antigas 007–017" e "novos
+006+007"; rodar o `007` por cima de um banco com as antigas até a 012, até a 014 ou até a 017, ou rodá-lo duas vezes, dá o
+mesmo resultado. De quebra, a instalação do zero, que quebrava no `002` (usava `dm_conversations` e `has_permission()`
+antes de existirem), foi corrigida movendo esses dois trechos pro fim do `003`/`004`.
+
+### Apagar grupo
+Quem **criou** o grupo tem "Apagar grupo" no topo da conversa e no botão direito do grupo na barra lateral (com
+confirmação); os outros só "Sair do grupo". Apaga mensagens, anexos, membros (cascata) e os arquivos do Storage. Some da
+lista de todo mundo na hora (Realtime).
+
+### Teste de carga e capacidade
+Kit em `loadtest/` (ver `loadtest/README.md`): preparo com service_role **só na sua máquina**, carga só com a chave
+pública (N clientes com presença + postgres_changes + broadcast, latência p50/p95/p99, erros, relatório), limpeza, e
+os comandos do `lk perf load-test` pra voz/vídeo. `loadtest/CAPACIDADE.md` tem os limites atuais dos planos e quantos
+usuários cada cenário aguenta. Resumo: o primeiro limite é o **LiveKit grátis** (50 GB ≈ 16 horas-espectador de
+transmissão 1080p60; 5.000 minutos de voz; 100 simultâneos); no Supabase, a cota de mensagens Realtime (principalmente
+"digitando…" e presença) e as conexões (200 Free / 500 Pro). Corrigido de graça: "não lidos" numa consulta só (era a
+maior fonte de egress), "digitando…" menos frequente, e a lista de grupos não recarrega mais em todo mundo a cada saída.
+
+### Ping (você em São Paulo) — ver `docs/PING.md`
+- Durante a call, a barra do usuário mostra o **ping real até o servidor de voz** (WebRTC) e se está em UDP direto ou
+  via TURN.
+- Entrada mais rápida: pré-aquecimento da conexão com o LiveKit ao abrir o app e `prepareConnection` assim que o token
+  chega (escolhe o data center mais próximo — o LiveKit Cloud tem região no Brasil).
+- **Confira a região do Supabase** (Settings → General → Region). Se não for `sa-east-1` (São Paulo), migrar o projeto é
+  a maior melhora de ping possível para chat/login; o passo a passo está no `docs/PING.md`. Opcional:
+  `VITE_SUPABASE_REGION` faz a função do token de voz rodar perto do banco.
+
+## Rodada 4 — revisão final (segurança, legal, erros)
+
+Três revisões independentes (segurança, conformidade legal, erros de integração) e as correções:
+
+- **Legal:** Política de Privacidade e Termos reescritos para refletir o que o app faz de verdade (a versão antiga dizia que a voz era peer-to-peer e que a detecção de jogos era opcional). Idade mínima 18 anos por causa do ECA Digital (Lei 15.211/2025, em vigor desde 17/03/2026), com tela de aceite dos termos + declaração de idade para toda conta (inclusive login com Google). Página pública `/excluir-conta` (exigida pela Google Play). `THIRD_PARTY_NOTICES.md` com as licenças de terceiros, incluído no instalador e visível em Configurações → Sobre → Licenças. E-mail pessoal removido do `package.json`.
+- **Denúncias:** agora é possível denunciar mensagens de DM e de grupo, e denúncias podem ir para a equipe da plataforma. Painel "Administração" nas Configurações para quem estiver na tabela `app_admins`.
+- **Privacidade:** opção "Mostrar o jogo que estou jogando" (desligada = o app para de verificar processos). DevTools no app instalado só com `--devtools`. Exclusão de conta apaga também as fotos de perfil.
+- **Segurança:** todos os canais de tempo real passaram a ser privados; anexos só do próprio projeto Supabase; ex-membro de grupo perde o acesso; moderador não tira o próprio castigo; buckets públicos não podem mais ser listados; limites no soundboard; Electron fuses ativados.
+- **Erros corrigidos:** cabeçalho do grupo no celular, figurinhas aparecendo como texto em prévias, confirmação de idade inconsistente, gravação dupla de "lido", prévia de DM não atualizando, 401 do ping, divisor solto no menu, texto de debug visível.
+
+Depois de rodar o 007: `alter database postgres set app.settings.supabase_url = 'https://<ref>.supabase.co';`, desligar "Allow public access" no Realtime e `insert into public.app_admins values ('<seu uuid>');` para virar administrador.

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { privateChannelParams } from '../lib/realtimeChannel'
 
 // Se inscreve no MESMO canal Realtime que useVoiceChannel usa pra
 // sinalização (voice:{channelId}), mas só pra observar a presença —
@@ -63,9 +64,15 @@ export function useVoicePresence(channelId: string | null, skip = false) {
         return
       }
 
-      const rt = supabase.channel(topic, {
-        config: { presence: { key: `observer-${Math.random().toString(36).slice(2)}` } },
-      })
+      // Canal PRIVADO (migration 016): só quem pode ver o canal de voz
+      // recebe a presença dele — antes qualquer logado que soubesse o id
+      // via quem estava em qualquer sala.
+      const rt = supabase.channel(
+        topic,
+        privateChannelParams({
+          config: { presence: { key: `observer-${Math.random().toString(36).slice(2)}` } },
+        })
+      )
       activeChannel = rt
 
       try {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { GIPHY_API_KEY } from '../../lib/config'
 import { giphyRating } from '../../lib/adultContent'
+import { CloseIcon, SearchIcon } from '../ui/icons'
 
 interface GifResult {
   id: string
@@ -62,6 +63,13 @@ export function GifPicker({
   }, [query, rating])
 
   async function fetchGifs(q: string) {
+    // Sem chave configurada (VITE_GIPHY_API_KEY) a busca fica desligada
+    // — ver lib/config.ts. Nem tenta a requisição.
+    if (!GIPHY_API_KEY) {
+      setLoading(false)
+      setGifs([])
+      return
+    }
     // Cancela a busca anterior: sem isso, a resposta de "gat" podia chegar
     // DEPOIS da de "gato" e sobrescrever o resultado certo.
     abortRef.current?.abort()
@@ -129,7 +137,7 @@ export function GifPicker({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Buscar GIF…"
           aria-label="Buscar GIF"
-          className="flex-1 min-w-0 bg-discord-darker text-sm text-discord-text px-3 py-2 outline-none"
+          className="flex-1 min-w-0 bg-mv-canvas text-sm text-mv-text px-3 py-2 outline-none"
         />
         {adult && (
           <span
@@ -140,49 +148,58 @@ export function GifPicker({
           </span>
         )}
         <button onClick={onClose} aria-label="Fechar" title="Fechar" className="icon-btn w-8 h-8 shrink-0">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-            <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
-          </svg>
+          <CloseIcon className="w-4 h-4" aria-hidden />
         </button>
       </div>
       <div className="p-2 max-h-72 overflow-y-auto grid grid-cols-3 gap-1.5">
-        {loading ? (
+        {!GIPHY_API_KEY ? (
+          <div className="col-span-3 flex flex-col items-center text-center gap-2 py-8 px-3">
+            <p className="text-sm font-medium text-mv-text">Busca de GIFs desativada</p>
+            <p className="text-xs text-mv-muted">A chave da GIPHY não foi configurada neste app.</p>
+          </div>
+        ) : loading ? (
           Array.from({ length: 9 }).map((_, i) => (
             <div key={i} className="aspect-video rounded-lg bg-white/[0.05] animate-pulse" style={{ animationDelay: `${i * 40}ms` }} />
           ))
         ) : loadError ? (
           <div className="col-span-3 flex flex-col items-center text-center gap-2 py-8 px-3">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-7 h-7 text-discord-text-muted" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-7 h-7 text-mv-muted" aria-hidden="true">
               <path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5v.01" />
               <path d="M3 3l18 18" />
             </svg>
-            <p className="text-sm font-medium text-discord-text">GIFs indisponíveis</p>
-            <p className="text-xs text-discord-text-muted">Verifique sua internet ou tente de novo em instantes.</p>
+            <p className="text-sm font-medium text-mv-text">GIFs indisponíveis</p>
+            <p className="text-xs text-mv-muted">Verifique sua internet ou tente de novo em instantes.</p>
           </div>
         ) : gifs.length === 0 ? (
           <div className="col-span-3 flex flex-col items-center text-center gap-2 py-8 px-3">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-7 h-7 text-discord-text-muted" aria-hidden="true">
-              <circle cx="11" cy="11" r="6" />
-              <path d="m20 20-4.5-4.5" />
-            </svg>
-            <p className="text-sm font-medium text-discord-text">Nenhum GIF encontrado</p>
-            <p className="text-xs text-discord-text-muted">Tente outra palavra.</p>
+            <SearchIcon className="w-7 h-7 text-mv-muted" aria-hidden />
+            <p className="text-sm font-medium text-mv-text">Nenhum GIF encontrado</p>
+            <p className="text-xs text-mv-muted">Tente outra palavra.</p>
           </div>
         ) : (
           gifs.map((gif) => (
             <button
               key={gif.id}
               onClick={() => onSelect(gif.url)}
-              className="aspect-video rounded-lg overflow-hidden bg-white/[0.04] hover:ring-2 hover:ring-discord-blurple hover:scale-[1.03] transition-all"
+              className="aspect-video rounded-lg overflow-hidden bg-white/[0.04] hover:ring-2 hover:ring-mv-accent hover:scale-[1.03] transition-all"
             >
               <img src={gif.previewUrl} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
             </button>
           ))
         )}
       </div>
-      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-discord-text-muted text-center py-1.5 border-t border-[var(--color-line)]">
-        {adult ? 'GIFs via GIPHY · classificação R' : 'GIFs via GIPHY'}
-      </p>
+      {/* Atribuição exigida pelos termos da API da GIPHY ("Powered by
+          GIPHY") — selo em texto, sem baixar logo de fora. */}
+      <div className="flex items-center justify-center gap-2 py-1.5 border-t border-[var(--color-line)]">
+        <span
+          aria-label="Powered by GIPHY"
+          className="inline-flex items-center gap-1 rounded-md bg-black px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-white ring-1 ring-white/10"
+        >
+          <span className="opacity-80">Powered by</span>
+          <span className="font-black tracking-[0.06em]">GIPHY</span>
+        </span>
+        {adult && <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-mv-muted">classificação R</span>}
+      </div>
     </div>
   )
 }

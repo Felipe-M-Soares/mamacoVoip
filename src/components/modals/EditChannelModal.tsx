@@ -100,7 +100,7 @@ export function EditChannelModal({
           </>
         }
       >
-        <p className="text-[14px] text-discord-text-muted leading-relaxed">
+        <p className="text-[14px] text-mv-muted leading-relaxed">
           Tem certeza que deseja excluir{' '}
           <span className="text-white font-medium">
             {channel.type === 'text' ? '#' : '🔊 '}
@@ -140,7 +140,7 @@ export function EditChannelModal({
             Nome do canal
           </label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-discord-text-muted pointer-events-none" aria-hidden="true">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-mv-muted pointer-events-none" aria-hidden="true">
               {channel.type === 'text' ? '#' : '🔊'}
             </span>
             <input
@@ -148,7 +148,7 @@ export function EditChannelModal({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full pl-8 pr-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+              className="w-full pl-8 pr-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
           </div>
         </div>
@@ -165,7 +165,7 @@ export function EditChannelModal({
               maxLength={200}
               rows={2}
               placeholder="Uma frase curta descrevendo o assunto do canal (opcional)"
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none resize-none"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none resize-none"
             />
           </div>
         )}
@@ -179,7 +179,7 @@ export function EditChannelModal({
               id="edit-channel-slowmode"
               value={slowmodeSeconds}
               onChange={(e) => setSlowmodeSeconds(Number(e.target.value))}
-              className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
+              className="w-full px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
             >
               <option value={0}>Desativado</option>
               <option value={5}>5 segundos</option>
@@ -189,7 +189,7 @@ export function EditChannelModal({
               <option value={300}>5 minutos</option>
               <option value={900}>15 minutos</option>
             </select>
-            <p className="text-[12px] text-discord-text-muted mt-1.5">
+            <p className="text-[12px] text-mv-muted mt-1.5">
               Tempo mínimo entre mensagens da mesma pessoa neste canal. Donos do servidor não são afetados.
             </p>
           </div>
@@ -231,7 +231,7 @@ export function EditChannelModal({
               id="edit-channel-limit"
               value={userLimit}
               onChange={(e) => setUserLimit(Number(e.target.value))}
-              className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
+              className="w-full px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
             >
               <option value={0}>Sem limite</option>
               {[2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 50].map((n) => (
@@ -247,13 +247,13 @@ export function EditChannelModal({
           <div className="flex items-center justify-between gap-4 px-3.5 py-3">
             <div className="min-w-0">
               <p className="text-[14px] font-medium text-white flex items-center gap-1.5">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-discord-text-muted" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-mv-muted" aria-hidden="true">
                   <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
                   <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
                 </svg>
                 Canal restrito
               </p>
-              <p className="text-[12.5px] text-discord-text-muted mt-0.5 leading-snug">
+              <p className="text-[12.5px] text-mv-muted mt-0.5 leading-snug">
                 Só cargos escolhidos abaixo conseguem ver esse canal (donos e quem gerencia canais sempre veem)
               </p>
             </div>
@@ -263,7 +263,7 @@ export function EditChannelModal({
           {isRestricted && (
             <div className="border-t border-[var(--color-line)] p-2 space-y-0.5 max-h-44 overflow-y-auto animate-fade-slide-in">
               {roles.length === 0 ? (
-                <p className="text-[12.5px] text-discord-text-muted px-2 py-2">
+                <p className="text-[12.5px] text-mv-muted px-2 py-2">
                   Esse servidor ainda não tem cargos — crie um cargo primeiro na aba "Cargos".
                 </p>
               ) : (
@@ -286,11 +286,11 @@ export function EditChannelModal({
                         }
                         className="sr-only peer"
                       />
-                      <span className="rounded-md peer-focus-visible:ring-2 peer-focus-visible:ring-discord-blurple">
+                      <span className="rounded-md peer-focus-visible:ring-2 peer-focus-visible:ring-mv-accent">
                         <CheckMark checked={checked} />
                       </span>
                       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: role.color }} />
-                      <span className="text-[13.5px] text-discord-text">{role.name}</span>
+                      <span className="text-[13.5px] text-mv-text">{role.name}</span>
                     </label>
                   )
                 })

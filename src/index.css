@@ -9,7 +9,7 @@
    DESIGN SYSTEM — "Mamacos Neo"
    Tema padrão "Vermelho" (identidade da marca).
 
-   Tailwind v4 gera as classes utilitárias (bg-discord-blurple, etc.)
+   Tailwind v4 gera as classes utilitárias (bg-mv-accent, etc.)
    referenciando estas variáveis via var(...), então trocar o valor
    delas em runtime (blocos [data-theme] abaixo) retema o app inteiro.
 
@@ -21,15 +21,15 @@
      lighter  → hover, botões secundários, chips
    ============================================================ */
 @theme {
-  --color-discord-darker: #07070a;
-  --color-discord-dark: #0e0e13;
-  --color-discord-channels: #121218;
-  --color-discord-sidebar: #0d0d12;
-  --color-discord-lighter: #25252e;
-  --color-discord-blurple: #ee3a34;
-  --color-discord-green: #22c55e;
-  --color-discord-text: #f4f4f7;
-  --color-discord-text-muted: #9d9dab;
+  --color-mv-canvas: #07070a;
+  --color-mv-dark: #0e0e13;
+  --color-mv-main: #121218;
+  --color-mv-side: #0d0d12;
+  --color-mv-raised: #25252e;
+  --color-mv-accent: #ee3a34;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #f4f4f7;
+  --color-mv-muted: #9d9dab;
 
   /* Tokens novos do design system */
   --color-accent-2: #ff8a3d; /* segunda cor do gradiente da marca */
@@ -46,50 +46,157 @@
   --animate-pop-in: pop-in 0.12s cubic-bezier(0.2, 0.9, 0.3, 1.1);
 }
 
-/* Tema "Clássico" — paleta calcada no Discord atual, mesma fonte em tudo */
+/* Tema "Clássico" — paleta calcada em outros apps de chat atual, mesma fonte em tudo */
 [data-theme='azul'] {
-  --color-discord-darker: #1e1f22;
-  --color-discord-dark: #232428;
-  --color-discord-channels: #313338;
-  --color-discord-sidebar: #2b2d31;
-  --color-discord-lighter: #3a3c43;
-  --color-discord-blurple: #5865f2;
-  --color-accent-2: #8b7bff;
-  --color-discord-green: #23a55a;
-  --color-discord-text: #f2f3f5;
-  --color-discord-text-muted: #a0a6b0;
+  --color-mv-canvas: #1e1f22;
+  --color-mv-dark: #232428;
+  --color-mv-main: #313338;
+  --color-mv-side: #2b2d31;
+  --color-mv-raised: #3a3c43;
+  --color-mv-accent: #6366f1;
+  --color-accent-text: #6366f1;
+  --color-accent-2: #a78bfa;
+  --color-mv-green: #23a55a;
+  --color-mv-text: #f2f3f5;
+  --color-mv-muted: #a0a6b0;
   --color-elevated: #313338;
   --font-display: 'Inter Variable', system-ui, sans-serif;
 }
 
 /* Tema "Roxo Meia-noite" */
 [data-theme='roxo'] {
-  --color-discord-darker: #08070f;
-  --color-discord-dark: #0f0d1a;
-  --color-discord-channels: #161329;
-  --color-discord-sidebar: #100e1b;
-  --color-discord-lighter: #2a2540;
-  --color-discord-blurple: #8b5cf6;
+  --color-mv-canvas: #08070f;
+  --color-mv-dark: #0f0d1a;
+  --color-mv-main: #161329;
+  --color-mv-side: #100e1b;
+  --color-mv-raised: #2a2540;
+  --color-mv-accent: #8b5cf6;
+  --color-accent-text: #8b5cf6;
   --color-accent-2: #ec4899;
-  --color-discord-green: #22c55e;
-  --color-discord-text: #eeeaf8;
-  --color-discord-text-muted: #a39cb8;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #eeeaf8;
+  --color-mv-muted: #a39cb8;
   --color-elevated: #1b1830;
 }
 
 /* Tema "Oceano" — novo: azul-petróleo, calmo, bom pra longas sessões */
 [data-theme='oceano'] {
-  --color-discord-darker: #05090c;
-  --color-discord-dark: #091014;
-  --color-discord-channels: #0f191e;
-  --color-discord-sidebar: #0a1216;
-  --color-discord-lighter: #1d2c35;
-  --color-discord-blurple: #14b8a6;
+  --color-mv-canvas: #05090c;
+  --color-mv-dark: #091014;
+  --color-mv-main: #0f191e;
+  --color-mv-side: #0a1216;
+  --color-mv-raised: #1d2c35;
+  --color-mv-accent: #14b8a6;
+  --color-accent-text: #14b8a6;
   --color-accent-2: #38bdf8;
-  --color-discord-green: #22c55e;
-  --color-discord-text: #eef6f8;
-  --color-discord-text-muted: #93a6ae;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #eef6f8;
+  --color-mv-muted: #93a6ae;
   --color-elevated: #111c22;
+}
+
+/* ------------------------------------------------------------
+   Temas novos. Regras de contraste (todos verificados):
+   - texto / fundos ≥ 7:1, texto secundário / fundos ≥ 4.5:1;
+   - branco / acento ≥ 4.5:1 (botões e selos com texto branco);
+   - --color-accent-text: tom mais claro do acento, usado quando o
+     acento vira TEXTO (menções, links, rótulos) — ≥ 4.5:1 nos fundos.
+   ------------------------------------------------------------ */
+
+/* Tema "Neon" — magenta elétrico com brilho ciano */
+[data-theme='neon'] {
+  --color-mv-canvas: #06060f;
+  --color-mv-dark: #0b0a18;
+  --color-mv-main: #0f0e1f;
+  --color-mv-side: #0a0916;
+  --color-mv-raised: #231f3d;
+  --color-mv-accent: #c616c6;
+  --color-accent-2: #0e9fb8;
+  --color-accent-text: #f06bf0;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #f4f0ff;
+  --color-mv-muted: #aaa5cc;
+  --color-elevated: #14122a;
+}
+
+/* Tema "Floresta" — verde-musgo, fundo quase preto esverdeado */
+[data-theme='floresta'] {
+  --color-mv-canvas: #050a07;
+  --color-mv-dark: #0a120d;
+  --color-mv-main: #0e1712;
+  --color-mv-side: #09110c;
+  --color-mv-raised: #1d2c23;
+  --color-mv-accent: #1a8646;
+  --color-accent-2: #4a780c;
+  --color-accent-text: #45c77c;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #eef6f0;
+  --color-mv-muted: #98ad9f;
+  --color-elevated: #121d17;
+}
+
+/* Tema "Pôr do sol" — rosa-coral com dourado, fundo vinho escuro */
+[data-theme='por-do-sol'] {
+  --color-mv-canvas: #0c0708;
+  --color-mv-dark: #150c10;
+  --color-mv-main: #1a0f14;
+  --color-mv-side: #130b0f;
+  --color-mv-raised: #2f1d25;
+  --color-mv-accent: #d42a5f;
+  --color-accent-2: #c2570c;
+  --color-accent-text: #ff8aa8;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #fdf1f4;
+  --color-mv-muted: #b89ca7;
+  --color-elevated: #20121a;
+}
+
+/* Tema "Grafite" — monocromático, acento branco (texto) sobre cinzas */
+[data-theme='grafite'] {
+  --color-mv-canvas: #09090b;
+  --color-mv-dark: #101012;
+  --color-mv-main: #141416;
+  --color-mv-side: #0e0e10;
+  --color-mv-raised: #27272a;
+  --color-mv-accent: #6e6e78;
+  --color-accent-2: #52525b;
+  --color-accent-text: #e4e4e7;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #fafafa;
+  --color-mv-muted: #a1a1aa;
+  --color-elevated: #19191c;
+}
+
+/* Tema "Sakura" — rosa suave, fundo ameixa */
+[data-theme='sakura'] {
+  --color-mv-canvas: #0d080c;
+  --color-mv-dark: #150d13;
+  --color-mv-main: #191117;
+  --color-mv-side: #130c11;
+  --color-mv-raised: #2e2029;
+  --color-mv-accent: #cc2b7a;
+  --color-accent-2: #a54bb8;
+  --color-accent-text: #f596c4;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #fcf0f6;
+  --color-mv-muted: #bba4b3;
+  --color-elevated: #1e141b;
+}
+
+/* Tema "Cyber" — ciano com amarelo de destaque, fundo azul-noite */
+[data-theme='cyber'] {
+  --color-mv-canvas: #05070a;
+  --color-mv-dark: #0a0f15;
+  --color-mv-main: #0c1218;
+  --color-mv-side: #080c11;
+  --color-mv-raised: #1b2531;
+  --color-mv-accent: #0a7c93;
+  --color-accent-2: #8a6d00;
+  --color-accent-text: #facc15;
+  --color-mv-green: #22c55e;
+  --color-mv-text: #eef7ff;
+  --color-mv-muted: #94a6b8;
+  --color-elevated: #101821;
 }
 
 /* ============================================================
@@ -106,11 +213,11 @@
     margin: 0;
     font-family: var(--font-sans);
     font-feature-settings: 'cv11', 'ss01';
-    background-color: var(--color-discord-darker);
-    color: var(--color-discord-text);
+    background-color: var(--color-mv-canvas);
+    color: var(--color-mv-text);
   }
   ::selection {
-    background: color-mix(in srgb, var(--color-discord-blurple) 40%, transparent);
+    background: color-mix(in srgb, var(--color-mv-accent) 40%, transparent);
   }
   button:not(:disabled),
   [role='button']:not([aria-disabled='true']) {
@@ -118,7 +225,7 @@
   }
   /* Foco visível só pra teclado — acessibilidade sem poluir o clique */
   :focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-discord-blurple) 80%, white);
+    outline: 2px solid color-mix(in srgb, var(--color-mv-accent) 80%, white);
     outline-offset: 2px;
     border-radius: 6px;
   }
@@ -129,46 +236,56 @@
   }
   input::placeholder,
   textarea::placeholder {
-    color: color-mix(in srgb, var(--color-discord-text-muted) 70%, transparent);
+    color: color-mix(in srgb, var(--color-mv-muted) 70%, transparent);
   }
   input[type='range'] {
-    accent-color: var(--color-discord-blurple);
+    accent-color: var(--color-mv-accent);
   }
   input[type='checkbox'],
   input[type='radio'] {
-    accent-color: var(--color-discord-blurple);
+    accent-color: var(--color-mv-accent);
   }
   hr {
     border-color: var(--color-line);
   }
 }
 
-/* Campos de texto: antes usavam o MESMO tom do fundo (bg-discord-darker +
+/* Campos de texto: antes usavam o MESMO tom do fundo (bg-mv-canvas +
    border-none) e ficavam invisíveis em várias telas. Fora das camadas
    de propósito (CSS sem @layer vence qualquer utilitário), mas com
    :not(:focus) pra não brigar com o anel de foco (focus:ring-*). */
-:is(input, textarea, select):is(.bg-discord-darker, .bg-discord-dark, .bg-discord-lighter):not(:focus):not([type='range']):not([type='checkbox']):not([type='radio']) {
+:is(input, textarea, select):is(.bg-mv-canvas, .bg-mv-dark, .bg-mv-raised):not(:focus):not([type='range']):not([type='checkbox']):not([type='radio']) {
   box-shadow: inset 0 0 0 1px var(--color-line-strong);
 }
-:is(input, textarea, select):is(.bg-discord-darker, .bg-discord-dark, .bg-discord-lighter) {
+:is(input, textarea, select):is(.bg-mv-canvas, .bg-mv-dark, .bg-mv-raised) {
   border-radius: 10px;
   transition: box-shadow 0.15s ease, background-color 0.15s ease;
 }
-:is(input, textarea, select):is(.bg-discord-darker, .bg-discord-dark):hover:not(:focus) {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-discord-text-muted) 45%, transparent);
+:is(input, textarea, select):is(.bg-mv-canvas, .bg-mv-dark):hover:not(:focus) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-mv-muted) 45%, transparent);
 }
 :is(input, textarea, select):focus {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-discord-blurple) 70%, transparent),
-    0 0 0 5px color-mix(in srgb, var(--color-discord-blurple) 18%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-mv-accent) 70%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--color-mv-accent) 18%, transparent);
 }
-select.bg-discord-darker,
-select.bg-discord-dark {
+select.bg-mv-canvas,
+select.bg-mv-dark {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239d9dab' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.6rem center;
   background-size: 1rem;
   padding-right: 2rem;
+}
+
+
+/* Acento usado como TEXTO: nos temas que definem --color-accent-text
+   (um tom mais claro do acento), menções/links/rótulos ficam legíveis
+   sem clarear o acento dos botões (que precisa segurar texto branco).
+   Fica fora das camadas de propósito (vence o utilitário), mas pula
+   elementos que trocam de cor no hover pra não travar o hover deles. */
+.text-mv-accent:not([class*='hover:text-']) {
+  color: var(--color-accent-text, var(--color-mv-accent));
 }
 
 /* ============================================================
@@ -178,12 +295,12 @@ select.bg-discord-dark {
 /* Painel flutuante (chat, sidebars) — o layout novo usa painéis
    arredondados com um respiro entre eles, em cima do fundo do app. */
 .panel {
-  background: var(--color-discord-channels);
+  background: var(--color-mv-main);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
 }
 .panel-muted {
-  background: var(--color-discord-sidebar);
+  background: var(--color-mv-side);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
 }
@@ -200,34 +317,34 @@ select.bg-discord-dark {
 }
 
 .text-gradient {
-  background: linear-gradient(120deg, var(--color-discord-blurple), var(--color-accent-2));
+  background: linear-gradient(120deg, var(--color-mv-accent), var(--color-accent-2));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 .bg-brand-gradient {
-  background: linear-gradient(135deg, var(--color-discord-blurple), var(--color-accent-2));
+  background: linear-gradient(135deg, var(--color-mv-accent), var(--color-accent-2));
 }
 
 /* Brilho ao redor de elementos importantes — herda a cor do tema */
 .brand-glow {
-  box-shadow: 0 0 32px 0 color-mix(in srgb, var(--color-discord-blurple) 45%, transparent);
+  box-shadow: 0 0 32px 0 color-mix(in srgb, var(--color-mv-accent) 45%, transparent);
 }
 .brand-glow-sm {
-  box-shadow: 0 0 16px 0 color-mix(in srgb, var(--color-discord-blurple) 38%, transparent);
+  box-shadow: 0 0 16px 0 color-mix(in srgb, var(--color-mv-accent) 38%, transparent);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--color-discord-blurple), color-mix(in srgb, var(--color-discord-blurple) 55%, var(--color-accent-2)));
+  background: linear-gradient(135deg, var(--color-mv-accent), color-mix(in srgb, var(--color-mv-accent) 55%, var(--color-accent-2)));
   color: white;
   font-weight: 600;
   border-radius: 10px;
-  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.18) inset, 0 6px 18px -6px color-mix(in srgb, var(--color-discord-blurple) 70%, transparent);
+  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.18) inset, 0 6px 18px -6px color-mix(in srgb, var(--color-mv-accent) 70%, transparent);
   transition: transform 0.12s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.08) saturate(1.05);
-  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.2) inset, 0 10px 26px -8px color-mix(in srgb, var(--color-discord-blurple) 80%, transparent);
+  box-shadow: 0 1px 0 0 rgb(255 255 255 / 0.2) inset, 0 10px 26px -8px color-mix(in srgb, var(--color-mv-accent) 80%, transparent);
   transform: translateY(-1px);
 }
 .btn-primary:active:not(:disabled) {
@@ -241,15 +358,15 @@ select.bg-discord-dark {
 }
 
 .btn-secondary {
-  background: var(--color-discord-lighter);
-  color: var(--color-discord-text);
+  background: var(--color-mv-raised);
+  color: var(--color-mv-text);
   font-weight: 500;
   border-radius: 10px;
   box-shadow: 0 0 0 1px var(--color-line) inset;
   transition: background-color 0.15s ease, transform 0.12s ease;
 }
 .btn-secondary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-discord-lighter) 82%, white);
+  background: color-mix(in srgb, var(--color-mv-raised) 82%, white);
 }
 .btn-secondary:active:not(:disabled) {
   transform: scale(0.99);
@@ -260,13 +377,13 @@ select.bg-discord-dark {
 }
 
 .btn-ghost {
-  color: var(--color-discord-text-muted);
+  color: var(--color-mv-muted);
   border-radius: 10px;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 .btn-ghost:hover:not(:disabled) {
   background: rgb(255 255 255 / 0.06);
-  color: var(--color-discord-text);
+  color: var(--color-mv-text);
 }
 
 .btn-danger {
@@ -295,12 +412,12 @@ select.bg-discord-dark {
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  color: var(--color-discord-text-muted);
+  color: var(--color-mv-muted);
   transition: background-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
 }
 .icon-btn:hover:not(:disabled) {
   background: rgb(255 255 255 / 0.07);
-  color: var(--color-discord-text);
+  color: var(--color-mv-text);
 }
 .icon-btn:active:not(:disabled) {
   transform: scale(0.94);
@@ -313,7 +430,7 @@ select.bg-discord-dark {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-discord-text-muted);
+  color: var(--color-mv-muted);
   margin-bottom: 0.45rem;
 }
 
@@ -327,7 +444,7 @@ select.bg-discord-dark {
   font-size: 0.72rem;
   font-weight: 600;
   background: rgb(255 255 255 / 0.06);
-  color: var(--color-discord-text-muted);
+  color: var(--color-mv-muted);
   border: 1px solid var(--color-line);
 }
 
@@ -337,13 +454,13 @@ select.bg-discord-dark {
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--color-discord-blurple);
+  background: var(--color-mv-accent);
   color: white;
   font-size: 11px;
   font-weight: 700;
   line-height: 18px;
   text-align: center;
-  box-shadow: 0 0 0 3px var(--color-discord-darker);
+  box-shadow: 0 0 0 3px var(--color-mv-canvas);
 }
 
 .font-display {
@@ -354,9 +471,9 @@ select.bg-discord-dark {
 /* Fundo decorativo das telas de entrada (login/cadastro) */
 .auth-backdrop {
   background:
-    radial-gradient(900px 520px at 12% -10%, color-mix(in srgb, var(--color-discord-blurple) 30%, transparent), transparent 65%),
+    radial-gradient(900px 520px at 12% -10%, color-mix(in srgb, var(--color-mv-accent) 30%, transparent), transparent 65%),
     radial-gradient(800px 560px at 100% 110%, color-mix(in srgb, var(--color-accent-2) 20%, transparent), transparent 60%),
-    var(--color-discord-darker);
+    var(--color-mv-canvas);
 }
 .auth-grid {
   background-image: linear-gradient(var(--color-line) 1px, transparent 1px),
@@ -369,7 +486,7 @@ select.bg-discord-dark {
 /* Scrollbar fina, some quando não está em uso */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-discord-lighter) transparent;
+  scrollbar-color: var(--color-mv-raised) transparent;
 }
 ::-webkit-scrollbar {
   width: 10px;
@@ -379,13 +496,13 @@ select.bg-discord-dark {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: var(--color-discord-lighter);
+  background-color: var(--color-mv-raised);
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, var(--color-discord-lighter) 70%, white);
+  background-color: color-mix(in srgb, var(--color-mv-raised) 70%, white);
 }
 
 /* Animações */

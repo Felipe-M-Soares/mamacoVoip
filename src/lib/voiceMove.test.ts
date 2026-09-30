@@ -57,7 +57,7 @@ describe('shouldApplyVoiceMove', () => {
 
 describe('describeVoiceMoveError', () => {
   it('traduz função ausente e rede, repassa as mensagens da RPC', () => {
-    expect(describeVoiceMoveError('Could not find the function public.move_voice_member')).toMatch(/migration 014/)
+    expect(describeVoiceMoveError('Could not find the function public.move_voice_member')).toMatch(/migration 007/)
     expect(describeVoiceMoveError('TypeError: Failed to fetch')).toMatch(/Sem conexão/)
     expect(describeVoiceMoveError('Você não tem permissão para mover membros')).toBe('Você não tem permissão para mover membros')
     expect(describeVoiceMoveError(undefined)).toBe('Não foi possível mover o membro.')

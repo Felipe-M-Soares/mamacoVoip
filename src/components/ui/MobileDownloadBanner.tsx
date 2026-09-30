@@ -32,9 +32,9 @@ export function MobileDownloadBanner() {
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-white">Baixe o app pra computador</p>
-        <p className="text-xs text-discord-text-muted">Voz, vídeo e compartilhamento de tela — a experiência completa é no PC</p>
+        <p className="text-xs text-mv-muted">Voz, vídeo e compartilhamento de tela — a experiência completa é no PC</p>
       </div>
-      <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 shrink-0 text-discord-text-muted">
+      <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 shrink-0 text-mv-muted">
         <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12 9.3 6.7a1 1 0 0 1 0-1.4z" />
       </svg>
     </a>

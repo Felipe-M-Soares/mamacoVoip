@@ -44,7 +44,7 @@ export function LeaveServerModal({
         </>
       }
     >
-      <p className="text-[14px] text-discord-text-muted leading-relaxed">
+      <p className="text-[14px] text-mv-muted leading-relaxed">
         Tem certeza que deseja sair de <span className="text-white font-medium">{serverName}</span>? Você vai
         precisar de um novo convite para entrar de novo.
       </p>

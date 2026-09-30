@@ -9,7 +9,7 @@ const STATUS_LABEL: Record<ProfileStatus, string> = {
   offline: 'Offline',
 }
 const STATUS_DOT: Record<ProfileStatus, string> = {
-  online: 'bg-discord-green',
+  online: 'bg-mv-green',
   idle: 'bg-amber-400',
   dnd: 'bg-rose-500',
   offline: 'bg-zinc-500',
@@ -26,7 +26,7 @@ function gradientFor(seed: string) {
 }
 
 // Painel fixo do lado direito da tela inicial (Amigos/DM/Grupo) — igual
-// o Discord mostra um cartão de perfil persistente ali. Substitui a
+// um app de chat popular mostra um cartão de perfil persistente ali. Substitui a
 // antiga barra de ping isolada em cima do UserPanel (ver
 // UserPanel.tsx/task #9): a MESMA ideia de "mostrar informação sobre
 // alguém" agora vira um card de verdade, com avatar grande e ação de
@@ -53,7 +53,7 @@ export function ProfileSidePanel({
   const isEffectivelyOnline = profile.status !== 'offline' && (isSelf || isPresent)
 
   return (
-    <aside aria-label="Perfil" className="hidden xl:flex w-72 shrink-0 bg-discord-sidebar flex-col overflow-y-auto border-t border-l border-[var(--color-line)]">
+    <aside aria-label="Perfil" className="hidden xl:flex w-72 shrink-0 bg-mv-side flex-col overflow-y-auto border-t border-l border-[var(--color-line)]">
       <div className="p-3 pb-0">
       <div
         className="h-28 shrink-0 bg-cover bg-center rounded-xl"
@@ -65,7 +65,7 @@ export function ProfileSidePanel({
       />
       </div>
       <div className="px-4 pb-4 -mt-10">
-        <div className="inline-block rounded-full ring-[6px] ring-discord-sidebar ml-2">
+        <div className="inline-block rounded-full ring-[6px] ring-mv-side ml-2">
         <Avatar
           name={profile.username}
           avatarUrl={profile.avatar_url}
@@ -79,7 +79,7 @@ export function ProfileSidePanel({
         <h3 className="font-display text-lg font-semibold text-white truncate">
           {profile.display_name || profile.username}
         </h3>
-        <p className="text-sm text-discord-text-muted truncate">@{profile.username}</p>
+        <p className="text-sm text-mv-muted truncate">@{profile.username}</p>
 
         <div className="chip mt-3">
           <span className={`w-2 h-2 rounded-full ${STATUS_DOT[isEffectivelyOnline ? profile.status : 'offline']}`} />
@@ -87,18 +87,18 @@ export function ProfileSidePanel({
         </div>
 
         {(profile.custom_status || (profile.playing && isEffectivelyOnline)) && <div className="h-px bg-[var(--color-line)] my-3" />}
-        {profile.custom_status && <p className="text-sm text-discord-text break-words">{profile.custom_status}</p>}
+        {profile.custom_status && <p className="text-sm text-mv-text break-words">{profile.custom_status}</p>}
         {profile.playing && isEffectivelyOnline && (
           <div className="mt-2.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-1.5">Atividade</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-1.5">Atividade</p>
             <div className="flex items-center gap-2.5">
-              <span className="w-9 h-9 rounded-lg bg-discord-green/15 text-discord-green flex items-center justify-center shrink-0" aria-hidden="true">
+              <span className="w-9 h-9 rounded-lg bg-mv-green/15 text-mv-green flex items-center justify-center shrink-0" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
                   <path d="M7 6h10a5 5 0 0 1 4.9 6l-.8 4a3 3 0 0 1-5.2 1.4L14.2 16H9.8l-1.7 1.4A3 3 0 0 1 2.9 16l-.8-4A5 5 0 0 1 7 6zm0 3v1.5H5.5v1.5H7v1.5h1.5V12H10v-1.5H8.5V9H7zm8.5.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm2 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" />
                 </svg>
               </span>
               <span className="min-w-0 leading-tight">
-                <span className="block text-xs text-discord-text-muted">Jogando</span>
+                <span className="block text-xs text-mv-muted">Jogando</span>
                 <span className="block text-sm font-semibold text-white truncate">{profile.playing}</span>
               </span>
             </div>

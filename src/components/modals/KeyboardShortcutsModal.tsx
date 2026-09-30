@@ -16,11 +16,11 @@ export function KeyboardShortcutsModal({ onClose }: { onClose: () => void }) {
       <div className="rounded-xl border border-[var(--color-line)] divide-y divide-[var(--color-line)] overflow-hidden">
         {SHORTCUTS.map((s) => (
           <div key={s.keys} className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-white/[0.015]">
-            <span className="text-[13.5px] text-discord-text">{s.label}</span>
+            <span className="text-[13.5px] text-mv-text">{s.label}</span>
             <span className="flex items-center gap-1 shrink-0">
               {s.keys.split(' + ').map((k, i) => (
                 <span key={k} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-[11px] text-discord-text-muted">+</span>}
+                  {i > 0 && <span className="text-[11px] text-mv-muted">+</span>}
                   <Kbd>{k}</Kbd>
                 </span>
               ))}

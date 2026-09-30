@@ -13,7 +13,7 @@ export const DESKTOP_DOWNLOAD_URL =
 // DESLIGOU o Tenor API de vez pra qualquer desenvolvedor de fora (parou
 // de aceitar cliente novo em janeiro de 2026, e desligou todo mundo que
 // já usava, inclusive quem já tinha chave, em 30/06/2026 — foi o mesmo
-// motivo do GIF picker do Discord/WhatsApp/X/Bluesky terem quebrado na
+// motivo do GIF picker do WhatsApp/X/Bluesky terem quebrado na
 // mesma época). Não existe mais chave de Tenor que funcione, nem nova
 // nem antiga — por isso migrado pra API do GIPHY, que continua aceitando
 // cadastro novo normalmente.
@@ -28,10 +28,11 @@ export const DESKTOP_DOWNLOAD_URL =
 //     Actions > New repository secret > VITE_GIPHY_API_KEY (e adicionar
 //     a mesma linha "VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}"
 //     no .github/workflows/release-desktop.yml, junto das outras)
-// Sem essa variável configurada, o valor abaixo é usado como reserva —
-// é só um placeholder e não funciona, então a busca de GIF fica
-// desativada até a chave de verdade ser configurada.
-export const GIPHY_API_KEY = import.meta.env.VITE_GIPHY_API_KEY || 'EU6ktp2I3dARvfow8NgQm0qEAkuAZaEn'
+// Sem essa variável configurada, a busca de GIF fica desativada (o GIF
+// picker mostra o aviso de "não configurado"). NUNCA coloque uma chave
+// real como valor de reserva aqui: tudo neste arquivo vai pro bundle
+// público e pro repositório.
+export const GIPHY_API_KEY: string = import.meta.env.VITE_GIPHY_API_KEY || ''
 
 // URL pública do app na web (o deploy na Vercel). Usada só como base
 // pra montar links de convite/compartilhamento QUANDO quem está gerando
@@ -48,3 +49,10 @@ export const GIPHY_API_KEY = import.meta.env.VITE_GIPHY_API_KEY || 'EU6ktp2I3dAR
 // sozinho, então só o Electron precisa desse valor fixo aqui.
 //
 export const PUBLIC_WEB_URL = 'https://mamaco-voip.vercel.app'
+
+// Versão dos Termos de Uso / Política de Privacidade em vigor (data da
+// última alteração relevante). Quem não aceitou ESTA versão vê a tela de
+// aceite (TermsGate) ao entrar — inclusive contas criadas pelo Google,
+// que não passam pelo formulário de cadastro. Ao mudar os textos legais
+// de forma relevante, atualize aqui para pedir o aceite de novo.
+export const TERMS_VERSION = '2026-09-30'

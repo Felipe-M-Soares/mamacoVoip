@@ -637,3 +637,21 @@ create policy "Membros veem mensagens do servidor"
         )
     )
   );
+
+-- ==== originalmente: 012_pinned_messages.sql (política) ====
+-- Movida de 002_messaging.sql (lá ela vinha antes de existir
+-- has_permission() e quebrava a instalação do zero). Mesmo SQL de antes.
+-- Só quem tem permissão de gerenciar mensagens no servidor (dono ou
+-- cargo com essa permissão) pode fixar/desafixar — reaproveita a
+-- função has_permission() criada acima, neste arquivo.
+drop policy if exists "messages_pin_update" on public.messages;
+create policy "messages_pin_update"
+  on public.messages for update
+  using (
+    exists (
+      select 1 from public.channels ch
+      join public.servers s on s.id = ch.server_id
+      where ch.id = messages.channel_id
+        and (s.owner_id = auth.uid() or public.has_permission(s.id, auth.uid(), 'manage_messages'))
+    )
+  );

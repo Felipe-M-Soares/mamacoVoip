@@ -76,23 +76,23 @@ export function UpdateStatusBadge() {
 
   if (applying) {
     return (
-      <div className="fixed inset-0 z-[500] bg-discord-darker flex flex-col items-center justify-center gap-5">
+      <div className="fixed inset-0 z-[500] bg-mv-canvas flex flex-col items-center justify-center gap-5">
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              'radial-gradient(ellipse 500px 350px at 50% 42%, color-mix(in srgb, var(--color-discord-blurple) 22%, transparent), transparent 70%)',
+              'radial-gradient(ellipse 500px 350px at 50% 42%, color-mix(in srgb, var(--color-mv-accent) 22%, transparent), transparent 70%)',
           }}
         />
         <div className="relative w-20 h-20">
-          <div className="w-20 h-20 rounded-[26px] bg-brand-gradient ring-1 ring-white/10 shadow-[0_20px_50px_-15px_var(--color-discord-blurple)] flex items-center justify-center">
+          <div className="w-20 h-20 rounded-[26px] bg-brand-gradient ring-1 ring-white/10 shadow-[0_20px_50px_-15px_var(--color-mv-accent)] flex items-center justify-center">
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-9 h-9 text-white">
               <path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4l3.3 3.3V4a1 1 0 0 1 1-1zM4 19a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2H4z" />
             </svg>
           </div>
         </div>
         <p className="relative font-display font-semibold text-white">Aplicando atualização…</p>
-        <div className="relative w-6 h-6 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" role="status" aria-label="Aplicando atualização" />
+        <div className="relative w-6 h-6 border-2 border-mv-accent border-t-transparent rounded-full animate-spin" role="status" aria-label="Aplicando atualização" />
       </div>
     )
   }
@@ -104,19 +104,19 @@ export function UpdateStatusBadge() {
   if (status.status === 'checking') {
     return (
       <div role="status" className="fixed bottom-4 right-4 z-[250] flex items-center gap-2 surface-elevated rounded-full pl-3 pr-4 py-2 animate-pop-in">
-        <div className="w-3.5 h-3.5 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin shrink-0" />
-        <span className="text-xs text-discord-text-muted">Verificando atualizações...</span>
+        <div className="w-3.5 h-3.5 border-2 border-mv-accent border-t-transparent rounded-full animate-spin shrink-0" />
+        <span className="text-xs text-mv-muted">Verificando atualizações...</span>
       </div>
     )
   }
 
   if (status.status === 'up-to-date') {
     return (
-      <div role="status" className="fixed bottom-4 right-4 z-[250] flex items-center gap-2 surface-elevated !border-discord-green/30 rounded-full pl-3 pr-4 py-2 animate-pop-in">
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-discord-green shrink-0">
+      <div role="status" className="fixed bottom-4 right-4 z-[250] flex items-center gap-2 surface-elevated !border-mv-green/30 rounded-full pl-3 pr-4 py-2 animate-pop-in">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-mv-green shrink-0">
           <path d="M9 16.2l-3.5-3.5-1.4 1.4L9 19 20 8l-1.4-1.4z" />
         </svg>
-        <span className="text-xs text-discord-text-muted">App atualizado</span>
+        <span className="text-xs text-mv-muted">App atualizado</span>
       </div>
     )
   }
@@ -124,10 +124,10 @@ export function UpdateStatusBadge() {
   if (status.status === 'downloading') {
     return (
       <div role="status" className="fixed bottom-4 right-4 z-[250] flex items-center gap-2.5 surface-elevated rounded-full pl-3 pr-4 py-2 animate-pop-in">
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-discord-blurple shrink-0 animate-bounce">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-mv-accent shrink-0 animate-bounce">
           <path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4l3.3 3.3V4a1 1 0 0 1 1-1zM4 19a1 1 0 1 0 0 2h16a1 1 0 1 0 0-2H4z" />
         </svg>
-        <span className="text-xs text-discord-text">
+        <span className="text-xs text-mv-text">
           Baixando atualização{typeof status.percent === 'number' ? ` (${status.percent}%)` : '...'}
         </span>
       </div>
@@ -136,16 +136,16 @@ export function UpdateStatusBadge() {
 
   if (status.status === 'ready') {
     return (
-      <div role="status" className="fixed bottom-4 right-4 z-[250] flex items-center gap-3 surface-elevated !border-discord-green/30 rounded-full pl-3 pr-1.5 py-1.5 animate-pop-in">
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-discord-green shrink-0">
+      <div role="status" className="fixed bottom-4 right-4 z-[250] flex items-center gap-3 surface-elevated !border-mv-green/30 rounded-full pl-3 pr-1.5 py-1.5 animate-pop-in">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-mv-green shrink-0">
           <path d="M9 16.2l-3.5-3.5-1.4 1.4L9 19 20 8l-1.4-1.4z" />
         </svg>
-        <span className="text-xs text-discord-text">
+        <span className="text-xs text-mv-text">
           Atualização {status.version ? `v${status.version} ` : ''}pronta
         </span>
         <button
           onClick={handleRestart}
-          className="text-xs h-7 px-3.5 rounded-full bg-discord-green text-white font-semibold hover:brightness-110 transition-all"
+          className="text-xs h-7 px-3.5 rounded-full bg-mv-green text-white font-semibold hover:brightness-110 transition-all"
         >
           Reiniciar
         </button>
@@ -160,10 +160,10 @@ export function UpdateStatusBadge() {
         <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2zm0-4h-2V7h2z" />
       </svg>
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-discord-text">Não foi possível verificar atualizações</p>
+        <p className="text-xs font-medium text-mv-text">Não foi possível verificar atualizações</p>
         {status.message && (
           <>
-            <p className="text-[10px] text-discord-text-muted/70 mt-0.5 break-words max-h-24 overflow-y-auto font-mono">
+            <p className="text-[10px] text-mv-muted/70 mt-0.5 break-words max-h-24 overflow-y-auto font-mono">
               {status.message}
             </p>
             <div className="flex items-center gap-3 mt-1.5">
@@ -173,7 +173,7 @@ export function UpdateStatusBadge() {
                     // sem permissão de área de transferência — nada a fazer
                   })
                 }}
-                className="text-[11px] font-medium text-discord-blurple hover:underline"
+                className="text-[11px] font-medium text-mv-accent hover:underline"
               >
                 Copiar detalhes
               </button>
@@ -182,7 +182,7 @@ export function UpdateStatusBadge() {
                   href={status.downloadUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[11px] text-discord-green hover:underline font-medium"
+                  className="text-[11px] text-mv-green hover:underline font-medium"
                 >
                   Baixar manualmente
                 </a>

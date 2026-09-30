@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { uniqueTopic } from '../lib/realtimeChannel'
+import { removeAttachmentObjects } from '../lib/storageUrls'
+import { changesChannel } from '../lib/realtimeChannel'
 import { useAuth } from './useAuth'
 import { useChannelMutes } from './useChannelMutes'
 import { notify } from '../lib/notifications'
+import { describeMessageContent } from '../lib/stickers'
+import { playMentionSound, playMessageSound } from '../lib/sounds'
 import { describeError } from '../lib/errors'
 import { rateLimitError } from '../lib/rateLimit'
 import type { Message, MessageAttachment, MessageReaction } from '../types/database'
@@ -272,10 +275,9 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     const belongsHere = (m: Message) => m.channel_id === channelId && (threadId ? m.thread_id === threadId : m.thread_id === null)
     const isLoaded = (messageId: string) => messagesRef.current.some((m) => m.id === messageId)
 
-    const channel = supabase
-      // Nome único por montagem: `supabase.channel(nome)` devolve um canal
-      // já existente com o mesmo nome (ver lib/realtimeChannel.ts).
-      .channel(uniqueTopic(`messages:${channelId}${threadId ? `:${threadId}` : ''}`))
+    // Nome único por montagem (canal privado `pgc:`): `supabase.channel(nome)`
+    // devolve um canal já existente com o mesmo nome (ver lib/realtimeChannel.ts).
+    const channel = changesChannel(`messages:${channelId}${threadId ? `:${threadId}` : ''}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
@@ -294,7 +296,9 @@ export function useMessages(channelId: string | null, serverId: string | null, t
                 ? new RegExp(`@(everyone|here|${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'i').test(newMessage.content)
                 : false
             if (level === 'all' || mentionsMe) {
-              notify('Nova mensagem', newMessage.content.slice(0, 120))
+              notify('Nova mensagem', describeMessageContent(newMessage.content).slice(0, 120))
+              if (mentionsMe) playMentionSound()
+              else if (document.hidden || !document.hasFocus()) playMessageSound()
             }
           }
         }
@@ -426,12 +430,13 @@ export function useMessages(channelId: string | null, serverId: string | null, t
             continue
           }
 
-          const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(path)
+          // Bucket privado (migration 017): grava só o CAMINHO dentro do
+          // bucket; quem exibe gera uma URL assinada (useAttachmentUrl).
           const { data: att, error: attError } = await supabase
             .from('message_attachments')
             .insert({
               message_id: message.id,
-              file_url: urlData.publicUrl,
+              file_url: path,
               file_name: file.name,
               file_size: file.size,
               mime_type: file.type || 'application/octet-stream',
@@ -475,9 +480,17 @@ export function useMessages(channelId: string | null, serverId: string | null, t
 
   const deleteMessage = useCallback(async (messageId: string) => {
     try {
+      // Anexos lidos ANTES de apagar (o delete da mensagem leva as
+      // linhas de anexo junto, em cascata) — pra remover os arquivos do
+      // Storage depois.
+      const { data: attRows } = await supabase.from('message_attachments').select('file_url').eq('message_id', messageId)
       const { error } = await supabase.from('messages').delete().eq('id', messageId)
       if (error) return { error: describeError(error, 'Não foi possível excluir a mensagem') }
       setMessages((prev) => prev.filter((m) => m.id !== messageId))
+      // Best-effort: não segura a UI nem transforma a exclusão em erro.
+      if (attRows && attRows.length > 0) {
+        void removeAttachmentObjects('attachments', attRows.map((r) => r.file_url))
+      }
       return { error: null }
     } catch (err) {
       return { error: describeError(err, 'Não foi possível excluir a mensagem') }

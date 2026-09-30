@@ -5,6 +5,8 @@ import { isElectron } from '../hooks/useGamePresence'
 import type { Profile, ProfileStatus } from '../types/database'
 import { normalizeEmail, normalizeTotpCode } from '../lib/authValidation'
 import { clearLinkPreviewCache } from '../hooks/useLinkPreview'
+import { clearSignedUrlCache } from '../lib/storageUrls'
+import { PUBLIC_WEB_URL } from '../lib/config'
 
 // Esquema de URL customizado que o app desktop registra no sistema
 // operacional (ver "protocols" em package.json e o bloco grande no
@@ -84,9 +86,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // cliente do Supabase pode "limpar" o hash da URL assim que processa a
   // sessão — se a gente checar isso só dentro de um useEffect, pode já ser
   // tarde demais.
+  // Com PKCE o link de confirmação volta como "/?type=signup&code=..."
+  // (o "?type=signup" é colocado pelo próprio signUp abaixo); links no
+  // formato antigo traziam "#...&type=signup".
   const isEmailConfirmationRef = useRef(
     typeof window !== 'undefined' &&
-      (window.location.hash.includes('type=signup') || window.location.hash.includes('type=email_change'))
+      (() => {
+        const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+        const query = new URLSearchParams(window.location.search)
+        const type = hash.get('type') ?? query.get('type')
+        return type === 'signup' || type === 'email_change'
+      })()
   )
 
   async function fetchProfile(userId: string) {
@@ -105,8 +115,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // embutida (pra funcionar o "detectSessionInUrl"). Só que não
       // queremos logar a pessoa automaticamente nesse caso — a gente
       // desloga na hora e manda pra tela de login com um aviso de sucesso.
-      if (isEmailConfirmationRef.current && session) {
-        await supabase.auth.signOut()
+      //
+      // Com PKCE, se o link foi aberto em OUTRO navegador/aparelho (sem o
+      // code_verifier do cadastro), não há sessão nenhuma — mas o e-mail
+      // já foi confirmado pelo Supabase antes do redirecionamento, então
+      // mostra o mesmo aviso de sucesso.
+      const confirmationWithoutSession =
+        isEmailConfirmationRef.current && !session && new URLSearchParams(window.location.search).has('code')
+      if (isEmailConfirmationRef.current && (session || confirmationWithoutSession)) {
+        if (session) await supabase.auth.signOut()
         try {
           sessionStorage.setItem('mamacos-email-confirmed', '1')
         } catch {
@@ -248,10 +265,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         data: { username: username.trim() },
         // No site, o link de confirmação volta pro próprio domínio. No
         // app desktop (app://, file://) isso não é uma URL que o
-        // navegador consiga abrir, então fica o "Site URL" do projeto.
-        ...(!isElectron() && /^https?:$/.test(window.location.protocol)
-          ? { emailRedirectTo: window.location.origin }
-          : {}),
+        // navegador consiga abrir, então vai pro site público.
+        // "?type=signup" marca a volta como confirmação de cadastro — com
+        // PKCE o Supabase só acrescenta "&code=..." (sem "type"), e sem
+        // essa marca a tela de login não saberia mostrar o aviso.
+        emailRedirectTo: `${
+          !isElectron() && /^https?:$/.test(window.location.protocol) ? window.location.origin : PUBLIC_WEB_URL
+        }/?type=signup`,
       },
     })
     if (error) return { error: traduzErro(error.message) }
@@ -302,9 +322,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Só existe dentro do app desktop (window.electronAPI) — é o outro
   // lado do signInWithGoogle() acima: quando o link mamacovoip://
-  // chega de volta (ver electron/main.cjs), extrai o token da URL e
-  // efetiva a sessão. onAuthStateChange (já escutado lá em cima) cuida
-  // do resto (buscar perfil, etc.) automaticamente a partir daqui.
+  // chega de volta (ver electron/main.cjs), confere o state e troca o
+  // "?code=" (PKCE) pela sessão. O code sozinho não serve pra nada sem
+  // o code_verifier que ficou guardado (cifrado) neste app — um link
+  // interceptado/forjado não vira sessão em outro lugar.
+  // onAuthStateChange (já escutado lá em cima) cuida do resto (buscar
+  // perfil, etc.) automaticamente a partir daqui.
   useEffect(() => {
     if (!window.electronAPI?.onGoogleAuthCallback) return
     return window.electronAPI.onGoogleAuthCallback(async (url) => {
@@ -333,11 +356,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        const params = new URLSearchParams(hashIndex >= 0 ? url.slice(hashIndex + 1) : '')
-        const access_token = params.get('access_token')
-        const refresh_token = params.get('refresh_token')
-        if (access_token && refresh_token) {
-          await supabase.auth.setSession({ access_token, refresh_token })
+        const query = new URLSearchParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '')
+        const code = query.get('code')
+        // Fluxo implícito (#access_token=...) NÃO é mais aceito: com
+        // flowType 'pkce' o Supabase sempre devolve ?code=.
+        if (code && /^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
+          await supabase.auth.exchangeCodeForSession(code)
         }
       } catch {
         // best-effort — um link malformado não deve derrubar o app
@@ -350,6 +374,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // itens fixados ou o destino pós-login de quem saiu.
   function clearLocalUserData() {
     clearLinkPreviewCache()
+    clearSignedUrlCache()
     for (const key of ['mamacos-pinned-items', 'mamacos-user-notes', 'mamacos-server-order', 'mamacos-participant-volumes']) {
       try {
         localStorage.removeItem(key)

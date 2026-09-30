@@ -52,18 +52,18 @@ export function AuthShell({ children, wide = false }: { children: ReactNode; wid
           <h2 className="mt-8 font-display text-[40px] font-bold leading-[1.1] text-white">
             Sua galera, <span className="text-gradient">sempre a um clique.</span>
           </h2>
-          <p className="mt-4 text-[15px] leading-relaxed text-discord-text-muted">
+          <p className="mt-4 text-[15px] leading-relaxed text-mv-muted">
             Converse por voz, compartilhe a tela e organize seus grupos em servidores — tudo num lugar só.
           </p>
           <ul className="mt-8 space-y-3">
             {HIGHLIGHTS.map((h) => (
               <li key={h.title} className="flex items-start gap-3.5 rounded-xl border border-[var(--color-line)] bg-white/[0.03] p-3.5">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-discord-blurple/15 text-discord-blurple ring-1 ring-inset ring-discord-blurple/25">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25">
                   {h.icon}
                 </span>
                 <span className="min-w-0">
                   <span className="block text-[14px] font-semibold text-white">{h.title}</span>
-                  <span className="mt-0.5 block text-[13px] text-discord-text-muted">{h.text}</span>
+                  <span className="mt-0.5 block text-[13px] text-mv-muted">{h.text}</span>
                 </span>
               </li>
             ))}
@@ -83,14 +83,14 @@ export function AuthHeader({ title, subtitle, icon }: { title: string; subtitle?
   return (
     <div className="text-center lg:text-left">
       {icon ? (
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-discord-blurple/15 text-discord-blurple ring-1 ring-inset ring-discord-blurple/25 lg:mx-0 [&_svg]:h-6 [&_svg]:w-6">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 lg:mx-0 [&_svg]:h-6 [&_svg]:w-6">
           {icon}
         </div>
       ) : (
         <img src="/logo.png" alt="Mamacos Voip" className="mx-auto mb-4 h-14 w-14 rounded-2xl object-cover ring-1 ring-[var(--color-line-strong)] lg:hidden" />
       )}
       <h1 className="font-display text-2xl font-semibold text-white">{title}</h1>
-      {subtitle && <p className="mt-1.5 text-[14px] text-discord-text-muted">{subtitle}</p>}
+      {subtitle && <p className="mt-1.5 text-[14px] text-mv-muted">{subtitle}</p>}
     </div>
   )
 }
@@ -100,8 +100,8 @@ export function AuthAlert({ tone, children }: { tone: 'error' | 'success' | 'inf
     tone === 'error'
       ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
       : tone === 'success'
-        ? 'border-discord-green/30 bg-discord-green/10 text-discord-green'
-        : 'border-[var(--color-line-strong)] bg-white/[0.04] text-discord-text'
+        ? 'border-mv-green/30 bg-mv-green/10 text-mv-green'
+        : 'border-[var(--color-line-strong)] bg-white/[0.04] text-mv-text'
   return (
     <div role={tone === 'error' ? 'alert' : 'status'} className={`flex items-start gap-2.5 rounded-[10px] border px-3 py-2.5 text-[13px] leading-snug ${styles}`}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-px h-4 w-4 shrink-0" aria-hidden>
@@ -123,7 +123,7 @@ export function AuthDivider() {
   return (
     <div className="my-5 flex items-center gap-3" role="separator">
       <div className="h-px flex-1 bg-[var(--color-line)]" />
-      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">ou</span>
+      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted">ou</span>
       <div className="h-px flex-1 bg-[var(--color-line)]" />
     </div>
   )
@@ -206,14 +206,14 @@ export function AuthField({ label, icon, hint, labelAside, revealable, type = 't
         {labelAside}
       </div>
       <div className="relative">
-        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-discord-text-muted" aria-hidden>
+        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-mv-muted" aria-hidden>
           {icon}
         </span>
         <input
           id={inputId}
           type={effectiveType}
           aria-describedby={hintId}
-          className={`h-11 w-full bg-discord-darker pl-10 ${revealable ? 'pr-11' : 'pr-3'} text-[15px] text-discord-text outline-none`}
+          className={`h-11 w-full bg-mv-canvas pl-10 ${revealable ? 'pr-11' : 'pr-3'} text-[15px] text-mv-text outline-none`}
           {...rest}
         />
         {revealable && type === 'password' && (
@@ -240,7 +240,7 @@ export function AuthField({ label, icon, hint, labelAside, revealable, type = 't
         )}
       </div>
       {hint && (
-        <p id={hintId} className="mt-1.5 text-[12px] text-discord-text-muted">
+        <p id={hintId} className="mt-1.5 text-[12px] text-mv-muted">
           {hint}
         </p>
       )}

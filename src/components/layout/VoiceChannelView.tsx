@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { VideoTile } from './CallMediaTiles'
+import { GameStreamMenuSection, LocalScreenShareStats } from './GameStreamControls'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { isNativeMobileApp } from '../../lib/platform'
@@ -101,8 +102,8 @@ function ScreenShareStage({
               // exatamente esse "efeito caleidoscópio" que apareceu
               // quando isso não existia). Como é a SUA tela, você já sabe
               // o que está mostrando — não faz falta uma prévia.
-              <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-discord-text-muted bg-discord-darker">
-                <div className="w-14 h-14 rounded-2xl bg-discord-blurple/15 text-discord-blurple ring-1 ring-inset ring-discord-blurple/25 flex items-center justify-center mb-1">
+              <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-mv-muted bg-mv-canvas">
+                <div className="w-14 h-14 rounded-2xl bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 flex items-center justify-center mb-1">
                   <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7">
                     <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
                   </svg>
@@ -111,6 +112,10 @@ function ScreenShareStage({
                 <p className="text-[12px] text-center px-6 max-w-sm">
                   Sem prévia aqui de propósito — evita o efeito de espelho infinito se a captura pegar esta janela
                 </p>
+                {/* Qualidade REAL que está saindo (getStats) — só pra quem transmite. */}
+                <div className="mt-1 px-4">
+                  <LocalScreenShareStats />
+                </div>
               </div>
             ) : (
               <VideoTile
@@ -167,16 +172,16 @@ function ScreenShareStage({
                   </button>
                   {openVolumeFor === share.key && (
                     <div className="absolute top-10 right-0 surface-elevated rounded-xl animate-pop-in p-3 w-44 z-10">
-                      <p className="text-[11px] font-semibold text-discord-text mb-2 flex justify-between"><span>Áudio da transmissão</span><span className="tabular-nums text-discord-text-muted">{shareVolume}%</span></p>
+                      <p className="text-[11px] font-semibold text-mv-text mb-2 flex justify-between"><span>Áudio da transmissão</span><span className="tabular-nums text-mv-muted">{shareVolume}%</span></p>
                       <input
                         type="range"
                         min={0}
                         max={200}
                         value={shareVolume}
                         onChange={(e) => voice.setScreenShareVolume(share.key, Number(e.target.value))}
-                        className="w-full accent-discord-blurple"
+                        className="w-full accent-mv-accent"
                       />
-                      <p className="text-[10px] leading-snug text-discord-text-muted mt-1.5">Acima de 100% reforça o som (útil se o jogo/app estiver baixo).</p>
+                      <p className="text-[10px] leading-snug text-mv-muted mt-1.5">Acima de 100% reforça o som (útil se o jogo/app estiver baixo).</p>
                     </div>
                   )}
                 </div>
@@ -265,9 +270,9 @@ function HeadphonesIcon({ className = 'w-5 h-5' }: { className?: string }) {
 function controlBtnClass(tone: 'neutral' | 'active' | 'off') {
   const base =
     'w-12 h-12 rounded-full flex items-center justify-center transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed'
-  if (tone === 'active') return `${base} bg-discord-blurple text-white shadow-[0_6px_18px_-6px_var(--color-discord-blurple)] hover:brightness-110`
+  if (tone === 'active') return `${base} bg-mv-accent text-white shadow-[0_6px_18px_-6px_var(--color-mv-accent)] hover:brightness-110`
   if (tone === 'off') return `${base} bg-rose-500/15 text-rose-400 ring-1 ring-inset ring-rose-500/35 hover:bg-rose-500/25`
-  return `${base} bg-white/[0.07] text-discord-text hover:bg-white/[0.13] hover:text-white`
+  return `${base} bg-white/[0.07] text-mv-text hover:bg-white/[0.13] hover:text-white`
 }
 
 function ParticipantTile({
@@ -328,7 +333,8 @@ function ParticipantTile({
   // todo — era redesenhada a cada mudança).
   const speaking = useVoiceSpeaking(userId)
   const peerQuality = useVoiceConnectionQuality(isLocal ? null : userId)
-  const hasCameraVideo = isLocal ? localVideoEnabled : Boolean(data?.cameraStream?.getVideoTracks().length)
+  const cameraStream = isLocal ? voice.localCameraStream : data?.cameraStream ?? null
+  const hasCameraVideo = isLocal ? Boolean(localVideoEnabled && cameraStream) : Boolean(data?.cameraStream?.getVideoTracks().length)
   const participantVolume = isLocal ? 100 : voice.getParticipantVolume(userId)
 
   const volumeButton = !isLocal && (
@@ -345,7 +351,7 @@ function ParticipantTile({
         aria-label="Ajustar volume deste participante"
         className={
           compact
-            ? 'w-6 h-6 flex items-center justify-center rounded-full bg-white/[0.07] text-discord-text-muted hover:bg-white/[0.14] hover:text-white transition-colors'
+            ? 'w-6 h-6 flex items-center justify-center rounded-full bg-white/[0.07] text-mv-muted hover:bg-white/[0.14] hover:text-white transition-colors'
             : 'glass w-8 h-8 flex items-center justify-center rounded-full text-white hover:brightness-125 transition-all'
         }
       >
@@ -362,9 +368,9 @@ function ParticipantTile({
         // nada"). Abrindo pra BAIXO (top-full) ele fica dentro da área
         // do próprio card, que tem espaço de sobra logo abaixo do botão.
         <div className="absolute top-full left-0 mt-1.5 surface-elevated rounded-xl animate-pop-in p-3 w-40 z-10">
-          <p className="text-[11px] font-semibold text-discord-text mb-2 flex justify-between">
+          <p className="text-[11px] font-semibold text-mv-text mb-2 flex justify-between">
             <span>Volume</span>
-            <span className="tabular-nums text-discord-text-muted">{participantVolume}%</span>
+            <span className="tabular-nums text-mv-muted">{participantVolume}%</span>
           </p>
           {/* Vai até 200% agora (não só 100%) — dá pra REFORÇAR o volume
               de quem tem captação de mic fraca, não só abaixar quem já
@@ -375,7 +381,7 @@ function ParticipantTile({
             max={200}
             value={participantVolume}
             onChange={(e) => voice.setParticipantVolume(userId, Number(e.target.value))}
-            className="w-full accent-discord-blurple"
+            className="w-full accent-mv-accent"
           />
         </div>
       )}
@@ -424,20 +430,20 @@ function ParticipantTile({
       >
         <div
           className={`relative rounded-full transition-shadow duration-200 ${
-            speaking ? 'ring-2 ring-discord-green ring-offset-2 ring-offset-discord-channels shadow-[0_0_14px_0] shadow-discord-green/50' : ''
+            speaking ? 'ring-2 ring-mv-green ring-offset-2 ring-offset-mv-main shadow-[0_0_14px_0] shadow-mv-green/50' : ''
           }`}
         >
           <Avatar name={name} avatarUrl={avatarUrl} decorationUrl={decorationUrl} size={44} />
           {(selfMuted || selfDeafened) && (
             <span
-              className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-discord-channels flex items-center justify-center text-rose-400"
+              className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-mv-main flex items-center justify-center text-rose-400"
               title={selfDeafened ? 'Áudio desativado' : 'Microfone mutado'}
             >
               {selfDeafened ? <HeadphonesOffIcon className="w-3 h-3" /> : <MicOffIcon className="w-3 h-3" />}
             </span>
           )}
         </div>
-        <span className="text-[11px] font-medium text-discord-text truncate max-w-full">{isLocal ? 'Você' : name}</span>
+        <span className="text-[11px] font-medium text-mv-text truncate max-w-full">{isLocal ? 'Você' : name}</span>
         {volumeButton}
         {menuState && !isLocal && <ContextMenu x={menuState.x} y={menuState.y} onClose={closeMenu} items={menuItems} />}
       </div>
@@ -448,18 +454,20 @@ function ParticipantTile({
     <div
       className={`relative aspect-video rounded-2xl flex items-center justify-center overflow-hidden border transition-[border-color,box-shadow] duration-200 group/tile animate-fade-in ${
         speaking
-          ? 'border-discord-green/70 shadow-[0_0_0_1px_var(--color-discord-green),0_0_28px_-6px_var(--color-discord-green)]'
+          ? 'border-mv-green/70 shadow-[0_0_0_1px_var(--color-mv-green),0_0_28px_-6px_var(--color-mv-green)]'
           : 'border-[var(--color-line)] hover:border-[var(--color-line-strong)]'
       }`}
       style={{
         background:
-          'radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--color-discord-lighter) 55%, transparent), transparent 70%), var(--color-discord-darker)',
+          'radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--color-mv-raised) 55%, transparent), transparent 70%), var(--color-mv-canvas)',
       }}
       onMouseLeave={() => setShowVolumeSlider(false)}
       onContextMenu={!isLocal ? openMenu : undefined}
     >
-      {hasCameraVideo && data?.cameraStream && !videoHiddenLocally ? (
-        <VideoTile stream={data.cameraStream} sinkId={sinkId} />
+      {hasCameraVideo && cameraStream && !videoHiddenLocally ? (
+        // Prévia própria espelhada (como um espelho), padrão de apps de vídeo;
+        // quem assiste recebe a imagem normal.
+        <VideoTile stream={cameraStream} sinkId={sinkId} mirror={isLocal} />
       ) : (
         // Sem câmera, o ícone/avatar no centro é a única coisa "visível"
         // pra indicar quem está falando — sem esse anel pulsando, só a
@@ -471,8 +479,8 @@ function ParticipantTile({
         <div className="relative flex items-center justify-center">
           {speaking && (
             <>
-              <span className="absolute -inset-3 rounded-full bg-discord-green/15 animate-ping [animation-duration:1.6s]" aria-hidden />
-              <span className="absolute -inset-1.5 rounded-full ring-[3px] ring-discord-green shadow-[0_0_24px_0] shadow-discord-green/50" aria-hidden />
+              <span className="absolute -inset-3 rounded-full bg-mv-green/15 animate-ping [animation-duration:1.6s]" aria-hidden />
+              <span className="absolute -inset-1.5 rounded-full ring-[3px] ring-mv-green shadow-[0_0_24px_0] shadow-mv-green/50" aria-hidden />
             </>
           )}
           <div className="relative">
@@ -482,7 +490,7 @@ function ParticipantTile({
         </div>
       )}
       <span className="glass absolute bottom-2.5 left-2.5 max-w-[calc(100%-5.5rem)] text-[13px] font-medium text-white pl-2.5 pr-2.5 py-1 rounded-full flex items-center gap-1.5">
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${speaking ? 'bg-discord-green' : 'bg-white/30'}`} aria-hidden />
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${speaking ? 'bg-mv-green' : 'bg-white/30'}`} aria-hidden />
         <span className="truncate">
           {name}
           {isLocal && ' (você)'}
@@ -491,7 +499,7 @@ function ParticipantTile({
           <span
             className={`text-[10px] font-semibold uppercase tracking-wide shrink-0 ${
               peerQuality === 'excellent'
-                ? 'text-discord-green'
+                ? 'text-mv-green'
                 : peerQuality === 'good'
                   ? 'text-yellow-400'
                   : 'text-red-400'
@@ -634,17 +642,17 @@ export function VoiceChannelView({
   const aloneInCall = isConnectedHere && Object.keys(voice.participants).length === 0
 
   return (
-    <section className="flex-1 flex flex-col min-w-0 bg-discord-channels border-t border-l border-[var(--color-line)]">
+    <section className="flex-1 flex flex-col min-w-0 bg-mv-main border-t border-l border-[var(--color-line)]">
       <header className="h-14 px-4 flex items-center gap-2.5 border-b border-[var(--color-line)] shrink-0">
         <span className="w-8 h-8 rounded-[10px] bg-white/[0.05] flex items-center justify-center shrink-0">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px] text-discord-text-muted" aria-hidden>
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px] text-mv-muted" aria-hidden>
             <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 0 1-14 0z" />
           </svg>
         </span>
         <h2 className="font-display font-semibold text-white truncate">{channel.name}</h2>
         {isConnectedHere && (
           <span className="chip shrink-0" title="Pessoas conectadas / limite">
-            <span className="w-1.5 h-1.5 rounded-full bg-discord-green" aria-hidden />
+            <span className="w-1.5 h-1.5 rounded-full bg-mv-green" aria-hidden />
             {Object.keys(voice.participants).length + 1}/{voice.maxParticipants} conectados
           </span>
         )}
@@ -667,15 +675,15 @@ export function VoiceChannelView({
           <div className="relative w-28 h-28 mb-6 flex items-center justify-center" aria-hidden>
             <span className="absolute inset-0 rounded-full border border-[var(--color-line)]" />
             <span className="absolute inset-3 rounded-full border border-[var(--color-line-strong)]" />
-            <span className="absolute inset-0 rounded-full bg-discord-blurple/10 blur-2xl" />
-            <div className="relative w-16 h-16 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-[0_12px_30px_-10px_var(--color-discord-blurple)]">
+            <span className="absolute inset-0 rounded-full bg-mv-accent/10 blur-2xl" />
+            <div className="relative w-16 h-16 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-[0_12px_30px_-10px_var(--color-mv-accent)]">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-white">
                 <path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z" />
               </svg>
             </div>
           </div>
           <h3 className="font-display text-xl font-semibold text-white">{channel.name}</h3>
-          <p className="text-[14px] text-discord-text-muted mt-1.5 max-w-sm">
+          <p className="text-[14px] text-mv-muted mt-1.5 max-w-sm">
             Você já está conectado em outro canal de voz. Quer trocar pra este?
           </p>
           <button
@@ -691,15 +699,15 @@ export function VoiceChannelView({
           <div className="relative w-28 h-28 mb-6 flex items-center justify-center" aria-hidden>
             <span className="absolute inset-0 rounded-full border border-[var(--color-line)]" />
             <span className="absolute inset-3 rounded-full border border-[var(--color-line-strong)]" />
-            <span className="absolute inset-0 rounded-full bg-discord-blurple/10 blur-2xl" />
-            <div className="relative w-16 h-16 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-[0_12px_30px_-10px_var(--color-discord-blurple)]">
+            <span className="absolute inset-0 rounded-full bg-mv-accent/10 blur-2xl" />
+            <div className="relative w-16 h-16 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-[0_12px_30px_-10px_var(--color-mv-accent)]">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-white">
                 <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 0 1-14 0z" />
               </svg>
             </div>
           </div>
           <h3 className="font-display text-xl font-semibold text-white">{channel.name}</h3>
-          <p className="text-[14px] text-discord-text-muted mt-1.5 max-w-sm">
+          <p className="text-[14px] text-mv-muted mt-1.5 max-w-sm">
             Ninguém está no canal de voz ainda. Entre pra começar uma chamada.
           </p>
           {voice.error && (
@@ -713,7 +721,7 @@ export function VoiceChannelView({
               if (!isSpeaker) voice.toggleMute()
             }}
             disabled={voice.connecting}
-            className="mt-6 h-11 px-6 rounded-[10px] bg-discord-green text-white text-[14px] font-semibold flex items-center gap-2 shadow-[0_8px_22px_-10px_var(--color-discord-green)] hover:brightness-110 hover:-translate-y-px active:translate-y-0 transition-all disabled:opacity-60 disabled:hover:translate-y-0"
+            className="mt-6 h-11 px-6 rounded-[10px] bg-mv-green text-white text-[14px] font-semibold flex items-center gap-2 shadow-[0_8px_22px_-10px_var(--color-mv-green)] hover:brightness-110 hover:-translate-y-px active:translate-y-0 transition-all disabled:opacity-60 disabled:hover:translate-y-0"
           >
             {voice.connecting ? (
               <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" aria-hidden />
@@ -906,7 +914,7 @@ export function VoiceChannelView({
               {aloneInCall && (
                 <div className="mt-5 flex flex-col items-center text-center animate-fade-slide-in">
                   <p className="text-[14px] font-semibold text-white">Só você por aqui, por enquanto</p>
-                  <p className="text-[13px] text-discord-text-muted mt-0.5">Chame a galera — quem entrar aparece aqui na hora.</p>
+                  <p className="text-[13px] text-mv-muted mt-0.5">Chame a galera — quem entrar aparece aqui na hora.</p>
                   <button
                     onClick={() => setShowInvite(true)}
                     className="btn-secondary mt-3 h-9 px-4 text-[13px] flex items-center gap-2"
@@ -932,7 +940,7 @@ export function VoiceChannelView({
             {/* Mic + seta: clicar no mic muta/desmuta na hora igual antes;
                 a setinha ao lado abre um painel com escolha de
                 microfone/saída de áudio, "Desativar áudio" (deafen) e um
-                atalho pras configurações — mesma ideia do Discord de
+                atalho pras configurações — mesma ideia de apps de chat populares de
                 anexar as opções extras no botão em vez de espalhar em
                 selects soltos pela barra. */}
             <div className="relative" ref={micMenuRef}>
@@ -944,8 +952,8 @@ export function VoiceChannelView({
                       deafened
                         ? 'bg-rose-500/15 text-rose-400'
                         : voice.pushToTalkActive
-                          ? 'bg-discord-green text-white'
-                          : 'bg-white/[0.07] text-discord-text-muted'
+                          ? 'bg-mv-green text-white'
+                          : 'bg-white/[0.07] text-mv-muted'
                     }`}
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -974,7 +982,7 @@ export function VoiceChannelView({
                     className={`w-12 h-12 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       deafened || voice.muted
                         ? 'bg-rose-500/15 text-rose-400 hover:bg-rose-500/25'
-                        : 'bg-white/[0.07] text-discord-text hover:bg-white/[0.13] hover:text-white'
+                        : 'bg-white/[0.07] text-mv-text hover:bg-white/[0.13] hover:text-white'
                     }`}
                   >
                     {deafened || voice.muted ? (
@@ -994,7 +1002,7 @@ export function VoiceChannelView({
                   className={`w-7 h-12 flex items-center justify-center border-l border-[var(--color-line)] transition-colors ${
                     deafened || voice.muted
                       ? 'bg-rose-500/10 text-rose-300/80 hover:text-rose-200 hover:bg-rose-500/20'
-                      : 'bg-white/[0.05] text-discord-text-muted hover:text-white hover:bg-white/[0.12]'
+                      : 'bg-white/[0.05] text-mv-muted hover:text-white hover:bg-white/[0.12]'
                   }`}
                 >
                   <svg viewBox="0 0 24 24" fill="currentColor" className={`w-3.5 h-3.5 transition-transform ${showMicMenu ? 'rotate-180' : ''}`}>
@@ -1011,7 +1019,7 @@ export function VoiceChannelView({
                       <select
                         value={voice.audioSettings.micId ?? ''}
                         onChange={(e) => voice.changeMicrophone(e.target.value)}
-                        className="w-full bg-discord-darker text-discord-text text-[13px] px-2.5 py-2 outline-none"
+                        className="w-full bg-mv-canvas text-mv-text text-[13px] px-2.5 py-2 outline-none"
                       >
                         {voice.audioSettings.microphones.map((m) => (
                           <option key={m.deviceId} value={m.deviceId}>
@@ -1028,7 +1036,7 @@ export function VoiceChannelView({
                       <select
                         value={voice.audioSettings.speakerId ?? ''}
                         onChange={(e) => voice.audioSettings.setSpeakerId(e.target.value || null)}
-                        className="w-full bg-discord-darker text-discord-text text-[13px] px-2.5 py-2 outline-none"
+                        className="w-full bg-mv-canvas text-mv-text text-[13px] px-2.5 py-2 outline-none"
                       >
                         {voice.audioSettings.speakers.map((s) => (
                           <option key={s.deviceId} value={s.deviceId}>
@@ -1042,7 +1050,7 @@ export function VoiceChannelView({
                   <div className="mb-1.5 px-1">
                     <div className="flex items-baseline justify-between">
                       <p className="field-label !mb-1.5">Volume geral</p>
-                      <span className="text-[11px] font-semibold tabular-nums text-discord-text-muted">{voice.masterVolume}%</span>
+                      <span className="text-[11px] font-semibold tabular-nums text-mv-muted">{voice.masterVolume}%</span>
                     </div>
                     <input
                       type="range"
@@ -1050,14 +1058,14 @@ export function VoiceChannelView({
                       max={100}
                       value={voice.masterVolume}
                       onChange={(e) => voice.setMasterVolume(Number(e.target.value))}
-                      className="w-full accent-discord-blurple"
+                      className="w-full accent-mv-accent"
                     />
                   </div>
 
                   <button
                     onClick={toggleDeafen}
                     className={`w-full flex items-center gap-2.5 text-left text-[13px] font-medium px-2.5 py-2 rounded-lg hover:bg-white/[0.06] transition-colors ${
-                      deafened ? 'text-rose-400' : 'text-discord-text'
+                      deafened ? 'text-rose-400' : 'text-mv-text'
                     }`}
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 shrink-0">
@@ -1073,7 +1081,7 @@ export function VoiceChannelView({
                       setShowMicMenu(false)
                       setShowSettingsFromVoice(true)
                     }}
-                    className="w-full flex items-center gap-2.5 text-left text-[13px] font-medium px-2.5 py-2 rounded-lg hover:bg-white/[0.06] hover:text-discord-text text-discord-text-muted transition-colors"
+                    className="w-full flex items-center gap-2.5 text-left text-[13px] font-medium px-2.5 py-2 rounded-lg hover:bg-white/[0.06] hover:text-mv-text text-mv-muted transition-colors"
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 shrink-0">
                       <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.9 3a7.6 7.6 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7.9 7.9 0 0 0-1.8-1L16 2h-4l-.6 2.9a7.9 7.9 0 0 0-1.8 1l-2.4-1-2 3.4L7 10a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.9 7.9 0 0 0 1.8 1L12 22h4l.6-2.9a7.9 7.9 0 0 0 1.8-1l2.4 1 2-3.4-2-1.6c.05-.3.1-.6.1-1z" />
@@ -1176,7 +1184,7 @@ export function VoiceChannelView({
             {!voice.screenSharing && (
               <div className="flex items-end gap-1.5 px-1">
                 <div className="flex flex-col items-start gap-0.5">
-                  <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted px-1">Resolução</span>
+                  <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-mv-muted px-1">Resolução</span>
                   <select
                     value={voice.screenShareQuality.resolution}
                     onChange={(e) =>
@@ -1184,7 +1192,7 @@ export function VoiceChannelView({
                     }
                     title="Resolução do compartilhamento de tela"
                     aria-label="Resolução do compartilhamento de tela"
-                    className="bg-discord-darker text-discord-text text-xs h-8 pl-2.5 outline-none max-w-[150px] truncate"
+                    className="bg-mv-canvas text-mv-text text-xs h-8 pl-2.5 outline-none max-w-[150px] truncate"
                   >
                     {voice.screenShareQuality.resolutionOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>
@@ -1194,13 +1202,13 @@ export function VoiceChannelView({
                   </select>
                 </div>
                 <div className="flex flex-col items-start gap-0.5">
-                  <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted px-1">FPS</span>
+                  <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-mv-muted px-1">FPS</span>
                   <select
                     value={voice.screenShareQuality.frameRate}
                     onChange={(e) => voice.screenShareQuality.setFrameRate(Number(e.target.value) as 15 | 30 | 60)}
                     title="Taxa de quadros do compartilhamento de tela"
                     aria-label="Taxa de quadros do compartilhamento de tela"
-                    className="bg-discord-darker text-discord-text text-xs h-8 pl-2.5 outline-none"
+                    className="bg-mv-canvas text-mv-text text-xs h-8 pl-2.5 outline-none"
                   >
                     {voice.screenShareQuality.frameRateOptions.map((fps) => (
                       <option key={fps} value={fps}>
@@ -1228,7 +1236,7 @@ export function VoiceChannelView({
 
             {/* "..." — o resto das opções que não precisam de um botão
                 dedicado o tempo todo, mesma ideia do menu de "mais opções"
-                do Discord na barra de chamada. */}
+                de apps de chat populares na barra de chamada. */}
             <div className="relative" ref={moreMenuRef}>
               <button
                 onClick={() => setShowMoreMenu((v) => !v)}
@@ -1249,7 +1257,7 @@ export function VoiceChannelView({
                       setShowMoreMenu(false)
                       setShowInvite(true)
                     }}
-                    className="w-full flex items-center gap-2.5 text-left text-[13px] font-medium px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-discord-text transition-colors"
+                    className="w-full flex items-center gap-2.5 text-left text-[13px] font-medium px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-mv-text transition-colors"
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 shrink-0">
                       <path d="M15 12a5 5 0 1 0-4.9-6H9a1 1 0 1 0 0 2h1.1c.1.4.2.7.4 1H9a1 1 0 1 0 0 2h2.5c.9.6 2 1 3.2 1zM3 20a6 6 0 0 1 6-6h1a6 6 0 0 1 6 6 1 1 0 1 1-2 0 4 4 0 0 0-4-4H9a4 4 0 0 0-4 4 1 1 0 1 1-2 0zm16-2v-2h-2v-2h2v-2h2v2h2v2h-2v2h-2z" />
@@ -1259,29 +1267,37 @@ export function VoiceChannelView({
 
                   <div className="h-px bg-[var(--color-line)] my-1.5" />
 
-                  <label className="w-full flex items-center gap-2.5 text-left text-[13px] px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-discord-text cursor-pointer transition-colors">
+                  <label className="w-full flex items-center gap-2.5 text-left text-[13px] px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-mv-text cursor-pointer transition-colors">
                     <input
                       type="checkbox"
                       checked={showOwnTile}
                       onChange={(e) => setShowOwnTile(e.target.checked)}
-                      className="accent-discord-blurple"
+                      className="accent-mv-accent"
                     />
                     Mostrar minha própria câmera
                   </label>
 
-                  <label className="w-full flex items-center gap-2.5 text-left text-[13px] px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-discord-text cursor-pointer transition-colors">
+                  <label className="w-full flex items-center gap-2.5 text-left text-[13px] px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-mv-text cursor-pointer transition-colors">
                     <input
                       type="checkbox"
                       checked={hideNoVideoParticipants}
                       onChange={(e) => setHideNoVideoParticipants(e.target.checked)}
-                      className="accent-discord-blurple"
+                      className="accent-mv-accent"
                     />
                     Ocultar quem está sem câmera
                   </label>
 
-                  <p className="text-[11px] leading-snug text-discord-text-muted px-2.5 pt-1 pb-0.5">
+                  <p className="text-[11px] leading-snug text-mv-muted px-2.5 pt-1 pb-0.5">
                     Essas duas preferências valem só enquanto você estiver nesta chamada.
                   </p>
+
+                  {/* Só no app desktop: detecção de jogo e sobreposição dependem do Electron. */}
+                  {Boolean(window.electronAPI) && (
+                    <>
+                      <div className="h-px bg-[var(--color-line)] my-1.5" />
+                      <GameStreamMenuSection />
+                    </>
+                  )}
 
                   <div className="h-px bg-[var(--color-line)] my-1.5" />
 
@@ -1290,7 +1306,7 @@ export function VoiceChannelView({
                       setShowMoreMenu(false)
                       setShowSettingsFromVoice(true)
                     }}
-                    className="w-full flex items-center gap-2.5 text-left text-[13px] font-medium px-2.5 py-2 rounded-lg hover:bg-white/[0.06] hover:text-discord-text text-discord-text-muted transition-colors"
+                    className="w-full flex items-center gap-2.5 text-left text-[13px] font-medium px-2.5 py-2 rounded-lg hover:bg-white/[0.06] hover:text-mv-text text-mv-muted transition-colors"
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 shrink-0">
                       <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.9 3a7.6 7.6 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7.9 7.9 0 0 0-1.8-1L16 2h-4l-.6 2.9a7.9 7.9 0 0 0-1.8 1l-2.4-1-2 3.4L7 10a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.9 7.9 0 0 0 1.8 1L12 22h4l.6-2.9a7.9 7.9 0 0 0 1.8-1l2.4 1 2-3.4-2-1.6c.05-.3.1-.6.1-1z" />

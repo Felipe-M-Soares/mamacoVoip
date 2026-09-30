@@ -15,12 +15,13 @@ import {
   type RemoteTrackPublication,
 } from 'livekit-client'
 import { supabase } from '../lib/supabase'
-import { fetchLiveKitToken } from '../lib/livekit'
+import { fetchLiveKitToken, prewarmLiveKitConnection, rememberLiveKitUrl, setActiveVoiceRoom } from '../lib/livekit'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
 import {
   useScreenShareQuality,
   contentHintForPreset,
+  resolveScreenSharePreset,
   exceedsH264FrameLimits,
   fitWithin,
   SAFE_MAX_CAPTURE_HEIGHT,
@@ -28,12 +29,13 @@ import {
   type QualityPreset,
 } from '../hooks/useScreenShareQuality'
 import { createNoiseSuppressor, type NoiseSuppressor, createScreenAudioDenoiser, type ScreenAudioDenoiser } from '../lib/noiseSuppression'
-import { takePendingGameShareHint } from '../lib/screenShareGameHint'
+import { peekPendingGameShareHint, takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
 import { armScreenShareChoice } from '../lib/chooseScreenShareSource'
 import { PcmStreamPlayer } from '../lib/pcmStreamPlayer'
 import { isAllowedSoundboardUrl } from '../lib/soundboardUrl'
+import { ensureRealtimeAuth, privateChannelParams, changesChannel } from '../lib/realtimeChannel'
 import { useSplitVoiceValue, VoiceActivityContext, VoiceCoreContext } from './voiceSplit'
 import {
   playConnectSound,
@@ -42,6 +44,8 @@ import {
   playUnmuteSound,
   playUserJoinSound,
   playUserLeaveSound,
+  playStreamStartSound,
+  playStreamStopSound,
 } from '../lib/sounds'
 
 // TRIGÉSIMA QUARTA RODADA — troca de motor de transmissão: o mesh manual
@@ -138,17 +142,17 @@ const MIC_MAX_BITRATE = 64_000
 // bem menos que música/som de jogo estéreo). Antes esse áudio não
 // recebia NENHUM ajuste, então ficava só no padrão baixo que o
 // navegador usa pra Opus (~32kbps) — péssimo pra música ou som de jogo,
-// que tem muito mais variação de frequência do que uma voz. 256kbps é
-// próximo do que serviços de streaming de música chamam de "qualidade
-// muito alta" (Opus estéreo satura a qualidade audível bem antes de
-// 256kbps) — dá pra considerar isso o teto prático de "o máximo que
-// vale a pena".
-const SCREEN_SHARE_AUDIO_MAX_BITRATE = 256_000
+// que tem muito mais variação de frequência do que uma voz. Opus estéreo
+// 48 kHz já é transparente pra música/jogo por volta de 160-192kbps — o
+// valor anterior (256kbps) só gastava upload disputando banda com o VÍDEO
+// do jogo, onde cada kbps faz diferença visível. Sem DTX (cortaria a
+// trilha/ambiente de jogo nos "silêncios") e sem RED (ver abaixo).
+const SCREEN_SHARE_AUDIO_MAX_BITRATE = 192_000
 
 // Opções de publicação do áudio da transmissão (eram repetidas em 3
 // lugares). `red: false` é novo: o Room publica tudo com RED por padrão
-// (ótimo pra voz), mas pra um fluxo ESTÉREO de 256kbps a redundância
-// dobrava o upload (~512kbps) sem ganho audível — música/jogo tolera
+// (ótimo pra voz), mas pra um fluxo ESTÉREO de 192kbps a redundância
+// dobrava o upload (~384kbps) sem ganho audível — música/jogo tolera
 // bem uma perda ocasional, ao contrário de uma sílaba de voz.
 const SCREEN_SHARE_AUDIO_PUBLISH_OPTIONS = {
   name: 'screen-audio',
@@ -162,6 +166,24 @@ const SCREEN_SHARE_AUDIO_PUBLISH_OPTIONS = {
 // Mensagem pt-BR padrão pra quando o servidor não deixa publicar (ouvinte
 // num canal "Palco" — ver supabase/functions/livekit-token).
 const NO_PUBLISH_PERMISSION_MESSAGE = 'Você está como ouvinte neste canal — só moderadores podem falar ou transmitir aqui.'
+
+// Sala do LiveKit com as opções da call (adaptiveStream desligado de
+// propósito — ver o comentário no join(), perto de `room = preparedRoom`).
+// DTX + RED na voz: DTX não manda pacote no silêncio (menos banda, mesma
+// latência); RED repete o quadro anterior no mesmo pacote (resiste a perda
+// sem esperar retransmissão). O Opus fica no padrão do WebRTC (quadro de
+// 20ms) e o jitter buffer do navegador é adaptativo — não mexemos (ver
+// docs/PING.md).
+function createVoiceRoom(): Room {
+  return new Room({
+    adaptiveStream: false,
+    dynacast: true,
+    publishDefaults: {
+      dtx: true,
+      red: true,
+    },
+  })
+}
 
 // Erro usado internamente pra abortar um join() que ficou obsoleto
 // (a pessoa saiu, ou pediu pra entrar em outro canal, no meio do caminho).
@@ -545,9 +567,58 @@ async function captureNativeFallbackStream(kind: 'wgc' | 'gdi', monitorIndex: nu
   return stream
 }
 
-async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: boolean }): Promise<MediaStream> {
+// `presetFor` (opcional): recebe `isGame` (a fonte escolhida é um jogo
+// detectado?) assim que a escolha é feita e devolve o preset EFETIVO — é
+// assim que o preset automático "Jogo" (1080p60, ver
+// resolveScreenSharePreset) entra ANTES de abrir a captura (os limites do
+// getUserMedia só reduzem, nunca aumentam depois). `out` recebe o preset
+// usado e se era jogo, pra quem chama publicar com o mesmo preset.
+// Versão WEB (site, sem o app desktop): usa o seletor do próprio
+// navegador (getDisplayMedia). Antes o site recusava com um erro tratado
+// como "cancelado" — o botão simplesmente não fazia nada. O navegador
+// mostra o seletor dele (aba, janela ou tela inteira) e, no Chrome/Edge,
+// uma caixa "compartilhar áudio" — o áudio vem junto no mesmo stream e o
+// resto do fluxo (toggleScreenShare) já sabe usar essa track.
+// Celulares (iOS/Android) não suportam captura de tela no navegador.
+async function captureScreenShareStreamWeb(preset: QualityPreset): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new DOMException(
+      'Este navegador não permite compartilhar a tela (celulares não suportam). Use o Chrome, Edge ou Firefox no computador, ou o app desktop.',
+      'NotSupportedError'
+    )
+  }
+  const options = {
+    video: {
+      frameRate: { ideal: preset.frameRate, max: preset.frameRate },
+      width: { max: preset.width },
+      height: { max: preset.height },
+    },
+    // Áudio "cru" (sem cancelamento de eco/ruído): é som de jogo/vídeo,
+    // não voz. Só o Chrome/Edge entregam áudio de aba/sistema.
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    // Dicas do Chrome/Edge (ignoradas por quem não conhece): oferece o
+    // áudio do sistema, esconde a própria aba do app da lista (evita o
+    // "espelho infinito") e permite trocar de aba sem parar a transmissão.
+    systemAudio: 'include',
+    selfBrowserSurface: 'exclude',
+    surfaceSwitching: 'include',
+  } as DisplayMediaStreamOptions
+  logDebug(`captureScreenShareStreamWeb: pedindo captura ${preset.width}x${preset.height}@${preset.frameRate}`)
+  return navigator.mediaDevices.getDisplayMedia(options)
+}
+
+async function captureScreenShareStream(
+  preset: QualityPreset,
+  opts?: { auto?: boolean },
+  presetFor?: (isGame: boolean) => QualityPreset,
+  out?: { preset: QualityPreset; isGame: boolean }
+): Promise<MediaStream> {
+  if (out) {
+    out.preset = preset
+    out.isGame = false
+  }
   if (!window.electronAPI) {
-    throw new DOMException('Compartilhamento de tela só funciona no app desktop.', 'NotAllowedError')
+    return captureScreenShareStreamWeb(preset)
   }
   // DÉCIMA PRIMEIRA RODADA — bug real relatado com print de tela: no
   // Linux (bem provavelmente Wayland, a julgar pelo visual do sistema no
@@ -565,7 +636,7 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
   // completa pra gente montar uma UI própria (daí sobrar só a própria
   // janela, que o Electron sempre enxerga por ser dono dela).
   //
-  // É exatamente esse portal nativo que o Discord/OBS/Chrome usam no
+  // É exatamente esse portal nativo que o OBS/Chrome usam no
   // Wayland — em vez de montar uma lista própria (que funciona bem no
   // Windows, onde desktopCapturer.getSources() devolve tudo de verdade),
   // eles chamam getDisplayMedia() puro e deixam o SISTEMA mostrar o
@@ -616,6 +687,26 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
   }
   if (!sourceId) {
     throw new DOMException('Compartilhamento cancelado.', 'NotAllowedError')
+  }
+  // A fonte escolhida é o jogo detectado? (card "Jogo"/atalho do aviso →
+  // deixou o recado de jogo; ou a janela/tela exata do jogo cadastrado.)
+  {
+    const chosen = payload.sources.find((s) => s.id === sourceId)
+    // Só conta como jogo quando a sugestão é um jogo DETECTADO (catálogo
+    // ou pasta de loja) — a "Sugestão" genérica pode ser o navegador.
+    const isGame =
+      Boolean(payload.suggestion?.isKnownGame) &&
+      (peekPendingGameShareHint() !== null || Boolean(chosen && (chosen.isExactGameWindow || chosen.isGameDisplay)))
+    if (presetFor) preset = presetFor(isGame)
+    if (out) {
+      out.preset = preset
+      out.isGame = isGame
+    }
+    if (isGame) {
+      logDebug(
+        `captureScreenShareStream: fonte é jogo (${payload.suggestion?.label ?? '?'}${payload.suggestion?.antiCheat ? `, anti-cheat ${payload.suggestion.antiCheat}` : ''}) — preset ${preset.label}`
+      )
+    }
   }
   // DÉCIMA NONA RODADA — bug real relatado: janela compartilha
   // normalmente (áudio e vídeo bons), mas a tela CHEIA de um jogo (o
@@ -743,7 +834,7 @@ async function captureScreenShareStream(preset: QualityPreset, opts?: { auto?: b
         // janela) costuma lidar melhor com jogos em modo exclusivo do que
         // a duplicação de TELA INTEIRA (Desktop Duplication API, usada
         // pra fontes "screen:") — é basicamente a mesma técnica que apps
-        // como o Discord usam pra "Compartilhar uma janela" funcionar em
+        // como um app de chat popular usam pra "Compartilhar uma janela" funcionar em
         // jogos que a tela cheia normal não consegue. Só uma tentativa
         // best-effort: se o HWND não existir de verdade (nunca foi
         // encontrado) ou também falhar, cai pro plano B de sempre.
@@ -913,6 +1004,13 @@ export interface VoiceParticipant {
 // em VoiceProvider abaixo.
 export type VoiceConnectionQuality = 'excellent' | 'good' | 'poor' | 'lost'
 
+// O mínimo de um som do soundboard que o VoiceContext precisa pra tocar.
+export type SoundboardSoundRef = { id: string; storage_path: string }
+
+function soundboardUrlFor(storagePath: string): string {
+  return supabase.storage.from('soundboard').getPublicUrl(storagePath).data.publicUrl
+}
+
 export interface VoiceContextValue {
   connectedChannelId: string | null
   connectedChannelName: string | null
@@ -940,6 +1038,8 @@ export interface VoiceContextValue {
   deafened: boolean
   toggleDeafen: () => void
   videoEnabled: boolean
+  /** Só o vídeo da própria câmera, pra prévia local (null com a câmera desligada). */
+  localCameraStream: MediaStream | null
   screenSharing: boolean
   screenShareConnecting: boolean
   localScreenStream: MediaStream | null
@@ -968,7 +1068,16 @@ export interface VoiceContextValue {
   // Troca a janela/tela sendo compartilhada sem parar a transmissão
   // atual primeiro — ver o comentário grande na implementação.
   switchScreenShareSource: () => Promise<void>
-  playSoundboardSound: (url: string) => void
+  // Rótulo do preset em uso na SUA transmissão (ex.: "Jogo · 1080p60").
+  screenSharePresetLabel: string | null
+  // RTCStatsReport do sender do vídeo da SUA transmissão (ou null) — ver
+  // lib/screenShareStats.ts e o indicador em VoiceChannelView.tsx.
+  getScreenShareStatsReport: () => Promise<RTCStatsReport | null>
+  // Toca um som do soundboard pra todo mundo no canal de voz atual. Passa
+  // pela RPC play_soundboard_sound (migration 016), que confere se você
+  // pode estar no canal, se não está de castigo e se o som é DESTE
+  // servidor; os outros recebem pelo postgres_changes de soundboard_plays.
+  playSoundboardSound: (sound: SoundboardSoundRef) => Promise<{ error: string | null }>
   changeMicrophone: (deviceId: string) => Promise<void>
   refreshAudioConstraints: (
     overrides?: Partial<
@@ -997,11 +1106,25 @@ export const VoiceContext = createContext<VoiceContextValue | undefined>(undefin
 // agora" — é por isso que trocar pra um canal de texto não te tira mais
 // da chamada. Só a chamada explícita de leave() desconecta de verdade.
 export function VoiceProvider({ children }: { children: ReactNode }) {
+  // Pré-aquece DNS/TLS com o servidor de voz da última call logo que o app
+  // abre (docs/PING.md) — a primeira entrada numa sala fica mais rápida.
+  useEffect(() => {
+    const id = setTimeout(() => prewarmLiveKitConnection((url) => createVoiceRoom().prepareConnection(url)), 2_000)
+    return () => clearTimeout(id)
+  }, [])
+
   const { user } = useAuth()
   const audioSettings = useAudioSettings()
   const screenShareQuality = useScreenShareQuality()
   const screenShareQualityRef = useRef(screenShareQuality.preset)
   screenShareQualityRef.current = screenShareQuality.preset
+  // Preset automático "Jogo" (ver resolveScreenSharePreset) — refs pra
+  // ler o valor ATUAL de dentro das funções assíncronas de captura.
+  const screenShareGameAutoRef = useRef(screenShareQuality.gameAuto)
+  screenShareGameAutoRef.current = screenShareQuality.gameAuto
+  // Rótulo do preset EFETIVO da transmissão atual (ex.: "Jogo · 1080p60"),
+  // mostrado no indicador de quem transmite (VoiceChannelView.tsx).
+  const [screenSharePresetLabel, setScreenSharePresetLabel] = useState<string | null>(null)
   const audioSettingsRef = useRef(audioSettings)
   audioSettingsRef.current = audioSettings
 
@@ -1018,6 +1141,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [connectedAt, setConnectedAt] = useState<number | null>(null)
   const [connectionQuality, setConnectionQuality] = useState<Record<string, VoiceConnectionQuality>>({})
   const [localConnectionQuality, setLocalConnectionQuality] = useState<VoiceConnectionQuality | null>(null)
+  const localConnectionQualityRef = useRef<VoiceConnectionQuality | null>(null)
+  localConnectionQualityRef.current = localConnectionQuality
   const [connecting, setConnecting] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
   const [canPublish, setCanPublishState] = useState(true)
@@ -1031,6 +1156,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [muted, setMuted] = useState(false)
   const mutedRef = useRef(false)
   const [videoEnabled, setVideoEnabled] = useState(false)
+  // Prévia da PRÓPRIA câmera (só vídeo). Antes o tile local nunca recebia
+  // stream nenhum — a câmera ligava e era transmitida, mas a pessoa via
+  // só o avatar e achava que "não aparecia imagem".
+  const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null)
   const [screenSharing, setScreenSharing] = useState(false)
   // VIGÉSIMA QUINTA RODADA — falha real encontrada na revisão geral: a
   // cadeia de tentativas de captura de tela (retry com espera de 700ms,
@@ -1273,7 +1402,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // "Desativar áudio" (deafen) — igual o Discord: para de ouvir todo
+  // "Desativar áudio" (deafen) — igual a apps de chat populares: para de ouvir todo
   // mundo de uma vez (e muta o mic junto, se ele já não estivesse
   // mutado) sem precisar abaixar o volume geral manualmente toda vez.
   // Vive AQUI no contexto (não como estado local de um componente)
@@ -1639,27 +1768,38 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // em qualquer outro caso, encerra a captura nativa (stopAppAudioCapture)
   // e devolve `null` — deixando quem chama cair pro áudio de sistema,
   // como já era a intenção original.
-  async function startAppAudioCapture(pid: number): Promise<MediaStreamTrack | null> {
-    logDebug(`startAppAudioCapture: iniciando pra pid=${pid}`)
-    if (!window.electronAPI?.startProcessAudioCapture) {
-      logDebug('startAppAudioCapture: window.electronAPI.startProcessAudioCapture não existe (fora do Electron?)')
+  // `target`: o PID do jogo/app (só o áudio dele) OU 'system-excluding-self'
+  // (todo o áudio do sistema MENOS o do próprio Mamacos Voip — sem a voz
+  // da call, ver captureSystemAudioWithoutCallEcho). No segundo modo uma
+  // falha é silenciosa (só log): quem chama cai no loopback do Chromium.
+  async function startAppAudioCapture(target: number | 'system-excluding-self'): Promise<MediaStreamTrack | null> {
+    const excludeSelf = target === 'system-excluding-self'
+    const pid = excludeSelf ? 0 : target
+    logDebug(`startAppAudioCapture: iniciando ${excludeSelf ? 'áudio do sistema sem o próprio app' : `pra pid=${pid}`}`)
+    const startFn = excludeSelf ? window.electronAPI?.startSystemAudioExcludingSelf : window.electronAPI?.startProcessAudioCapture
+    if (!startFn) {
+      logDebug('startAppAudioCapture: função de captura nativa não existe (fora do Electron / preload antigo?)')
       return null
     }
     try {
-      const result = await window.electronAPI.startProcessAudioCapture(pid)
+      const result = excludeSelf
+        ? await window.electronAPI!.startSystemAudioExcludingSelf!()
+        : await window.electronAPI!.startProcessAudioCapture(pid)
       if (!result?.ok) {
         logDebug(`startAppAudioCapture: IPC voltou ok=false — ${result?.error ?? '(sem mensagem)'}`)
-        setError(
-          result?.error
-            ? `Captura de áudio só deste app falhou: ${result.error}`
-            : 'Não foi possível capturar o áudio só deste app.'
-        )
+        if (!excludeSelf) {
+          setError(
+            result?.error
+              ? `Captura de áudio só deste app falhou: ${result.error}`
+              : 'Não foi possível capturar o áudio só deste app.'
+          )
+        }
         return null
       }
       logDebug('startAppAudioCapture: IPC voltou ok=true, esperando confirmação (format/error)...')
     } catch (err) {
-      logDebug(`startAppAudioCapture: IPC startProcessAudioCapture lançou exceção — ${String(err)}`)
-      setError('Não foi possível capturar o áudio só deste app.')
+      logDebug(`startAppAudioCapture: IPC de captura nativa lançou exceção — ${String(err)}`)
+      if (!excludeSelf) setError('Não foi possível capturar o áudio só deste app.')
       return null
     }
     const player = new PcmStreamPlayer()
@@ -1691,7 +1831,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // parecia simplesmente "sem áudio, sem explicação". setError +
         // logDebug aqui é o que torna isso diagnosticável a distância.
         logDebug(`startAppAudioCapture: process-audio:error recebido — ${message}`)
-        setError(`Captura de áudio só deste app falhou: ${message}`)
+        // No modo "sistema sem o próprio app", falhar na PARTIDA é esperado
+        // em Windows antigo/exe antigo — cai no loopback sem alarde.
+        if (!excludeSelf || confirmedOnce) setError(`Captura de áudio só deste app falhou: ${message}`)
         // Ainda esperando a primeira confirmação (ver `confirmed` acima)
         // — trata como qualquer outra falha de partida, cai pro áudio de
         // sistema como já fazia.
@@ -1725,7 +1867,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // formato nem o erro chegaram a tempo, o que antes virava só
           // silêncio total sem pista nenhuma.
           logDebug(
-            `startAppAudioCapture: nem process-audio:format nem process-audio:error chegaram em ${APP_AUDIO_CONFIRM_TIMEOUT_MS}ms (pid ${pid}) — caindo pro áudio de sistema.`
+            `startAppAudioCapture: nem process-audio:format nem process-audio:error chegaram em ${APP_AUDIO_CONFIRM_TIMEOUT_MS}ms (${excludeSelf ? 'sistema sem o app' : `pid ${pid}`}) — caindo pro áudio de sistema.`
           )
         }
         finish(false)
@@ -1773,6 +1915,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // `null` em qualquer falha — quem chama trata como "sem áudio de
   // sistema dessa vez", sem derrubar o vídeo.
   async function captureSystemAudioTrack(): Promise<MediaStreamTrack | null> {
+    // Loopback do sistema é recurso do Electron — no site o áudio (se a
+    // pessoa marcou "compartilhar áudio") já vem no próprio getDisplayMedia.
+    if (!window.electronAPI) return null
     try {
       const constraints = {
         video: false,
@@ -1828,6 +1973,28 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       logDebug(`captureSystemAudioTrack falhou: ${detail}${name ? ` (${name})` : ''}`)
       return null
     }
+  }
+
+  // Áudio "do sistema" pra transmissão SEM ECO: o loopback do Chromium
+  // (captureSystemAudioTrack) pega TUDO que sai nas caixas/fone —
+  // inclusive as vozes da própria call que o app está tocando, e aí quem
+  // assiste a transmissão ouve a si mesmo de volta com atraso. No Windows
+  // (build 20348+), a captura nativa em modo "excluir processo"
+  // (process-audio-capture.exe --exclude <PID do app>) pega todo o som do
+  // sistema MENOS a árvore de processos do Mamacos Voip — jogo, música,
+  // navegador entram; a call não. Se não der (Windows antigo, .exe antigo
+  // sem esse modo, fora do Windows), cai no loopback de antes.
+  async function captureSystemAudioWithoutCallEcho(): Promise<{ track: MediaStreamTrack; native: boolean } | null> {
+    if (window.electronAPI?.platform === 'win32' && window.electronAPI.startSystemAudioExcludingSelf) {
+      const nativeTrack = await startAppAudioCapture('system-excluding-self')
+      if (nativeTrack) {
+        logDebug('captureSystemAudioWithoutCallEcho: usando áudio do sistema SEM o próprio app (sem eco da call)')
+        return { track: nativeTrack, native: true }
+      }
+      logDebug('captureSystemAudioWithoutCallEcho: modo "excluir o próprio app" indisponível — usando loopback do Chromium (a call pode vazar no áudio da transmissão)')
+    }
+    const loopback = await captureSystemAudioTrack()
+    return loopback ? { track: loopback, native: false } : null
   }
 
   // DÉCIMA RODADA: chamada de dentro de startAppAudioCapture (ver o
@@ -2039,7 +2206,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     screenAudioDenoiserRef.current = null
   }
 
-  // Toca um efeito do soundboard localmente — igual o Discord, o áudio
+  // Toca um efeito do soundboard localmente — igual a apps de chat populares, o áudio
   // é reproduzido direto pelo alto-falante de cada um (não é misturado
   // no microfone/mídia publicada). Usa o volume PRÓPRIO do soundboard
   // (soundboardVolume), não o volume geral da call — cada pessoa que
@@ -2100,22 +2267,76 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     })
   }, [soundboardVolume])
 
-  // Toca o som pra MIM (na hora) e avisa todo mundo mais no canal de voz
-  // pra tocarem a mesma URL aí também — cada um busca e reproduz
-  // localmente, em vez de misturar no stream de voz (senão quem está
-  // ouvindo o eco do RNNoise/gate ouviria o som distorcido/cortado).
-  // Continua indo pelo canal Realtime do Supabase (ver joinPresenceChannel
-  // logo abaixo) — o LiveKit também tem um jeito de mandar dados
-  // (publishData), mas trocar isso não traria nenhum benefício aqui e só
-  // aumentaria o escopo da migração sem necessidade.
-  function playSoundboardSound(url: string) {
-    if (!isAllowedSoundboardUrl(url)) return
+  // Toca o som pra MIM e avisa todo mundo mais no canal de voz pra
+  // tocarem o mesmo som aí também — cada um busca e reproduz localmente,
+  // em vez de misturar no stream de voz (senão quem está ouvindo o eco do
+  // RNNoise/gate ouviria o som distorcido/cortado).
+  //
+  // Antes o aviso ia por um broadcast do Realtime com a URL no payload —
+  // qualquer um que soubesse o id do canal (mesmo de fora do servidor)
+  // conseguia mandar tocar qualquer arquivo do bucket pra todo mundo. Agora
+  // passa pela RPC play_soundboard_sound (migration 016), que valida
+  // acesso ao canal, castigo (timeout) e se o som é do MESMO servidor, e
+  // grava em soundboard_plays; os outros recebem via postgres_changes (que
+  // respeita a RLS) e resolvem a URL pelo id do som (ver o efeito logo
+  // abaixo) — nada vindo do cliente de outra pessoa vira URL.
+  async function playSoundboardSound(sound: SoundboardSoundRef): Promise<{ error: string | null }> {
+    const channelId = connectedChannelIdRef.current
+    if (!channelId || !connectedRef.current) return { error: 'Entre num canal de voz primeiro.' }
+    const url = soundboardUrlFor(sound.storage_path)
+    if (!isAllowedSoundboardUrl(url)) return { error: 'Som inválido.' }
+    const rpcAny = supabase.rpc.bind(supabase) as unknown as (
+      fn: string,
+      args: Record<string, unknown>
+    ) => Promise<{ data: unknown; error: { message: string } | null }>
+    const { error } = await rpcAny('play_soundboard_sound', { p_channel_id: channelId, p_sound_id: sound.id })
+    if (error) return { error: error.message }
     playLocalSoundboardAudio(url)
-    const from = userIdRef.current
-    if (presenceRef.current && from) {
-      presenceRef.current.send({ type: 'broadcast', event: 'soundboard-play', payload: { from, url } })
-    }
+    return { error: null }
   }
+
+  // Sons tocados pelos OUTROS no canal de voz atual (soundboard_plays,
+  // migration 016). O filtro por channel_id é só otimização — quem decide
+  // se a linha chega é a RLS de SELECT da tabela.
+  const connectedChannelIdRef = useRef<string | null>(null)
+  connectedChannelIdRef.current = connectedChannelId
+  useEffect(() => {
+    if (!connectedChannelId || !connectedServerId) return
+    const channelId = connectedChannelId
+    const serverId = connectedServerId
+    let cancelled = false
+    let rt: RealtimeChannel | null = null
+    void ensureRealtimeAuth().then(() => {
+      if (cancelled) return
+      rt = changesChannel(`soundboard_plays:${channelId}`)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'soundboard_plays', filter: `channel_id=eq.${channelId}` },
+          (payload) => {
+            const row = payload.new as { sound_id?: unknown; played_by?: unknown; channel_id?: unknown }
+            if (row.channel_id !== channelId || typeof row.sound_id !== 'string') return
+            // Quem tocou já ouviu localmente.
+            if (row.played_by === userIdRef.current) return
+            void supabase
+              .from('soundboard_sounds')
+              .select('storage_path, server_id')
+              .eq('id', row.sound_id)
+              .maybeSingle()
+              .then(({ data }) => {
+                if (cancelled || !data || data.server_id !== serverId) return
+                playLocalSoundboardAudio(soundboardUrlFor(data.storage_path))
+              })
+          }
+        )
+        .subscribe()
+    })
+    return () => {
+      cancelled = true
+      if (rt) void supabase.removeChannel(rt)
+    }
+    // playLocalSoundboardAudio só lê refs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectedChannelId, connectedServerId])
 
   // TRIGÉSIMA QUARTA RODADA — recalcula cameraStream/screenStream de um
   // participante remoto a partir das tracks mais recentes recebidas dele
@@ -2535,15 +2756,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             await supabase.removeChannel(existingChannel)
           }
           assertActive()
-          const rt = supabase.channel(topic, {
-            config: { broadcast: { self: false }, presence: { key: user.id } },
-          })
+          // Canal PRIVADO (migration 016): o Realtime só aceita quem pode
+          // ver este canal de voz (ou participa do grupo/DM). O soundboard
+          // não passa mais por aqui (ver playSoundboardSound).
+          await ensureRealtimeAuth()
+          assertActive()
+          const rt = supabase.channel(topic, privateChannelParams({ config: { presence: { key: user.id } } }))
           presence.channel = rt
-          rt.on('broadcast', { event: 'soundboard-play' }, ({ payload }) => {
-            const url = (payload as { url?: unknown } | null)?.url
-            // Validação de URL dentro de playLocalSoundboardAudio.
-            if (typeof url === 'string') playLocalSoundboardAudio(url)
-          })
 
           await new Promise<void>((resolve, reject) => {
             rt.subscribe((status) => {
@@ -2579,6 +2798,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         )
       })
 
+      // Pré-aquecimento da conexão (docs/PING.md): assim que o token chega —
+      // em paralelo com microfone e presença — a sala resolve DNS/TLS e, no
+      // LiveKit Cloud, escolhe o data center mais próximo (São Paulo, pra
+      // quem está no Brasil). O connect() abaixo já começa "quente".
+      const preparedRoom = createVoiceRoom()
+      const preparePromise = tokenPromise
+        .then((tok) => {
+          rememberLiveKitUrl(tok.url)
+          return preparedRoom.prepareConnection(tok.url, tok.token)
+        })
+        .catch(() => {})
+
       const [mic, , tokenResult] = await Promise.all([micPromise, presencePromise, tokenPromise])
       assertActive()
       logDebug(`join(${channelId}): mic + presença + token todos prontos, conectando na sala LiveKit (${tokenResult.url})...`)
@@ -2595,7 +2826,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setMuted(false)
       presenceRef.current = presence.channel
 
-      // adaptiveStream DESLIGADO de propósito (era `true`): o
+      // (Opções da sala em createVoiceRoom.) adaptiveStream DESLIGADO de propósito (era `true`): o
       // adaptiveStream do LiveKit decide a qualidade/pausa de cada vídeo
       // remoto observando os elementos <video> ligados via
       // `track.attach()` — só que este app usa a MediaStreamTrack crua
@@ -2607,14 +2838,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // podiam simplesmente não aparecer ou congelar. `dynacast`
       // continua: ele é do lado de quem PUBLICA (para de codificar
       // camadas que ninguém está assistindo) e não depende disso.
-      room = new Room({
-        adaptiveStream: false,
-        dynacast: true,
-        publishDefaults: {
-          dtx: true,
-          red: true,
-        },
-      })
+      // Criada lá em cima (createVoiceRoom), assim que o token chegou, pra
+      // já ter feito o prepareConnection — ver docs/PING.md.
+      room = preparedRoom
+      // Dá até 800ms pro pré-aquecimento terminar (normalmente já terminou
+      // enquanto o mic/presença carregavam); não trava a entrada além disso.
+      await Promise.race([preparePromise, new Promise((resolve) => setTimeout(resolve, 800))])
+      assertActive()
       // roomRef recebe a sala ANTES do connect: assim um leave() durante
       // o handshake desconecta ESTA sala (connect rejeita na hora) em vez
       // de esperar os 15s do timeout, e os handlers de evento já sabem
@@ -2623,6 +2853,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       attachRoomEvents(room, user.id)
       await withTimeout(room.connect(tokenResult.url, tokenResult.token), 15_000, 'conexão com o servidor de voz')
       assertActive()
+      setActiveVoiceRoom(room)
 
       const allowedToPublish = tokenResult.canPublish && room.localParticipant.permissions?.canPublish !== false
       setCanPublish(allowedToPublish)
@@ -2687,6 +2918,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         if (roomRef.current === room) {
           roomRef.current = null
           micPublicationRef.current = null
+          setActiveVoiceRoom(null)
         }
         void room.disconnect()
       }
@@ -2747,6 +2979,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // emite durante o disconnect são ignorados (ver attachRoomEvents).
       const roomToClose = roomRef.current
       roomRef.current = null
+      setActiveVoiceRoom(null)
       void roomToClose.disconnect().finally(() => roomToClose.removeAllListeners())
     }
     micPublicationRef.current = null
@@ -2816,6 +3049,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (deafenedRef.current) setMasterVolume(preDeafenVolumeRef.current)
     setDeafened(false)
     setVideoEnabled(false)
+    setLocalCameraStream(null)
     setScreenSharing(false)
     setSpeaking(false)
     setPushToTalkActive(false)
@@ -3168,6 +3402,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         localStreamRef.current?.removeTrack(track)
       }
       setVideoEnabled(false)
+      setLocalCameraStream(null)
       return
     }
     if (!connectedRef.current) return
@@ -3211,6 +3446,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         simulcast: true,
       })
       setVideoEnabled(true)
+      setLocalCameraStream(new MediaStream([track]))
     } catch (err) {
       // Falhou DEPOIS de abrir a câmera (ex.: publish recusado) — solta o
       // dispositivo em vez de deixar a luz da câmera acesa.
@@ -3258,7 +3494,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // (indicador do sistema aceso, peers ainda recebendo frames) mesmo com
   // a UI já mostrando "parou".
   function stopScreenShareState() {
+    setScreenSharePresetLabel(null)
     if (screenVideoPublicationRef.current) {
+      playStreamStopSound()
       const publishedTrack = screenVideoPublicationRef.current.track
       if (publishedTrack) roomRef.current?.localParticipant.unpublishTrack(publishedTrack)
       screenVideoPublicationRef.current = null
@@ -3363,6 +3601,55 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // novo durante o "Conectando..." abria uma SEGUNDA captura em paralelo.
   const screenShareOpRef = useRef(false)
 
+  // Preset EFETIVO de uma captura, decidido assim que a pessoa escolhe a
+  // fonte (ver captureScreenShareStream): o das configurações, ou o preset
+  // automático "Jogo" quando a fonte é um jogo detectado. Rede fraca = a
+  // SUA conexão com o servidor está "ruim"/"perdida" agora.
+  function effectiveScreenSharePreset(isGame: boolean): QualityPreset {
+    const quality = localConnectionQualityRef.current
+    return resolveScreenSharePreset(screenShareQualityRef.current, {
+      isGame,
+      gameAuto: screenShareGameAutoRef.current,
+      weakNetwork: quality === 'poor' || quality === 'lost',
+    })
+  }
+
+  // Ajusta bitrate/fps/prioridade/degradação do sender do vídeo da tela já
+  // publicado (usado ao trocar de fonte — replaceTrack mantém os
+  // parâmetros antigos). Best-effort: falha só fica no log.
+  function applyScreenSenderEncoding(track: LocalVideoTrack, preset: QualityPreset) {
+    const sender = track.sender
+    if (!sender) return
+    try {
+      const params = sender.getParameters()
+      if (!params.encodings?.length) return
+      const enc = params.encodings[0] as RTCRtpEncodingParameters & { priority?: string; networkPriority?: string }
+      enc.maxBitrate = preset.maxBitrate
+      enc.maxFramerate = preset.frameRate
+      if ('priority' in enc) enc.priority = 'high'
+      if ('networkPriority' in enc) enc.networkPriority = 'high'
+      ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = preset.degradationPreference
+      sender.setParameters(params).catch((err) => {
+        logDebug(`applyScreenSenderEncoding: setParameters falhou — ${err instanceof Error ? err.message : String(err)}`)
+      })
+    } catch (err) {
+      logDebug(`applyScreenSenderEncoding: falhou — ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  // Estatísticas REAIS do vídeo que está saindo (RTCRtpSender.getStats) —
+  // lidas pelo indicador discreto de quem transmite (VoiceChannelView.tsx,
+  // ver lib/screenShareStats.ts). null fora de uma transmissão.
+  const getScreenShareStatsReport = useCallback(async (): Promise<RTCStatsReport | null> => {
+    const sender = (screenVideoPublicationRef.current?.track as LocalVideoTrack | undefined)?.sender
+    if (!sender) return null
+    try {
+      return await sender.getStats()
+    } catch {
+      return null
+    }
+  }, [])
+
   async function toggleScreenShare(opts?: { auto?: boolean }) {
     if (screenShareOpRef.current) return
     if (screenSharing) {
@@ -3381,12 +3668,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // A call acabou (leave) em algum ponto da cadeia assíncrona abaixo?
     const callEnded = () => !connectedRef.current || !roomRef.current
     try {
-      const preset = screenShareQualityRef.current
       // OITAVA RODADA: getDisplayMedia() foi abandonado — ver o
       // comentário grande em captureScreenShareStream acima pro
       // raciocínio completo. A qualidade (resolução/taxa de quadros)
       // continua sendo ajustada DEPOIS, na track já ativa.
-      stream = await captureScreenShareStream(preset, opts)
+      // Preset efetivo: o escolhido nas configurações, ou o "Jogo"
+      // (1080p60/720p60) quando a fonte é um jogo detectado.
+      const captureInfo = { preset: screenShareQualityRef.current, isGame: false }
+      stream = await captureScreenShareStream(screenShareQualityRef.current, opts, effectiveScreenSharePreset, captureInfo)
+      const preset = captureInfo.preset
       // Recado deixado pelo ScreenSharePicker.tsx quando a pessoa clicou
       // no atalho "Compartilhar seu jogo/janela" E caiu no caso de tela
       // cheia (sem janela própria pra detectar o fechamento sozinha) — ver
@@ -3434,7 +3724,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // branch de Linux em captureScreenShareStream acima) tem seu
       // próprio toggle de "compartilhar também o áudio", e quando a
       // pessoa marca isso, getDisplayMedia() já devolve vídeo+áudio
-      // juntos no mesmo MediaStream, exatamente como o Chrome/Discord
+      // juntos no mesmo MediaStream, exatamente como o Chrome
       // fazem. Usar essa track direto (em vez de tentar as duas
       // capturas Windows-only abaixo, que nem se aplicam aqui) significa
       // reaproveitar o áudio que o PRÓPRIO SISTEMA já isolou pra área
@@ -3449,10 +3739,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         }
       }
       if (!audioTrack) {
-        const systemAudioTrack = await captureSystemAudioTrack()
-        if (systemAudioTrack) {
-          audioTrack = systemAudioTrack
-          systemAudioTrackRef.current = systemAudioTrack
+        const systemAudio = await captureSystemAudioWithoutCallEcho()
+        if (systemAudio) {
+          audioTrack = systemAudio.track
+          if (systemAudio.native) appAudioTrackRef.current = systemAudio.track
+          else systemAudioTrackRef.current = systemAudio.track
         }
       }
       logDebug(`toggleScreenShare: resultado final do áudio — ${audioTrack ? `track ok (${audioTrack.label || audioTrack.id})` : 'NENHUMA track de áudio (transmissão vai muda)'}`)
@@ -3548,6 +3839,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           `toggleScreenShare: publicando vídeo (${screenVideoCodec}, até ${preset.maxBitrate}bps) e áudio (${audioTrack ? 'sim' : 'não'})...`
         )
         const [videoPublication, audioPublication] = await Promise.all([
+          // Codec: H.264 (encoder de hardware na grande maioria das GPUs —
+          // NVENC/AMF/Quick Sync — e decodificado por qualquer um que
+          // assista); VP8 só quando o quadro passa do limite do H.264 (ver
+          // pickScreenShareCodec). VP9/AV1 ficaram de fora de propósito:
+          // encoder de hardware deles ainda é raro no Chromium do Windows
+          // (cairia em software, disputando CPU com o jogo) e exigiriam
+          // SVC/backupCodec (codificar duas vezes). `scalabilityMode` só
+          // vale pra VP9/AV1 — com H.264/VP8 sem simulcast é sempre uma
+          // camada só (L1T1), então não é passado.
+          // `priority: 'high'` marca os pacotes do vídeo como prioritários
+          // na fila de envio (mesmo nível do microfone, ver
+          // applyMicSenderPriority) — a voz continua minúscula (64kbps) e
+          // não perde pro vídeo.
           roomRef.current.localParticipant.publishTrack(videoTrack, {
             name: 'screen',
             source: Track.Source.ScreenShare,
@@ -3556,6 +3860,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             screenShareEncoding: {
               maxBitrate: preset.maxBitrate,
               maxFramerate: preset.frameRate,
+              priority: 'high',
             },
             degradationPreference: preset.degradationPreference,
             simulcast: false,
@@ -3571,10 +3876,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         ])
         screenVideoPublicationRef.current = videoPublication
         if (audioPublication) screenAudioPublicationRef.current = audioPublication
-        logDebug('toggleScreenShare: publicação concluída')
+        logDebug(`toggleScreenShare: publicação concluída (preset ${preset.label}${captureInfo.isGame ? ', fonte = jogo' : ''})`)
       }
       started = true
       setScreenSharing(true)
+      playStreamStartSound()
+      setScreenSharePresetLabel(preset.label)
 
       // Mitigação de vazamento pro caso "compartilhar seu jogo" em tela
       // cheia (sem janela própria — ver comentário grande acima e em
@@ -3651,7 +3958,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // tem como adivinhar isso só pela mensagem técnica do navegador,
       // então junto com o detalhe técnico (mantido pra quem for
       // diagnosticar à distância) mostra também o motivo provável e a
-      // solução que resolve a mesma limitação no Discord/OBS/Zoom.
+      // solução que resolve a mesma limitação no OBS/Zoom.
       const likelyExclusiveFullscreen = name === 'NotReadableError'
       const base = parts.length ? `Não foi possível compartilhar a tela: ${parts.join(' ')}` : 'Não foi possível compartilhar a tela.'
       setError(
@@ -3681,10 +3988,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     let newStream: MediaStream | null = null
     let adopted = false
     try {
-      const preset = screenShareQualityRef.current
       // OITAVA RODADA: idem toggleScreenShare acima — ver
-      // captureScreenShareStream.
-      newStream = await captureScreenShareStream(preset)
+      // captureScreenShareStream (inclusive o preset automático "Jogo").
+      const captureInfo = { preset: screenShareQualityRef.current, isGame: false }
+      newStream = await captureScreenShareStream(screenShareQualityRef.current, undefined, effectiveScreenSharePreset, captureInfo)
+      const preset = captureInfo.preset
       // A transmissão (ou a call) acabou enquanto o seletor estava aberto.
       if (!screenStreamRef.current || !connectedRef.current) {
         newStream.getTracks().forEach((t) => t.stop())
@@ -3753,10 +4061,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         }
       }
       if (!newAudioTrack) {
-        const systemAudioTrack = await captureSystemAudioTrack()
-        if (systemAudioTrack) {
-          newAudioTrack = systemAudioTrack
-          systemAudioTrackRef.current = systemAudioTrack
+        const systemAudio = await captureSystemAudioWithoutCallEcho()
+        if (systemAudio) {
+          newAudioTrack = systemAudio.track
+          if (systemAudio.native) appAudioTrackRef.current = systemAudio.track
+          else systemAudioTrackRef.current = systemAudio.track
         }
       }
       if (appAudioChoice?.isWindowChoice && !appAudioPid) {
@@ -3783,6 +4092,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const videoPublishedTrack = screenVideoPublicationRef.current?.track as LocalVideoTrack | undefined
       if (videoPublishedTrack) {
         await videoPublishedTrack.replaceTrack(newVideoTrack, true)
+        // A fonte nova pode ter outro preset (ex.: trocou de uma janela
+        // qualquer pro jogo → "Jogo · 1080p60"): ajusta bitrate/fps/
+        // prioridade do sender já negociado, sem republicar.
+        applyScreenSenderEncoding(videoPublishedTrack, preset)
+        setScreenSharePresetLabel(preset.label)
       }
 
       if (newAudioTrack && screenAudioPublicationRef.current?.track) {
@@ -3879,6 +4193,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         deafened,
         toggleDeafen,
         videoEnabled,
+        localCameraStream,
         screenSharing,
         screenShareConnecting,
         localScreenStream,
@@ -3897,6 +4212,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         toggleVideo,
         toggleScreenShare,
         switchScreenShareSource,
+        screenSharePresetLabel,
+        getScreenShareStatsReport,
         playSoundboardSound,
         changeMicrophone,
         refreshAudioConstraints,

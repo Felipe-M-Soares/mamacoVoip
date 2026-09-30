@@ -16,8 +16,8 @@ pela Store sem aviso nenhum, e as atualizações também vêm pela Store.
 3. Em *Product identity* copie dois valores:
    - `Package/Identity/Name` (ex.: `12345FelipeMSoares.MamacosVoip`)
    - `Package/Identity/Publisher` (ex.: `CN=ABCD1234-...`)
-4. No GitHub do projeto: *Settings → Secrets and variables → Actions → aba Variables* e crie
-   `MS_STORE_IDENTITY_NAME` e `MS_STORE_PUBLISHER` com esses valores.
+4. Esses valores já estão gravados em `package.json` → `build.appx` (identityName, publisher e
+   publisherDisplayName). Se um dia mudarem no Partner Center, atualize lá.
 5. No próximo push, o workflow gera também o artefato **mamacos-voip-microsoft-store** (arquivo
    `.appx`). Baixe na página da execução do workflow e envie no Partner Center (*Packages*).
 6. Preencha a ficha (descrição, capturas de tela, classificação etária, política de privacidade:

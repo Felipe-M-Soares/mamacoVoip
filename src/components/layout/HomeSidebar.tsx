@@ -1,3 +1,4 @@
+import { describeMessageContent } from '../../lib/stickers'
 import { Fragment, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { useConversations } from '../../hooks/useConversations'
@@ -5,6 +6,8 @@ import { useGroupConversations } from '../../context/GroupConversationsContext'
 import { usePinnedItems } from '../../hooks/usePinnedItems'
 import { useAuth } from '../../hooks/useAuth'
 import { lazyModal } from '../modals/lazyModal'
+import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu'
+import { ConfirmDialog } from '../modals/ConfirmDialog'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const CreateGroupModal = lazyModal(() => import('../modals/CreateGroupModal').then((m) => m.CreateGroupModal))
@@ -41,7 +44,61 @@ export function HomeSidebar({
     const { error } = await hideConversation(conversationId)
     if (error) alert(`Não deu pra apagar a conversa: ${error}`)
   }
-  const { groups } = useGroupConversations()
+  const { groups, leaveGroup, deleteGroup } = useGroupConversations()
+
+  // Menu de contexto (botão direito) dos grupos: fixar, sair e — só pra
+  // quem criou — apagar o grupo inteiro. As duas ações destrutivas passam
+  // pelo ConfirmDialog.
+  const [groupMenu, setGroupMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [groupAction, setGroupAction] = useState<{ kind: 'leave' | 'delete'; id: string; name: string } | null>(null)
+  const [groupActionError, setGroupActionError] = useState<string | null>(null)
+  function openGroupMenu(e: React.MouseEvent, groupId: string) {
+    e.preventDefault()
+    e.stopPropagation()
+    setGroupMenu({ id: groupId, x: e.clientX, y: e.clientY })
+  }
+  function groupMenuItems(groupId: string): ContextMenuItem[] {
+    const g = groups.find((x) => x.id === groupId)
+    if (!g) return []
+    const name = groupTitle(g)
+    const items: ContextMenuItem[] = [
+      { label: pinnedIds.has(g.id) ? 'Desafixar' : 'Fixar no topo', onClick: () => togglePin(g.id) },
+      {
+        label: 'Sair do grupo',
+        danger: true,
+        divider: true,
+        onClick: () => {
+          setGroupActionError(null)
+          setGroupAction({ kind: 'leave', id: g.id, name })
+        },
+      },
+    ]
+    if (user?.id && g.created_by === user.id) {
+      items.push({
+        label: 'Apagar grupo',
+        danger: true,
+        onClick: () => {
+          setGroupActionError(null)
+          setGroupAction({ kind: 'delete', id: g.id, name })
+        },
+      })
+    }
+    return items
+  }
+  async function confirmGroupAction() {
+    if (!groupAction) return
+    setGroupActionError(null)
+    const { error } = groupAction.kind === 'delete' ? await deleteGroup(groupAction.id) : await leaveGroup(groupAction.id)
+    if (error) {
+      setGroupActionError(error)
+      return
+    }
+    setGroupAction(null)
+  }
+  function groupTitle(g: (typeof groups)[number]) {
+    const others = g.members.filter((m) => m.id !== user?.id)
+    return g.name || others.map((m) => m.display_name || m.username).join(', ')
+  }
   const { pinnedIds, toggle: togglePin } = usePinnedItems()
   const [showCreateGroup, setShowCreateGroup] = useState(false)
 
@@ -51,9 +108,9 @@ export function HomeSidebar({
         ? 'bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]'
         : unread
           ? 'text-white hover:bg-white/[0.04]'
-          : 'text-discord-text-muted hover:bg-white/[0.04] hover:text-discord-text'
+          : 'text-mv-muted hover:bg-white/[0.04] hover:text-mv-text'
     }`
-  const sectionLabel = 'text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted'
+  const sectionLabel = 'text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted'
   const rowAction =
     'shrink-0 w-6 h-6 rounded-md hidden group-hover:flex group-focus-visible:flex items-center justify-center'
   const PinIcon = (
@@ -70,10 +127,10 @@ export function HomeSidebar({
     if (confirmingHide?.id !== conversationId) return null
     return (
       <div role="alertdialog" aria-label="Confirmar apagar conversa" className="mx-1 my-1 rounded-xl border border-rose-500/25 bg-rose-500/[0.06] p-2.5 animate-fade-in">
-        <p className="text-xs text-discord-text leading-snug">
+        <p className="text-xs text-mv-text leading-snug">
           Apagar a conversa com <strong className="font-semibold">{confirmingHide.name}</strong>?
         </p>
-        <p className="text-[11px] text-discord-text-muted mt-0.5 leading-snug">Se chegar mensagem nova, ela volta a aparecer.</p>
+        <p className="text-[11px] text-mv-muted mt-0.5 leading-snug">Se chegar mensagem nova, ela volta a aparecer.</p>
         <div className="flex gap-1.5 mt-2">
           <button onClick={() => setConfirmingHide(null)} className="btn-ghost h-7 px-2.5 text-xs flex-1">
             Cancelar
@@ -87,7 +144,7 @@ export function HomeSidebar({
   }
 
   return (
-    <aside className="w-64 bg-discord-sidebar flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
+    <aside className="w-64 bg-mv-side flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
       <div className="h-14 px-4 flex items-center gap-2.5 border-b border-[var(--color-line)] shrink-0">
         <img src="/logo-192.png" alt="" className="w-7 h-7 rounded-lg object-cover shrink-0 ring-1 ring-[var(--color-line-strong)]" />
         <span className="font-display text-white font-semibold text-[15px] truncate">Mamacos Voip</span>
@@ -144,12 +201,12 @@ export function HomeSidebar({
                       onClick={(e) => handleDeleteConversation(e, c.id, c.otherProfile.display_name || c.otherProfile.username)}
                       title="Apagar conversa"
                       aria-label="Apagar conversa"
-                      className={`${rowAction} text-discord-text-muted hover:text-rose-400 hover:bg-rose-500/10`}
+                      className={`${rowAction} text-mv-muted hover:text-rose-400 hover:bg-rose-500/10`}
                     >
                       {TrashIcon}
                     </span>
                     {unreadConversationIds.has(c.id) && (
-                      <span className="w-2 h-2 rounded-full bg-discord-blurple shrink-0" aria-label="Não lida" />
+                      <span className="w-2 h-2 rounded-full bg-mv-accent shrink-0" aria-label="Não lida" />
                     )}
                   </button>
                   {renderHideConfirm(c.id)}
@@ -162,10 +219,11 @@ export function HomeSidebar({
                     <button
                       key={`pinned-group-${g.id}`}
                       onClick={() => onSelectGroup(g.id)}
+                      onContextMenu={(e) => openGroupMenu(e, g.id)}
                       aria-current={view === 'group' && activeGroupId === g.id ? 'page' : undefined}
                       className={rowClass(view === 'group' && activeGroupId === g.id)}
                     >
-                      <div className="flex -space-x-2.5 shrink-0 [&>*]:ring-2 [&>*]:ring-discord-sidebar [&>*]:rounded-full">
+                      <div className="flex -space-x-2.5 shrink-0 [&>*]:ring-2 [&>*]:ring-mv-side [&>*]:rounded-full">
                         {others.slice(0, 2).map((m) => (
                           <Avatar key={m.id} name={m.username} avatarUrl={m.avatar_url} size={26} />
                         ))}
@@ -208,12 +266,12 @@ export function HomeSidebar({
           </div>
         ) : conversations.filter((c) => !pinnedIds.has(c.id)).length === 0 ? (
           <div className="mx-1 px-3 py-4 rounded-xl border border-dashed border-[var(--color-line-strong)] text-center">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 mx-auto text-discord-text-muted" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 mx-auto text-mv-muted" aria-hidden="true">
               <path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z" />
               <path d="M8 10h8M8 13h5" />
             </svg>
-            <p className="text-xs font-medium text-discord-text mt-2">Nenhuma conversa ainda</p>
-            <p className="text-[11px] text-discord-text-muted mt-0.5">Mande mensagem pra um amigo pra começar.</p>
+            <p className="text-xs font-medium text-mv-text mt-2">Nenhuma conversa ainda</p>
+            <p className="text-[11px] text-mv-muted mt-0.5">Mande mensagem pra um amigo pra começar.</p>
           </div>
         ) : (
           <div className="space-y-0.5">
@@ -226,7 +284,7 @@ export function HomeSidebar({
                 aria-current={view === 'conversation' && activeConversationId === c.id ? 'page' : undefined}
                 className={rowClass(view === 'conversation' && activeConversationId === c.id, unread)}
               >
-                {unread && <span className="absolute -left-2.5 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-discord-text" aria-hidden="true" />}
+                {unread && <span className="absolute -left-2.5 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-mv-text" aria-hidden="true" />}
                 <Avatar
                   name={c.otherProfile.username}
                   avatarUrl={c.otherProfile.avatar_url}
@@ -238,7 +296,7 @@ export function HomeSidebar({
                 <div className="min-w-0 text-left flex-1 leading-tight">
                   <p className={`truncate ${unread ? 'font-semibold' : 'font-medium'}`}>{c.otherProfile.display_name || c.otherProfile.username}</p>
                   {c.lastMessage && (
-                    <p className={`truncate text-xs mt-0.5 ${unread ? 'text-discord-text' : 'text-discord-text-muted'}`}>{c.lastMessage.content}</p>
+                    <p className={`truncate text-xs mt-0.5 ${unread ? 'text-mv-text' : 'text-mv-muted'}`}>{describeMessageContent(c.lastMessage.content)}</p>
                   )}
                 </div>
                 <span
@@ -248,7 +306,7 @@ export function HomeSidebar({
                   }}
                   title={pinnedIds.has(c.id) ? 'Desafixar' : 'Fixar no topo'}
                   aria-label={pinnedIds.has(c.id) ? 'Desafixar' : 'Fixar no topo'}
-                  className={`${rowAction} ${pinnedIds.has(c.id) ? '!flex text-amber-300' : 'text-discord-text-muted hover:text-white hover:bg-white/[0.08]'}`}
+                  className={`${rowAction} ${pinnedIds.has(c.id) ? '!flex text-amber-300' : 'text-mv-muted hover:text-white hover:bg-white/[0.08]'}`}
                 >
                   {PinIcon}
                 </span>
@@ -256,11 +314,11 @@ export function HomeSidebar({
                   onClick={(e) => handleDeleteConversation(e, c.id, c.otherProfile.display_name || c.otherProfile.username)}
                   title="Apagar conversa"
                   aria-label="Apagar conversa"
-                  className={`${rowAction} text-discord-text-muted hover:text-rose-400 hover:bg-rose-500/10`}
+                  className={`${rowAction} text-mv-muted hover:text-rose-400 hover:bg-rose-500/10`}
                 >
                   {TrashIcon}
                 </span>
-                {unread && <span className="w-2 h-2 rounded-full bg-discord-blurple shrink-0 group-hover:hidden" aria-label="Não lida" />}
+                {unread && <span className="w-2 h-2 rounded-full bg-mv-accent shrink-0 group-hover:hidden" aria-label="Não lida" />}
               </button>
               {renderHideConfirm(c.id)}
               </Fragment>
@@ -286,7 +344,7 @@ export function HomeSidebar({
         {groups.filter((g) => !pinnedIds.has(g.id)).length === 0 ? (
           <button
             onClick={() => setShowCreateGroup(true)}
-            className="w-full mx-0 px-3 py-3 rounded-xl border border-dashed border-[var(--color-line-strong)] text-left flex items-center gap-3 text-discord-text-muted hover:text-discord-text hover:bg-white/[0.03] transition-colors"
+            className="w-full mx-0 px-3 py-3 rounded-xl border border-dashed border-[var(--color-line-strong)] text-left flex items-center gap-3 text-mv-muted hover:text-mv-text hover:bg-white/[0.03] transition-colors"
           >
             <span className="w-8 h-8 rounded-full bg-white/[0.05] flex items-center justify-center shrink-0">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4" aria-hidden="true">
@@ -294,7 +352,7 @@ export function HomeSidebar({
               </svg>
             </span>
             <span className="min-w-0 leading-tight">
-              <span className="block text-xs font-medium text-discord-text">Nenhum grupo ainda</span>
+              <span className="block text-xs font-medium text-mv-text">Nenhum grupo ainda</span>
               <span className="block text-[11px] mt-0.5">Crie um pra conversar com vários amigos.</span>
             </span>
           </button>
@@ -307,17 +365,18 @@ export function HomeSidebar({
                 <button
                   key={g.id}
                   onClick={() => onSelectGroup(g.id)}
+                  onContextMenu={(e) => openGroupMenu(e, g.id)}
                   aria-current={view === 'group' && activeGroupId === g.id ? 'page' : undefined}
                   className={rowClass(view === 'group' && activeGroupId === g.id)}
                 >
-                  <div className="flex -space-x-2.5 shrink-0 [&>*]:ring-2 [&>*]:ring-discord-sidebar [&>*]:rounded-full">
+                  <div className="flex -space-x-2.5 shrink-0 [&>*]:ring-2 [&>*]:ring-mv-side [&>*]:rounded-full">
                     {others.slice(0, 2).map((m) => (
                       <Avatar key={m.id} name={m.username} avatarUrl={m.avatar_url} size={26} />
                     ))}
                   </div>
                   <div className="min-w-0 text-left flex-1 leading-tight">
                     <p className="truncate font-medium">{title}</p>
-                    <p className="truncate text-xs mt-0.5 text-discord-text-muted">{g.members.length} membros</p>
+                    <p className="truncate text-xs mt-0.5 text-mv-muted">{g.members.length} membros</p>
                   </div>
                   <span
                     onClick={(e) => {
@@ -326,7 +385,7 @@ export function HomeSidebar({
                     }}
                     title="Fixar no topo"
                     aria-label="Fixar no topo"
-                    className={`${rowAction} text-discord-text-muted hover:text-white hover:bg-white/[0.08]`}
+                    className={`${rowAction} text-mv-muted hover:text-white hover:bg-white/[0.08]`}
                   >
                     {PinIcon}
                   </span>
@@ -336,6 +395,42 @@ export function HomeSidebar({
           </div>
         )}
       </div>
+
+      {groupMenu && (
+        <ContextMenu x={groupMenu.x} y={groupMenu.y} items={groupMenuItems(groupMenu.id)} onClose={() => setGroupMenu(null)} />
+      )}
+
+      {groupAction && (
+        <ConfirmDialog
+          title={groupAction.kind === 'delete' ? 'Apagar grupo' : 'Sair do grupo'}
+          danger
+          confirmLabel={groupAction.kind === 'delete' ? 'Apagar para todos' : 'Sair'}
+          message={
+            <>
+              <p>
+                {groupAction.kind === 'delete' ? (
+                  <>
+                    Apagar <strong className="text-white font-semibold">{groupAction.name || 'este grupo'}</strong> para
+                    todos os membros? Todas as mensagens e arquivos serão apagados e isso não pode ser desfeito.
+                  </>
+                ) : (
+                  <>
+                    Sair de <strong className="text-white font-semibold">{groupAction.name || 'este grupo'}</strong>? Você
+                    não verá mais as mensagens.
+                  </>
+                )}
+              </p>
+              {groupActionError && (
+                <p role="alert" className="mt-2 text-rose-400 text-[13px]">
+                  {groupActionError}
+                </p>
+              )}
+            </>
+          }
+          onConfirm={confirmGroupAction}
+          onCancel={() => setGroupAction(null)}
+        />
+      )}
 
       {showCreateGroup && (
         <CreateGroupModal

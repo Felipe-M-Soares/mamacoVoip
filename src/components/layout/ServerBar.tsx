@@ -8,6 +8,7 @@ import { ServerHoverCard } from './ServerHoverCard'
 import { supabase } from '../../lib/supabase'
 import type { Server, Channel } from '../../types/database'
 import { lazyModal } from '../modals/lazyModal'
+import { PlusIcon } from '../ui/icons'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const CreateOrJoinServerModal = lazyModal(() => import('../modals/CreateOrJoinServerModal').then((m) => m.CreateOrJoinServerModal))
@@ -74,7 +75,7 @@ function ServerIcon({
     >
       <span
         className={`absolute -left-3 top-1/2 -translate-y-1/2 w-1 rounded-r-full transition-all duration-150 ${
-          active ? 'h-9 bg-brand-gradient' : unread ? 'h-2 bg-discord-text' : 'h-0 bg-discord-text group-hover:h-4'
+          active ? 'h-9 bg-brand-gradient' : unread ? 'h-2 bg-mv-text' : 'h-0 bg-mv-text group-hover:h-4'
         }`}
       />
       <button
@@ -84,10 +85,10 @@ function ServerIcon({
         aria-label={name}
         aria-current={active ? 'page' : undefined}
         className={`w-12 h-12 flex items-center justify-center font-display font-semibold text-white text-[15px] transition-all duration-150 overflow-hidden
-          ${active ? 'rounded-[16px] ring-2 ring-discord-blurple/70 ring-offset-2 ring-offset-discord-darker' : 'rounded-[18px] hover:rounded-[14px] hover:-translate-y-px'}
-          ${variant === 'server' && !iconUrl ? (active ? '' : 'saturate-[.85] hover:saturate-100') : variant === 'add' ? '' : active ? 'bg-discord-lighter' : 'bg-discord-lighter/70 hover:bg-discord-lighter'}
-          ${variant === 'add' ? 'text-2xl font-light text-discord-text-muted border border-dashed border-white/15 hover:border-discord-green hover:text-discord-green hover:bg-discord-green/10' : ''}
-          ${isDragOver ? 'ring-2 ring-discord-blurple' : ''}
+          ${active ? 'rounded-[16px] ring-2 ring-mv-accent/70 ring-offset-2 ring-offset-mv-canvas' : 'rounded-[18px] hover:rounded-[14px] hover:-translate-y-px'}
+          ${variant === 'server' && !iconUrl ? (active ? '' : 'saturate-[.85] hover:saturate-100') : variant === 'add' ? '' : active ? 'bg-mv-raised' : 'bg-mv-raised/70 hover:bg-mv-raised'}
+          ${variant === 'add' ? 'text-2xl font-light text-mv-muted border border-dashed border-white/15 hover:border-mv-green hover:text-mv-green hover:bg-mv-green/10' : ''}
+          ${isDragOver ? 'ring-2 ring-mv-accent' : ''}
           ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}
         `}
       >
@@ -96,7 +97,7 @@ function ServerIcon({
         ) : variant === 'home' ? (
           <img src="/logo-192.png" alt="" className="w-full h-full object-cover" />
         ) : variant === 'add' ? (
-          '+'
+          <PlusIcon className="w-6 h-6" strokeWidth={2.25} aria-hidden />
         ) : (
           initials
         )}
@@ -189,7 +190,7 @@ export function ServerBar({
 
   return (
     <>
-      <nav aria-label="Servidores" className="w-[72px] bg-discord-darker flex flex-col items-center py-3 gap-2.5 shrink-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none]">
+      <nav aria-label="Servidores" className="w-[72px] bg-mv-canvas flex flex-col items-center py-3 gap-2.5 shrink-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none]">
         <ServerIcon name="Início" variant="home" active={activeServerId === null} onClick={onSelectHome} />
         <div className="w-8 h-px bg-white/10 rounded-full my-0.5" />
 

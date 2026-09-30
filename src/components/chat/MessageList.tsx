@@ -27,7 +27,7 @@ function DateSeparator({ label }: { label: string }) {
   return (
     <div role="separator" aria-label={label} className="flex items-center gap-3 px-4 my-4">
       <div className="flex-1 h-px bg-[var(--color-line)]" />
-      <span className="text-[11px] font-semibold text-discord-text-muted whitespace-nowrap px-3 py-1 rounded-full bg-white/[0.04] border border-[var(--color-line)]">
+      <span className="text-[11px] font-semibold text-mv-muted whitespace-nowrap px-3 py-1 rounded-full bg-white/[0.04] border border-[var(--color-line)]">
         {label}
       </span>
       <div className="flex-1 h-px bg-[var(--color-line)]" />
@@ -123,7 +123,7 @@ export function MessageList({
     onLoadOlder,
   })
 
-  // Cor do nome igual o Discord faz — usa o cargo de posição mais alta
+  // Cor do nome igual a apps de chat populares faz — usa o cargo de posição mais alta
   // que tenha uma cor definida (ignora o cinza padrão, que significa "sem
   // cor específica"). Calculado uma vez por autor, não por mensagem.
   const roleColorByAuthor = useMemo(() => {
@@ -168,7 +168,7 @@ export function MessageList({
           </svg>
         </span>
         <p className="font-display font-semibold text-white">Não foi possível carregar as mensagens</p>
-        <p className="text-sm text-discord-text-muted max-w-sm -mt-1.5 break-words">{loadError}</p>
+        <p className="text-sm text-mv-muted max-w-sm -mt-1.5 break-words">{loadError}</p>
         {onRetry && (
           <button onClick={onRetry} className="h-10 px-5 btn-primary text-sm">
             Tentar de novo
@@ -185,10 +185,10 @@ export function MessageList({
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              'radial-gradient(ellipse 500px 300px at 50% 35%, color-mix(in srgb, var(--color-discord-blurple) 10%, transparent), transparent 70%)',
+              'radial-gradient(ellipse 500px 300px at 50% 35%, color-mix(in srgb, var(--color-mv-accent) 10%, transparent), transparent 70%)',
           }}
         />
-        <div className="relative w-20 h-20 rounded-3xl bg-brand-gradient flex items-center justify-center mb-5 shadow-[0_12px_32px_-12px_var(--color-discord-blurple)] ring-1 ring-white/10">
+        <div className="relative w-20 h-20 rounded-3xl bg-brand-gradient flex items-center justify-center mb-5 shadow-[0_12px_32px_-12px_var(--color-mv-accent)] ring-1 ring-white/10">
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-white">
             <path d="M9.3 3.1a1 1 0 0 1 1.94.48L10.6 6.5h3.24l.68-2.92a1 1 0 1 1 1.94.48L15.86 6.5h2.14a1 1 0 1 1 0 2h-2.6l-.7 3h2.3a1 1 0 1 1 0 2h-2.77l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H9.13l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H4.9a1 1 0 1 1 0-2h2.64l.7-3H6a1 1 0 1 1 0-2h2.6l.7-3zm.84 5.4-.7 3h3.24l.7-3z" />
           </svg>
@@ -196,7 +196,7 @@ export function MessageList({
         <h3 className="relative font-display text-2xl font-bold text-white">
           Bem-vindo a #{channelName}!
         </h3>
-        <p className="relative text-discord-text-muted mt-1.5 max-w-sm">
+        <p className="relative text-mv-muted mt-1.5 max-w-sm">
           Este é o começo do canal #{channelName}. Manda a primeira mensagem pra começar a conversa.
         </p>
       </div>
@@ -215,9 +215,9 @@ export function MessageList({
           {hasMore && (
             <div className="flex justify-center py-2">
               {loadingOlder ? (
-                <div role="status" aria-label="Carregando mensagens anteriores" className="w-5 h-5 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+                <div role="status" aria-label="Carregando mensagens anteriores" className="w-5 h-5 border-2 border-mv-accent border-t-transparent rounded-full animate-spin" />
               ) : (
-                <button onClick={onLoadOlder} className="chip h-7 !px-3 hover:!text-discord-text hover:!bg-white/[0.08] transition-colors">
+                <button onClick={onLoadOlder} className="chip h-7 !px-3 hover:!text-mv-text hover:!bg-white/[0.08] transition-colors">
                   Carregar mensagens anteriores
                 </button>
               )}

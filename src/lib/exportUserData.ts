@@ -1,8 +1,9 @@
 import { supabase } from './supabase'
 
 export async function exportUserData(userId: string) {
-  const [profile, serverMemberships, friendships, messages, dmMessages, groupMessages] = await Promise.all([
+  const [profile, privateSettings, serverMemberships, friendships, messages, dmMessages, groupMessages] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', userId).single(),
+    supabase.from('user_private_settings').select('*').eq('user_id', userId).maybeSingle(),
     supabase.from('server_members').select('server_id, nickname, joined_at, servers(name)').eq('user_id', userId),
     supabase
       .from('friendships')
@@ -16,6 +17,7 @@ export async function exportUserData(userId: string) {
   const exportData = {
     exported_at: new Date().toISOString(),
     profile: profile.data,
+    private_settings: privateSettings.data,
     server_memberships: serverMemberships.data,
     friendships: friendships.data,
     messages_in_servers: messages.data,

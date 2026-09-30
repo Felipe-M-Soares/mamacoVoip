@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
-import { uniqueTopic } from '../lib/realtimeChannel'
+import { changesChannel } from '../lib/realtimeChannel'
 import { useAuth } from './useAuth'
 import type { DMConversation, DMMessage, Profile } from '../types/database'
 
@@ -149,6 +149,28 @@ function scheduleReload(userId: string, entry: Entry) {
   }, 250)
 }
 
+// Atualiza a "última mensagem" de uma conversa (e a ordem da lista) sem
+// recarregar tudo. Conversa desconhecida (nova/escondida) → recarrega.
+function applyMessage(userId: string, entry: Entry, message: DMMessage) {
+  const list = entry.snapshot.conversations
+  const idx = list.findIndex((c) => c.id === message.conversation_id)
+  if (idx === -1) {
+    scheduleReload(userId, entry)
+    return
+  }
+  const current = list[idx]
+  if (current.lastMessage && current.lastMessage.created_at > message.created_at) return
+  const updated = { ...current, lastMessage: message }
+  const rest = list.filter((_, i) => i !== idx)
+  emit(entry, { ...entry.snapshot, conversations: [updated, ...rest] })
+}
+
+/** Chamado por useDirectMessages logo depois de enviar (atualização otimista). */
+export function applyDmMessageToConversations(userId: string, message: DMMessage) {
+  const entry = store.get(userId)
+  if (entry) applyMessage(userId, entry, message)
+}
+
 function subscribe(userId: string, listener: () => void): () => void {
   const entry = getEntry(userId)
   entry.listeners.add(listener)
@@ -167,12 +189,22 @@ function subscribe(userId: string, listener: () => void): () => void {
     // pessoa manda mensagem de novo (gatilho on_dm_message_unhide_conversation).
     const reload = () => scheduleReload(userId, entry)
     let hadProblem = false
-    const channel = supabase
-      .channel(uniqueTopic(`dm_conversations:${userId}`))
+    const channel = changesChannel(`dm_conversations:${userId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_conversations', filter: `user_a=eq.${userId}` }, reload)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_conversations', filter: `user_b=eq.${userId}` }, reload)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dm_conversations', filter: `user_a=eq.${userId}` }, reload)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dm_conversations', filter: `user_b=eq.${userId}` }, reload)
+      // Mensagem nova em qualquer conversa minha (a RLS de dm_messages só
+      // entrega as das minhas conversas) → atualiza a prévia na lista.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_messages' }, (payload) => {
+        const message = payload.new as DMMessage | undefined
+        if (message?.conversation_id) applyMessage(userId, entry, message)
+      })
+      // Mensagem editada/apagada pode ser a última da lista → recarrega (com debounce).
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dm_messages' }, (payload) => {
+        const message = payload.new as DMMessage | undefined
+        if (message && entry.snapshot.conversations.some((c) => c.lastMessage?.id === message.id)) reload()
+      })
       .subscribe((status, err) => {
         if (entry.channel !== channel) return
         if (status === 'SUBSCRIBED') {

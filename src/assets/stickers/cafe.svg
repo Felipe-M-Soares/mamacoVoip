@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><defs><filter id="s" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+<feMorphology in="SourceAlpha" operator="dilate" radius="3.5" result="d"/>
+<feFlood flood-color="#fff"/><feComposite in2="d" operator="in" result="w"/>
+<feGaussianBlur in="d" stdDeviation="2.4"/><feOffset dy="2.5" result="b"/>
+<feFlood flood-color="#000" flood-opacity=".35"/><feComposite in2="b" operator="in" result="sh"/>
+<feMerge><feMergeNode in="sh"/><feMergeNode in="w"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter></defs><g filter="url(#s)" stroke-linejoin="round" stroke-linecap="round"><path d="M48 10c-6 8 6 12 0 20M64 6c-6 8 6 12 0 22M80 10c-6 8 6 12 0 20" fill="none" stroke="#9ca3af" stroke-width="4.5"/><path d="M92 56h8a14 14 0 0 1 0 28h-8" fill="none" stroke="#1d1b26" stroke-width="13"/><path d="M92 56h8a14 14 0 0 1 0 28h-8" fill="none" stroke="#f1f5f9" stroke-width="6"/><path d="M24 42h72v48a20 20 0 0 1-20 20H44a20 20 0 0 1-20-20z" fill="#f1f5f9" stroke="#1d1b26" stroke-width="5"/><ellipse cx="60" cy="42" rx="36" ry="7" fill="#78350f" stroke="#1d1b26" stroke-width="4.5"/><path d="M50 72c-6-6-2-14 4-12 2-2 6-2 8 0 6-2 10 6 4 12l-8 8z" fill="#ef4444"/><path d="M32 56v30" stroke="#fff" stroke-width="5"/><ellipse cx="60" cy="116" rx="44" ry="6" fill="#cbd5e1" stroke="#1d1b26" stroke-width="4"/></g></svg>

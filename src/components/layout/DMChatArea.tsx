@@ -11,6 +11,10 @@ import { useVoiceCore } from '../../hooks/useVoice'
 import { useChatScroll } from '../../hooks/useChatScroll'
 import { MessageListSkeleton } from '../chat/MessageListSkeleton'
 import type { DMMessage, Profile } from '../../types/database'
+import { ArrowDownIcon, HangUpIcon, PhoneIcon, WarningIcon } from '../ui/icons'
+import { lazyComponent } from '../modals/lazyModal'
+
+const ReportModal = lazyComponent(() => import('../modals/ReportModal').then((m) => m.ReportModal))
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
 
@@ -25,6 +29,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   const { typingUserIds, notifyTyping, stopTyping } = useTypingIndicator(conversationId, user?.id)
   const otherLastReadAt = useDMSeenState(conversationId, otherProfile.id)
   const [replyingTo, setReplyingTo] = useState<DMMessage | null>(null)
+  const [reportingMessageId, setReportingMessageId] = useState<string | null>(null)
   // Confirmação de bloqueio inline no header (antes era um confirm() nativo)
   const [confirmingBlock, setConfirmingBlock] = useState(false)
 
@@ -64,7 +69,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   }, [messages])
 
   // Última mensagem MINHA que a outra pessoa já leu — só essa mostra
-  // "Visto", igual o Discord/WhatsApp fazem.
+  // "Visto", igual o WhatsApp fazem.
   const myLastSeenMessageId = useMemo(() => {
     if (!otherLastReadAt) return undefined
     const readAt = new Date(otherLastReadAt).getTime()
@@ -88,12 +93,12 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   }
 
   return (
-    <section className="flex-1 flex flex-col min-w-0 bg-discord-channels border-t border-l border-[var(--color-line)]">
+    <section className="flex-1 flex flex-col min-w-0 bg-mv-main border-t border-l border-[var(--color-line)]">
       <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-2 border-b border-[var(--color-line)] shrink-0">
         <Avatar name={otherProfile.username} avatarUrl={otherProfile.avatar_url} status={otherProfile.status} userId={otherProfile.id} size={32} />
         <div className="min-w-0 flex flex-col leading-tight ml-0.5">
           <h2 className="font-display font-semibold text-[15px] text-white truncate">{otherProfile.display_name || otherProfile.username}</h2>
-          <span className="text-[11px] text-discord-text-muted truncate">@{otherProfile.username}</span>
+          <span className="text-[11px] text-mv-muted truncate">@{otherProfile.username}</span>
         </div>
         <div className="flex-1" />
         {!isBlocked &&
@@ -102,9 +107,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
               onClick={() => voice.leave()}
               className="btn-danger h-9 px-3.5 text-sm flex items-center gap-1.5 shrink-0"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                <path d="M20 15.5c-1.2 0-2.5-.2-3.6-.6-.4-.1-.8 0-1.1.3l-2.2 2.2c-2.8-1.4-5.2-3.8-6.6-6.6l2.2-2.2c.3-.3.4-.7.3-1.1-.4-1.1-.6-2.4-.6-3.6 0-.6-.4-1-1-1H4c-.6 0-1 .4-1 1 0 9.4 7.6 17 17 17 .6 0 1-.4 1-1v-3.5c0-.6-.4-1-1-1z" />
-              </svg>
+              <HangUpIcon className="w-4 h-4" aria-hidden />
               Sair da chamada
             </button>
           ) : (
@@ -116,11 +119,9 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
               }
               disabled={isInAnotherCall || voice.connecting}
               title={isInAnotherCall ? 'Você já está em outra chamada' : 'Iniciar chamada de voz'}
-              className="h-9 px-3.5 rounded-[10px] text-sm font-semibold bg-discord-green/15 text-discord-green border border-discord-green/25 hover:bg-discord-green hover:text-white transition-colors disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 shrink-0"
+              className="h-9 px-3.5 rounded-[10px] text-sm font-semibold bg-mv-green/15 text-mv-green border border-mv-green/25 hover:bg-mv-green hover:text-white transition-colors disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 shrink-0"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                <path d="M12 3a4 4 0 0 1 4 4v5a4 4 0 0 1-8 0V7a4 4 0 0 1 4-4zm-7 9a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.92V21h2a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h2v-2.08A7 7 0 0 1 5 12z" />
-              </svg>
+              <PhoneIcon className="w-4 h-4" aria-hidden />
               Chamada
             </button>
           ))}
@@ -133,7 +134,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
           </button>
         ) : confirmingBlock ? (
           <div className="flex items-center gap-1.5 shrink-0 animate-fade-in" role="group" aria-label="Confirmar bloqueio">
-            <span className="text-xs text-discord-text-muted hidden sm:inline">Bloquear?</span>
+            <span className="text-xs text-mv-muted hidden sm:inline">Bloquear?</span>
             <button onClick={() => setConfirmingBlock(false)} className="btn-ghost h-9 px-3 text-sm">
               Cancelar
             </button>
@@ -164,13 +165,10 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
       ) : loadError && messages.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center px-4 gap-3">
           <span className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-7 h-7 text-rose-400" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 8v5M12 16.5v.01" />
-            </svg>
+            <WarningIcon className="w-7 h-7 text-rose-400" aria-hidden />
           </span>
           <p className="font-display font-semibold text-white">Não foi possível carregar a conversa</p>
-          <p className="text-sm text-discord-text-muted max-w-sm -mt-1.5 break-words">{loadError}</p>
+          <p className="text-sm text-mv-muted max-w-sm -mt-1.5 break-words">{loadError}</p>
         </div>
       ) : messages.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
@@ -183,7 +181,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
           <h3 className="font-display text-2xl font-bold text-white mt-4">
             {otherProfile.display_name || otherProfile.username}
           </h3>
-          <p className="text-discord-text-muted mt-1.5 max-w-sm">
+          <p className="text-mv-muted mt-1.5 max-w-sm">
             Este é o início da sua conversa com {otherProfile.display_name || otherProfile.username}.
           </p>
         </div>
@@ -194,9 +192,9 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
               {hasMore && (
                 <div className="flex justify-center py-2">
                   {loadingOlder ? (
-                    <div role="status" aria-label="Carregando mensagens anteriores" className="w-5 h-5 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+                    <div role="status" aria-label="Carregando mensagens anteriores" className="w-5 h-5 border-2 border-mv-accent border-t-transparent rounded-full animate-spin" />
                   ) : (
-                    <button onClick={() => void loadOlder()} className="chip h-7 !px-3 hover:!text-discord-text hover:!bg-white/[0.08] transition-colors">
+                    <button onClick={() => void loadOlder()} className="chip h-7 !px-3 hover:!text-mv-text hover:!bg-white/[0.08] transition-colors">
                       Carregar mensagens anteriores
                     </button>
                   )}
@@ -220,11 +218,12 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
                       onEdit={editMessage}
                       onDelete={handleDelete}
                       onReply={setReplyingTo}
+                      onReport={setReportingMessageId}
                       attachments={attachments[message.id]}
                     />
                     {myLastSeenMessageId === message.id && (
-                      <p className="px-4 pt-1 text-[11px] text-discord-text-muted text-right flex items-center justify-end gap-1">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-discord-blurple" aria-hidden="true">
+                      <p className="px-4 pt-1 text-[11px] text-mv-muted text-right flex items-center justify-end gap-1">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-mv-accent" aria-hidden="true">
                           <path d="m2 12 5 5L18 6M13 16l1 1L22 8" />
                         </svg>
                         Visto por {otherProfile.display_name || otherProfile.username}
@@ -241,31 +240,29 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
               className="absolute bottom-3 left-1/2 -translate-x-1/2 h-8 pl-3.5 pr-3 flex items-center gap-1.5 !rounded-full btn-primary text-xs animate-pop-in"
             >
               Novas mensagens
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden="true">
-                <path d="M12 5v14M6 13l6 6 6-6" />
-              </svg>
+              <ArrowDownIcon className="w-3.5 h-3.5" strokeWidth={2.5} aria-hidden />
             </button>
           )}
         </div>
       )}
 
       <div className="shrink-0">
-        <div className="h-6 px-5 flex items-center gap-2 text-xs text-discord-text-muted" aria-live="polite">
+        <div className="h-6 px-5 flex items-center gap-2 text-xs text-mv-muted" aria-live="polite">
           {typingUserIds.length > 0 && (
             <>
               <span className="flex items-center gap-[3px] px-2 py-1 rounded-full bg-white/[0.05] border border-[var(--color-line)]">
-                <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce [animation-delay:-0.3s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce [animation-delay:-0.15s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce" />
+                <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce" />
               </span>
               <span className="truncate animate-fade-in">
-                <strong className="font-semibold text-discord-text">{otherProfile.display_name || otherProfile.username}</strong> está digitando…
+                <strong className="font-semibold text-mv-text">{otherProfile.display_name || otherProfile.username}</strong> está digitando…
               </span>
             </>
           )}
         </div>
         {isBlocked ? (
-          <p className="mx-4 mb-5 text-center text-sm text-discord-text-muted bg-white/[0.03] border border-[var(--color-line)] rounded-2xl py-3.5 px-4">
+          <p className="mx-4 mb-5 text-center text-sm text-mv-muted bg-white/[0.03] border border-[var(--color-line)] rounded-2xl py-3.5 px-4">
             Você bloqueou {otherProfile.display_name || otherProfile.username}. Desbloqueie para enviar mensagens.
           </p>
         ) : (
@@ -288,6 +285,16 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
           />
         )}
       </div>
+
+      {reportingMessageId && (
+        <ReportModal
+          targetType="dm_message"
+          targetLabel={`mensagem de ${otherProfile.display_name || otherProfile.username}`}
+          dmMessageId={reportingMessageId}
+          reportedUserId={otherProfile.id}
+          onClose={() => setReportingMessageId(null)}
+        />
+      )}
     </section>
   )
 }

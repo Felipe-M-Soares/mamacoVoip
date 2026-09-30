@@ -72,7 +72,7 @@ export function InviteRedirect() {
               </svg>
             </div>
             <h1 className="font-display text-xl font-semibold text-white">Não foi possível entrar</h1>
-            <p className="mt-2 text-[14px] text-discord-text-muted" role="alert">{error}</p>
+            <p className="mt-2 text-[14px] text-mv-muted" role="alert">{error}</p>
             <button onClick={() => navigate('/')} className="btn-primary mt-6 h-10 w-full px-5 text-[14px]">
               Voltar pro app
             </button>
@@ -81,10 +81,10 @@ export function InviteRedirect() {
           <div role="status" aria-live="polite">
             <div className="relative mx-auto mb-5 h-16 w-16">
               <img src="/logo.png" alt="" className="h-16 w-16 rounded-2xl object-cover ring-1 ring-[var(--color-line-strong)]" />
-              <span className="absolute -inset-1.5 animate-spin rounded-[22px] border-2 border-discord-blurple/70 border-t-transparent border-l-transparent" aria-hidden />
+              <span className="absolute -inset-1.5 animate-spin rounded-[22px] border-2 border-mv-accent/70 border-t-transparent border-l-transparent" aria-hidden />
             </div>
             <h1 className="font-display text-lg font-semibold text-white">Entrando no servidor...</h1>
-            <p className="mt-1 text-[13px] text-discord-text-muted">Só um instante, estamos validando o convite.</p>
+            <p className="mt-1 text-[13px] text-mv-muted">Só um instante, estamos validando o convite.</p>
           </div>
         )}
       </div>

@@ -93,12 +93,12 @@ export function OnboardingModal({ onDismiss }: { onDismiss: () => void }) {
           className="absolute inset-x-0 top-0 h-48 opacity-60 pointer-events-none"
           style={{
             background:
-              'radial-gradient(60% 70% at 50% 0%, color-mix(in srgb, var(--color-discord-blurple) 35%, transparent), transparent 70%)',
+              'radial-gradient(60% 70% at 50% 0%, color-mix(in srgb, var(--color-mv-accent) 35%, transparent), transparent 70%)',
           }}
         />
         <div className="relative px-6 pt-5 pb-6 text-center">
           <div className="flex items-center justify-between h-8 mb-4">
-            <span className="text-[12px] font-medium text-discord-text-muted tabular-nums">
+            <span className="text-[12px] font-medium text-mv-muted tabular-nums">
               Passo {step + 1} de {SLIDES.length}
             </span>
             {!isLast && (
@@ -120,7 +120,7 @@ export function OnboardingModal({ onDismiss }: { onDismiss: () => void }) {
             <h2 id="onboarding-title" className="font-display text-xl font-semibold text-white mb-2">
               {slide.title}
             </h2>
-            <p className="text-[14px] text-discord-text-muted leading-relaxed min-h-[4.5rem]">{slide.text}</p>
+            <p className="text-[14px] text-mv-muted leading-relaxed min-h-[4.5rem]">{slide.text}</p>
           </div>
 
           <div className="flex items-center justify-center gap-1.5 mt-5" aria-hidden="true">
@@ -128,7 +128,7 @@ export function OnboardingModal({ onDismiss }: { onDismiss: () => void }) {
               <span
                 key={i}
                 className={`h-1.5 rounded-full transition-all duration-300 ${
-                  i === step ? 'w-6 bg-brand-gradient' : i < step ? 'w-1.5 bg-discord-blurple/60' : 'w-1.5 bg-white/15'
+                  i === step ? 'w-6 bg-brand-gradient' : i < step ? 'w-1.5 bg-mv-accent/60' : 'w-1.5 bg-white/15'
                 }`}
               />
             ))}

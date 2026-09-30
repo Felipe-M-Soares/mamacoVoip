@@ -8,15 +8,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; base-uri 'none'; form-action 'none'" />
   <title>Mamacos Voip — Overlay</title>
   <style>
-    /* TRIGÉSIMA OITAVA RODADA — pedido: deixar a sobreposição igual ao
-       Discord (só a imagem + nome do usuário, piscando conforme
-       detecção de voz), em vez do "card" com fundo/lista de antes.
-       Cada participante agora é uma bolha solta (avatar circular com
-       nome numa etiqueta escura embaixo), sem painel/fundo por trás —
-       só aparece o que precisa aparecer por cima do jogo. O anel ao
-       redor do avatar pulsa (animação de escala + brilho) enquanto a
-       pessoa está falando, igual ao efeito do Discord, em vez de só um
-       contorno estático como era antes. */
+    /* Visual minimalista: cada participante é uma bolha solta (avatar
+       circular + nome numa etiqueta escura), sem painel/fundo por trás —
+       só aparece o que precisa aparecer por cima do jogo. Quem está
+       falando ganha um anel verde; mudo/ensurdecido ganha um selo. */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
       background: transparent;
@@ -26,11 +21,36 @@
       -webkit-user-select: none;
       user-select: none;
     }
+    /* Leve de propósito: roda POR CIMA de um jogo, então nada de
+       animação infinita, blur (backdrop-filter numa janela transparente
+       força composição extra da GPU a cada quadro) ou sombra pesada. O
+       indicador de "falando" é só um anel estático que liga/desliga. */
     #panel {
       display: none;
       flex-direction: column;
-      gap: 8px;
-      padding: 8px;
+      gap: 6px;
+      padding: 6px;
+      height: 100vh;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    body.corner-top-right #panel,
+    body.corner-bottom-right #panel { align-items: flex-end; }
+    body.corner-bottom-left #panel,
+    body.corner-bottom-right #panel { justify-content: flex-end; }
+    body.corner-top-right .participant,
+    body.corner-bottom-right .participant { flex-direction: row-reverse; }
+    .channel {
+      font-size: 11px;
+      font-weight: 700;
+      color: #d4d4d8;
+      background: rgba(12, 12, 16, 0.78);
+      padding: 2px 8px;
+      border-radius: 999px;
+      max-width: 200px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
     .participant {
       display: flex;
@@ -40,43 +60,30 @@
     }
     .avatar-wrap {
       position: relative;
-      width: 40px;
-      height: 40px;
+      width: 36px;
+      height: 36px;
       flex-shrink: 0;
-    }
-    .avatar-ring {
-      position: absolute;
-      inset: -4px;
-      border-radius: 50%;
-      box-shadow: 0 0 0 2px rgba(34, 197, 94, 0);
-      transition: box-shadow 0.14s ease-out;
-    }
-    .participant.speaking .avatar-ring {
-      box-shadow: 0 0 0 2.5px #22c55e, 0 0 14px 2px rgba(34, 197, 94, 0.55);
-      animation: pulse 1.2s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.07); }
     }
     .avatar {
       position: relative;
-      width: 40px;
-      height: 40px;
+      width: 36px;
+      height: 36px;
       border-radius: 50%;
       background: linear-gradient(135deg, #ee3a34, #ff8a3d);
       color: white;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 700;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
       display: flex;
       align-items: center;
       justify-content: center;
       overflow: hidden;
-      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 4px 12px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
+    }
+    .participant.speaking .avatar {
+      box-shadow: 0 0 0 2.5px #22c55e;
     }
     .avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .mic-off-badge {
+    .badge {
       position: absolute;
       bottom: -2px;
       right: -2px;
@@ -89,30 +96,24 @@
       justify-content: center;
       border: 2px solid #121218;
     }
-    .mic-off-badge svg { width: 9px; height: 9px; fill: white; }
+    .badge svg { width: 9px; height: 9px; fill: white; }
     .name-tag {
       font-size: 12px;
       font-weight: 600;
       color: #f4f4f7;
-      background: rgba(18, 18, 24, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      -webkit-backdrop-filter: blur(10px);
-      backdrop-filter: blur(10px);
+      background: rgba(12, 12, 16, 0.78);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       padding: 3px 10px;
       border-radius: 999px;
       white-space: nowrap;
-      max-width: 160px;
+      max-width: 170px;
       overflow: hidden;
       text-overflow: ellipsis;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-      transition: border-color 0.14s ease-out;
     }
     .participant.speaking .name-tag {
-      border-color: rgba(34, 197, 94, 0.55);
+      border-color: rgba(34, 197, 94, 0.7);
     }
-    @media (prefers-reduced-motion: reduce) {
-      .participant.speaking .avatar-ring { animation: none; }
-    }
+    .participant.silenced .name-tag { color: #a1a1aa; }
   </style>
 </head>
 <body>
@@ -122,40 +123,59 @@
     const panel = document.getElementById('panel')
 
     const MIC_OFF_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 11a1 1 0 0 0-1 1 6 6 0 0 1-9.8 4.66l-1.43 1.43A8 8 0 0 0 12 20a8 8 0 0 0 8-8 1 1 0 0 0-1-1zM4.41 2.86 2.86 4.41l4.2 4.2V11a5 5 0 0 0 8.4 3.67l1.49 1.49A7 7 0 0 1 5 11a1 1 0 0 0-2 0 9 9 0 0 0 8 8.94V22h2v-2.06a8.96 8.96 0 0 0 3.32-1.2l2.27 2.27 1.55-1.55L4.41 2.86zM12 15a3 3 0 0 0 2.83-2L9.17 7.34A3 3 0 0 0 9 8v4a3 3 0 0 0 3 3zM12 2a3 3 0 0 0-3 3v.28l6 6V5a3 3 0 0 0-3-3z"/></svg>`
+    // Fone cortado (ensurdecido).
+    const DEAF_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3.3 2.3 2 3.6l3.1 3.1A8.9 8.9 0 0 0 3 12v6a3 3 0 0 0 3 3h1a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2H5v-1c0-1.4.4-2.7 1.1-3.8l11.5 11.5-.1.1V19h-.1l2.9 2.9 1.3-1.3L3.3 2.3zM12 3c-1.7 0-3.3.5-4.6 1.3l1.5 1.5A7 7 0 0 1 19 12v1h-2c-.3 0-.6.1-.9.2l4.6 4.6c.2-.4.3-.8.3-1.3V12a9 9 0 0 0-9-9z"/></svg>`
+
+    // Última assinatura desenhada — o estado chega várias vezes por
+    // segundo (indicador de "falando"), mas só redesenha o DOM quando
+    // algo visível mudou de fato.
+    let lastSignature = ''
 
     function render(state) {
       if (!state || !state.connected) {
         panel.style.display = 'none'
+        lastSignature = ''
         return
       }
+      const participants = state.participants || []
+      const signature = JSON.stringify([state.channelName || '', participants.map((p) => [p.name, p.avatarUrl, !!p.speaking, !!p.muted, !!p.deafened])])
+      if (signature === lastSignature && panel.style.display === 'flex') return
+      lastSignature = signature
       panel.style.display = 'flex'
-      panel.innerHTML = ''
-      for (const p of state.participants || []) {
+      panel.textContent = ''
+
+      if (state.channelName) {
+        const channel = document.createElement('div')
+        channel.className = 'channel'
+        channel.textContent = state.channelName
+        panel.appendChild(channel)
+      }
+
+      for (const p of participants) {
+        const silenced = p.muted || p.deafened
         const row = document.createElement('div')
-        row.className = 'participant' + (p.speaking && !p.muted ? ' speaking' : '')
+        row.className = 'participant' + (p.speaking && !silenced ? ' speaking' : '') + (silenced ? ' silenced' : '')
 
         const avatarWrap = document.createElement('div')
         avatarWrap.className = 'avatar-wrap'
-
-        const ring = document.createElement('div')
-        ring.className = 'avatar-ring'
-        avatarWrap.appendChild(ring)
 
         const avatar = document.createElement('div')
         avatar.className = 'avatar'
         if (p.avatarUrl) {
           const img = document.createElement('img')
           img.src = p.avatarUrl
+          img.alt = ''
           avatar.appendChild(img)
         } else {
           avatar.textContent = (p.name || '?').slice(0, 1).toUpperCase()
         }
         avatarWrap.appendChild(avatar)
 
-        if (p.muted) {
+        if (p.deafened || p.muted) {
           const badge = document.createElement('div')
-          badge.className = 'mic-off-badge'
-          badge.innerHTML = MIC_OFF_SVG
+          badge.className = 'badge'
+          badge.innerHTML = p.deafened ? DEAF_SVG : MIC_OFF_SVG
+          badge.title = p.deafened ? 'Ensurdecido' : 'Mudo'
           avatarWrap.appendChild(badge)
         }
 
@@ -168,6 +188,12 @@
         panel.appendChild(row)
       }
     }
+
+    function applySettings(settings) {
+      const corner = settings && typeof settings.corner === 'string' ? settings.corner : 'top-left'
+      document.body.className = 'corner-' + corner
+    }
+    applySettings(null)
 
     if (window.overlayAPI) {
       // requestAnimationFrame agrupa várias atualizações seguidas (o
@@ -184,6 +210,7 @@
           render(pendingState)
         })
       })
+      if (window.overlayAPI.onSettings) window.overlayAPI.onSettings(applySettings)
     }
   </script>
 </body>

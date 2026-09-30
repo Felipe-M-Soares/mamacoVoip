@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getCurrentGame: () => ipcRenderer.invoke('app:getCurrentGame'),
+  // Privacidade: liga/desliga a detecção de jogos (lista de processos).
+  getGameDetectionEnabled: () => ipcRenderer.invoke('app:getGameDetectionEnabled'),
+  setGameDetectionEnabled: (enabled) => ipcRenderer.invoke('app:setGameDetectionEnabled', !!enabled),
   onGameStatusChanged: (callback) => {
     const handler = (_event, game) => callback(game)
     ipcRenderer.on('game-status-changed', handler)
@@ -53,6 +56,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('ptt-state', handler)
   },
   sendVoiceStateToOverlay: (state) => ipcRenderer.send('overlay:update-state', state),
+  // Sobreposição (overlay) — ligar/desligar e canto da tela pela UI,
+  // além do atalho global Ctrl+Shift+O. Ver setOverlayVisible em main.cjs.
+  getOverlaySettings: () => ipcRenderer.invoke('overlay:get-settings'),
+  setOverlayVisible: (visible) => ipcRenderer.invoke('overlay:set-visible', visible),
+  setOverlayCorner: (corner) => ipcRenderer.invoke('overlay:set-corner', corner),
+  onOverlayVisibilityChanged: (callback) => {
+    const handler = (_event, visible) => callback(visible)
+    ipcRenderer.on('overlay:visibility-changed', handler)
+    return () => ipcRenderer.removeListener('overlay:visibility-changed', handler)
+  },
+  // { label, antiCheat, generic } do jogo detectado agora (ou null).
+  getCurrentGameInfo: () => ipcRenderer.invoke('app:getCurrentGameInfo'),
   checkForUpdatesNow: () => ipcRenderer.send('app:check-for-updates-now'),
   // Vigia de foco do jogo (mitigação de vazamento em compartilhamento de
   // tela inteira) — ver o bloco grande em electron/main.cjs pra entender
@@ -82,6 +97,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // { ok: false, error } — nunca lança exceção, quem chama sempre trata
   // os dois casos (ver VoiceContext.tsx).
   startProcessAudioCapture: (pid) => ipcRenderer.invoke('process-audio:start', pid),
+  // Áudio de TODO o sistema, EXCETO o do próprio app (a call) — evita que
+  // quem assiste a transmissão ouça a própria voz de volta (eco). Mesmos
+  // eventos (format/chunk/error) da captura por processo.
+  startSystemAudioExcludingSelf: () => ipcRenderer.invoke('process-audio:start-excluding-self'),
   stopProcessAudioCapture: () => ipcRenderer.invoke('process-audio:stop'),
   onProcessAudioFormat: (callback) => {
     const handler = (_event, format) => callback(format)
@@ -159,4 +178,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // vez de `invoke` de propósito — logar nunca deve fazer quem chama
   // esperar nem falhar por causa disso.
   logDebug: (message) => ipcRenderer.send('debug:log', message),
+  // B7 — sessão do Supabase cifrada com o safeStorage do sistema (ver
+  // "secure-storage:*" em electron/main.cjs e src/lib/authStorage.ts).
+  // Só chaves com prefixo "sb-"; o processo principal valida de novo.
+  secureStorage: {
+    getItem: (key) =>
+      typeof key === 'string' && key.startsWith('sb-')
+        ? ipcRenderer.invoke('secure-storage:get', key)
+        : Promise.resolve({ ok: false }),
+    setItem: (key, value) =>
+      typeof key === 'string' && key.startsWith('sb-') && typeof value === 'string'
+        ? ipcRenderer.invoke('secure-storage:set', key, value)
+        : Promise.resolve({ ok: false }),
+    removeItem: (key) =>
+      typeof key === 'string' && key.startsWith('sb-')
+        ? ipcRenderer.invoke('secure-storage:remove', key)
+        : Promise.resolve({ ok: false }),
+  },
 })

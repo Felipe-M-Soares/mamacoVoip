@@ -9,6 +9,7 @@ import { useFriends } from '../../context/FriendsContext'
 import { useOnlineIds } from '../../hooks/usePresence'
 import type { Profile, Role } from '../../types/database'
 import { lazyModal } from '../modals/lazyModal'
+import { CloseIcon, GamepadIcon, SettingsIcon } from '../ui/icons'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const ManageMemberModal = lazyModal(() => import('../modals/ManageMemberModal').then((m) => m.ManageMemberModal))
@@ -50,7 +51,7 @@ export function MemberList({
   const offline = others.filter((m) => !isEffectivelyOnline(m.profile))
 
   // Agrupa quem está online pelo cargo mais alto de cada um — igual
-  // ao Discord, com o nome e a cor do cargo como título do grupo.
+  // a apps de chat populares, com o nome e a cor do cargo como título do grupo.
   // Quem não tem nenhum cargo cai num grupo "ONLINE" genérico no final.
   const groupedOnline: { role: Role | null; members: typeof online }[] = []
   for (const role of roles) {
@@ -81,22 +82,20 @@ export function MemberList({
           />
           <div className="min-w-0 leading-tight">
             <span
-              className={`text-[14px] font-medium truncate block ${topRole ? '' : 'text-discord-text'}`}
+              className={`text-[14px] font-medium truncate block ${topRole ? '' : 'text-mv-text'}`}
               style={topRole ? { color: topRole.color } : undefined}
             >
               {member.profile.display_name || member.profile.username}
             </span>
             {member.profile.playing && isEffectivelyOnline(member.profile) ? (
-              <span className="text-[11px] text-discord-text-muted truncate flex items-center gap-1 mt-0.5">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 shrink-0 text-discord-green" aria-hidden="true">
-                  <path d="M7 6h10a5 5 0 0 1 4.9 6l-.8 4a3 3 0 0 1-5.2 1.4L14.2 16H9.8l-1.7 1.4A3 3 0 0 1 2.9 16l-.8-4A5 5 0 0 1 7 6zm0 3v1.5H5.5v1.5H7v1.5h1.5V12H10v-1.5H8.5V9H7zm8.5.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm2 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" />
-                </svg>
+              <span className="text-[11px] text-mv-muted truncate flex items-center gap-1 mt-0.5">
+                <GamepadIcon className="w-3 h-3 shrink-0 text-mv-green" aria-hidden />
                 <span className="truncate">
-                  Jogando <strong className="font-semibold text-discord-text/90">{member.profile.playing}</strong>
+                  Jogando <strong className="font-semibold text-mv-text/90">{member.profile.playing}</strong>
                 </span>
               </span>
             ) : member.profile.custom_status && isEffectivelyOnline(member.profile) ? (
-              <span className="text-[11px] text-discord-text-muted truncate block mt-0.5">{member.profile.custom_status}</span>
+              <span className="text-[11px] text-mv-muted truncate block mt-0.5">{member.profile.custom_status}</span>
             ) : null}
           </div>
         </button>
@@ -107,9 +106,7 @@ export function MemberList({
             aria-label="Gerenciar membro"
             className="icon-btn w-7 h-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-              <path d="M19.4 13a7.4 7.4 0 0 0 .1-1 7.4 7.4 0 0 0-.1-1l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1a.5.5 0 0 0-.6.2L2.6 8.8a.5.5 0 0 0 .1.6l2 1.6a7.4 7.4 0 0 0 0 2l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1c.5.4 1.1.8 1.7 1l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6l-2-1.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" />
-            </svg>
+            <SettingsIcon className="w-4 h-4" aria-hidden />
           </button>
         )}
       </div>
@@ -123,16 +120,14 @@ export function MemberList({
       )}
       <aside
         aria-label="Membros"
-        className={`w-60 bg-discord-sidebar shrink-0 overflow-y-auto py-4 px-2.5 lg:block lg:static border-t border-l border-[var(--color-line)] ${
+        className={`w-60 bg-mv-side shrink-0 overflow-y-auto py-4 px-2.5 lg:block lg:static border-t border-l border-[var(--color-line)] ${
           mobileOpen ? 'fixed inset-y-0 right-0 z-40 block animate-fade-slide-in shadow-[-24px_0_60px_-12px_rgb(0_0_0/0.6)]' : 'hidden'
         }`}
       >
         <div className="lg:hidden flex items-center justify-between mb-2 px-2">
           <span className="font-display font-semibold text-white">Membros</span>
           <button onClick={onCloseMobile} aria-label="Fechar membros" title="Fechar" className="icon-btn w-9 h-9">
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-              <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
-            </svg>
+            <CloseIcon className="w-5 h-5" aria-hidden />
           </button>
         </div>
       {loading ? (
@@ -149,7 +144,7 @@ export function MemberList({
         <>
           {profile && (
             <div>
-              <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-1.5">Você</h3>
+              <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-1.5">Você</h3>
               <button
                 onClick={() => onViewProfile(profile)}
                 className="w-full flex items-center gap-2.5 px-2 py-[6px] rounded-lg hover:bg-white/[0.05] transition-colors text-left"
@@ -163,11 +158,11 @@ export function MemberList({
                   size={32}
                 />
                 <span className="min-w-0 leading-tight">
-                  <span className="text-[14px] font-medium text-discord-text truncate block">
+                  <span className="text-[14px] font-medium text-mv-text truncate block">
                     {profile.display_name || profile.username}
                   </span>
                   {profile.custom_status && (
-                    <span className="text-[11px] text-discord-text-muted truncate block mt-0.5">{profile.custom_status}</span>
+                    <span className="text-[11px] text-mv-muted truncate block mt-0.5">{profile.custom_status}</span>
                   )}
                 </span>
               </button>
@@ -176,10 +171,10 @@ export function MemberList({
 
           {groupedOnline.map(({ role, members: group }) => (
             <div key={role?.id ?? 'no-role'}>
-              <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mt-5 mb-1.5 flex items-center gap-1.5">
+              <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mt-5 mb-1.5 flex items-center gap-1.5">
                 {role && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: role.color }} aria-hidden="true" />}
                 <span className="truncate">{role?.name ?? 'Online'}</span>
-                <span className="text-discord-text-muted/70">— {group.length}</span>
+                <span className="text-mv-muted/70">— {group.length}</span>
               </h3>
               {group.map((m) => (
                 <MemberRow key={m.user_id} member={m} />
@@ -187,8 +182,8 @@ export function MemberList({
             </div>
           ))}
 
-          <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mt-5 mb-1.5">
-            Offline <span className="text-discord-text-muted/70">— {offline.length}</span>
+          <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mt-5 mb-1.5">
+            Offline <span className="text-mv-muted/70">— {offline.length}</span>
           </h3>
           {offline.map((m) => (
             <div key={m.user_id} className="opacity-45 hover:opacity-100 transition-opacity">

@@ -1,15 +1,16 @@
-// Preferências LOCAIS de conteúdo adulto (+18), no modelo do Discord:
+// Preferências LOCAIS de conteúdo adulto (+18), no modelo de apps de chat populares:
 // conteúdo adulto só aparece em canais marcados como +18 (channels.is_nsfw)
 // e só pra quem confirmou ser maior de idade.
 //
-// A confirmação "oficial" fica no perfil (profiles.age_verified_adult_at,
-// migration 015) e acompanha a conta em qualquer aparelho. Aqui guardamos:
+// A confirmação "oficial" fica no banco (user_private_settings.
+// age_verified_adult_at, migration 016 — antes era profiles, legível por
+// todos) e acompanha a conta em qualquer aparelho; o banco a exige pra
+// liberar a leitura de mensagens de canais +18. Aqui guardamos:
 //   * showAdult — "Mostrar conteúdo +18 em canais com restrição de idade".
 //     Desligado = o portão aparece TODA vez que a pessoa abre um canal +18
 //     (a confirmação vale só pra aquela visita).
 //   * localConfirmedUserId — cópia local da confirmação (por conta), pra o
-//     portão não piscar enquanto o perfil carrega e pra funcionar num banco
-//     que ainda não rodou a 015. Revogar apaga as duas.
+//     portão não piscar enquanto a confirmação carrega do banco. Revogar apaga as duas.
 
 const SHOW_KEY = 'mamacos:adult-content:show'
 const CONFIRMED_KEY = 'mamacos:adult-content:confirmed-user'

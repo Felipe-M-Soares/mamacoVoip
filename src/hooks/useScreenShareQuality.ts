@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 // TRIGÉSIMA SÉTIMA RODADA — pedido explícito: "colocar todas opções de
-// gráfico e fps disponíveis pra transmissão", igual OBS/Discord deixam
+// gráfico e fps disponíveis pra transmissão", igual OBS deixam
 // escolher resolução e taxa de quadros de forma INDEPENDENTE uma da
 // outra (não só dois pacotes fechados "desempenho" ou "qualidade
 // máxima" como antes). Resolução e fps agora são dois controles
@@ -11,6 +11,7 @@ export type ScreenShareFrameRate = 15 | 30 | 60
 
 const RESOLUTION_KEY = 'mamacos-screenshare-resolution'
 const FRAMERATE_KEY = 'mamacos-screenshare-framerate'
+const GAME_AUTO_KEY = 'mamacos-screenshare-game-auto'
 
 interface ResolutionInfo {
   width: number
@@ -66,11 +67,11 @@ const RESOLUTIONS: Record<ScreenShareResolution, ResolutionInfo> = {
   native: { width: SAFE_MAX_CAPTURE_WIDTH, height: SAFE_MAX_CAPTURE_HEIGHT, label: 'Fonte (nativa, até 1440p)' },
 }
 
-export const RESOLUTION_OPTIONS: { value: ScreenShareResolution; label: string }[] = (
+const RESOLUTION_OPTIONS: { value: ScreenShareResolution; label: string }[] = (
   Object.keys(RESOLUTIONS) as ScreenShareResolution[]
 ).map((value) => ({ value, label: RESOLUTIONS[value].label }))
 
-export const FRAME_RATE_OPTIONS: ScreenShareFrameRate[] = [15, 30, 60]
+const FRAME_RATE_OPTIONS: ScreenShareFrameRate[] = [15, 30, 60]
 
 // Teto de bitrate por combinação resolução×fps — valores de referência
 // comuns de serviços de streaming pra cada combinação (Twitch/YouTube
@@ -102,6 +103,8 @@ export interface QualityPreset {
   capResolution: boolean
   label: string
   description: string
+  // true quando é o preset automático "Jogo" (ver buildGamePreset).
+  isGamePreset?: boolean
 }
 
 function buildPreset(resolution: ScreenShareResolution, frameRate: ScreenShareFrameRate): QualityPreset {
@@ -136,12 +139,87 @@ export function contentHintForPreset(preset: Pick<QualityPreset, 'frameRate'>): 
   return preset.frameRate <= 15 ? 'detail' : 'motion'
 }
 
+// ---------------------------------------------------------------------------
+// Preset "Jogo" — aplicado AUTOMATICAMENTE quando a fonte escolhida é um
+// jogo detectado (card "Jogo" do seletor / atalho do aviso "Jogando X"),
+// se a opção "Qualidade automática para jogos" estiver ligada (padrão).
+//
+//  - 60fps sempre (jogo a 30fps parece travado pra quem assiste);
+//  - 1080p60 a 7 Mbps — faixa recomendada pra 1080p60 em H.264 (6–8 Mbps);
+//  - rede fraca (qualidade da SUA conexão "ruim"/"perdida") → 720p60 a
+//    3,5 Mbps, pra não picotar;
+//  - quem escolheu 1440p/"Fonte" nas configurações continua em 1440p60
+//    (teto de segurança SAFE_MAX_CAPTURE_* nunca é ultrapassado);
+//  - 'maintain-framerate': se a rede apertar, perde nitidez, não fluidez;
+//  - contentHint 'motion' (vem de contentHintForPreset, frameRate 60).
+// ---------------------------------------------------------------------------
+const GAME_PRESET_BITRATE_1080P60 = 7_000_000
+const GAME_PRESET_BITRATE_720P60 = 3_500_000
+
+export function buildGamePreset(userPreset: Pick<QualityPreset, 'width' | 'height'>, opts: { weakNetwork: boolean }): QualityPreset {
+  const base = {
+    frameRate: 60,
+    degradationPreference: 'maintain-framerate' as const,
+    capResolution: true,
+    isGamePreset: true,
+  }
+  if (opts.weakNetwork) {
+    return {
+      ...base,
+      width: 1280,
+      height: 720,
+      maxBitrate: GAME_PRESET_BITRATE_720P60,
+      label: 'Jogo · 720p60 (rede fraca)',
+      description: 'Sua conexão está instável — transmitindo o jogo em 720p a 60fps pra não travar.',
+    }
+  }
+  if (userPreset.width > 1920 || userPreset.height > 1080) {
+    const width = Math.min(userPreset.width, SAFE_MAX_CAPTURE_WIDTH)
+    const height = Math.min(userPreset.height, SAFE_MAX_CAPTURE_HEIGHT)
+    return {
+      ...base,
+      width,
+      height,
+      maxBitrate: BITRATE_TABLE['1440p'][60],
+      label: 'Jogo · 1440p60',
+      description: 'Transmitindo o jogo em até 1440p a 60fps (a resolução alta que você escolheu).',
+    }
+  }
+  return {
+    ...base,
+    width: 1920,
+    height: 1080,
+    maxBitrate: GAME_PRESET_BITRATE_1080P60,
+    label: 'Jogo · 1080p60',
+    description: 'Transmitindo o jogo em 1080p a 60fps, priorizando fluidez.',
+  }
+}
+
+// Decide o preset EFETIVO de uma transmissão: o escolhido pela pessoa, ou
+// o preset "Jogo" quando a fonte é um jogo detectado e o modo automático
+// está ligado.
+export function resolveScreenSharePreset(
+  userPreset: QualityPreset,
+  ctx: { isGame: boolean; gameAuto: boolean; weakNetwork: boolean }
+): QualityPreset {
+  if (!ctx.isGame || !ctx.gameAuto) return userPreset
+  return buildGamePreset(userPreset, { weakNetwork: ctx.weakNetwork })
+}
+
+export function loadGameAutoPreset(): boolean {
+  try {
+    return localStorage.getItem(GAME_AUTO_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
+
 // Exportadas (não só internas ao hook) pra permitir uma LEITURA somente-
 // exibição do valor atual em lugares fora do VoiceProvider — ver
 // ScreenSharePicker.tsx, que mostra "qualidade selecionada" antes de
 // compartilhar mas não pode chamar useVoice() (ele existe fora do
 // VoiceProvider, que só monta dentro do MainLayout).
-export function loadResolution(): ScreenShareResolution {
+function loadResolution(): ScreenShareResolution {
   try {
     const raw = localStorage.getItem(RESOLUTION_KEY)
     return raw === '720p' || raw === '1080p' || raw === '1440p' || raw === 'native' ? raw : '1080p'
@@ -150,7 +228,7 @@ export function loadResolution(): ScreenShareResolution {
   }
 }
 
-export function loadFrameRate(): ScreenShareFrameRate {
+function loadFrameRate(): ScreenShareFrameRate {
   try {
     const raw = Number(localStorage.getItem(FRAMERATE_KEY))
     return raw === 15 || raw === 30 || raw === 60 ? raw : 30
@@ -166,6 +244,16 @@ export function loadQualityPreset(): QualityPreset {
 export function useScreenShareQuality() {
   const [resolution, setResolutionState] = useState<ScreenShareResolution>(loadResolution)
   const [frameRate, setFrameRateState] = useState<ScreenShareFrameRate>(loadFrameRate)
+  const [gameAuto, setGameAutoState] = useState<boolean>(loadGameAutoPreset)
+
+  function setGameAuto(next: boolean) {
+    setGameAutoState(next)
+    try {
+      localStorage.setItem(GAME_AUTO_KEY, String(next))
+    } catch {
+      // best-effort
+    }
+  }
 
   function setResolution(next: ScreenShareResolution) {
     setResolutionState(next)
@@ -192,6 +280,9 @@ export function useScreenShareQuality() {
     setFrameRate,
     resolutionOptions: RESOLUTION_OPTIONS,
     frameRateOptions: FRAME_RATE_OPTIONS,
+    // Qualidade automática para jogos (preset "Jogo", ver buildGamePreset).
+    gameAuto,
+    setGameAuto,
     preset: buildPreset(resolution, frameRate),
   }
 }

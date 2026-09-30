@@ -64,16 +64,16 @@ export function ThreadPanel({
   }
 
   return (
-    <div role="dialog" aria-label={`Thread ${thread.name}`} className="fixed inset-y-0 right-0 z-[300] w-full max-w-md bg-discord-channels border-l border-[var(--color-line)] flex flex-col shadow-[-24px_0_60px_-12px_rgb(0_0_0/0.6)] animate-fade-slide-in">
+    <div role="dialog" aria-label={`Thread ${thread.name}`} className="fixed inset-y-0 right-0 z-[300] w-full max-w-md bg-mv-main border-l border-[var(--color-line)] flex flex-col shadow-[-24px_0_60px_-12px_rgb(0_0_0/0.6)] animate-fade-slide-in">
       <div className="h-14 px-4 flex items-center justify-between gap-2 border-b border-[var(--color-line)] shrink-0">
         <div className="min-w-0 flex items-center gap-2.5">
           <span className="w-8 h-8 rounded-lg bg-white/[0.05] border border-[var(--color-line)] flex items-center justify-center shrink-0" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-discord-text-muted">
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-mv-muted">
               <path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8l-4 4V6a1 1 0 0 1 1-1z" />
             </svg>
           </span>
           <div className="min-w-0 leading-tight">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">Thread</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted">Thread</p>
             <h2 className="font-display font-semibold text-[15px] text-white truncate">{thread.name}</h2>
           </div>
         </div>
@@ -110,17 +110,17 @@ export function ThreadPanel({
         onViewProfile={onViewProfile}
       />
 
-      <div className="h-6 px-5 flex items-center gap-2 text-xs text-discord-text-muted shrink-0" aria-live="polite">
+      <div className="h-6 px-5 flex items-center gap-2 text-xs text-mv-muted shrink-0" aria-live="polite">
         {typingNames.length > 0 && (
           <>
             <span className="flex items-center gap-[3px] px-2 py-1 rounded-full bg-white/[0.05] border border-[var(--color-line)]">
-              <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce [animation-delay:-0.3s]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce [animation-delay:-0.15s]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce" />
+              <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce [animation-delay:-0.3s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce [animation-delay:-0.15s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce" />
             </span>
             <span className="truncate animate-fade-in">
               {typingNames.length === 1 ? (
-                <><strong className="font-semibold text-discord-text">{typingNames[0]}</strong> está digitando…</>
+                <><strong className="font-semibold text-mv-text">{typingNames[0]}</strong> está digitando…</>
               ) : (
                 `${typingNames.length} pessoas estão digitando…`
               )}

@@ -32,12 +32,15 @@ export function OverlayStateSync() {
     }
 
     const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
+    const selfProfile = user ? profileById[user.id] : undefined
     const participants = [
       {
         name: 'Você',
-        avatarUrl: null,
-        speaking: voice.speaking,
+        avatarUrl: selfProfile?.avatar_url ?? null,
+        // Ensurdecido também silencia o microfone — o selo mostra o fone.
+        speaking: voice.speaking && !voice.muted && !voice.deafened,
         muted: voice.muted,
+        deafened: voice.deafened,
       },
       ...Object.entries(voice.participants).map(([userId, p]) => {
         const profile = profileById[userId]
@@ -45,7 +48,11 @@ export function OverlayStateSync() {
           name: profile?.display_name || profile?.username || '...',
           avatarUrl: profile?.avatar_url ?? null,
           speaking: p.speaking,
+          // O estado de mudo/ensurdecido dos OUTROS não é sincronizado
+          // pela call hoje — só o "falando" (que já some quando a pessoa
+          // está muda).
           muted: false,
+          deafened: false,
         }
       }),
     ]
@@ -55,7 +62,7 @@ export function OverlayStateSync() {
       channelName,
       participants,
     })
-  }, [voice.connectedChannelId, voice.participants, voice.speaking, voice.muted, members, channelName, user])
+  }, [voice.connectedChannelId, voice.participants, voice.speaking, voice.muted, voice.deafened, members, channelName, user])
 
   return null
 }

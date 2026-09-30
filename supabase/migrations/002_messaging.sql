@@ -26,7 +26,7 @@ create table if not exists public.messages (
   pinned_at timestamptz,
   pinned_by uuid references public.profiles(id) on delete set null,
   -- null pra mensagem normal; 'member_join' pra aviso automático de
-  -- "fulano entrou no servidor" (igual o Discord mostra) — o author_id
+  -- "fulano entrou no servidor" (igual a apps de chat populares mostra) — o author_id
   -- continua sendo a própria pessoa que entrou, então não precisa de
   -- coluna nova pra isso.
   system_event text,
@@ -38,7 +38,7 @@ create table if not exists public.messages (
 alter table public.messages add column if not exists system_event text;
 
 -- Aviso automático de entrada no servidor — posta na primeira sala de
--- texto (por posição) assim que alguém entra, igual o Discord faz.
+-- texto (por posição) assim que alguém entra, igual a apps de chat populares faz.
 create or replace function public.announce_member_join()
 returns trigger
 language plpgsql
@@ -297,8 +297,8 @@ end $$;
 --
 -- Observação de segurança: o bucket é público (como o de ícones de
 -- servidor) — quem tem o link direto consegue acessar o arquivo sem
--- passar pela RLS, o mesmo modelo de confiança que o CDN de anexos do
--- Discord usa. A RLS aqui impede que não-membros DESCUBRAM o link pela
+-- passar pela RLS, o mesmo modelo de confiança que o CDN de anexos de
+-- outros apps de chat. A RLS aqui impede que não-membros DESCUBRAM o link pela
 -- API/app; ela não impede acesso a um link já vazado. Pra um app de
 -- produção real com dados sensíveis, o próximo passo seria trocar por
 -- bucket privado + signed URLs com expiração curta.
@@ -376,30 +376,16 @@ create table if not exists public.channel_read_state (
   primary key (channel_id, user_id)
 );
 
-create table if not exists public.dm_read_state (
-  conversation_id uuid not null references public.dm_conversations(id) on delete cascade,
-  user_id uuid not null references auth.users(id) on delete cascade,
-  last_read_at timestamptz not null default now(),
-  primary key (conversation_id, user_id)
-);
+-- (dm_read_state — estado de leitura das DMs — foi MOVIDA pro fim de
+-- 003_social.sql: ela referencia dm_conversations, que só nasce na 003.
+-- Antes ficava aqui e quebrava a instalação do zero, rodando em ordem.)
 
 alter table public.channel_read_state enable row level security;
-alter table public.dm_read_state enable row level security;
 
 drop policy if exists "Usuário vê o próprio estado de leitura de canais" on public.channel_read_state;
 create policy "Usuário vê o próprio estado de leitura de canais"
   on public.channel_read_state for select to authenticated
   using (user_id = auth.uid());
-
-drop policy if exists "Usuário vê o próprio estado de leitura de DMs" on public.dm_read_state;
-create policy "Usuário vê o próprio estado de leitura de DMs"
-  on public.dm_read_state for select to authenticated
-  using (
-    exists (
-      select 1 from public.dm_conversations c
-      where c.id = conversation_id and (c.user_a = auth.uid() or c.user_b = auth.uid())
-    )
-  );
 
 -- Upsert só pelo próprio usuário, direto (não precisa de função aqui —
 -- não há regra de negócio sensível, só "marquei como lido até agora")
@@ -413,16 +399,6 @@ create policy "Usuário atualiza o próprio estado de leitura de canais"
   on public.channel_read_state for update to authenticated
   using (user_id = auth.uid());
 
-drop policy if exists "Usuário marca suas DMs como lidas" on public.dm_read_state;
-create policy "Usuário marca suas DMs como lidas"
-  on public.dm_read_state for insert to authenticated
-  with check (user_id = auth.uid());
-
-drop policy if exists "Usuário atualiza o próprio estado de leitura de DMs" on public.dm_read_state;
-create policy "Usuário atualiza o próprio estado de leitura de DMs"
-  on public.dm_read_state for update to authenticated
-  using (user_id = auth.uid());
-
 -- ==== originalmente: 012_pinned_messages.sql ====
 -- ============================================================
 -- Mensagens fixadas (pin)
@@ -430,20 +406,10 @@ create policy "Usuário atualiza o próprio estado de leitura de DMs"
 -- ============================================================
 create index if not exists messages_pinned_idx on public.messages (channel_id, pinned_at) where pinned_at is not null;
 
--- Só quem tem permissão de gerenciar mensagens no servidor (dono ou
--- cargo com essa permissão) pode fixar/desafixar — reaproveita a
--- função has_permission() já criada na migration 006.
-drop policy if exists "messages_pin_update" on public.messages;
-create policy "messages_pin_update"
-  on public.messages for update
-  using (
-    exists (
-      select 1 from public.channels ch
-      join public.servers s on s.id = ch.server_id
-      where ch.id = messages.channel_id
-        and (s.owner_id = auth.uid() or public.has_permission(s.id, auth.uid(), 'manage_messages'))
-    )
-  );
+-- A política "messages_pin_update" (fixar/desafixar com manage_messages)
+-- usa has_permission(), que só nasce na 004 — por isso ela foi MOVIDA
+-- pro fim de 004_roles_moderation.sql (antes ficava aqui e quebrava a
+-- instalação do zero, rodando em ordem).
 
 -- ==== originalmente: 014_channel_mutes.sql ====
 -- ============================================================

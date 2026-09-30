@@ -27,6 +27,7 @@ const Register = lazy(() => import('./pages/Register').then((m) => ({ default: m
 const InviteRedirect = lazy(() => import('./pages/InviteRedirect').then((m) => ({ default: m.InviteRedirect })))
 const PrivacyPolicy = lazy(() => import('./pages/legal/PrivacyPolicy').then((m) => ({ default: m.PrivacyPolicy })))
 const TermsOfService = lazy(() => import('./pages/legal/TermsOfService').then((m) => ({ default: m.TermsOfService })))
+const DeleteAccountInfo = lazy(() => import('./pages/legal/DeleteAccountInfo').then((m) => ({ default: m.DeleteAccountInfo })))
 
 // Quase toda sessão termina no layout principal — começa a baixá-lo em
 // segundo plano logo após a primeira pintura (em paralelo com a checagem
@@ -80,6 +81,7 @@ function App() {
                 <Route path="/cadastro" element={<Register />} />
                 <Route path="/privacidade" element={<PrivacyPolicy />} />
                 <Route path="/termos" element={<TermsOfService />} />
+                <Route path="/excluir-conta" element={<DeleteAccountInfo />} />
                 <Route
                   path="/convite/:code"
                   element={

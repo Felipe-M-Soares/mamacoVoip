@@ -91,7 +91,7 @@ export const DEFAULT_MIC_SENSITIVITY = 50
 const SENSITIVITY_MIN_DB = -80 // sensibilidade 100 — gate quase sempre aberto
 const SENSITIVITY_MAX_DB = -20 // sensibilidade 0 — só som bem alto abre
 
-export function sensitivityToOpenThresholdDb(sensitivity: number): number {
+function sensitivityToOpenThresholdDb(sensitivity: number): number {
   const clamped = Math.max(MIN_MIC_SENSITIVITY, Math.min(MAX_MIC_SENSITIVITY, sensitivity))
   const t = clamped / 100
   return SENSITIVITY_MAX_DB + t * (SENSITIVITY_MIN_DB - SENSITIVITY_MAX_DB)

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><defs><filter id="s" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+<feMorphology in="SourceAlpha" operator="dilate" radius="3.5" result="d"/>
+<feFlood flood-color="#fff"/><feComposite in2="d" operator="in" result="w"/>
+<feGaussianBlur in="d" stdDeviation="2.4"/><feOffset dy="2.5" result="b"/>
+<feFlood flood-color="#000" flood-opacity=".35"/><feComposite in2="b" operator="in" result="sh"/>
+<feMerge><feMergeNode in="sh"/><feMergeNode in="w"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter></defs><g filter="url(#s)" stroke-linejoin="round" stroke-linecap="round"><circle cx="64" cy="54" r="42" fill="#ffc83d" stroke="#1d1b26" stroke-width="5"/><path d="M36 40a30 30 0 0 1 24 -20" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="6"/><path d="M26 44h76v6c0 10-8 16-17 16-8 0-13-5-15-12h-12c-2 7-7 12-15 12-9 0-17-6-17-16z" fill="#1d1b26"/><path d="M36 50l8-4M74 50l8-4" stroke="#fff" stroke-opacity=".7" stroke-width="3.5"/><path d="M48 76q14 8 30-2" fill="none" stroke="#1d1b26" stroke-width="5"/><g transform="rotate(-6 64 106)"><rect x="29.0" y="91" width="70" height="28" rx="10" fill="#22c55e" stroke="#1d1b26" stroke-width="5"/><text x="64" y="113" text-anchor="middle" font-family="'Arial Black','Segoe UI Black','Helvetica Neue',Impact,system-ui,sans-serif" font-weight="900" font-size="24" fill="#ffffff" stroke="#1d1b26" stroke-width="5" paint-order="stroke" letter-spacing="0.5">EZ</text></g></g></svg>

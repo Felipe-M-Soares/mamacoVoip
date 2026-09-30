@@ -101,3 +101,30 @@ describe('safeHttpUrl / safeHexColor', () => {
     expect(safeHexColor('#fff;x:y')).toBe('#99aab5')
   })
 })
+
+describe('figurinhas em parseMessageContent', () => {
+  it('renderiza [[sticker:gg]] como imagem grande', () => {
+    const el = renderContent('[[sticker:gg]]')
+    const img = el.querySelector('img[data-sticker="gg"]')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('alt')).toBe('Figurinha: GG')
+    expect(img?.getAttribute('width')).toBe('140')
+  })
+
+  it('aceita espaços em volta da marcação', () => {
+    const el = renderContent('  [[sticker:mascote-oi]] ')
+    expect(el.querySelector('img[data-sticker="mascote-oi"]')).not.toBeNull()
+  })
+
+  it('id desconhecido cai num texto de fallback', () => {
+    const el = renderContent('[[sticker:nao-existe]]')
+    expect(el.querySelector('img')).toBeNull()
+    expect(el.textContent).toBe('[figurinha indisponível]')
+  })
+
+  it('marcação no meio de outro texto continua sendo texto', () => {
+    const el = renderContent('olha isso [[sticker:gg]] kkk')
+    expect(el.querySelector('img')).toBeNull()
+    expect(el.textContent).toBe('olha isso [[sticker:gg]] kkk')
+  })
+})

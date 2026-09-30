@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut, screen, powerMonitor } = require('electron')
+const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut, screen, powerMonitor, safeStorage } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { exec, spawn } = require('node:child_process')
@@ -15,7 +15,7 @@ const { autoUpdater } = require('electron-updater')
 // (handler registrado mais abaixo, perto da criação da janela) e se
 // encerra na hora — sem isso o `return` aqui embaixo, o resto do arquivo
 // (registro de protocolo, criação de janela, etc.) nunca chega a rodar
-// pra essa segunda tentativa. É assim que apps como o Discord conseguem
+// pra essa segunda tentativa. É assim que apps como um app de chat popular conseguem
 // "puxar" a janela já aberta em vez de duplicar.
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
@@ -23,13 +23,13 @@ if (!gotSingleInstanceLock) {
   return
 }
 
-// VIGÉSIMA SEGUNDA RODADA — relatado com razão: "mas o OBS e o Discord
+// VIGÉSIMA SEGUNDA RODADA — relatado com razão: "mas o OBS e outros apps
 // capturam esses jogos tranquilamente". Isso é verdade, e joga por
 // terra a explicação de que tela cheia exclusiva com anti-cheat SEMPRE
 // quebra a duplicação de tela — se fosse uma regra dura do Windows, o
 // Display Capture do OBS (que usa a MESMA API de duplicação de tela,
 // DXGI Output Duplication) também falharia sempre, e não falha. A
-// diferença real está em QUEM implementa a captura: o Discord e o OBS
+// diferença real está em QUEM implementa a captura: o OBS e outros apps
 // têm pipeline de captura PRÓPRIO, escrito à mão em C++ direto contra
 // as APIs do Windows, com lógica de recuperação pra exatamente esses
 // casos de borda (ex.: reconstruir a interface de duplicação quando o
@@ -318,6 +318,33 @@ const DIST_DIR = path.join(__dirname, '..', 'dist')
 // quando carregados via file:// — a página "carrega" sem erro nenhum
 // visível, só o script nunca roda. Servindo pelo protocolo próprio, o
 // app passa a ter uma origem de verdade e os módulos funcionam normal.
+// B4 — Content-Security-Policy das páginas servidas pelo app:// (só no
+// app empacotado; em desenvolvimento a página vem do servidor do Vite).
+// Mesma política do site (vercel.json), sem frame-ancestors (a janela
+// não é embutida em lugar nenhum) — se trocar uma, troque a outra:
+//   - connect-src: Supabase (REST/Auth/Storage/Edge Functions em https,
+//     Realtime em wss), LiveKit Cloud (sinalização wss + https) e a API
+//     da GIPHY. Se o Supabase/LiveKit usar domínio próprio, inclua aqui.
+//   - img/media: https:, data: e blob: (anexos por URL assinada, GIFs,
+//     avatares, prévias de link, gravações locais).
+//   - 'wasm-unsafe-eval' + worker/blob: supressão de ruído (WASM em
+//     AudioWorklet) e LiveKit.
+const APP_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' data: blob: https:",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.livekit.cloud wss://*.livekit.cloud https://api.giphy.com",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ')
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'app',
@@ -432,105 +459,23 @@ function openExternalSafely(url) {
   }
 }
 
-// Lista de processos conhecidos mapeados pro nome bonito que aparece
-// no status ("Jogando X"). Detecção é por nome de processo em
-// execução — funciona bem no Windows (onde a maioria dos jogos roda);
-// no Mac/Linux o nome do processo costuma ser diferente, então a
-// cobertura ali é mais limitada. Isso só existe no app desktop porque
-// nenhum navegador dá acesso à lista de processos do sistema por
-// motivo de segurança — é uma limitação de qualquer navegador, não
-// só do nosso app.
-const KNOWN_GAMES = {
-  // Tiro/competitivo
-  'valorant.exe': 'Valorant',
-  'valorant-win64-shipping.exe': 'Valorant',
-  'csgo.exe': 'Counter-Strike',
-  'cs2.exe': 'Counter-Strike 2',
-  'rainbowsix.exe': 'Rainbow Six Siege',
-  // NÃO incluir 'rainbowsix_be.exe' aqui: é o serviço do BattlEye
-  // (anti-cheat) do jogo, que fica residente em segundo plano — muitas
-  // vezes iniciado com o Windows — mesmo depois que você fecha o jogo.
-  // Era por isso que o status ficava travado em "Jogando Rainbow Six
-  // Siege" pra sempre: esse processo nunca some da lista do tasklist,
-  // então a detecção nunca voltava a null. O processo do jogo em si
-  // ('rainbowsix.exe' / variantes _vulkan/_dx11 abaixo) é o sinal
-  // confiável de que o jogo está de fato aberto.
-  'rainbowsix_vulkan.exe': 'Rainbow Six Siege',
-  'rainbowsix_dx11.exe': 'Rainbow Six Siege',
-  'r5apex.exe': 'Apex Legends',
-  'overwatch.exe': 'Overwatch 2',
-  'pubg.exe': 'PUBG: Battlegrounds',
-  'tslgame.exe': 'PUBG: Battlegrounds',
-  'escapefromtarkov.exe': 'Escape from Tarkov',
-  'destiny2.exe': 'Destiny 2',
-  'thefinals.exe': 'The Finals',
-  'delta_force.exe': 'Delta Force',
-
-  // Battle royale / multiplayer casual
-  'fortniteclient-win64-shipping.exe': 'Fortnite',
-  'robloxplayerbeta.exe': 'Roblox',
-  'among us.exe': 'Among Us',
-  'amongus.exe': 'Among Us',
-
-  // MOBA
-  'league of legends.exe': 'League of Legends',
-  'leagueclient.exe': 'League of Legends',
-  'dota2.exe': 'Dota 2',
-  'smite.exe': 'Smite',
-
-  // Mundo aberto / RPG / ação
-  'gta5.exe': 'GTA V',
-  'gta5_enhanced.exe': 'GTA V',
-  'eldenring.exe': 'Elden Ring',
-  'starfield.exe': 'Starfield',
-  'cyberpunk2077.exe': 'Cyberpunk 2077',
-  'witcher3.exe': 'The Witcher 3',
-  'reddeadredemption2.exe': 'Red Dead Redemption 2',
-  'rdr2.exe': 'Red Dead Redemption 2',
-  'skyrimse.exe': 'Skyrim',
-  'baldur\'s gate 3.exe': "Baldur's Gate 3",
-  'bg3.exe': "Baldur's Gate 3",
-  'hogwartslegacy.exe': 'Hogwarts Legacy',
-  'palworld.exe': 'Palworld',
-  'blackmythwukong.exe': 'Black Myth: Wukong',
-
-  // Sandbox / construção / sobrevivência
-  'javaw.exe': 'Minecraft',
-  'minecraft.exe': 'Minecraft',
-  'minecraftlauncher.exe': 'Minecraft',
-  'terraria.exe': 'Terraria',
-  'rust.exe': 'Rust',
-  'dayzps.exe': 'DayZ',
-  'dayz_x64.exe': 'DayZ',
-  'ark.exe': 'ARK: Survival Evolved',
-  'arkascended.exe': 'ARK: Survival Ascended',
-  'valheim.exe': 'Valheim',
-  '7daystodie.exe': '7 Days to Die',
-  'stardewvalley.exe': 'Stardew Valley',
-
-  // Esportes / corrida
-  'rocketleague.exe': 'Rocket League',
-  'fc24.exe': 'EA Sports FC 24',
-  'fc25.exe': 'EA Sports FC 25',
-  'nba2k24.exe': 'NBA 2K24',
-  'forzahorizon5.exe': 'Forza Horizon 5',
-  'assettocorsa.exe': 'Assetto Corsa',
-
-  // Outros populares
-  'wow.exe': 'World of Warcraft',
-  'wowclassic.exe': 'World of Warcraft',
-  'ffxiv_dx11.exe': 'Final Fantasy XIV',
-  'genshinimpact.exe': 'Genshin Impact',
-  'starrail.exe': 'Honkai: Star Rail',
-  'wutheringwaves.exe': 'Wuthering Waves',
-  'phasmophobia.exe': 'Phasmophobia',
-  'lethalcompany.exe': 'Lethal Company',
-  'helldivers2.exe': 'Helldivers 2',
-  'palia.exe': 'Palia',
-  'sea of thieves.exe': 'Sea of Thieves',
-  'seaofthieves.exe': 'Sea of Thieves',
-  'itsvertigo.exe': 'Vertigo',
-}
+// Lista de jogos conhecidos (nome exibido, executáveis, anti-cheat) —
+// fica em electron/gameCatalog.cjs (módulo puro, testado pelo Vitest em
+// src/lib/gameCatalog.test.ts). KNOWN_GAMES continua existindo no formato
+// antigo { 'exe': 'Nome' } porque o resto deste arquivo usa ele.
+// Detecção é por nome de processo em execução (tasklist), confirmada por
+// uma JANELA visível do processo — funciona bem no Windows; no Mac/Linux
+// a cobertura é limitada. Jogos FORA do catálogo ainda são reconhecidos
+// pelo fallback genérico (pasta da Steam/Epic/Riot/Xbox/...), ver
+// detectGenericGameFromPath e runForegroundCheckTick.
+//
+// IMPORTANTE (anti-cheat): nada aqui injeta código em processo de jogo.
+// Só lemos a lista de processos (tasklist) e perguntamos ao Windows qual
+// janela está em primeiro plano / onde ela está (user32, somente leitura)
+// — exatamente o que o Gerenciador de Tarefas faz. Vanguard, EAC,
+// BattlEye, Ricochet, FACEIT etc. não bloqueiam nem punem isso.
+const gameCatalog = require('./gameCatalog.cjs')
+const KNOWN_GAMES = gameCatalog.buildKnownGamesMap()
 
 // Combina o nome do processo (chave do dicionário acima) SEM a
 // extensão .exe também, já que no Mac/Linux processos não costumam
@@ -568,6 +513,12 @@ let currentGame = null
 // "Compartilhar seu jogo" pra QUALQUER jogo/app, não só os da lista
 // KNOWN_GAMES).
 let lastForegroundApp = null
+// Jogo FORA do catálogo reconhecido pela pasta da loja (Steam/Epic/Riot/
+// Xbox/...) quando a janela dele esteve em primeiro plano — ver
+// runForegroundCheckTick e gameCatalog.detectGenericGameFromPath. Vale
+// enquanto o processo continuar rodando (checado em runGameCheckTick).
+// Formato: { label, processNames: string[], antiCheat } | null
+let genericDetectedGame = null
 // Nome(s) de processo que a gente está de olho pra saber quando a pessoa
 // FECHOU o jogo/app que estava compartilhando em modo tela cheia (ver
 // watchedProcessWasSeen logo abaixo e o bloco "screen-share-sources" mais
@@ -676,6 +627,17 @@ async function runGameCheckTick() {
     if (!snapshot) return
 
     let game = detectRunningGameFromSnapshot(snapshot)
+    // Fallback genérico (jogo fora do catálogo, reconhecido pela pasta da
+    // loja quando esteve em primeiro plano) — só enquanto o processo
+    // dele continuar existindo.
+    if (!game && genericDetectedGame) {
+      if (genericDetectedGame.processNames.some((n) => snapshotHasProcess(snapshot, n))) {
+        game = genericDetectedGame.label
+      } else {
+        appendDebugLog('main', `detecção genérica: "${genericDetectedGame.label}" fechou`)
+        genericDetectedGame = null
+      }
+    }
 
     // NONA RODADA — corrige o status "Jogando X" ficando travado mesmo
     // depois de fechar o jogo de verdade. `tasklist` sozinho só prova que
@@ -774,6 +736,15 @@ async function runForegroundCheckTick() {
         // foco sem mainWindow.isFocused() perceber).
         if (fg && fg.pid !== process.pid && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
           lastForegroundApp = fg
+          // Detecção genérica: o .exe em primeiro plano mora numa pasta de
+          // loja de jogos? (custo zero — o caminho já veio nessa consulta).
+          const generic = gameCatalog.detectGenericGameFromPath(fg.exePath)
+          if (generic && !gameCatalog.findGameByProcessName(generic.processName)) {
+            if (!genericDetectedGame || genericDetectedGame.label !== generic.label) {
+              appendDebugLog('main', `detecção genérica: "${generic.label}" (${generic.store}, ${generic.processName}.exe)`)
+            }
+            genericDetectedGame = { label: generic.label, processNames: [generic.processName], antiCheat: generic.antiCheat }
+          }
         }
       } finally {
         foregroundCheckInFlight = false
@@ -786,6 +757,44 @@ function stopGameDetection() {
   if (foregroundCheckTimer) clearInterval(foregroundCheckTimer)
   gameCheckTimer = null
   foregroundCheckTimer = null
+}
+
+// Privacidade: "Mostrar o jogo que estou jogando" (Configurações →
+// Privacidade). Desligado = o app nem olha a lista de processos (nada
+// de tasklist/PowerShell rodando em segundo plano). Fica salvo em
+// privacy-settings.json na pasta de dados do app, pra valer já na
+// próxima abertura, antes mesmo da página carregar.
+function privacySettingsPath() {
+  return path.join(app.getPath('userData'), 'privacy-settings.json')
+}
+
+function isGameDetectionEnabled() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(privacySettingsPath(), 'utf8'))
+    return raw?.gameDetection !== false
+  } catch {
+    return true // sem arquivo ainda = padrão (ligado)
+  }
+}
+
+function setGameDetectionEnabled(enabled) {
+  try {
+    fs.writeFileSync(privacySettingsPath(), JSON.stringify({ gameDetection: !!enabled }))
+  } catch (err) {
+    appendDebugLog('main', `privacidade: falha ao salvar — ${err?.message ?? err}`)
+  }
+  if (enabled) {
+    startGameDetection()
+  } else {
+    stopGameDetection()
+    genericDetectedGame = null
+    lastForegroundApp = null
+    if (currentGame !== null) {
+      currentGame = null
+      sendToMain('game-status-changed', null)
+    }
+  }
+  return !!enabled
 }
 
 // ============================================================
@@ -816,9 +825,23 @@ let foregroundWatcherProc = null
 let foregroundWatcherGames = []
 
 function processNamesForGameLabel(label) {
-  return Object.entries(KNOWN_GAMES)
+  const names = Object.entries(KNOWN_GAMES)
     .filter(([, gameLabel]) => gameLabel === label)
     .map(([processName]) => processName.replace(/\.exe$/i, ''))
+  if (names.length === 0 && genericDetectedGame && genericDetectedGame.label === label) {
+    return genericDetectedGame.processNames.slice()
+  }
+  return names
+}
+
+// Nome legível do anti-cheat do jogo atual (ou null) — só informativo,
+// pra UI explicar limitações (ex.: sobreposição exige janela sem borda).
+function antiCheatForGameLabel(label) {
+  if (!label) return null
+  const entry = gameCatalog.findGameByName(label)
+  if (entry) return gameCatalog.antiCheatLabel(entry.antiCheat)
+  if (genericDetectedGame && genericDetectedGame.label === label) return gameCatalog.antiCheatLabel(genericDetectedGame.antiCheat)
+  return null
 }
 
 // ============================================================
@@ -827,7 +850,7 @@ function processNamesForGameLabel(label) {
 // clássico de jogo em modo tela cheia exclusiva), o atalho simplesmente
 // chutava a tela PRINCIPAL — o que está errado pra qualquer pessoa que
 // joga com o jogo no monitor SECUNDÁRIO (setup comum: jogo numa tela,
-// chat/Discord/navegador na outra). Essa função pergunta pro Windows,
+// chat/navegador na outra). Essa função pergunta pro Windows,
 // de verdade, em qual monitor a JANELA do próprio processo do jogo está
 // (e qual é o TÍTULO exato dessa janela) — mesmo que a janela esteja em
 // modo tela cheia exclusiva, ela quase sempre ainda tem um
@@ -898,6 +921,24 @@ public class MamacosScan {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  // Caminho do .exe de um processo — usado só pra detecção GENÉRICA de
+  // jogo (pasta steamapps/Epic/Riot/..., ver gameCatalog.cjs).
+  // PROCESS_QUERY_LIMITED_INFORMATION (0x1000) é o acesso MÍNIMO que o
+  // Windows oferece (o mesmo do Gerenciador de Tarefas): funciona até com
+  // processos protegidos por anti-cheat e não permite ler/escrever memória
+  // nem injetar nada. Falhou → string vazia (best-effort).
+  [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool QueryFullProcessImageName(IntPtr hProcess, uint flags, StringBuilder name, ref uint size);
+  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+  public static string GetProcessPath(uint pid) {
+    IntPtr h = OpenProcess(0x1000, false, pid);
+    if (h == IntPtr.Zero) return "";
+    try {
+      StringBuilder sb = new StringBuilder(1024);
+      uint size = 1024;
+      return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : "";
+    } finally { CloseHandle(h); }
+  }
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   public struct POINT { public int X; public int Y; }
   public struct WINDOWPLACEMENT {
@@ -1010,7 +1051,8 @@ function Find-MamacosForegroundWindow {
   $b = $s.Bounds
   $sb = New-Object System.Text.StringBuilder 512
   [MamacosScan]::GetWindowText($hwnd, $sb, 512) | Out-Null
-  return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $sb.ToString(); processName = $proc.ProcessName; pid = $procId }
+  $exePath = [MamacosScan]::GetProcessPath([uint32]$procId)
+  return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $sb.ToString(); processName = $proc.ProcessName; pid = $procId; exePath = $exePath }
 }
 
 function Find-MamacosPidsForHandles($hwnds) {
@@ -1308,6 +1350,7 @@ function getForegroundWindowInfo() {
         windowTitle: typeof r.title === 'string' && r.title ? r.title : null,
         processName: typeof r.processName === 'string' && r.processName ? r.processName.toLowerCase() : null,
         pid: r.pid,
+        exePath: typeof r.exePath === 'string' && r.exePath ? r.exePath : null,
       })
     })
   })
@@ -1559,49 +1602,144 @@ function createSplashWindow() {
 
 let overlayWindow = null
 let overlayVisible = false
+let overlayTopmostTimer = null
 
 // Sobreposição dentro de jogos — janela transparente, sem borda,
-// sempre por cima, que só mostra quem está na call e quem tá falando.
-// Fica "clique-através" (ignora o mouse) o tempo todo, porque não tem
-// nenhum botão nela — é só informação, pra não atrapalhar o jogo.
+// sempre por cima, que só mostra quem está na call, quem tá falando e
+// se você está mudo/ensurdecido. Fica "clique-através" (ignora o mouse)
+// o tempo todo, porque não tem nenhum botão nela — é só informação, pra
+// não atrapalhar o jogo. Também NUNCA recebe foco (focusable: false +
+// showInactive), senão tirava o jogo de primeiro plano.
 //
-// LIMITAÇÃO CONHECIDA: funciona bem com o jogo em janela sem borda,
-// mas normalmente NÃO aparece por cima de jogos em tela cheia
-// exclusiva — mesma limitação técnica do compartilhamento de tela,
-// sem solução sem uma ferramenta bem mais arriscada (hook de DirectX).
+// LIMITAÇÃO CONHECIDA (e não contornável sem injeção): funciona com o
+// jogo em JANELA SEM BORDA (borderless/"tela cheia em janela"), que é o
+// padrão da maioria dos jogos atuais no Windows 10/11. Em tela cheia
+// EXCLUSIVA (DirectX exclusivo) o jogo toma a tela e nenhuma janela
+// normal aparece por cima — ferramentas que desenham ali fazem isso
+// INJETANDO código/hook de DirectX no processo do jogo, o que é
+// exatamente o que anti-cheats de kernel (Vanguard, EAC, BattlEye,
+// Ricochet, FACEIT) bloqueiam/punem. O Mamacos Voip NUNCA injeta nada;
+// por isso a UI orienta "use modo janela sem borda" (ver
+// OverlaySettingsButton em VoiceChannelView.tsx).
+//
+// Posição configurável (cantos), salva em overlay-settings.json na
+// pasta de dados do app.
+const OVERLAY_WIDTH = 240
+const OVERLAY_HEIGHT = 420
+const OVERLAY_MARGIN = 24
+const OVERLAY_CORNERS = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right'])
+let overlaySettingsCache = null
+
+function overlaySettingsPath() {
+  return path.join(app.getPath('userData'), 'overlay-settings.json')
+}
+
+function loadOverlaySettings() {
+  if (overlaySettingsCache) return overlaySettingsCache
+  let corner = 'top-left'
+  try {
+    const raw = JSON.parse(fs.readFileSync(overlaySettingsPath(), 'utf8'))
+    if (raw && OVERLAY_CORNERS.has(raw.corner)) corner = raw.corner
+  } catch {
+    // sem arquivo ainda / corrompido — usa o padrão
+  }
+  overlaySettingsCache = { corner }
+  return overlaySettingsCache
+}
+
+function saveOverlaySettings(next) {
+  overlaySettingsCache = next
+  try {
+    fs.writeFileSync(overlaySettingsPath(), JSON.stringify(next))
+  } catch (err) {
+    appendDebugLog('main', `overlay: falha ao salvar configurações — ${err?.message ?? err}`)
+  }
+}
+
+// Monitor onde o jogo está (última janela em primeiro plano fora do app)
+// — quem joga no monitor secundário quer a sobreposição LÁ, não no
+// principal. Sem essa informação, usa o monitor principal.
+function overlayTargetDisplay() {
+  try {
+    const b = lastForegroundApp?.bounds
+    if (b && b.width > 0 && b.height > 0) return screen.getDisplayMatching(b)
+  } catch {
+    // cai pro principal
+  }
+  return screen.getPrimaryDisplay()
+}
+
+function overlayBoundsFor(corner) {
+  const area = overlayTargetDisplay().workArea
+  const left = area.x + OVERLAY_MARGIN
+  const right = area.x + area.width - OVERLAY_WIDTH - OVERLAY_MARGIN
+  const top = area.y + OVERLAY_MARGIN
+  const bottom = area.y + area.height - OVERLAY_HEIGHT - OVERLAY_MARGIN
+  return {
+    x: Math.round(corner.endsWith('right') ? right : left),
+    y: Math.round(corner.startsWith('bottom') ? bottom : top),
+    width: OVERLAY_WIDTH,
+    height: OVERLAY_HEIGHT,
+  }
+}
+
+function applyOverlayPlacement(overlay) {
+  if (!overlay || overlay.isDestroyed()) return
+  const { corner } = loadOverlaySettings()
+  overlay.setBounds(overlayBoundsFor(corner))
+  if (!overlay.webContents.isLoading()) overlay.webContents.send('overlay:settings', { corner })
+}
+
 function createOverlayWindow() {
-  // TRIGÉSIMA OITAVA RODADA — altura aumentada (200 → 420): o visual
-  // novo (bolhas soltas empilhadas, ver overlay.html) ocupa mais altura
-  // por pessoa do que o card compacto de antes, então com o tamanho
-  // antigo os participantes do fim da lista ficavam cortados fora da
-  // janela em calls com mais gente.
+  const { corner } = loadOverlaySettings()
   const overlay = new BrowserWindow({
-    width: 220,
-    height: 420,
-    x: 40,
-    y: 40,
+    ...overlayBoundsFor(corner),
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
     hasShadow: false,
     focusable: false,
+    show: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       preload: path.join(__dirname, 'overlay-preload.cjs'),
+      // Sobreposição escondida não precisa gastar CPU; visível ela só
+      // redesenha quando o estado muda (ver overlay.html).
+      backgroundThrottling: true,
+      spellcheck: false,
     },
   })
+  // 'screen-saver' é o nível mais alto de "sempre por cima" que o
+  // Electron oferece — fica acima de jogos em janela sem borda (que
+  // costumam se colocar como topmost também).
   overlay.setAlwaysOnTop(true, 'screen-saver')
+  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   overlay.setIgnoreMouseEvents(true)
+  // NÃO aparecer na captura de tela: sem isso, quem transmite a TELA
+  // INTEIRA mandava a própria sobreposição (nomes/avatares da call) no
+  // stream. No Windows 10 2004+ isso vira WDA_EXCLUDEFROMCAPTURE (a
+  // janela some da captura, mas continua visível na tela de quem joga).
+  try {
+    overlay.setContentProtection(true)
+  } catch {
+    // plataforma sem suporte — segue sem
+  }
   overlay.loadFile(path.join(__dirname, 'overlay.html'))
   // Assim que a página da sobreposição carregar, já entrega o último
   // estado conhecido da call (ver lastOverlayState/ensureOverlayWindow).
   overlay.webContents.on('did-finish-load', () => {
-    if (lastOverlayState !== null && !overlay.isDestroyed()) {
+    if (overlay.isDestroyed()) return
+    overlay.webContents.send('overlay:settings', loadOverlaySettings())
+    if (lastOverlayState !== null) {
       overlay.webContents.send('overlay:voice-state', lastOverlayState)
     }
   })
@@ -1609,10 +1747,54 @@ function createOverlayWindow() {
     if (overlayWindow === overlay) {
       overlayWindow = null
       overlayVisible = false
+      stopOverlayTopmostKeeper()
     }
   })
-  overlay.hide()
   return overlay
+}
+
+// Alguns jogos em janela sem borda se recolocam como "topmost" ao ganhar
+// foco e acabam cobrindo a sobreposição. Enquanto ela estiver visível,
+// reafirma a posição no topo a cada poucos segundos — moveTop() é uma
+// única chamada SetWindowPos, custo desprezível.
+function startOverlayTopmostKeeper() {
+  stopOverlayTopmostKeeper()
+  overlayTopmostTimer = setInterval(() => {
+    if (!overlayVisible || !overlayWindow || overlayWindow.isDestroyed()) return
+    try {
+      overlayWindow.setAlwaysOnTop(true, 'screen-saver')
+      overlayWindow.moveTop()
+    } catch {
+      // janela fechando
+    }
+  }, 4000)
+}
+
+function stopOverlayTopmostKeeper() {
+  if (overlayTopmostTimer) clearInterval(overlayTopmostTimer)
+  overlayTopmostTimer = null
+}
+
+function setOverlayVisible(visible) {
+  overlayVisible = Boolean(visible)
+  if (overlayVisible) {
+    const overlay = ensureOverlayWindow()
+    applyOverlayPlacement(overlay)
+    // Se a página já carregou, manda o estado mais recente agora (ele
+    // pode ter mudado enquanto ela estava escondida); se ainda está
+    // carregando, o 'did-finish-load' em createOverlayWindow entrega.
+    if (!overlay.webContents.isLoading() && lastOverlayState !== null) {
+      overlay.webContents.send('overlay:voice-state', lastOverlayState)
+    }
+    overlay.showInactive()
+    overlay.setAlwaysOnTop(true, 'screen-saver')
+    startOverlayTopmostKeeper()
+  } else {
+    stopOverlayTopmostKeeper()
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
+  }
+  appendDebugLog('main', `overlay: ${overlayVisible ? 'ligada' : 'desligada'} (canto=${loadOverlaySettings().corner})`)
+  sendToMain('overlay:visibility-changed', overlayVisible)
 }
 
 // AUDITORIA — desempenho: antes a janela da sobreposição era criada
@@ -1714,7 +1896,12 @@ function createWindow() {
     win.loadURL('app://bundle/index.html')
   }
 
-  // DÉCIMA QUARTA RODADA: Ctrl+Shift+I agora abre o DevTools mesmo no
+  // Ctrl+Shift+I: sempre em desenvolvimento; no app INSTALADO só quando
+  // ele foi aberto com `--devtools` ou com a variável MAMACOS_DEVTOOLS=1
+  // (DevTools aberto dá acesso direto à sessão/tokens da conta — não
+  // pode estar a um atalho de distância de qualquer pessoa na máquina).
+  //
+  // (Histórico) DÉCIMA QUARTA RODADA: Ctrl+Shift+I abria o DevTools mesmo no
   // build EMPACOTADO (antes só existia em desenvolvimento, via
   // openDevTools acima) — só pra diagnóstico à distância mesmo, sem essa
   // válvula de escape nenhum erro no console (ex.: por que a captura de
@@ -1722,7 +1909,10 @@ function createWindow() {
   // visível pra quem está rodando o app já instalado, e todo esse tipo
   // de bug vira "só não funciona, sem pista nenhuma do motivo" pra
   // qualquer pessoa fora de quem tem acesso ao código-fonte.
+  const devToolsAllowed =
+    isDev || process.argv.includes('--devtools') || process.env.MAMACOS_DEVTOOLS === '1'
   win.webContents.on('before-input-event', (_event, input) => {
+    if (!devToolsAllowed) return
     if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'i') {
       win.webContents.toggleDevTools()
     }
@@ -1821,7 +2011,7 @@ function createWindow() {
   })
 
   // Minimizar/fechar a janela vai pra bandeja do sistema em vez de
-  // sumir da barra de tarefas ou encerrar o app — igual o Discord de
+  // sumir da barra de tarefas ou encerrar o app — igual a apps de chat populares de
   // verdade faz, pra continuar recebendo notificações/call em segundo
   // plano sem ocupar espaço na barra de tarefas.
   win.on('minimize', (event) => {
@@ -1897,6 +2087,68 @@ function createTray(win) {
 // se fechou sozinha. Em vez de deixar abrir outra janela, restaura (se
 // estiver minimizada) e traz a janela existente pra frente — inclusive
 // se ela estiver escondida na bandeja (hide(), não destruída), já que
+// ---- Armazenamento cifrado da sessão (B7) ----
+// Ver os handlers "secure-storage:*" em app.whenReady().
+const SECURE_STORAGE_FILE = 'secure-session.json'
+const SECURE_STORAGE_KEY_PATTERN = /^sb-[A-Za-z0-9._-]{1,200}$/
+const SECURE_STORAGE_MAX_VALUE = 512 * 1024
+let secureStoreCache = null
+
+function isValidSecureStorageKey(key) {
+  return typeof key === 'string' && SECURE_STORAGE_KEY_PATTERN.test(key)
+}
+
+function isSecureStorageAvailable() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return false
+    // No Linux sem chaveiro o Electron cai no backend "basic_text", que
+    // é só ofuscação com uma senha fixa — trata como indisponível.
+    if (process.platform === 'linux' && typeof safeStorage.getSelectedStorageBackend === 'function') {
+      return safeStorage.getSelectedStorageBackend() !== 'basic_text'
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+function secureStorePath() {
+  return path.join(app.getPath('userData'), SECURE_STORAGE_FILE)
+}
+
+function loadSecureStore() {
+  if (secureStoreCache) return secureStoreCache
+  let parsed = {}
+  try {
+    const raw = fs.readFileSync(secureStorePath(), 'utf8')
+    const data = JSON.parse(raw)
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      for (const [k, v] of Object.entries(data)) {
+        if (isValidSecureStorageKey(k) && typeof v === 'string') parsed[k] = v
+      }
+    }
+  } catch {
+    parsed = {}
+  }
+  secureStoreCache = parsed
+  return secureStoreCache
+}
+
+// Grava de forma atômica (arquivo temporário + rename) pra um
+// desligamento no meio da escrita não corromper a sessão.
+function persistSecureStore() {
+  const target = secureStorePath()
+  const tmp = `${target}.tmp`
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(secureStoreCache ?? {}), { encoding: 'utf8', mode: 0o600 })
+    fs.renameSync(tmp, target)
+    return true
+  } catch (err) {
+    appendDebugLog('main', `secure-storage: falha ao gravar: ${err?.message ?? err}`)
+    return false
+  }
+}
+
 // forceFocusMainWindow() já cuida de mostrar + contornar a proteção do
 // Windows contra roubo de foco.
 app.on('second-instance', (_event, argv) => {
@@ -1920,7 +2172,7 @@ app.whenReady().then(() => {
   // que substitui o antigo win.loadFile(file://...) e resolve o
   // bloqueio silencioso de módulos JS do Chromium.
   if (!isDev) {
-    protocol.handle('app', (request) => {
+    protocol.handle('app', async (request) => {
       let pathname
       try {
         const parsedUrl = new URL(request.url)
@@ -1947,7 +2199,15 @@ app.whenReady().then(() => {
       if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || filePath.includes('\0')) {
         return new Response('Forbidden', { status: 403 })
       }
-      return net.fetch(pathToFileURL(filePath).toString())
+      const response = await net.fetch(pathToFileURL(filePath).toString())
+      // B4 — a CSP vai como CABEÇALHO (vale desde o primeiro byte, ao
+      // contrário de uma <meta>, e não afeta o site na web). Só páginas
+      // HTML precisam dela.
+      if (!/\.html?$/i.test(filePath)) return response
+      const headers = new Headers(response.headers)
+      headers.set('Content-Security-Policy', APP_CONTENT_SECURITY_POLICY)
+      headers.set('X-Content-Type-Options', 'nosniff')
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
     })
   }
 
@@ -2033,7 +2293,7 @@ app.whenReady().then(() => {
       // primeira tela que o Windows devolvesse nessa lista, que nem
       // sempre é onde o jogo está de fato rodando. Como a maioria de
       // quem joga com dois monitores usa o principal pro jogo e o
-      // secundário pra navegador/chat/Discord, ir direto na principal é
+      // secundário pra navegador/chat, ir direto na principal é
       // a aposta mais segura — bem melhor do que arriscar compartilhar
       // sem querer a tela com as conversas abertas.
       let primaryDisplayId = null
@@ -2052,12 +2312,12 @@ app.whenReady().then(() => {
       // generalização: antes disso, um jogo fora da lista fixa KNOWN_GAMES
       // nunca tinha o atalho "compartilhar seu jogo" e sempre caía pra
       // "compartilhar a tela inteira" manual, o que parecia (e de fato
-      // era) bem mais limitado que o Discord/OBS — cai pro fallback
+      // era) bem mais limitado que o OBS — cai pro fallback
       // genérico: a última janela que esteve em primeiro plano antes de a
       // pessoa clicar em "Compartilhar tela" (lastForegroundApp, mantido
       // fresco pelo laço em startGameDetection). Isso funciona pra
       // QUALQUER app/jogo, cadastrado ou não — mesmo princípio do atalho de
-      // compartilhamento rápido do Discord, que também não depende de uma
+      // compartilhamento rápido de apps de chat populares, que também não depende de uma
       // lista fixa.
       let windowInfo = null
       let isKnownGame = false
@@ -2245,6 +2505,10 @@ app.whenReady().then(() => {
               // ScreenSharePicker.tsx.
               hwnd: gameWindowHwnd,
               looksMinimized,
+              // Só informativo (ver ScreenSharePicker.tsx): nome do
+              // anti-cheat do jogo, quando conhecido. A captura continua
+              // igual — nunca injetamos nada no jogo.
+              antiCheat: isKnownGame ? antiCheatForGameLabel(suggestionLabel) : null,
             }
           : null,
       }
@@ -2326,7 +2590,7 @@ app.whenReady().then(() => {
   // — daí sobrar só "Mamacos Voip" (a própria janela do app, que o
   // Electron sempre enxerga por ser o processo dono dela).
   //
-  // É exatamente esse portal nativo que o Discord (e qualquer app sério
+  // É exatamente esse portal nativo que um app de chat popular (e qualquer app sério
   // no Linux — OBS, Zoom, o próprio Chrome) usa no Wayland: em vez de
   // tentar montar uma UI própria com a lista de janelas (como esse app
   // faz pro Windows, onde desktopCapturer.getSources() realmente devolve
@@ -2459,48 +2723,98 @@ app.whenReady().then(() => {
   // (não depende do módulo nativo do push-to-talk), já que só precisa
   // reagir a "tecla apertada", não "segurando ou não".
   const registered = globalShortcut.register('Control+Shift+O', () => {
-    overlayVisible = !overlayVisible
-    if (overlayVisible) {
-      const overlay = ensureOverlayWindow()
-      // Se a página já carregou, manda o estado mais recente agora (ele
-      // pode ter mudado enquanto ela estava escondida); se ainda está
-      // carregando, o 'did-finish-load' em createOverlayWindow entrega.
-      if (!overlay.webContents.isLoading() && lastOverlayState !== null) {
-        overlay.webContents.send('overlay:voice-state', lastOverlayState)
-      }
-      overlay.showInactive()
-    } else if (overlayWindow && !overlayWindow.isDestroyed()) {
-      overlayWindow.hide()
-    }
+    setOverlayVisible(!overlayVisible)
+  })
+  // Mesmos controles pela interface (botão da sobreposição na tela da
+  // call, ver OverlaySettingsButton em VoiceChannelView.tsx).
+  handleTrusted('overlay:get-settings', () => ({
+    ...loadOverlaySettings(),
+    visible: overlayVisible,
+    shortcutRegistered: registered,
+  }))
+  handleTrusted('overlay:set-visible', (_event, visible) => {
+    setOverlayVisible(Boolean(visible))
+    return overlayVisible
+  })
+  handleTrusted('overlay:set-corner', (_event, corner) => {
+    if (!OVERLAY_CORNERS.has(corner)) return loadOverlaySettings()
+    saveOverlaySettings({ ...loadOverlaySettings(), corner })
+    if (overlayWindow && !overlayWindow.isDestroyed()) applyOverlayPlacement(overlayWindow)
+    return loadOverlaySettings()
   })
   if (!registered) {
     console.error('Não foi possível registrar o atalho da sobreposição (Ctrl+Shift+O) — pode já estar em uso por outro programa.')
   }
 
-  // DÉCIMA QUARTA RODADA: além do before-input-event na janela principal
-  // Além do atalho de teclado normal (Ctrl+Shift+I, só dentro da janela
-  // do app — ver before-input-event mais acima, que só dispara se ELA
-  // estiver com foco), registra Ctrl+Shift+I também como atalho GLOBAL —
-  // funciona mesmo com outra janela em foco (relatado: "não tem como
-  // usar teclas de atalho do console", possivelmente porque o jogo ainda
-  // estava em foco na hora de tentar). O item equivalente no menu da
-  // bandeja foi removido a pedido (ver createTray acima) — esse atalho
-  // de teclado continua sendo o caminho pra abrir o DevTools quando
-  // precisar diagnosticar algo.
-  const devToolsRegistered = globalShortcut.register('Control+Shift+I', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    mainWindow.show()
-    mainWindow.focus()
-    mainWindow.webContents.toggleDevTools()
+  // Ctrl+Shift+I (DevTools) NÃO é mais atalho GLOBAL do sistema: antes
+  // ele era registrado com globalShortcut, ou seja, sequestrava essa
+  // combinação em TODOS os programas do computador (outro app/jogo que
+  // usasse Ctrl+Shift+I nunca recebia a tecla) e abria o DevTools do app
+  // mesmo sem a janela em foco. Continua funcionando com a janela do app
+  // focada — ver o before-input-event em createWindow.
+
+  if (isGameDetectionEnabled()) startGameDetection()
+
+  handleTrusted('app:getGameDetectionEnabled', () => isGameDetectionEnabled())
+  handleTrusted('app:setGameDetectionEnabled', (_event, enabled) => {
+    if (typeof enabled !== 'boolean') throw new Error('valor inválido')
+    return setGameDetectionEnabled(enabled)
   })
-  if (!devToolsRegistered) {
-    console.error('Não foi possível registrar o atalho do DevTools (Ctrl+Shift+I) — pode já estar em uso por outro programa; use o menu da bandeja como alternativa.')
-  }
-
-  startGameDetection()
-
   handleTrusted('app:getVersion', () => app.getVersion())
   handleTrusted('app:getCurrentGame', () => currentGame)
+  handleTrusted('app:getCurrentGameInfo', () =>
+    currentGame
+      ? {
+          label: currentGame,
+          antiCheat: antiCheatForGameLabel(currentGame),
+          generic: !gameCatalog.findGameByName(currentGame),
+        }
+      : null
+  )
+
+  // B7 — armazenamento cifrado da sessão do Supabase (ver
+  // src/lib/authStorage.ts). Antes o access/refresh token ficavam em
+  // texto puro no localStorage do perfil do Electron. Agora cada valor
+  // é cifrado com o safeStorage do sistema (DPAPI no Windows, Keychain
+  // no macOS, libsecret/kwallet no Linux) e gravado em
+  // secure-session.json na pasta de dados do app. Só chaves "sb-" (do
+  // supabase-js). Sem cifragem disponível, responde { ok: false } e o
+  // renderer continua usando o localStorage (nunca desloga por isso).
+  handleTrusted('secure-storage:get', (_event, key) => {
+    if (!isValidSecureStorageKey(key) || !isSecureStorageAvailable()) return { ok: false }
+    const store = loadSecureStore()
+    const encrypted = store[key]
+    if (typeof encrypted !== 'string') return { ok: true, value: null }
+    try {
+      return { ok: true, value: safeStorage.decryptString(Buffer.from(encrypted, 'base64')) }
+    } catch (err) {
+      appendDebugLog('main', `secure-storage: falha ao decifrar ${key}: ${err?.message ?? err}`)
+      delete store[key]
+      persistSecureStore()
+      return { ok: true, value: null }
+    }
+  })
+  handleTrusted('secure-storage:set', (_event, key, value) => {
+    if (!isValidSecureStorageKey(key) || typeof value !== 'string' || value.length > SECURE_STORAGE_MAX_VALUE) return { ok: false }
+    if (!isSecureStorageAvailable()) return { ok: false }
+    try {
+      const store = loadSecureStore()
+      store[key] = safeStorage.encryptString(value).toString('base64')
+      return { ok: persistSecureStore() }
+    } catch (err) {
+      appendDebugLog('main', `secure-storage: falha ao cifrar ${key}: ${err?.message ?? err}`)
+      return { ok: false }
+    }
+  })
+  handleTrusted('secure-storage:remove', (_event, key) => {
+    if (!isValidSecureStorageKey(key)) return { ok: false }
+    const store = loadSecureStore()
+    if (key in store) {
+      delete store[key]
+      return { ok: persistSecureStore() }
+    }
+    return { ok: true }
+  })
 
   // Ver o bloco grande "Vigia de foco do jogo" (perto de
   // startGameDetection) pra entender o que isso faz e por quê. Recebe os
@@ -2610,9 +2924,17 @@ app.whenReady().then(() => {
     }
   }
 
-  function startProcessAudioCapture(pid) {
+  // `mode`:
+  //  - 'include' (padrão): só o áudio da árvore de processos do PID (o jogo).
+  //  - 'exclude': TODO o áudio do sistema MENOS a árvore do PID — usado com
+  //    o PID do próprio app (process.pid, dono do serviço de áudio do
+  //    Chromium) pra transmitir o "áudio do sistema" sem a call junto
+  //    (senão quem assiste ouve a própria voz de volta = eco).
+  //    Exe antigo (sem suporte a --exclude) sai com "PID invalido" e o
+  //    renderer cai no loopback do Chromium, como antes.
+  function startProcessAudioCapture(pid, mode = 'include') {
     stopProcessAudioCapture()
-    appendDebugLog('main', `startProcessAudioCapture: pedido pra pid=${pid}`)
+    appendDebugLog('main', `startProcessAudioCapture: pedido pra pid=${pid} (modo=${mode})`)
     if (process.platform !== 'win32') {
       return { ok: false, error: 'Captura de áudio por processo só existe no Windows.' }
     }
@@ -2630,7 +2952,8 @@ app.whenReady().then(() => {
       }
     }
     try {
-      const proc = spawn(exePath, [String(pid)], { windowsHide: true })
+      const args = mode === 'exclude' ? ['--exclude', String(pid)] : [String(pid)]
+      const proc = spawn(exePath, args, { windowsHide: true })
       processAudioCaptureProc = proc
       appendDebugLog('main', `startProcessAudioCapture: spawn ok (exe=${exePath}, pid=${pid})`)
 
@@ -2720,6 +3043,7 @@ app.whenReady().then(() => {
   }
 
   handleTrusted('process-audio:start', (_event, pid) => startProcessAudioCapture(pid))
+  handleTrusted('process-audio:start-excluding-self', () => startProcessAudioCapture(process.pid, 'exclude'))
   handleTrusted('process-audio:stop', () => stopProcessAudioCapture())
 
   // ============================================================
@@ -3360,7 +3684,7 @@ app.whenReady().then(() => {
     // se fosse a primeira vez, em vez de só trocar a versão e voltar
     // direto pro app. `true, true` = instala em silêncio (sem nenhuma
     // janela aparecer) e reabre o app sozinho assim que terminar — junto
-    // com "oneClick: true" no nsis (package.json), fica igual o Discord
+    // com "oneClick: true" no nsis (package.json), fica igual a apps de chat populares
     // de verdade: a pessoa nem percebe que uma instalação aconteceu.
     //
     // AUDITORIA: só aceita o pedido se já existe uma atualização baixada

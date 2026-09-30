@@ -13,7 +13,7 @@
 // pessoa continuou levando "Could not start video source
 // (NotReadableError)" em TODO jogo de tela cheia com anti-cheat
 // (Valorant/Vanguard, Fortnite/EAC, R6/BattlEye, CS2), numa placa AMD
-// (RX 9060 XT) — e confirmou que Discord e OBS capturam esses MESMOS
+// (RX 9060 XT) — e confirmou que OBS e outros apps capturam esses MESMOS
 // jogos sem problema na MESMA máquina. Isso descarta "impossível de
 // capturar" como explicação: o problema está especificamente na captura
 // de tela do Chromium/WebRTC (que este app usava até agora,
@@ -28,8 +28,8 @@
 // hipótese mais provável pra esse caso: o driver da AMD nessa máquina
 // falha especificamente na PARTE DXGI da captura, mas ainda atende
 // normalmente chamadas GDI clássicas (a tecnologia de captura de tela
-// mais antiga do Windows, que antecede o DXGI em décadas) — daí Discord
-// e OBS conseguirem (eles têm pipeline de captura próprio, com lógica
+// mais antiga do Windows, que antecede o DXGI em décadas) — daí OBS e
+// outros apps conseguirem (eles têm pipeline de captura próprio, com lógica
 // de recuperação/fallback que este app não tinha até agora).
 //
 // Esse .exe existe como ÚLTIMO RECURSO: só é chamado por

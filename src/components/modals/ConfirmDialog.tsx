@@ -64,7 +64,7 @@ export function ConfirmDialog({
         <span
           aria-hidden="true"
           className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center ${
-            danger ? 'bg-rose-500/12 text-rose-400' : 'bg-discord-blurple/15 text-discord-blurple'
+            danger ? 'bg-rose-500/12 text-rose-400' : 'bg-mv-accent/15 text-mv-accent'
           }`}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
@@ -78,7 +78,7 @@ export function ConfirmDialog({
             )}
           </svg>
         </span>
-        <div className="text-[14px] text-discord-text-muted leading-relaxed pt-1.5">{message}</div>
+        <div className="text-[14px] text-mv-muted leading-relaxed pt-1.5">{message}</div>
       </div>
     </Modal>
   )

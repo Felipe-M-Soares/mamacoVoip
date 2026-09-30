@@ -49,7 +49,7 @@ export function NetworkDiagnosticsPanel() {
     result === null
       ? ''
       : result.totalMs < 250
-        ? 'text-discord-green'
+        ? 'text-mv-green'
         : result.totalMs < 700
           ? 'text-amber-400'
           : 'text-rose-400'
@@ -57,7 +57,7 @@ export function NetworkDiagnosticsPanel() {
   return (
     <div>
       <p className="field-label">Diagnóstico de rede</p>
-      <p className="text-[12px] leading-snug text-discord-text-muted mb-3">
+      <p className="text-[12px] leading-snug text-mv-muted mb-3">
         Quebra o tempo de conexão em partes, pra ver exatamente onde ele está sendo gasto (DNS, conexão,
         segurança, ou resposta do servidor).
       </p>
@@ -78,7 +78,7 @@ export function NetworkDiagnosticsPanel() {
       </div>
 
       {!result && running && (
-        <div className="rounded-xl border border-[var(--color-line)] bg-discord-darker p-3.5 space-y-2.5" aria-hidden>
+        <div className="rounded-xl border border-[var(--color-line)] bg-mv-canvas p-3.5 space-y-2.5" aria-hidden>
           <div className="h-6 w-24 animate-pulse bg-white/[0.05] rounded" />
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="h-3 animate-pulse bg-white/[0.05] rounded" />
@@ -87,12 +87,12 @@ export function NetworkDiagnosticsPanel() {
       )}
 
       {result && (
-        <div className="rounded-xl border border-[var(--color-line)] bg-discord-darker p-3.5 animate-fade-in" aria-live="polite">
+        <div className="rounded-xl border border-[var(--color-line)] bg-mv-canvas p-3.5 animate-fade-in" aria-live="polite">
           <div className="flex items-baseline justify-between mb-3">
-            <span className="text-[12px] font-medium text-discord-text-muted">Tempo total</span>
+            <span className="text-[12px] font-medium text-mv-muted">Tempo total</span>
             <span className={`font-display text-2xl font-semibold tabular-nums ${totalColor}`}>
               {result.totalMs}
-              <span className="text-[13px] font-medium text-discord-text-muted ml-0.5">ms</span>
+              <span className="text-[13px] font-medium text-mv-muted ml-0.5">ms</span>
             </span>
           </div>
           <div className="space-y-2.5">
@@ -122,8 +122,8 @@ function Row({ label, value, total }: { label: string; value: number | null; tot
   return (
     <div>
       <div className="flex items-center justify-between text-[12px] mb-1">
-        <span className="text-discord-text-muted">{label}</span>
-        <span className="text-discord-text font-medium tabular-nums">{value === null ? '—' : `${value}ms`}</span>
+        <span className="text-mv-muted">{label}</span>
+        <span className="text-mv-text font-medium tabular-nums">{value === null ? '—' : `${value}ms`}</span>
       </div>
       <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
         <div className="h-full rounded-full bg-brand-gradient transition-[width] duration-300" style={{ width: `${pct}%` }} />

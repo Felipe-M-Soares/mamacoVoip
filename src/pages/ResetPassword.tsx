@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AUTH_REDIRECT_TYPE, supabase } from '../lib/supabase'
+import { AUTH_REDIRECT_TYPE, supabase, wasPasswordRecoveryDetected } from '../lib/supabase'
 import { traduzErro } from '../context/AuthContext'
 import { PASSWORD_MIN_LENGTH, validatePassword } from '../lib/authValidation'
 import { AuthAlert, AuthField, AuthHeader, AuthIcons, AuthShell } from './AuthShell'
@@ -16,9 +16,15 @@ export function ResetPassword() {
   const [success, setSuccess] = useState(false)
 
   useEffect(() => {
-    // O link do e-mail já vem com a sessão de recuperação embutida
-    // (processada automaticamente pelo detectSessionInUrl) — só
-    // precisa confirmar que ela chegou antes de mostrar o formulário.
+    // O link do e-mail traz a prova de que a pessoa é dona da conta.
+    // Formatos aceitos (ver ForgotPassword.tsx e supabase/README.md):
+    //  1) "?code=..." (PKCE, mesmo navegador que pediu): o cliente troca
+    //     sozinho (detectSessionInUrl) e avisa com PASSWORD_RECOVERY;
+    //  2) "?token_hash=...&type=recovery" (template de e-mail
+    //     recomendado): verifyOtp aqui — funciona em qualquer aparelho;
+    //  3) "#access_token=...&type=recovery" (template padrão, pedido no
+    //     fluxo implícito): o cliente principal (PKCE) recusa esse
+    //     formato, então a sessão é aplicada aqui com setSession.
     //
     // Antes, QUALQUER sessão servia: alguém com acesso a um app já
     // logado (computador destravado) abria /redefinir-senha e trocava a
@@ -28,11 +34,45 @@ export function ResetPassword() {
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' && session && !cancelled) setReady(true)
     })
-    supabase.auth.getSession().then(({ data: { session } }) => {
+
+    async function consumeRecoveryLink(): Promise<boolean> {
+      const query = new URLSearchParams(window.location.search)
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+      const clearUrl = () => window.history.replaceState(null, '', window.location.pathname)
+
+      const tokenHash = query.get('token_hash')
+      if (tokenHash && AUTH_REDIRECT_TYPE === 'recovery') {
+        const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
+        clearUrl()
+        return !error && Boolean(data.session)
+      }
+
+      const accessToken = hash.get('access_token')
+      const refreshToken = hash.get('refresh_token')
+      if (accessToken && refreshToken && AUTH_REDIRECT_TYPE === 'recovery') {
+        const { data, error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+        clearUrl()
+        return !error && Boolean(data.session)
+      }
+      return false
+    }
+
+    void (async () => {
+      let fromLink = false
+      try {
+        fromLink = await consumeRecoveryLink()
+      } catch {
+        fromLink = false
+      }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
       if (cancelled) return
-      if (session && AUTH_REDIRECT_TYPE === 'recovery') setReady(true)
+      // fromLink: formatos 2/3 acima. wasPasswordRecoveryDetected: formato
+      // 1, cuja troca pode ter acontecido antes desta tela montar.
+      if (session && (fromLink || wasPasswordRecoveryDetected())) setReady(true)
       setChecking(false)
-    })
+    })()
     return () => {
       cancelled = true
       listener.subscription.unsubscribe()
@@ -82,7 +122,7 @@ export function ResetPassword() {
           <div className="h-11 animate-pulse rounded-[10px] bg-white/[0.05]" />
           <div className="h-3 w-32 animate-pulse rounded bg-white/[0.05]" />
           <div className="h-11 animate-pulse rounded-[10px] bg-white/[0.05]" />
-          <p className="text-center text-[13px] text-discord-text-muted">Verificando o link...</p>
+          <p className="text-center text-[13px] text-mv-muted">Verificando o link...</p>
         </div>
       ) : !ready ? (
         <div className="mt-6 space-y-4">

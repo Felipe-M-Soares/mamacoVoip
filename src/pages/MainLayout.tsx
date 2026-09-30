@@ -84,18 +84,18 @@ function ActiveServerBody({
 
   if (!liveChannel) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-discord-channels border-t border-l border-[var(--color-line)]">
+      <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-mv-main border-t border-l border-[var(--color-line)]">
         {loadingChannels ? (
-          <div role="status" aria-label="Carregando canal" className="w-7 h-7 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+          <div role="status" aria-label="Carregando canal" className="w-7 h-7 border-2 border-mv-accent border-t-transparent rounded-full animate-spin" />
         ) : (
           <div className="flex flex-col items-center animate-fade-in">
             <span className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center mb-4" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-discord-text-muted">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-mv-muted">
                 <path d="M9.3 3.1a1 1 0 0 1 1.94.48L10.6 6.5h3.24l.68-2.92a1 1 0 1 1 1.94.48L15.86 6.5h2.14a1 1 0 1 1 0 2h-2.6l-.7 3h2.3a1 1 0 1 1 0 2h-2.77l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H9.13l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H4.9a1 1 0 1 1 0-2h2.64l.7-3H6a1 1 0 1 1 0-2h2.6l.7-3zm.84 5.4-.7 3h3.24l.7-3z" />
               </svg>
             </span>
             <p className="font-display font-semibold text-white">Nenhum canal por aqui</p>
-            <p className="text-sm text-discord-text-muted mt-1 max-w-xs">Este servidor ainda não tem canais. Quem administra pode criar um pela lista ao lado.</p>
+            <p className="text-sm text-mv-muted mt-1 max-w-xs">Este servidor ainda não tem canais. Quem administra pode criar um pela lista ao lado.</p>
           </div>
         )}
       </div>
@@ -105,8 +105,8 @@ function ActiveServerBody({
   return liveChannel.type === 'voice' ? (
     <Suspense
       fallback={
-        <div className="flex-1 flex items-center justify-center bg-discord-channels border-t border-l border-[var(--color-line)]">
-          <div role="status" aria-label="Carregando" className="w-7 h-7 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+        <div className="flex-1 flex items-center justify-center bg-mv-main border-t border-l border-[var(--color-line)]">
+          <div role="status" aria-label="Carregando" className="w-7 h-7 border-2 border-mv-accent border-t-transparent rounded-full animate-spin" />
         </div>
       }
     >
@@ -162,7 +162,7 @@ function ActiveServerContent({
     <ChannelsProvider serverId={server.id} key={server.id}>
       {/* Coluna esquerda inteira (barra de servidores + lista de canais)
           empilhada em cima do rodapé compartilhado (UserPanel) — igual o
-          Discord de verdade: aquele rodapé (ping, "jogando agora", "voz
+          apps de chat populares: aquele rodapé (ping, "jogando agora", "voz
           conectada", microfone/fone/config) cobre a LARGURA TOTAL dessa
           coluna, por baixo da barra de servidores E da lista de canais
           juntas, não só embaixo da lista de canais sozinha. Por isso o
@@ -360,15 +360,32 @@ function MainLayoutInner() {
   // canal que estava aberto na tela.
   const activeTextChannelId = activeServer && activeChannel?.type === 'text' ? activeChannel.id : null
   const activeTextChannelUnread = activeTextChannelId ? unread.unreadChannelIds.has(activeTextChannelId) : false
+  // Último canal/conversa marcado: ao abrir um não lido, o efeito rodava
+  // de novo quando o "não lido" virava false (2 gravações por abertura).
+  // Agora grava ao ABRIR, e depois só quando voltar a ficar não lido.
+  const lastMarkedChannelRef = useRef<string | null>(null)
   useEffect(() => {
-    if (activeTextChannelId) void unread.markChannelRead(activeTextChannelId)
+    if (!activeTextChannelId) {
+      lastMarkedChannelRef.current = null
+      return
+    }
+    if (lastMarkedChannelRef.current === activeTextChannelId && !activeTextChannelUnread) return
+    lastMarkedChannelRef.current = activeTextChannelId
+    void unread.markChannelRead(activeTextChannelId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTextChannelId, activeTextChannelUnread])
 
   const openConversationId = !activeServer && homeView === 'conversation' ? activeConversationId : null
   const openConversationUnread = openConversationId ? unread.unreadConversationIds.has(openConversationId) : false
+  const lastMarkedConversationRef = useRef<string | null>(null)
   useEffect(() => {
-    if (openConversationId) void unread.markConversationRead(openConversationId)
+    if (!openConversationId) {
+      lastMarkedConversationRef.current = null
+      return
+    }
+    if (lastMarkedConversationRef.current === openConversationId && !openConversationUnread) return
+    lastMarkedConversationRef.current = openConversationId
+    void unread.markConversationRead(openConversationId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openConversationId, openConversationUnread])
 
@@ -444,13 +461,13 @@ function MainLayoutInner() {
   )
 
   return (
-    <div className="h-full w-full flex overflow-hidden bg-discord-darker relative">
+    <div className="h-full w-full flex overflow-hidden bg-mv-canvas relative">
       {/* Botão de menu — só aparece em telas pequenas (nunca no app
           desktop, que não tem esse "modo mobile" — ver isElectronApp). */}
       {!isElectronApp && (
         <button
           onClick={() => setMobileSidebarOpen(true)}
-          className="lg:hidden fixed top-2.5 left-2.5 z-30 w-9 h-9 rounded-[10px] glass text-discord-text hover:text-white flex items-center justify-center shadow-[0_8px_20px_-8px_rgb(0_0_0/0.7)] active:scale-95 transition"
+          className="lg:hidden fixed top-2.5 left-2.5 z-30 w-9 h-9 rounded-[10px] glass text-mv-text hover:text-white flex items-center justify-center shadow-[0_8px_20px_-8px_rgb(0_0_0/0.7)] active:scale-95 transition"
           aria-label="Abrir menu"
           title="Abrir menu"
         >
@@ -527,8 +544,8 @@ function MainLayoutInner() {
           </div>
 
           {loadingServers ? (
-            <div className="flex-1 flex items-center justify-center bg-discord-channels border-t border-l border-[var(--color-line)] rounded-tl-[var(--radius-panel)]">
-              <div role="status" aria-label="Carregando" className="w-7 h-7 border-2 border-discord-blurple border-t-transparent rounded-full animate-spin" />
+            <div className="flex-1 flex items-center justify-center bg-mv-main border-t border-l border-[var(--color-line)] rounded-tl-[var(--radius-panel)]">
+              <div role="status" aria-label="Carregando" className="w-7 h-7 border-2 border-mv-accent border-t-transparent rounded-full animate-spin" />
             </div>
           ) : homeView === 'conversation' && activeConversation ? (
             // key: cada conversa/grupo começa com estado limpo — antes o

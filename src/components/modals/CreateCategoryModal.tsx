@@ -51,7 +51,7 @@ export function CreateCategoryModal({ onClose }: { onClose: () => void }) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="NOVA CATEGORIA"
-            className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none uppercase"
+            className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none uppercase"
           />
         </div>
 

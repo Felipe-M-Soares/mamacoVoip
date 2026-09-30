@@ -38,3 +38,7 @@ android/app/src/main/assets/capacitor.config.json
 *.njsproj
 *.sln
 *.sw?
+
+# Teste de carga: senhas dos usuários de TESTE e relatórios gerados
+loadtest/.carga-*.json
+loadtest/relatorios/

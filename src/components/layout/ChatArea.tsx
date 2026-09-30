@@ -13,6 +13,7 @@ import { useRoles } from '../../hooks/useRoles'
 import { useAdultContent } from '../../hooks/useAdultContent'
 import { shouldGateAdultChannel } from '../../lib/adultContent'
 import type { Channel, Message, Server, Profile, Thread } from '../../types/database'
+import { ClockIcon, LockIcon, MembersIcon, PinIcon, SearchIcon, TextChannelIcon } from '../ui/icons'
 
 // Painéis/modais que só aparecem sob demanda — carregados só quando abertos,
 // fora do pacote inicial do app.
@@ -198,12 +199,10 @@ export function ChatArea({
   }
 
   return (
-    <section className="flex-1 flex flex-col min-w-0 bg-discord-channels border-t border-l border-[var(--color-line)]">
+    <section className="flex-1 flex flex-col min-w-0 bg-mv-main border-t border-l border-[var(--color-line)]">
       <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-2 border-b border-[var(--color-line)] shrink-0">
-        <span className="w-8 h-8 rounded-lg bg-white/[0.05] border border-[var(--color-line)] flex items-center justify-center shrink-0 text-discord-text-muted" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
-            <path d="M9.3 3.1a1 1 0 0 1 1.94.48L10.6 6.5h3.24l.68-2.92a1 1 0 1 1 1.94.48L15.86 6.5h2.14a1 1 0 1 1 0 2h-2.6l-.7 3h2.3a1 1 0 1 1 0 2h-2.77l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H9.13l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H4.9a1 1 0 1 1 0-2h2.64l.7-3H6a1 1 0 1 1 0-2h2.6l.7-3zm.84 5.4-.7 3h3.24l.7-3z" />
-          </svg>
+        <span className="w-8 h-8 rounded-lg bg-white/[0.05] border border-[var(--color-line)] flex items-center justify-center shrink-0 text-mv-muted" aria-hidden="true">
+          <TextChannelIcon className="w-[18px] h-[18px]" aria-hidden />
         </span>
         <h2 className="font-display font-semibold text-[15px] text-white shrink-0 truncate max-w-[40%]">{channel.name}</h2>
         {channel.is_nsfw && (
@@ -219,16 +218,14 @@ export function ChatArea({
             title={`Modo lento: ${channel.slowmode_seconds}s entre mensagens`}
             className="chip !text-amber-300 !bg-amber-400/10 !border-amber-400/20 shrink-0"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-              <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 5v5.4l4 2.3-.7 1.3-4.8-2.8V7h1.5z" />
-            </svg>
+            <ClockIcon className="w-3.5 h-3.5" aria-hidden />
             {channel.slowmode_seconds}s
           </span>
         )}
         {channel.topic && (
           <>
             <span className="w-px h-5 bg-[var(--color-line-strong)] mx-1.5 shrink-0 hidden sm:block" />
-            <p className="text-[13px] text-discord-text-muted truncate flex-1 hidden sm:block" title={channel.topic}>{channel.topic}</p>
+            <p className="text-[13px] text-mv-muted truncate flex-1 hidden sm:block" title={channel.topic}>{channel.topic}</p>
             <div className="flex-1 sm:hidden" />
           </>
         )}
@@ -243,7 +240,7 @@ export function ChatArea({
             title="Selecionar mensagens"
             aria-label="Selecionar mensagens"
             aria-pressed={selectionMode}
-            className={`icon-btn w-9 h-9 ${selectionMode ? '!text-discord-blurple bg-discord-blurple/10' : ''}`}
+            className={`icon-btn w-9 h-9 ${selectionMode ? '!text-mv-accent bg-mv-accent/10' : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
               <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
@@ -257,9 +254,7 @@ export function ChatArea({
           aria-label="Mensagens fixadas"
           className="icon-btn w-9 h-9"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
-          </svg>
+          <PinIcon className="w-5 h-5" aria-hidden />
         </button>
         <button
           onClick={() => setShowSearch(true)}
@@ -267,9 +262,7 @@ export function ChatArea({
           aria-label="Pesquisar mensagens"
           className="icon-btn w-9 h-9"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M10 4a6 6 0 1 0 3.76 10.66l5.29 5.29a1 1 0 0 0 1.41-1.41l-5.29-5.29A6 6 0 0 0 10 4zm-4 6a4 4 0 1 1 8 0 4 4 0 0 1-8 0z" />
-          </svg>
+          <SearchIcon className="w-5 h-5" aria-hidden />
         </button>
         {onToggleMembers && (
           <button
@@ -278,9 +271,7 @@ export function ChatArea({
             aria-label="Membros"
             className="icon-btn w-9 h-9 lg:!hidden"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-              <path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zM8 11c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-            </svg>
+            <MembersIcon className="w-5 h-5" aria-hidden />
           </button>
         )}
         </div>
@@ -288,7 +279,7 @@ export function ChatArea({
 
       {isAdultGated ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 relative overflow-hidden">
-          <div className="absolute inset-0 backdrop-blur-2xl bg-discord-channels/70" />
+          <div className="absolute inset-0 backdrop-blur-2xl bg-mv-main/70" />
           <div
             role="alertdialog"
             aria-labelledby="adult-gate-title"
@@ -299,7 +290,7 @@ export function ChatArea({
               +18
             </span>
             <p id="adult-gate-title" className="font-display text-white font-semibold">Canal com restrição de idade</p>
-            <p id="adult-gate-desc" className="text-sm text-discord-text-muted -mt-1">
+            <p id="adult-gate-desc" className="text-sm text-mv-muted -mt-1">
               Este canal tem conteúdo adulto. Você confirma que tem 18 anos ou mais?
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
@@ -319,29 +310,33 @@ export function ChatArea({
               <button
                 onClick={() => {
                   setRevealedAdultChannelId(channel.id)
-                  void adultContent.confirmAdult()
+                  // O banco só libera as mensagens de canal +18 depois que
+                  // a confirmação está salva (RLS, migration 016) — por
+                  // isso recarrega a lista quando ela termina.
+                  void adultContent.confirmAdult().then(({ error }) => {
+                    if (error) alert(error)
+                    else refresh()
+                  })
                 }}
                 className="h-10 px-5 btn-primary text-sm"
               >
                 Sou maior de 18, continuar
               </button>
             </div>
-            <p className="text-[11.5px] text-discord-text-muted leading-snug">
+            <p className="text-[11.5px] text-mv-muted leading-snug">
               Dá pra rever essa escolha em Configurações › Privacidade.
             </p>
           </div>
         </div>
       ) : isSpoilerHidden ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 relative overflow-hidden">
-          <div className="absolute inset-0 backdrop-blur-2xl bg-discord-channels/70" />
+          <div className="absolute inset-0 backdrop-blur-2xl bg-mv-main/70" />
           <div className="relative z-10 flex flex-col items-center gap-3 text-center px-6 py-8 max-w-sm surface-elevated rounded-2xl animate-pop-in">
             <span className="w-14 h-14 rounded-2xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7 text-amber-300">
-                <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3z" />
-              </svg>
+              <LockIcon className="w-7 h-7 text-amber-300" aria-hidden />
             </span>
             <p className="font-display text-white font-semibold">Conteúdo com spoiler</p>
-            <p className="text-sm text-discord-text-muted -mt-1">Este canal tem conteúdo marcado como spoiler.</p>
+            <p className="text-sm text-mv-muted -mt-1">Este canal tem conteúdo marcado como spoiler.</p>
             <button
               onClick={() => setRevealedSpoilerChannelId(channel.id)}
               className="h-10 px-5 btn-primary text-sm mt-1"
@@ -392,19 +387,19 @@ export function ChatArea({
         onReport={setReportingMessageId}
       />
 
-      <div className="h-6 px-5 flex items-center gap-2 text-xs text-discord-text-muted shrink-0" aria-live="polite">
+      <div className="h-6 px-5 flex items-center gap-2 text-xs text-mv-muted shrink-0" aria-live="polite">
         {typingNames.length > 0 && (
           <>
             <span className="flex items-center gap-[3px] px-2 py-1 rounded-full bg-white/[0.05] border border-[var(--color-line)]">
-              <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce [animation-delay:-0.3s]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce [animation-delay:-0.15s]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-discord-text-muted animate-bounce" />
+              <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce [animation-delay:-0.3s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce [animation-delay:-0.15s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-mv-muted animate-bounce" />
             </span>
             <span className="truncate animate-fade-in">
               {typingNames.length === 1 ? (
-                <><strong className="font-semibold text-discord-text">{typingNames[0]}</strong> está digitando…</>
+                <><strong className="font-semibold text-mv-text">{typingNames[0]}</strong> está digitando…</>
               ) : typingNames.length === 2 ? (
-                <><strong className="font-semibold text-discord-text">{typingNames[0]}</strong> e <strong className="font-semibold text-discord-text">{typingNames[1]}</strong> estão digitando…</>
+                <><strong className="font-semibold text-mv-text">{typingNames[0]}</strong> e <strong className="font-semibold text-mv-text">{typingNames[1]}</strong> estão digitando…</>
               ) : (
                 `${typingNames.length} pessoas estão digitando…`
               )}
@@ -494,7 +489,7 @@ export function ChatArea({
       </Suspense>
       {selectionMode && selectedMessageIds.size > 0 && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[200] surface-elevated rounded-full pl-4 pr-1.5 py-1.5 flex items-center gap-2 animate-pop-in">
-          <span className="text-sm text-discord-text font-medium tabular-nums">
+          <span className="text-sm text-mv-text font-medium tabular-nums">
             {confirmingBulk ? `Excluir ${selectedMessageIds.size} mensagem(ns)? Não dá pra desfazer.` : `${selectedMessageIds.size} selecionada(s)`}
           </span>
           <button

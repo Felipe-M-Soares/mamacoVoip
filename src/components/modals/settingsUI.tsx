@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { CheckIcon } from '../ui/icons'
 
 // Peças visuais compartilhadas pelas telas de configuração (usuário e
 // servidor): cabeçalho de aba, cartões de grupo, linhas "rótulo +
@@ -8,7 +9,7 @@ export function TabHeader({ title, description }: { title: string; description?:
   return (
     <header className="mb-6">
       <h1 className="font-display text-2xl font-semibold text-white">{title}</h1>
-      {description && <p className="text-[14px] text-discord-text-muted mt-1.5 leading-relaxed">{description}</p>}
+      {description && <p className="text-[14px] text-mv-muted mt-1.5 leading-relaxed">{description}</p>}
     </header>
   )
 }
@@ -40,7 +41,7 @@ export function SettingsCard({
             {title && (
               <h2 className={`text-[15px] font-semibold ${tone === 'danger' ? 'text-rose-300' : 'text-white'}`}>{title}</h2>
             )}
-            {description && <p className="text-[13px] text-discord-text-muted mt-1 leading-relaxed">{description}</p>}
+            {description && <p className="text-[13px] text-mv-muted mt-1 leading-relaxed">{description}</p>}
           </div>
           {action}
         </div>
@@ -75,7 +76,7 @@ export function SettingRow({
           ) : (
             <p className="text-[14px] font-medium text-white">{title}</p>
           )}
-          {description && <p className="text-[12.5px] text-discord-text-muted mt-0.5 leading-relaxed">{description}</p>}
+          {description && <p className="text-[12.5px] text-mv-muted mt-0.5 leading-relaxed">{description}</p>}
         </div>
         {control}
       </div>
@@ -112,12 +113,12 @@ export function RangeSlider({
       aria-label={label}
       onChange={(e) => onChange(Number(e.target.value))}
       style={{
-        background: `linear-gradient(to right, var(--color-discord-blurple) ${pct}%, var(--color-discord-lighter) ${pct}%)`,
+        background: `linear-gradient(to right, var(--color-mv-accent) ${pct}%, var(--color-mv-raised) ${pct}%)`,
       }}
       className="w-full h-1.5 rounded-full appearance-none cursor-pointer
         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-[18px] [&::-webkit-slider-thumb]:h-[18px]
         [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
-        [&::-webkit-slider-thumb]:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-discord-blurple)_30%,transparent),0_2px_6px_rgb(0_0_0/0.5)]
+        [&::-webkit-slider-thumb]:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-mv-accent)_30%,transparent),0_2px_6px_rgb(0_0_0/0.5)]
         [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-110
         [&::-moz-range-thumb]:w-[18px] [&::-moz-range-thumb]:h-[18px] [&::-moz-range-thumb]:rounded-full
         [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0"
@@ -138,7 +139,7 @@ export function Segmented<T extends string>({
   label: string
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex w-full gap-1 p-1 rounded-xl bg-discord-darker border border-[var(--color-line)]">
+    <div role="radiogroup" aria-label={label} className="inline-flex w-full gap-1 p-1 rounded-xl bg-mv-canvas border border-[var(--color-line)]">
       {options.map((o) => (
         <button
           key={o.value}
@@ -148,8 +149,8 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={`flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
             value === o.value
-              ? 'bg-discord-lighter text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
-              : 'text-discord-text-muted hover:text-discord-text'
+              ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
+              : 'text-mv-muted hover:text-mv-text'
           }`}
         >
           {o.label}
@@ -161,7 +162,7 @@ export function Segmented<T extends string>({
 
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex items-center min-w-[1.4rem] justify-center h-[22px] px-1.5 rounded-md bg-discord-darker border border-[var(--color-line-strong)] border-b-2 font-mono text-[11px] text-discord-text-muted">
+    <kbd className="inline-flex items-center min-w-[1.4rem] justify-center h-[22px] px-1.5 rounded-md bg-mv-canvas border border-[var(--color-line-strong)] border-b-2 font-mono text-[11px] text-mv-muted">
       {children}
     </kbd>
   )
@@ -170,8 +171,8 @@ export function Kbd({ children }: { children: ReactNode }) {
 export function InlineMessage({ tone, children }: { tone: 'error' | 'success' | 'info'; children: ReactNode }) {
   const styles = {
     error: 'bg-rose-500/10 text-rose-300 border-rose-500/25',
-    success: 'bg-discord-green/10 text-discord-green border-discord-green/25',
-    info: 'bg-white/[0.03] text-discord-text-muted border-[var(--color-line)]',
+    success: 'bg-mv-green/10 text-mv-green border-mv-green/25',
+    info: 'bg-white/[0.03] text-mv-muted border-[var(--color-line)]',
   }[tone]
   return (
     <p role={tone === 'error' ? 'alert' : 'status'} className={`text-[13px] rounded-lg border px-3 py-2 ${styles}`}>
@@ -184,13 +185,13 @@ export function InlineMessage({ tone, children }: { tone: 'error' | 'success' | 
 export function EmptyState({ icon, title, hint }: { icon: ReactNode; title: string; hint?: ReactNode }) {
   return (
     <div className="flex flex-col items-center text-center py-8 px-4">
-      <span className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center text-discord-text-muted mb-3">
+      <span className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center text-mv-muted mb-3">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6" aria-hidden="true">
           {icon}
         </svg>
       </span>
       <p className="text-[14px] font-medium text-white">{title}</p>
-      {hint && <p className="text-[12.5px] text-discord-text-muted mt-0.5 max-w-xs">{hint}</p>}
+      {hint && <p className="text-[12.5px] text-mv-muted mt-0.5 max-w-xs">{hint}</p>}
     </div>
   )
 }
@@ -218,13 +219,11 @@ export function CheckMark({ checked }: { checked: boolean }) {
     <span
       aria-hidden="true"
       className={`w-5 h-5 rounded-md shrink-0 flex items-center justify-center border transition-colors ${
-        checked ? 'bg-discord-blurple border-discord-blurple' : 'border-[var(--color-line-strong)] bg-discord-darker'
+        checked ? 'bg-mv-accent border-mv-accent' : 'border-[var(--color-line-strong)] bg-mv-canvas'
       }`}
     >
       {checked && (
-        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-          <path d="M5 12.5l4.5 4.5L19 7.5" />
-        </svg>
+        <CheckIcon className="w-3 h-3 text-white" strokeWidth={3.5} aria-hidden />
       )}
     </span>
   )
@@ -254,13 +253,13 @@ export function OptionCard({
       onClick={onSelect}
       disabled={disabled}
       className={`w-full flex items-center gap-3 text-left px-3.5 py-3 rounded-xl border transition-colors disabled:opacity-60 ${
-        selected ? 'border-discord-blurple/60 bg-discord-blurple/[0.08]' : 'border-[var(--color-line)] bg-discord-darker/50 hover:bg-white/[0.04]'
+        selected ? 'border-mv-accent/60 bg-mv-accent/[0.08]' : 'border-[var(--color-line)] bg-mv-canvas/50 hover:bg-white/[0.04]'
       }`}
     >
       {icon && (
         <span
           className={`w-9 h-9 rounded-[10px] shrink-0 flex items-center justify-center ${
-            selected ? 'bg-discord-blurple/15 text-discord-blurple' : 'bg-white/[0.05] text-discord-text-muted'
+            selected ? 'bg-mv-accent/15 text-mv-accent' : 'bg-white/[0.05] text-mv-muted'
           }`}
         >
           {icon}
@@ -268,15 +267,15 @@ export function OptionCard({
       )}
       <span className="flex-1 min-w-0">
         <span className="block text-[14px] font-medium text-white">{title}</span>
-        {description && <span className="block text-[12.5px] text-discord-text-muted mt-0.5">{description}</span>}
+        {description && <span className="block text-[12.5px] text-mv-muted mt-0.5">{description}</span>}
       </span>
       <span
         aria-hidden="true"
         className={`w-[18px] h-[18px] rounded-full shrink-0 border-2 flex items-center justify-center ${
-          selected ? 'border-discord-blurple' : 'border-[var(--color-line-strong)]'
+          selected ? 'border-mv-accent' : 'border-[var(--color-line-strong)]'
         }`}
       >
-        {selected && <span className="w-2 h-2 rounded-full bg-discord-blurple" />}
+        {selected && <span className="w-2 h-2 rounded-full bg-mv-accent" />}
       </span>
     </button>
   )
@@ -296,7 +295,7 @@ export function ToggleRow({
     <div className="flex items-center justify-between gap-4 rounded-xl bg-white/[0.02] border border-[var(--color-line)] px-3.5 py-3">
       <div className="min-w-0">
         <p className="text-[14px] font-medium text-white">{title}</p>
-        {description && <p className="text-[12.5px] text-discord-text-muted mt-0.5 leading-snug">{description}</p>}
+        {description && <p className="text-[12.5px] text-mv-muted mt-0.5 leading-snug">{description}</p>}
       </div>
       {children}
     </div>

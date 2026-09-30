@@ -35,7 +35,7 @@
 // fallback GDI, ambas dependentes do DWM), o WGC pega o conteúdo direto
 // da GPU, sem depender do compositor estar ativo — é a mesma tecnologia
 // por trás do Xbox Game Bar, e do "compartilhar uma janela"/"tela
-// inteira" mais recente do Discord. Ela é pública, documentada,
+// inteira" mais recente de apps de chat populares. Ela é pública, documentada,
 // suportada desde o Windows 10 versão 1903 — usar ela não tem nada a
 // ver com as técnicas de "hook" de gráficos (injeção de DLL no
 // processo do jogo) que o OBS usa no modo "Game Capture" e que

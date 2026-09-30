@@ -12,8 +12,8 @@
 
 export const PASSWORD_MIN_LENGTH = 8
 // bcrypt (usado pelo Supabase Auth) ignora tudo depois do byte 72.
-export const PASSWORD_MAX_LENGTH = 72
-export const USERNAME_MIN_LENGTH = 3
+const PASSWORD_MAX_LENGTH = 72
+const USERNAME_MIN_LENGTH = 3
 export const USERNAME_MAX_LENGTH = 32
 
 export function validatePassword(password: string, context: { email?: string; username?: string } = {}): string | null {

@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { LoadingScreen } from './ui/LoadingScreen'
 import { MfaChallengeScreen } from '../pages/MfaChallengeScreen'
 import { safeRedirectPath } from '../lib/authValidation'
+import { TermsGate } from './TermsGate'
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading, mfaPending } = useAuth()
@@ -30,5 +31,6 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <MfaChallengeScreen />
   }
 
-  return <>{children}</>
+  // Aceite dos Termos + declaração 18+ (ver TermsGate.tsx).
+  return <TermsGate>{children}</TermsGate>
 }

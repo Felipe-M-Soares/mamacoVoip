@@ -25,6 +25,7 @@ import {
   isVoiceMemberDrag,
   type VoiceMemberDragPayload,
 } from '../../lib/voiceMove'
+import { AnnouncementIcon, BellOffIcon, CalendarIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, LockIcon, PinIcon, PlusIcon, ScreenShareIcon, SettingsIcon, TextChannelIcon, VoiceChannelIcon, WarningIcon } from '../ui/icons'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const InviteModal = lazyModal(() => import('../modals/InviteModal').then((m) => m.InviteModal))
@@ -52,7 +53,7 @@ function CallDurationTimer({ startedAt }: { startedAt: number }) {
   const s = totalSeconds % 60
   const label = h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`
 
-  return <span className="text-[11px] text-discord-green font-mono tabular-nums shrink-0">{label}</span>
+  return <span className="text-[11px] text-mv-green font-mono tabular-nums shrink-0">{label}</span>
 }
 
 function VoiceChannelPresence({
@@ -108,7 +109,7 @@ function VoiceChannelPresence({
       onDrop={onDrop}
     >
       {Boolean(userLimit) && (
-        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted px-1.5 pb-0.5 tabular-nums">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-mv-muted px-1.5 pb-0.5 tabular-nums">
           {userIds.length}/{userLimit} pessoas
         </p>
       )}
@@ -156,12 +157,10 @@ function VoiceChannelPresence({
             <SpeakingAvatarRing userId={id}>
               <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={20} />
             </SpeakingAvatarRing>
-            <span className="text-[13px] text-discord-text-muted truncate">{name}</span>
+            <span className="text-[13px] text-mv-muted truncate">{name}</span>
             {isSharingScreen && (
               <span title="Compartilhando tela" className="shrink-0 ml-auto text-[9px] font-bold tracking-wide uppercase px-1.5 py-px rounded bg-rose-500 text-white flex items-center gap-1">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-2.5 h-2.5" aria-hidden="true">
-                  <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
-                </svg>
+                <ScreenShareIcon className="w-2.5 h-2.5" aria-hidden />
                 Ao vivo
               </span>
             )}
@@ -179,7 +178,7 @@ function SpeakingAvatarRing({ userId, children }: { userId: string; children: Re
   return (
     <div
       className={`relative rounded-full shrink-0 transition-shadow ${
-        isSpeaking ? 'ring-2 ring-discord-green ring-offset-1 ring-offset-discord-sidebar' : ''
+        isSpeaking ? 'ring-2 ring-mv-green ring-offset-1 ring-offset-mv-side' : ''
       }`}
     >
       {children}
@@ -190,22 +189,16 @@ function SpeakingAvatarRing({ userId, children }: { userId: string; children: Re
 function ChannelIcon({ type, isStage }: { type: 'text' | 'voice'; isStage?: boolean }) {
   if (type === 'voice' && isStage) {
     return (
-      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0 text-yellow-400">
-        <path d="M11 2a1 1 0 0 1 1 1v.06a8 8 0 0 1 7 7.94v3a3 3 0 0 1-3 3h-1l-3 4-3-4H8a3 3 0 0 1-3-3v-3a8 8 0 0 1 7-7.94V3a1 1 0 0 1-1-1zm1 5a5 5 0 0 0-5 5v3a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3a5 5 0 0 0-5-5z" />
-      </svg>
+      <AnnouncementIcon className="w-5 h-5 shrink-0 text-yellow-400" aria-hidden />
     )
   }
   if (type === 'voice') {
     return (
-      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0">
-        <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 0 1-14 0z" />
-      </svg>
+      <VoiceChannelIcon className="w-5 h-5 shrink-0" aria-hidden />
     )
   }
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0 opacity-70">
-      <path d="M9.3 3.1a1 1 0 0 1 1.94.48L10.6 6.5h3.24l.68-2.92a1 1 0 1 1 1.94.48L15.86 6.5h2.14a1 1 0 1 1 0 2h-2.6l-.7 3h2.3a1 1 0 1 1 0 2h-2.77l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H9.13l-.72 3.1a1 1 0 1 1-1.94-.48l.6-2.62H4.9a1 1 0 1 1 0-2h2.64l.7-3H6a1 1 0 1 1 0-2h2.6l.7-3zm.84 5.4-.7 3h3.24l.7-3z" />
-    </svg>
+    <TextChannelIcon className="w-5 h-5 shrink-0 opacity-70" aria-hidden />
   )
 }
 
@@ -248,7 +241,7 @@ function InlineEditableLabel({
           if (e.key === 'Enter') commit()
           if (e.key === 'Escape') setEditing(false)
         }}
-        className={`bg-discord-darker text-discord-text rounded px-1 outline-none ring-1 ring-discord-blurple ${className ?? ''}`}
+        className={`bg-mv-canvas text-mv-text rounded px-1 outline-none ring-1 ring-mv-accent ${className ?? ''}`}
       />
     )
   }
@@ -307,31 +300,25 @@ function ChannelRow({
       onDrop={onDrop}
       onContextMenu={onContextMenu}
       className={`group relative flex items-center gap-2 px-2.5 py-[7px] rounded-lg text-[14px] font-medium transition-colors ${isOwner ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
-        ${active ? 'bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]' : unread ? 'text-white hover:bg-white/[0.04]' : 'text-discord-text-muted hover:bg-white/[0.04] hover:text-discord-text'}
-        ${isDragOver ? 'ring-2 ring-discord-blurple' : ''}
+        ${active ? 'bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]' : unread ? 'text-white hover:bg-white/[0.04]' : 'text-mv-muted hover:bg-white/[0.04] hover:text-mv-text'}
+        ${isDragOver ? 'ring-2 ring-mv-accent' : ''}
       `}
       onClick={onSelect}
     >
       <ChannelIcon type={channel.type} isStage={channel.is_stage} />
       {pinned && (
         <span title="Canal fixado" className="shrink-0 text-yellow-400">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
-            <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
-          </svg>
+          <PinIcon className="w-3 h-3" aria-hidden />
         </span>
       )}
       {channel.is_spoiler && (
         <span title="Canal spoiler" className="shrink-0">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 text-yellow-400">
-            <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3z" />
-          </svg>
+          <LockIcon className="w-3 h-3 text-yellow-400" aria-hidden />
         </span>
       )}
       {channel.is_restricted && (
         <span title="Canal restrito — só cargos específicos veem" className="shrink-0">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 text-discord-text-muted">
-            <path d="M12 2a5 5 0 0 0-5 5v3H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1V7a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3zm0 9a1.5 1.5 0 0 0-1 2.6V17a1 1 0 0 0 2 0v-1.4A1.5 1.5 0 0 0 12 13z" />
-          </svg>
+          <LockIcon className="w-3 h-3 text-mv-muted" aria-hidden />
         </span>
       )}
       <InlineEditableLabel
@@ -349,14 +336,12 @@ function ChannelRow({
           +18
         </span>
       )}
-      {unread && !active && !muted && <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-discord-text" />}
+      {unread && !active && !muted && <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-mv-text" />}
       {channel.type === 'voice' && voice.connectedChannelId === channel.id && voice.connectedAt && (
         <CallDurationTimer startedAt={voice.connectedAt} />
       )}
       {muted && (
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 text-discord-text-muted shrink-0">
-          <path d="M16.5 12A4.5 4.5 0 0 0 14 8v1.2l2.4 2.4c.06-.2.1-.4.1-.6zm2.5 0c0 .94-.2 1.83-.55 2.64l1.51 1.51A8.94 8.94 0 0 0 21 12h-2zM4.27 3L3 4.27l6 6V12a4.5 4.5 0 0 0 6.16 4.18l1.6 1.6a6.5 6.5 0 0 1-9.26-5.87v-.36l-.01.01L3 8.27V12a9 9 0 0 0 8 8.94V22h2v-1.06a8.93 8.93 0 0 0 3.36-1.09L19.73 22 21 20.73 4.27 3z" />
-        </svg>
+        <BellOffIcon className="w-3.5 h-3.5 text-mv-muted shrink-0" aria-hidden />
       )}
 
       {isOwner && (
@@ -370,9 +355,7 @@ function ChannelRow({
             }}
             className="w-5 h-5 flex items-center justify-center hover:text-white"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-              <path d="M12 8l-6 6h12l-6-6z" />
-            </svg>
+            <ChevronUpIcon className="w-3.5 h-3.5" aria-hidden />
           </button>
           <button
             title="Mover para baixo"
@@ -383,9 +366,7 @@ function ChannelRow({
             }}
             className="w-5 h-5 flex items-center justify-center hover:text-white"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-              <path d="M12 16l6-6H6l6 6z" />
-            </svg>
+            <ChevronDownIcon className="w-3.5 h-3.5" aria-hidden />
           </button>
           <button
             title="Editar canal"
@@ -396,9 +377,7 @@ function ChannelRow({
             }}
             className="w-5 h-5 flex items-center justify-center hover:text-white"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-              <path d="M19.4 13a7.4 7.4 0 0 0 .1-1 7.4 7.4 0 0 0-.1-1l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1a.5.5 0 0 0-.6.2L2.6 8.8a.5.5 0 0 0 .1.6l2 1.6a7.4 7.4 0 0 0 0 2l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3a.5.5 0 0 0 .6.2l2.4-1c.5.4 1.1.8 1.7 1l.4 2.5a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1a.5.5 0 0 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6l-2-1.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" />
-            </svg>
+            <SettingsIcon className="w-3.5 h-3.5" aria-hidden />
           </button>
         </div>
       )}
@@ -580,11 +559,11 @@ export function ChannelSidebar({
   ].filter((c) => c.type === 'voice')
 
   return (
-    <aside className="w-64 bg-discord-sidebar flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
+    <aside className="w-64 bg-mv-side flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
       {server.banner_url && (
         <div className="relative h-24 w-full overflow-hidden shrink-0">
           <img src={server.banner_url} alt="" className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-discord-sidebar" />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-mv-side" />
         </div>
       )}
       <div className="relative">
@@ -594,9 +573,7 @@ export function ChannelSidebar({
           className="w-full h-14 px-4 flex items-center justify-between border-b border-[var(--color-line)] text-white font-semibold text-left hover:bg-white/[0.04] transition-colors"
         >
           <span className="truncate font-display text-[15px]">{server.name}</span>
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 shrink-0">
-            <path d="M12 16a1 1 0 0 1-.7-.3l-6-6a1 1 0 1 1 1.4-1.4L12 13.6l5.3-5.3a1 1 0 0 1 1.4 1.4l-6 6a1 1 0 0 1-.7.3z" />
-          </svg>
+          <ChevronDownIcon className="w-4 h-4 shrink-0" aria-hidden />
         </button>
 
         {menuOpen && (
@@ -606,7 +583,7 @@ export function ChannelSidebar({
                 setShowInvite(true)
                 setMenuOpen(false)
               }}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-discord-blurple hover:bg-discord-blurple/10 transition-colors"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-mv-accent hover:bg-mv-accent/10 transition-colors"
             >
               Convidar pessoas
             </button>
@@ -615,7 +592,7 @@ export function ChannelSidebar({
                 setShowInviteFriends(true)
                 setMenuOpen(false)
               }}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-discord-blurple hover:bg-discord-blurple/10 transition-colors"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-mv-accent hover:bg-mv-accent/10 transition-colors"
             >
               Chamar amigos
             </button>
@@ -626,7 +603,7 @@ export function ChannelSidebar({
                     setShowCreateChannel({ categoryId: null })
                     setMenuOpen(false)
                   }}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-mv-text hover:bg-white/[0.06] transition-colors"
                 >
                   Criar canal
                 </button>
@@ -635,7 +612,7 @@ export function ChannelSidebar({
                     setShowCreateCategory(true)
                     setMenuOpen(false)
                   }}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-mv-text hover:bg-white/[0.06] transition-colors"
                 >
                   Criar categoria
                 </button>
@@ -647,7 +624,7 @@ export function ChannelSidebar({
                   setShowRoles(true)
                   setMenuOpen(false)
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
+                className="w-full text-left px-3 py-2 rounded-lg text-sm text-mv-text hover:bg-white/[0.06] transition-colors"
               >
                 Cargos
               </button>
@@ -658,7 +635,7 @@ export function ChannelSidebar({
                   setShowModeration(true)
                   setMenuOpen(false)
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
+                className="w-full text-left px-3 py-2 rounded-lg text-sm text-mv-text hover:bg-white/[0.06] transition-colors"
               >
                 Moderação
               </button>
@@ -668,21 +645,24 @@ export function ChannelSidebar({
                 setShowSettings(true)
                 setMenuOpen(false)
               }}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm text-discord-text hover:bg-white/[0.06] transition-colors"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm text-mv-text hover:bg-white/[0.06] transition-colors"
             >
               Configurações do servidor
             </button>
-            <div className="h-px bg-white/10 my-1.5" />
+            {/* Divisor só quando há item depois dele (o dono não tem "Sair"). */}
             {!isOwner && (
-              <button
-                onClick={() => {
-                  setShowLeave(true)
-                  setMenuOpen(false)
-                }}
-                className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-red-500/10 transition-colors"
-              >
-                Sair do servidor
-              </button>
+              <>
+                <div className="h-px bg-white/10 my-1.5" />
+                <button
+                  onClick={() => {
+                    setShowLeave(true)
+                    setMenuOpen(false)
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  Sair do servidor
+                </button>
+              </>
             )}
           </div>
         )}
@@ -694,13 +674,10 @@ export function ChannelSidebar({
         ) : channelsLoadError ? (
           <div className="mx-1 px-4 py-5 rounded-xl border border-rose-500/20 bg-rose-500/[0.05] flex flex-col items-center text-center gap-2">
             <span className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5 text-rose-400">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 8v5M12 16.5v.01" />
-              </svg>
+              <WarningIcon className="w-5 h-5 text-rose-400" aria-hidden />
             </span>
-            <p className="text-sm font-medium text-discord-text">Não foi possível carregar os canais</p>
-            <p className="text-xs text-discord-text-muted break-words">{channelsLoadError}</p>
+            <p className="text-sm font-medium text-mv-text">Não foi possível carregar os canais</p>
+            <p className="text-xs text-mv-muted break-words">{channelsLoadError}</p>
             <button onClick={() => refresh()} className="btn-secondary h-8 px-3 text-xs mt-1">
               Tentar de novo
             </button>
@@ -709,11 +686,9 @@ export function ChannelSidebar({
           <>
         <button
           onClick={() => setShowEvents(true)}
-          className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[14px] font-medium text-discord-text-muted hover:bg-white/[0.04] hover:text-discord-text transition-colors"
+          className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[14px] font-medium text-mv-muted hover:bg-white/[0.04] hover:text-mv-text transition-colors"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0">
-            <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zM4 10v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9H4zm3 3h4v4H7v-4z" />
-          </svg>
+          <CalendarIcon className="w-5 h-5 shrink-0" aria-hidden />
           Eventos
           {upcomingEventsCount > 0 && (
             <span className="ml-auto badge-count !shadow-none">{upcomingEventsCount}</span>
@@ -788,7 +763,7 @@ export function ChannelSidebar({
             <div
               key={category.id}
               className={`group/category rounded transition-colors ${
-                dragOverTarget === category.id ? 'bg-white/5 ring-1 ring-dashed ring-discord-blurple/50' : ''
+                dragOverTarget === category.id ? 'bg-white/5 ring-1 ring-dashed ring-mv-accent/50' : ''
               }`}
               onDragOver={(e) => handleDragOverCategory(e, category.id)}
               onDragLeave={() => setDragOverTarget(null)}
@@ -802,7 +777,7 @@ export function ChannelSidebar({
                   <svg
                     viewBox="0 0 24 24"
                     fill="currentColor"
-                    className={`w-3 h-3 shrink-0 text-discord-text-muted transition-transform ${
+                    className={`w-3 h-3 shrink-0 text-mv-muted transition-transform ${
                       collapsedCategories.has(category.id) ? '-rotate-90' : ''
                     }`}
                   >
@@ -812,7 +787,7 @@ export function ChannelSidebar({
                     value={category.name}
                     editable={isOwner}
                     onSave={(name) => updateCategory(category.id, name.toUpperCase())}
-                    className="text-[11px] font-semibold uppercase text-discord-text-muted tracking-[0.08em] truncate group-hover/category:text-discord-text transition-colors"
+                    className="text-[11px] font-semibold uppercase text-mv-muted tracking-[0.08em] truncate group-hover/category:text-mv-text transition-colors"
                   />
                 </div>
                 {isOwner && (
@@ -824,11 +799,9 @@ export function ChannelSidebar({
                         e.stopPropagation()
                         moveCategory(category.id, 'up')
                       }}
-                      className="text-discord-text-muted hover:text-white"
+                      className="text-mv-muted hover:text-white"
                     >
-                      <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
-                        <path d="M12 8l-6 6h12l-6-6z" />
-                      </svg>
+                      <ChevronUpIcon className="w-3 h-3" aria-hidden />
                     </button>
                     <button
                       title="Mover categoria para baixo"
@@ -837,11 +810,9 @@ export function ChannelSidebar({
                         e.stopPropagation()
                         moveCategory(category.id, 'down')
                       }}
-                      className="text-discord-text-muted hover:text-white"
+                      className="text-mv-muted hover:text-white"
                     >
-                      <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
-                        <path d="M12 16l6-6H6l6 6z" />
-                      </svg>
+                      <ChevronDownIcon className="w-3 h-3" aria-hidden />
                     </button>
                     <button
                       title="Criar canal nesta categoria"
@@ -850,11 +821,9 @@ export function ChannelSidebar({
                         e.stopPropagation()
                         setShowCreateChannel({ categoryId: category.id })
                       }}
-                      className="text-discord-text-muted hover:text-white"
+                      className="text-mv-muted hover:text-white"
                     >
-                      <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                        <path d="M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1z" />
-                      </svg>
+                      <PlusIcon className="w-3.5 h-3.5" aria-hidden />
                     </button>
                   </div>
                 )}
@@ -928,9 +897,7 @@ export function ChannelSidebar({
             aria-label="Fechar aviso"
             className="shrink-0 text-rose-300/70 hover:text-rose-200"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
-              <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
-            </svg>
+            <CloseIcon className="w-3.5 h-3.5" aria-hidden />
           </button>
         </div>
       )}
@@ -995,9 +962,7 @@ export function ChannelSidebar({
             return targets.map((c) => ({
               label: `Mover para ${c.name}`,
               icon: (
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4" aria-hidden="true">
-                  <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 0 1-14 0z" />
-                </svg>
+                <VoiceChannelIcon className="w-4 h-4" aria-hidden />
               ),
               onClick: () => void moveVoiceMember(contextMember.userId, c),
             }))

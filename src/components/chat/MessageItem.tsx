@@ -1,10 +1,12 @@
-import { safeHttpUrl } from '../../lib/messageFormatting'
+import { SignedAttachment } from './SignedAttachment'
 import { memo, useMemo, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { parseMessageContent } from '../../lib/messageFormatting'
+import { describeMessageContent, parseStickerId } from '../../lib/stickers'
 import { LinkPreviewCard, extractFirstUrl, isPureMediaMessage } from './LinkPreviewCard'
 import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji, Thread, Role } from '../../types/database'
+import { AddReactionIcon, ArrowRightIcon, DownloadIcon, EditIcon, FileIcon, PinIcon, ReplyIcon, ThreadIcon, TrashIcon } from '../ui/icons'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉']
 
@@ -134,7 +136,7 @@ function MessageItemImpl({
   }
 
   function handleDelete(e?: { shiftKey?: boolean }) {
-    // Shift+clique pula a confirmação (igual o Discord) — antes o botão
+    // Shift+clique pula a confirmação (igual a apps de chat populares) — antes o botão
     // da barra de ferramentas excluía direto, sem confirmar nada, enquanto
     // o menu de contexto pedia confirmação.
     if (e?.shiftKey) onDelete(message.id)
@@ -150,6 +152,8 @@ function MessageItemImpl({
       }, {}),
     [reactions]
   )
+  // Figurinha não tem texto pra editar — o botão de editar some nela.
+  const isSticker = useMemo(() => parseStickerId(message.content) !== null, [message.content])
   const renderedContent = useMemo(
     () => parseMessageContent(message.content, members, emojis, roles),
     [message.content, members, emojis, roles]
@@ -169,26 +173,24 @@ function MessageItemImpl({
     return (
       <div className="mx-2 px-2 py-1.5 flex items-center gap-3 group rounded-lg hover:bg-white/[0.025] transition-colors">
         <span className="w-10 flex justify-center shrink-0">
-          <span className="w-7 h-7 rounded-full bg-discord-green/10 border border-discord-green/20 flex items-center justify-center">
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-discord-green">
-              <path d="M12 4l-1.4 1.4L16.2 11H4v2h12.2l-5.6 5.6L12 20l8-8-8-8z" />
-            </svg>
+          <span className="w-7 h-7 rounded-full bg-mv-green/10 border border-mv-green/20 flex items-center justify-center">
+            <ArrowRightIcon className="w-4 h-4 text-mv-green" aria-hidden />
           </span>
         </span>
-        <p className="text-sm text-discord-text-muted min-w-0 truncate">
-          <button onClick={() => author && onViewProfile(author)} className="font-medium text-discord-text hover:underline">
+        <p className="text-sm text-mv-muted min-w-0 truncate">
+          <button onClick={() => author && onViewProfile(author)} className="font-medium text-mv-text hover:underline">
             {author?.display_name || author?.username || 'Alguém'}
           </button>{' '}
           entrou no servidor.
         </p>
-        <span className="text-[11px] text-discord-text-muted/80 shrink-0 tabular-nums">{formatTime(message.created_at)}</span>
+        <span className="text-[11px] text-mv-muted/80 shrink-0 tabular-nums">{formatTime(message.created_at)}</span>
         {currentUserId && currentUserId !== message.author_id && (
           <button
             onClick={() => onToggleReaction(message.id, '👋')}
             className={`ml-auto text-xs font-medium h-7 px-3 rounded-full border shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all ${
               authorReactions.length > 0
-                ? 'bg-discord-blurple/15 border-discord-blurple/50 text-discord-text opacity-100'
-                : 'bg-white/[0.03] border-[var(--color-line-strong)] text-discord-text-muted hover:text-white hover:bg-white/[0.06]'
+                ? 'bg-mv-accent/15 border-mv-accent/50 text-mv-text opacity-100'
+                : 'bg-white/[0.03] border-[var(--color-line-strong)] text-mv-muted hover:text-white hover:bg-white/[0.06]'
             }`}
           >
             👋 Acenar
@@ -202,7 +204,7 @@ function MessageItemImpl({
     <div
       className={`group relative px-4 py-0.5 transition-colors animate-fade-slide-in ${showHeader ? 'mt-3 pt-1.5' : ''} ${
         mentionsMe
-          ? 'bg-discord-blurple/[0.07] hover:bg-discord-blurple/[0.1] shadow-[inset_2px_0_0_0_var(--color-discord-blurple)]'
+          ? 'bg-mv-accent/[0.07] hover:bg-mv-accent/[0.1] shadow-[inset_2px_0_0_0_var(--color-mv-accent)]'
           : 'hover:bg-white/[0.025]'
       }`}
       onMouseLeave={() => setShowReactionPicker(false)}
@@ -216,9 +218,7 @@ function MessageItemImpl({
           onClick={() => setShowReactionPicker((v) => !v)}
           className="icon-btn w-8 h-8"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
-            <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zM8.5 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm7 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM12 17.5c-2.3 0-4.3-1.3-5.3-3.2a1 1 0 1 1 1.8-.9c.7 1.3 2 2.1 3.5 2.1s2.8-.8 3.5-2.1a1 1 0 1 1 1.8.9c-1 1.9-3 3.2-5.3 3.2z" />
-          </svg>
+          <AddReactionIcon className="w-[18px] h-[18px]" aria-hidden />
         </button>
         <button
           title="Responder"
@@ -226,20 +226,16 @@ function MessageItemImpl({
           onClick={() => onReply(message)}
           className="icon-btn w-8 h-8"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
-            <path d="M10 8V5l-7 7 7 7v-3.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
-          </svg>
+          <ReplyIcon className="w-[18px] h-[18px]" aria-hidden />
         </button>
-        {isOwn && (
+        {isOwn && !isSticker && (
           <button
             title="Editar"
             aria-label="Editar"
             onClick={startEditing}
             className="icon-btn w-8 h-8"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
-              <path d="M16.3 3.3a2.4 2.4 0 0 1 3.4 3.4L8.4 18l-4.6 1.2L5 14.6 16.3 3.3zm-1.4 3.5L6.8 14.9l-.4 1.7 1.7-.4 8.1-8.1-1.3-1.3z" />
-            </svg>
+            <EditIcon className="w-[18px] h-[18px]" aria-hidden />
           </button>
         )}
         {(isOwn || canModerate) && (
@@ -249,9 +245,7 @@ function MessageItemImpl({
             onClick={(e) => handleDelete(e)}
             className="icon-btn w-8 h-8 hover:!text-rose-400 hover:!bg-rose-500/10"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
-              <path d="M9 3a1 1 0 0 0-1 1v1H4a1 1 0 1 0 0 2h1v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7h1a1 1 0 1 0 0-2h-4V4a1 1 0 0 0-1-1H9zm1 6a1 1 0 1 1 2 0v8a1 1 0 1 1-2 0V9zm5-1a1 1 0 0 0-1 1v8a1 1 0 1 0 2 0V9a1 1 0 0 0-1-1z" />
-            </svg>
+            <TrashIcon className="w-[18px] h-[18px]" aria-hidden />
           </button>
         )}
       </div>
@@ -292,15 +286,15 @@ function MessageItemImpl({
       {message.reply_to_id && (
         <button
           onClick={() => replyToMessage && onJumpToMessage?.(replyToMessage.id)}
-          className="relative flex items-center gap-1.5 text-xs text-discord-text-muted ml-14 mb-1 hover:text-discord-text text-left max-w-full"
+          className="relative flex items-center gap-1.5 text-xs text-mv-muted ml-14 mb-1 hover:text-mv-text text-left max-w-full"
         >
           <span aria-hidden="true" className="absolute -left-9 top-1/2 w-7 h-2.5 border-l-2 border-t-2 border-[var(--color-line-strong)] rounded-tl-md" />
           {replyToMessage ? (
             <>
-              <span className="font-semibold text-discord-text shrink-0">
+              <span className="font-semibold text-mv-text shrink-0">
                 {replyToAuthor?.display_name || replyToAuthor?.username || 'alguém'}
               </span>
-              <span className="truncate max-w-md opacity-80">{replyToMessage.content}</span>
+              <span className="truncate max-w-md opacity-80">{describeMessageContent(replyToMessage.content)}</span>
             </>
           ) : (
             <span className="italic">Mensagem original não encontrada</span>
@@ -315,13 +309,13 @@ function MessageItemImpl({
           isHighlighted
             ? 'bg-amber-400/10 ring-1 ring-amber-400/30 -mx-2 px-2 rounded-lg transition-colors'
             : selected
-              ? 'bg-discord-blurple/10 ring-1 ring-discord-blurple/30 -mx-2 px-2 rounded-lg'
+              ? 'bg-mv-accent/10 ring-1 ring-mv-accent/30 -mx-2 px-2 rounded-lg'
               : ''
         }`}
       >
         {selectionMode && (
           <div className="pt-2 shrink-0">
-            <input type="checkbox" checked={Boolean(selected)} readOnly aria-label="Selecionar mensagem" className="w-4 h-4 accent-discord-blurple" />
+            <input type="checkbox" checked={Boolean(selected)} readOnly aria-label="Selecionar mensagem" className="w-4 h-4 accent-mv-accent" />
           </div>
         )}
         {showHeader ? (
@@ -342,7 +336,7 @@ function MessageItemImpl({
           </div>
         ) : (
           <div className="w-10 shrink-0 flex items-start justify-center">
-            <span className="invisible group-hover:visible text-[10px] text-discord-text-muted/80 pt-[5px] tabular-nums">
+            <span className="invisible group-hover:visible text-[10px] text-mv-muted/80 pt-[5px] tabular-nums">
               {formatTime(message.created_at)}
             </span>
           </div>
@@ -360,16 +354,14 @@ function MessageItemImpl({
                 {author?.display_name || author?.username || 'Usuário'}
               </button>
               <span
-                className="text-[11px] text-discord-text-muted/80 tabular-nums shrink-0"
+                className="text-[11px] text-mv-muted/80 tabular-nums shrink-0"
                 title={formatFullDate(message.created_at)}
               >
                 {formatTime(message.created_at)}
               </span>
               {message.pinned_at && (
-                <span className="chip !py-0 !text-[10px] !text-discord-blurple !bg-discord-blurple/10 !border-discord-blurple/20 shrink-0">
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
-                    <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
-                  </svg>
+                <span className="chip !py-0 !text-[10px] !text-mv-accent !bg-mv-accent/10 !border-mv-accent/20 shrink-0">
+                  <PinIcon className="w-3 h-3" aria-hidden />
                   Fixada
                 </span>
               )}
@@ -393,22 +385,22 @@ function MessageItemImpl({
                   }
                 }}
                 autoFocus
-                className="w-full bg-discord-darker text-discord-text text-[15px] px-3 py-2.5 outline-none resize-none"
+                className="w-full bg-mv-canvas text-mv-text text-[15px] px-3 py-2.5 outline-none resize-none"
                 rows={2}
               />
               {editError && <p className="text-xs text-rose-400 mt-1">{editError}</p>}
-              <p className="text-xs text-discord-text-muted mt-1.5">
+              <p className="text-xs text-mv-muted mt-1.5">
                 <kbd className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.06] border border-[var(--color-line)]">esc</kbd> para{' '}
-                <button onClick={() => setEditing(false)} className="text-discord-blurple font-medium hover:underline">cancelar</button> ·{' '}
+                <button onClick={() => setEditing(false)} className="text-mv-accent font-medium hover:underline">cancelar</button> ·{' '}
                 <kbd className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.06] border border-[var(--color-line)]">enter</kbd> para{' '}
-                <button onClick={handleSaveEdit} className="text-discord-blurple font-medium hover:underline">salvar</button>
+                <button onClick={handleSaveEdit} className="text-mv-accent font-medium hover:underline">salvar</button>
               </p>
             </div>
           ) : pureMedia ? null : (
-            <p className="text-[15px] text-discord-text/95 whitespace-pre-wrap break-words leading-[1.4rem]">
+            <p className="text-[15px] text-mv-text/95 whitespace-pre-wrap break-words leading-[1.4rem]">
               {renderedContent}
               {message.edited_at && (
-                <span className="text-[10px] text-discord-text-muted/80 ml-1" title={formatFullDate(message.edited_at)}>(editado)</span>
+                <span className="text-[10px] text-mv-muted/80 ml-1" title={formatFullDate(message.edited_at)}>(editado)</span>
               )}
             </p>
           )}
@@ -416,11 +408,9 @@ function MessageItemImpl({
           {thread && (
             <button
               onClick={() => onOpenThread?.(thread)}
-              className="mt-1.5 inline-flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium bg-white/[0.04] border border-[var(--color-line)] text-discord-text hover:bg-white/[0.07] transition-colors"
+              className="mt-1.5 inline-flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium bg-white/[0.04] border border-[var(--color-line)] text-mv-text hover:bg-white/[0.07] transition-colors"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 text-discord-blurple">
-                <path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8l-4 4V6a1 1 0 0 1 1-1z" />
-              </svg>
+              <ThreadIcon className="w-3.5 h-3.5 text-mv-accent" aria-hidden />
               {replyCount} {replyCount === 1 ? 'resposta' : 'respostas'} — {thread.name}
             </button>
           )}
@@ -429,38 +419,58 @@ function MessageItemImpl({
             <div className="mt-2 flex flex-col gap-2 max-w-md">
               {attachments.map((att) =>
                 att.mime_type.startsWith('image/') ? (
-                  <a key={att.id} href={safeHttpUrl(att.file_url) ?? undefined} target="_blank" rel="noreferrer">
-                    <img
-                      src={safeHttpUrl(att.file_url) ?? undefined}
-                      alt={att.file_name}
-                      className="rounded-xl max-h-80 object-cover border border-[var(--color-line)] hover:brightness-110 transition"
-                    />
-                  </a>
+                  <SignedAttachment key={att.id} bucket="attachments" fileUrl={att.file_url}>
+                    {(url, onError) => (
+                      <a href={url} target="_blank" rel="noreferrer">
+                        <img
+                          src={url}
+                          onError={onError}
+                          alt={att.file_name}
+                          className="rounded-xl max-h-80 object-cover border border-[var(--color-line)] hover:brightness-110 transition"
+                        />
+                      </a>
+                    )}
+                  </SignedAttachment>
                 ) : att.mime_type.startsWith('audio/') ? (
-                  <div key={att.id} className="flex items-center gap-2 bg-discord-darker border border-[var(--color-line)] rounded-xl px-3 py-2.5">
-                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-blurple shrink-0">
-                      <path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4l3.3 3.3V4a1 1 0 0 1 1-1z" />
-                    </svg>
-                    <audio controls src={safeHttpUrl(att.file_url) ?? undefined} className="h-9 max-w-xs" />
-                  </div>
+                  <SignedAttachment key={att.id} bucket="attachments" fileUrl={att.file_url} autoRenew={false}>
+                    {(url, onError) => (
+                      <div className="flex items-center gap-2 bg-mv-canvas border border-[var(--color-line)] rounded-xl px-3 py-2.5">
+                        <DownloadIcon className="w-5 h-5 text-mv-accent shrink-0" aria-hidden />
+                        <audio controls src={url} onError={onError} className="h-9 max-w-xs" />
+                      </div>
+                    )}
+                  </SignedAttachment>
+                ) : att.mime_type.startsWith('video/') ? (
+                  <SignedAttachment key={att.id} bucket="attachments" fileUrl={att.file_url} autoRenew={false}>
+                    {(url, onError) => (
+                      <video
+                        controls
+                        preload="metadata"
+                        src={url}
+                        onError={onError}
+                        className="rounded-xl max-h-80 max-w-full border border-[var(--color-line)] bg-black"
+                      />
+                    )}
+                  </SignedAttachment>
                 ) : (
-                  <a
-                    key={att.id}
-                    href={safeHttpUrl(att.file_url) ?? undefined}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-3 bg-discord-darker border border-[var(--color-line)] rounded-xl px-3 py-2.5 hover:border-[var(--color-line-strong)] hover:bg-white/[0.03] transition-colors"
-                  >
-                    <span className="w-10 h-10 rounded-lg bg-discord-blurple/10 flex items-center justify-center shrink-0">
-                      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-blurple">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm0 2.5L18.5 9H14V4.5z" />
-                      </svg>
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-discord-text truncate">{att.file_name}</p>
-                      <p className="text-xs text-discord-text-muted">{formatFileSize(att.file_size)}</p>
-                    </div>
-                  </a>
+                  <SignedAttachment key={att.id} bucket="attachments" fileUrl={att.file_url}>
+                    {(url) => (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-3 bg-mv-canvas border border-[var(--color-line)] rounded-xl px-3 py-2.5 hover:border-[var(--color-line-strong)] hover:bg-white/[0.03] transition-colors"
+                      >
+                        <span className="w-10 h-10 rounded-lg bg-mv-accent/10 flex items-center justify-center shrink-0">
+                          <FileIcon className="w-5 h-5 text-mv-accent" aria-hidden />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-mv-text truncate">{att.file_name}</p>
+                          <p className="text-xs text-mv-muted">{formatFileSize(att.file_size)}</p>
+                        </div>
+                      </a>
+                    )}
+                  </SignedAttachment>
                 )
               )}
             </div>
@@ -468,7 +478,7 @@ function MessageItemImpl({
 
           {confirmingDelete && (
             <div role="alertdialog" aria-label="Confirmar exclusão" className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-3 py-2 animate-fade-in">
-              <span className="text-sm text-discord-text flex-1 min-w-[10rem]">Excluir esta mensagem?</span>
+              <span className="text-sm text-mv-text flex-1 min-w-[10rem]">Excluir esta mensagem?</span>
               <button onClick={() => setConfirmingDelete(false)} className="btn-ghost h-8 px-3 text-sm">
                 Cancelar
               </button>
@@ -497,8 +507,8 @@ function MessageItemImpl({
                     aria-label={`${emoji} ${group.length}`}
                     className={`flex items-center gap-1.5 h-7 px-2 rounded-full text-xs font-semibold border tabular-nums transition-all active:scale-95 ${
                       reactedByMe
-                        ? 'bg-discord-blurple/15 border-discord-blurple/60 text-discord-text'
-                        : 'bg-white/[0.04] border-[var(--color-line)] text-discord-text-muted hover:border-[var(--color-line-strong)] hover:bg-white/[0.07] hover:text-discord-text'
+                        ? 'bg-mv-accent/15 border-mv-accent/60 text-mv-text'
+                        : 'bg-white/[0.04] border-[var(--color-line)] text-mv-muted hover:border-[var(--color-line-strong)] hover:bg-white/[0.07] hover:text-mv-text'
                     }`}
                   >
                     {(() => {
@@ -541,7 +551,7 @@ function MessageItemImpl({
                     : { label: 'Fixar mensagem', onClick: () => onPin?.(message.id) },
                 ]
               : []),
-            ...(isOwn ? [{ label: 'Editar', onClick: startEditing }] : []),
+            ...(isOwn && !isSticker ? [{ label: 'Editar', onClick: startEditing }] : []),
             ...(!isOwn && onReport ? [{ label: 'Denunciar mensagem', onClick: () => onReport(message.id) }] : []),
             ...(isOwn || canModerate
               ? [

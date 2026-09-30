@@ -1,4 +1,291 @@
 -- ============================================================
+-- 006 — AJUSTES DE 2025 (antigas migrations 007 a 012, juntas)
+--
+-- Este arquivo é a concatenação EXATA, na mesma ordem, das antigas:
+--   007_server_members_realtime.sql, 008_profile_asset_size.sql,
+--   009_dm_unhide_on_recreate.sql, 010_google_oauth_profile.sql,
+--   011_security_hardening.sql, 012_content_reports.sql
+-- Nenhuma linha de SQL foi mudada — só os cabeçalhos de seção abaixo
+-- (comentários). Não existia 006 antes; o número ficou livre.
+--
+-- Quem JÁ RODOU as antigas 007..012 não precisa rodar este arquivo.
+-- Banco novo: rode 001, 002, 003, 004, 005, 006 e 007, nessa ordem.
+-- (Ver supabase/README.md.)
+-- ============================================================
+
+
+-- ##################################################################
+-- ANTIGA 007_server_members_realtime.sql
+-- ##################################################################
+
+-- ============================================================
+-- Realtime em server_members — sem isso, os avisos abaixo escutam a
+-- tabela mas nunca recebem nenhum evento de verdade (o Supabase só
+-- manda Realtime pras tabelas que estão explicitamente na publicação
+-- "supabase_realtime", mesmo esquema usado em 002_messaging.sql e
+-- 003_social.sql pras outras tabelas):
+--   - ServersContext.tsx escuta a MINHA linha em server_members pra
+--     saber a hora que entrei num servidor novo (convite por link,
+--     convite pelo chat, ou ter sido adicionado por outra pessoa) e
+--     atualizar a lista sozinho, sem precisar fechar e abrir o app.
+--   - useServerMembers.ts escuta as linhas de UM servidor pra saber
+--     assim que alguém novo entra, e conseguir mostrar o NOME de quem
+--     entrou (em vez do genérico "Alguém entrou no servidor").
+-- ============================================================
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'server_members'
+  ) then
+    alter publication supabase_realtime add table public.server_members;
+  end if;
+end $$;
+
+
+-- ##################################################################
+-- ANTIGA 008_profile_asset_size.sql
+-- ##################################################################
+
+-- ============================================================
+-- Aumenta o limite de tamanho das imagens de edição do perfil. Esses
+-- valores precisam bater com AVATAR_MAX_BYTES/BANNER_MAX_BYTES/
+-- DECORATION_MAX_BYTES em src/lib/profileAssetLimits.ts — o app já
+-- confere o tamanho no navegador ANTES de tentar enviar (pra não
+-- gastar tempo de upload à toa), mas quem trava de verdade um arquivo
+-- grande demais é o limite do próprio bucket aqui no banco. Se só um
+-- dos dois lados for aumentado, o upload passa na checagem do app e
+-- falha depois, então os dois valores sempre precisam mudar juntos.
+--
+--   avatars              5MB -> 10MB
+--   profile-banners      8MB -> 15MB
+--   avatar-decorations   2MB -> 5MB
+-- ============================================================
+update storage.buckets set file_size_limit = 10485760 where id = 'avatars';
+update storage.buckets set file_size_limit = 15728640 where id = 'profile-banners';
+update storage.buckets set file_size_limit = 5242880 where id = 'avatar-decorations';
+
+
+-- ##################################################################
+-- ANTIGA 009_dm_unhide_on_recreate.sql
+-- ##################################################################
+
+-- ============================================================
+-- Corrige: depois de apagar uma conversa de mensagem direta, não dava
+-- pra criar/reabrir outra conversa com a mesma pessoa.
+--
+-- Como funciona o "apagar" de uma DM (ver 003_social_FIX_dm_delete.sql):
+-- apagar não é um delete de verdade — só marca hidden_for_a/hidden_for_b
+-- (dependendo de qual lado da conversa é você) como true, e a lista
+-- (useConversations.ts) filtra fora qualquer conversa marcada como
+-- escondida pro seu lado. Isso é de propósito: a OUTRA pessoa continua
+-- vendo a conversa normalmente, e se ela mandar mensagem nova a
+-- conversa volta a aparecer pra você sozinha.
+--
+-- O problema: como só existe UMA linha de dm_conversations por par de
+-- usuários (unique(user_a, user_b)), quando você mesmo tenta começar
+-- uma conversa nova com alguém que você tinha apagado antes,
+-- get_or_create_dm encontra essa MESMA linha antiga — mas nunca
+-- limpava a sua própria flag de "escondida", então a conversa
+-- continuava invisível pra você mesmo já "existindo" de novo.
+--
+-- Esta migration é auto-suficiente (recria as colunas/função/gatilho de
+-- 003_social_FIX_dm_delete.sql caso ainda não existam, é seguro rodar
+-- de novo mesmo que já existam) e corrige só o get_or_create_dm pra
+-- sempre limpar a flag de quem está chamando ao reencontrar uma
+-- conversa antiga.
+--
+-- Rode isto no SQL Editor do Supabase (Dashboard → SQL Editor → New
+-- query → colar isto → Run).
+-- ============================================================
+
+alter table public.dm_conversations add column if not exists hidden_for_a boolean not null default false;
+alter table public.dm_conversations add column if not exists hidden_for_b boolean not null default false;
+
+-- Apaga (esconde) a conversa só do lado de quem chamou.
+create or replace function public.hide_dm_conversation(p_conversation_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_convo public.dm_conversations;
+begin
+  select * into v_convo from public.dm_conversations where id = p_conversation_id;
+
+  if v_convo is null then
+    raise exception 'Conversa não encontrada';
+  end if;
+
+  if v_convo.user_a = auth.uid() then
+    update public.dm_conversations set hidden_for_a = true where id = p_conversation_id;
+  elsif v_convo.user_b = auth.uid() then
+    update public.dm_conversations set hidden_for_b = true where id = p_conversation_id;
+  else
+    raise exception 'Você não participa dessa conversa';
+  end if;
+end;
+$$;
+
+-- Toda vez que chega uma mensagem nova, a conversa "reaparece" pros dois
+-- lados (mesmo pra quem tinha apagado) — assim ninguém perde uma
+-- mensagem nova só porque tinha limpado a conversa antes.
+create or replace function public.unhide_dm_conversation_on_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.dm_conversations
+    set hidden_for_a = false, hidden_for_b = false
+    where id = new.conversation_id and (hidden_for_a or hidden_for_b);
+  return new;
+end;
+$$;
+
+drop trigger if exists on_dm_message_unhide_conversation on public.dm_messages;
+create trigger on_dm_message_unhide_conversation
+  after insert on public.dm_messages
+  for each row execute function public.unhide_dm_conversation_on_message();
+
+-- ============================================================
+-- A CORREÇÃO NOVA: get_or_create_dm agora limpa a flag de "escondida"
+-- de quem está chamando, sempre que reencontra uma conversa que já
+-- existia (escondida ou não — não faz mal nenhum limpar de novo).
+-- ============================================================
+create or replace function public.get_or_create_dm(p_other_user_id uuid)
+returns public.dm_conversations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_a uuid;
+  v_b uuid;
+  v_convo public.dm_conversations;
+begin
+  if p_other_user_id = auth.uid() then
+    raise exception 'Você não pode iniciar uma conversa consigo mesmo';
+  end if;
+
+  if exists (
+    select 1 from public.blocked_users
+    where (blocker_id = auth.uid() and blocked_id = p_other_user_id)
+       or (blocker_id = p_other_user_id and blocked_id = auth.uid())
+  ) then
+    raise exception 'Não é possível enviar mensagem para este usuário';
+  end if;
+
+  if auth.uid() < p_other_user_id then
+    v_a := auth.uid();
+    v_b := p_other_user_id;
+  else
+    v_a := p_other_user_id;
+    v_b := auth.uid();
+  end if;
+
+  select * into v_convo from public.dm_conversations where user_a = v_a and user_b = v_b;
+
+  if v_convo is null then
+    insert into public.dm_conversations (user_a, user_b) values (v_a, v_b) returning * into v_convo;
+  else
+    -- Linha já existia: limpa só o lado de quem está chamando agora
+    -- (o lado da outra pessoa não muda, exatamente como o
+    -- unhide-on-message acima já respeita).
+    update public.dm_conversations
+    set hidden_for_a = (case when v_a = auth.uid() then false else hidden_for_a end),
+        hidden_for_b = (case when v_b = auth.uid() then false else hidden_for_b end)
+    where id = v_convo.id
+    returning * into v_convo;
+  end if;
+
+  return v_convo;
+end;
+$$;
+
+
+-- ##################################################################
+-- ANTIGA 010_google_oauth_profile.sql
+-- ##################################################################
+
+-- ============================================================
+-- Ajusta a criação automática de perfil (handle_new_user, de
+-- 001_core.sql) pra funcionar bem também com quem se cadastra pelo
+-- login do Google, não só pelo formulário de e-mail/senha.
+--
+-- Duas diferenças de quem entra pelo Google:
+--
+-- 1. Não vem "username" nenhum (isso só é mandado explicitamente no
+--    cadastro por e-mail/senha, em signUp() no AuthContext.tsx) — o
+--    código ORIGINAL já cobria isso caindo pro texto antes do @ do
+--    e-mail (ex: "joao" de "joao@gmail.com"). Mas como username é
+--    UNIQUE, duas pessoas DIFERENTES com o mesmo texto antes do @ (uma
+--    no Gmail, outra no Outlook, por exemplo) fariam a segunda travar
+--    o cadastro inteiro com um erro de banco que ela não teria como
+--    entender. Agora, se o nome já estiver em uso, tenta variações com
+--    um número no final até achar uma livre, em vez de falhar.
+--
+-- 2. O Google manda um nome de exibição de verdade (raw_user_meta_data
+--    ->>'full_name' ou ->>'name', dependendo de como o provedor
+--    devolve) — melhor usar ele no display_name em vez de repetir o
+--    username ali, quando disponível.
+--
+-- Rode isto no SQL Editor do Supabase (Dashboard → SQL Editor → New
+-- query → colar isto → Run).
+-- ============================================================
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_base text;
+  v_username text;
+  v_suffix int := 0;
+  v_display_name text;
+begin
+  v_base := coalesce(
+    nullif(trim(new.raw_user_meta_data->>'username'), ''),
+    split_part(new.email, '@', 1)
+  );
+  -- username só aceita letras/números/ponto/underline no cadastro por
+  -- e-mail (ver validate() em Register.tsx) — o texto antes do @ de um
+  -- e-mail de verdade pode ter outros caracteres (ex: "joao+voip"),
+  -- então limpa aqui também pra manter os dois cadastros consistentes.
+  v_base := regexp_replace(v_base, '[^a-zA-Z0-9_.]', '', 'g');
+  if v_base = '' then
+    v_base := 'usuario';
+  end if;
+
+  v_username := v_base;
+  while exists (select 1 from public.profiles where lower(username) = lower(v_username)) loop
+    v_suffix := v_suffix + 1;
+    v_username := v_base || v_suffix::text;
+  end loop;
+
+  v_display_name := coalesce(
+    nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
+    nullif(trim(new.raw_user_meta_data->>'name'), ''),
+    v_base
+  );
+
+  insert into public.profiles (id, username, display_name)
+  values (new.id, v_username, v_display_name);
+
+  return new;
+end;
+$$;
+
+
+-- ##################################################################
+-- ANTIGA 011_security_hardening.sql
+-- ##################################################################
+
+-- ============================================================
 -- ENDURECIMENTO DE SEGURANÇA — resultado de uma auditoria completa
 -- do banco (RLS, funções, buckets) pedida pelo dono do app. Corrige
 -- vários problemas reais encontrados, do mais grave pro mais leve.
@@ -505,3 +792,184 @@ begin
   update public.soundboard_sounds set play_count = play_count + 1 where id = p_sound_id;
 end;
 $$;
+
+
+-- ##################################################################
+-- ANTIGA 012_content_reports.sql
+-- ##################################################################
+
+-- Sistema de denúncia de conteúdo: mensagens de servidor e usuários.
+-- Quem denuncia só enxerga a própria denúncia; quem modera o servidor
+-- (dono ou quem tem a permissão manage_messages) enxerga e resolve as
+-- denúncias daquele servidor. Nada aqui confia em valores vindos do
+-- cliente pra decidir quem pode ver o quê — server_id e
+-- reported_user_id são sempre recalculados no servidor a partir do
+-- que realmente existe no banco (ver set_report_context() abaixo),
+-- então não dá pra forjar uma denúncia apontando pra outro servidor
+-- ou "roubando" a identidade de quem denuncia.
+
+create table if not exists public.reports (
+  id uuid primary key default gen_random_uuid(),
+  reporter_id uuid not null references auth.users(id) on delete cascade,
+  server_id uuid references public.servers(id) on delete cascade,
+  target_type text not null check (target_type in ('message', 'user')),
+  message_id uuid references public.messages(id) on delete cascade,
+  reported_user_id uuid references auth.users(id) on delete cascade,
+  reason text not null,
+  details text,
+  status text not null default 'pending' check (status in ('pending', 'reviewed', 'dismissed')),
+  reviewed_by uuid references auth.users(id) on delete set null,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists reports_server_status_idx on public.reports(server_id, status);
+create index if not exists reports_reporter_idx on public.reports(reporter_id);
+
+-- Preenche server_id/reported_user_id a partir dos dados reais no
+-- banco (nunca confia no que o cliente mandou pra esses dois campos),
+-- valida o alvo, e impede autodenúncia.
+create or replace function public.set_report_context()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_server_id uuid;
+  v_author_id uuid;
+begin
+  if new.reporter_id is distinct from auth.uid() then
+    raise exception 'reporter_id precisa ser o usuário autenticado';
+  end if;
+
+  if new.target_type = 'message' then
+    if new.message_id is null then
+      raise exception 'message_id é obrigatório para denúncia de mensagem';
+    end if;
+    select server_id, author_id into v_server_id, v_author_id
+    from public.messages where id = new.message_id;
+    if v_server_id is null then
+      raise exception 'mensagem não encontrada';
+    end if;
+    if v_author_id = auth.uid() then
+      raise exception 'não é possível denunciar a própria mensagem';
+    end if;
+    new.server_id := v_server_id;
+    new.reported_user_id := v_author_id;
+  elsif new.target_type = 'user' then
+    if new.reported_user_id is null then
+      raise exception 'reported_user_id é obrigatório para denúncia de usuário';
+    end if;
+    if new.reported_user_id = auth.uid() then
+      raise exception 'não é possível denunciar a si mesmo';
+    end if;
+    -- server_id é opcional numa denúncia de usuário (só indica em qual
+    -- servidor a denúncia deveria aparecer pros moderadores) — se vier
+    -- preenchido, só é aceito quando quem denuncia é membro de fato
+    -- daquele servidor; caso contrário a denúncia ainda é criada, só
+    -- sem servidor associado (ninguém além do próprio denunciante a vê).
+    if new.server_id is not null and not exists (
+      select 1 from public.server_members where server_id = new.server_id and user_id = auth.uid()
+    ) then
+      new.server_id := null;
+    end if;
+  else
+    raise exception 'target_type inválido';
+  end if;
+
+  new.status := 'pending';
+  new.reviewed_by := null;
+  new.reviewed_at := null;
+  new.created_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists before_insert_report on public.reports;
+create trigger before_insert_report
+  before insert on public.reports
+  for each row execute function public.set_report_context();
+
+-- Depois de criada, uma denúncia só pode ter status/revisão alterados
+-- (por um moderador) — o conteúdo da denúncia em si é imutável.
+create or replace function public.protect_report_immutable_columns()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.reporter_id is distinct from old.reporter_id
+    or new.target_type is distinct from old.target_type
+    or new.message_id is distinct from old.message_id
+    or new.reported_user_id is distinct from old.reported_user_id
+    or new.reason is distinct from old.reason
+    or new.details is distinct from old.details
+    or new.server_id is distinct from old.server_id
+    or new.created_at is distinct from old.created_at
+  then
+    raise exception 'só é permitido alterar o status da denúncia';
+  end if;
+  new.reviewed_by := auth.uid();
+  new.reviewed_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists before_update_report on public.reports;
+create trigger before_update_report
+  before update on public.reports
+  for each row execute function public.protect_report_immutable_columns();
+
+alter table public.reports enable row level security;
+
+drop policy if exists "reports_insert_own" on public.reports;
+create policy "reports_insert_own" on public.reports
+  for insert to authenticated
+  with check (reporter_id = auth.uid());
+
+drop policy if exists "reports_select_own_or_moderator" on public.reports;
+create policy "reports_select_own_or_moderator" on public.reports
+  for select to authenticated
+  using (
+    reporter_id = auth.uid()
+    or (
+      server_id is not null
+      and (
+        exists (select 1 from public.servers where id = server_id and owner_id = auth.uid())
+        or public.has_permission(server_id, auth.uid(), 'manage_messages')
+      )
+    )
+  );
+
+drop policy if exists "reports_update_moderator" on public.reports;
+create policy "reports_update_moderator" on public.reports
+  for update to authenticated
+  using (
+    server_id is not null
+    and (
+      exists (select 1 from public.servers where id = server_id and owner_id = auth.uid())
+      or public.has_permission(server_id, auth.uid(), 'manage_messages')
+    )
+  )
+  with check (
+    server_id is not null
+    and (
+      exists (select 1 from public.servers where id = server_id and owner_id = auth.uid())
+      or public.has_permission(server_id, auth.uid(), 'manage_messages')
+    )
+  );
+
+revoke all on public.reports from public, anon;
+grant select, insert, update on public.reports to authenticated;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'reports'
+  ) then
+    alter publication supabase_realtime add table public.reports;
+  end if;
+end $$;

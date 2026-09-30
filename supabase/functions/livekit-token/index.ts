@@ -128,6 +128,19 @@ Deno.serve(async (req: Request) => {
     if (!channelRow && !groupRow && !dmRow) {
       return jsonResponse({ error: 'Você não tem acesso a essa sala de voz.', code: 'not_authorized' }, 403)
     }
+    // Grupo: exige ser MEMBRO agora. (Até a migration 007/parte 19 a RLS
+    // de group_conversations também mostrava o grupo pra quem o CRIOU,
+    // mesmo depois de sair — e isso bastava pra ganhar token da call.)
+    // Checagem explícita além da RLS, falhando fechado.
+    if (groupRow && !channelRow && !dmRow) {
+      const { data: isMember, error: memberErr } = await supabase.rpc('is_group_member', {
+        p_group_id: room,
+        p_user_id: user.id,
+      })
+      if (memberErr || isMember !== true) {
+        return jsonResponse({ error: 'Você não tem acesso a essa sala de voz.', code: 'not_authorized' }, 403)
+      }
+    }
     // Canal de TEXTO não vira sala de voz — antes qualquer canal que a
     // pessoa enxergasse (inclusive de texto) gerava um token válido.
     if (channelRow && channelRow.type !== 'voice') {
@@ -159,6 +172,18 @@ Deno.serve(async (req: Request) => {
         p_permission: 'manage_channels',
       })
       canPublish = !permErr && isModerator === true
+    }
+
+    // Membro em castigo (timeout) entra só pra OUVIR — antes o token
+    // liberava microfone/câmera/tela normalmente. Falha fechado: se a
+    // checagem der erro, também não publica. (Quem já estava na sala na
+    // hora do castigo é tratado pela Edge Function livekit-moderate.)
+    if (channelRow && canPublish) {
+      const { data: timedOut, error: timeoutErr } = await supabase.rpc('is_timed_out', {
+        p_server_id: channelRow.server_id,
+        p_user_id: user.id,
+      })
+      if (timeoutErr || timedOut === true) canPublish = false
     }
 
     const livekitUrl = Deno.env.get('LIVEKIT_URL')
@@ -225,6 +250,8 @@ Deno.serve(async (req: Request) => {
     if (err instanceof HttpError) {
       return jsonResponse({ error: err.message, code: err.code }, err.status)
     }
-    return jsonResponse({ error: err instanceof Error ? err.message : 'Erro desconhecido' }, 400)
+    // Erro inesperado: detalhe só no log da função, nunca a mensagem crua.
+    console.error('livekit-token:', err instanceof Error ? err.message : err)
+    return jsonResponse({ error: 'Não foi possível entrar na sala de voz agora.' }, 500)
   }
 })

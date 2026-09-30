@@ -25,11 +25,11 @@ export function TitleBar() {
 
   return (
     <div
-      className="h-10 shrink-0 flex items-center gap-2.5 px-3.5 bg-discord-sidebar border-b border-[var(--color-line)] relative z-10 select-none"
+      className="h-10 shrink-0 flex items-center gap-2.5 px-3.5 bg-mv-side border-b border-[var(--color-line)] relative z-10 select-none"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       <img src="/logo-192.png" alt="" className="w-5 h-5 rounded-md shrink-0 ring-1 ring-[var(--color-line-strong)]" />
-      <span className="font-display font-semibold text-[13px] text-discord-text-muted">Mamacos <span className="text-discord-text">Voip</span></span>
+      <span className="font-display font-semibold text-[13px] text-mv-muted">Mamacos <span className="text-mv-text">Voip</span></span>
     </div>
   )
 }

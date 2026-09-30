@@ -1,3 +1,4 @@
+import { describeMessageContent } from '../../lib/stickers'
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import { EmptyState } from './settingsUI'
@@ -13,7 +14,7 @@ const STATUS_LABEL: Record<ReportStatus, string> = {
 
 const STATUS_COLOR: Record<ReportStatus, string> = {
   pending: '!bg-amber-400/12 !text-amber-300 !border-amber-400/25',
-  reviewed: '!bg-discord-green/12 !text-discord-green !border-discord-green/25',
+  reviewed: '!bg-mv-green/12 !text-mv-green !border-mv-green/25',
   dismissed: '',
 }
 
@@ -55,6 +56,13 @@ export function ReportsPanel({ serverId, onClose }: { serverId: string; onClose:
     }
   }, [reports])
 
+  // Moderador manda a denúncia também pra equipe da plataforma (o banco
+  // só aceita escalated de false pra true).
+  async function escalate(reportId: string) {
+    const { error } = await supabase.from('reports').update({ escalated: true }).eq('id', reportId)
+    if (error) alert('Não foi possível enviar para a equipe. Tente de novo.')
+  }
+
   const visible = reports.filter((r) => filter === 'all' || r.status === filter)
 
   function nameFor(userId: string) {
@@ -73,8 +81,8 @@ export function ReportsPanel({ serverId, onClose }: { serverId: string; onClose:
             onClick={() => setFilter(f)}
             className={`h-8 px-3.5 rounded-full text-[13px] font-medium border transition-colors ${
               filter === f
-                ? 'bg-discord-blurple/15 border-discord-blurple/50 text-white'
-                : 'bg-white/[0.02] border-[var(--color-line)] text-discord-text-muted hover:text-discord-text hover:bg-white/[0.05]'
+                ? 'bg-mv-accent/15 border-mv-accent/50 text-white'
+                : 'bg-white/[0.02] border-[var(--color-line)] text-mv-muted hover:text-mv-text hover:bg-white/[0.05]'
             }`}
           >
             {f === 'all' ? 'Todas' : STATUS_LABEL[f]}
@@ -108,32 +116,41 @@ export function ReportsPanel({ serverId, onClose }: { serverId: string; onClose:
             <div key={r.id} className="rounded-2xl bg-white/[0.02] border border-[var(--color-line)] p-4">
               <div className="flex items-center justify-between gap-2 mb-2">
                 <span className={`chip ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
-                <span className="text-[11.5px] text-discord-text-muted">{formatDate(r.created_at)}</span>
+                <span className="text-[11.5px] text-mv-muted">{formatDate(r.created_at)}</span>
               </div>
 
-              <p className="text-[14px] text-discord-text">
-                <span className="text-discord-text-muted">{nameFor(r.reporter_id)}</span> denunciou{' '}
+              <p className="text-[14px] text-mv-text">
+                <span className="text-mv-muted">{nameFor(r.reporter_id)}</span> denunciou{' '}
                 {r.target_type === 'message' ? 'uma mensagem de ' : ''}
                 <span className="font-medium text-white">{r.reported_user_id ? nameFor(r.reported_user_id) : 'usuário'}</span>
               </p>
-              <p className="text-[13.5px] text-discord-text mt-1">
-                <span className="text-discord-text-muted">Motivo:</span> {r.reason}
+              <p className="text-[13.5px] text-mv-text mt-1">
+                <span className="text-mv-muted">Motivo:</span> {r.reason}
               </p>
-              {r.details && <p className="text-[13px] text-discord-text-muted mt-1 italic">"{r.details}"</p>}
+              {r.details && <p className="text-[13px] text-mv-muted mt-1 italic">"{r.details}"</p>}
               {r.message_id && (
-                <p className="text-[12.5px] text-discord-text-muted mt-2 rounded-lg bg-discord-darker/70 border-l-2 border-[var(--color-line-strong)] px-3 py-2 line-clamp-3">
-                  {messagesById[r.message_id]?.content || '(mensagem não encontrada — pode já ter sido excluída)'}
+                <p className="text-[12.5px] text-mv-muted mt-2 rounded-lg bg-mv-canvas/70 border-l-2 border-[var(--color-line-strong)] px-3 py-2 line-clamp-3">
+                  {(messagesById[r.message_id]?.content && describeMessageContent(messagesById[r.message_id].content)) || '(mensagem não encontrada — pode já ter sido excluída)'}
                 </p>
               )}
 
               {r.status === 'pending' && (
-                <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-[var(--color-line)]">
+                <div className="flex flex-wrap justify-end gap-2 mt-3 pt-3 border-t border-[var(--color-line)]">
+                  {!r.escalated && (
+                    <button
+                      onClick={() => void escalate(r.id)}
+                      title="Envia esta denúncia também para a equipe do Mamacos Voip"
+                      className="btn-ghost h-8 px-3 text-[13px] mr-auto"
+                    >
+                      Enviar para a equipe
+                    </button>
+                  )}
                   <button onClick={() => setStatus(r.id, 'dismissed')} className="btn-ghost h-8 px-3 text-[13px]">
                     Descartar
                   </button>
                   <button
                     onClick={() => setStatus(r.id, 'reviewed')}
-                    className="h-8 px-3 rounded-[10px] text-[13px] font-medium bg-discord-green/15 text-discord-green border border-discord-green/30 hover:bg-discord-green/25 transition-colors"
+                    className="h-8 px-3 rounded-[10px] text-[13px] font-medium bg-mv-green/15 text-mv-green border border-mv-green/30 hover:bg-mv-green/25 transition-colors"
                   >
                     Marcar como revisada
                   </button>

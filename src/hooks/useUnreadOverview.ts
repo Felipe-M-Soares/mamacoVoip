@@ -10,6 +10,15 @@ const POLL_INTERVAL_MS = 20_000
 // consulta agregada a cada 20s. Isso é um trade-off razoável pra um
 // indicador de "não lido" — troca precisão ao segundo por muito menos
 // conexões abertas.
+//
+// Desde a 007 (parte "não lidos numa consulta só") a consulta é UMA RPC,
+// `unread_overview()`, que devolve só os canais/DMs não lidos. Antes eram
+// 7 consultas e até 2.000 linhas baixadas a cada 20s por pessoa — a maior
+// fonte de egress do app (ver loadtest/CAPACIDADE.md). Se a função ainda
+// não existir no banco, cai no caminho antigo.
+function isMissingFunction(error: { code?: string; message?: string }) {
+  return error.code === 'PGRST202' || error.code === '42883' || /could not find the function/i.test(error.message ?? '')
+}
 export function useUnreadOverview() {
   const { user } = useAuth()
   // Só o ID — o objeto `user` muda a cada renovação do token, o que antes
@@ -24,6 +33,7 @@ export function useUnreadOverview() {
   // canal que ela acabou de ler. Com isso, vale sempre a leitura mais nova.
   const localReadsRef = useRef<Map<string, string>>(new Map())
   const inFlightRef = useRef(false)
+  const rpcMissingRef = useRef(false)
 
   const refresh = useCallback(async () => {
     if (!userId || inFlightRef.current) return
@@ -36,8 +46,33 @@ export function useUnreadOverview() {
         return local > remote ? local : remote
       }
 
-      // As duas metades (canais de servidor e DMs) não dependem uma da
-      // outra — antes rodavam em sequência.
+      if (!rpcMissingRef.current) {
+        const { data, error } = await supabase.rpc('unread_overview')
+        if (!error && data) {
+          const unreadChannels = new Set<string>()
+          const unreadServers = new Set<string>()
+          const unreadConvos = new Set<string>()
+          for (const row of data) {
+            const lastRead = latestRead(row.id, row.last_read_at ?? undefined)
+            if (lastRead && new Date(row.last_message_at) <= new Date(lastRead)) continue
+            if (row.kind === 'channel') {
+              unreadChannels.add(row.id)
+              if (row.server_id) unreadServers.add(row.server_id)
+            } else {
+              unreadConvos.add(row.id)
+            }
+          }
+          setUnreadChannelIds((prev) => (sameSet(prev, unreadChannels) ? prev : unreadChannels))
+          setUnreadServerIds((prev) => (sameSet(prev, unreadServers) ? prev : unreadServers))
+          setUnreadConversationIds((prev) => (sameSet(prev, unreadConvos) ? prev : unreadConvos))
+          return
+        }
+        if (error && isMissingFunction(error)) rpcMissingRef.current = true
+        // Outro erro (rede, etc.): tenta o caminho antigo desta vez.
+      }
+
+      // Caminho antigo (banco sem a função). As duas metades (canais de
+      // servidor e DMs) não dependem uma da outra.
       const channelsPart = (async () => {
         const { data: memberRows } = await supabase.from('server_members').select('server_id').eq('user_id', userId)
         const serverIds = (memberRows ?? []).map((m) => m.server_id)

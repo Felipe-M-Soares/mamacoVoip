@@ -14,7 +14,7 @@ export function VoiceMovedToast() {
       {notices.map((n) => (
         <div key={n.id} role="status" className="surface-elevated rounded-2xl p-3.5 animate-pop-in flex items-center gap-3">
           <Avatar name={n.movedByName} avatarUrl={n.movedByAvatarUrl} size={32} />
-          <p className="text-[13px] text-discord-text leading-snug min-w-0 flex-1">
+          <p className="text-[13px] text-mv-text leading-snug min-w-0 flex-1">
             Você foi movido para <span className="font-semibold text-white break-words">#{n.channelName}</span> por{' '}
             <span className="font-semibold text-white break-words">{n.movedByName}</span>
           </p>

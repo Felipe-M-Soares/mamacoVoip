@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Mamacos Voip — servidores, canais, chat em tempo real, voz e vídeo.",
-  "author": "Felipe M. Soares <jogos.fms@hotmail.com>",
+  "author": "Mamacos Voip",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -27,6 +27,7 @@
     "@supabase/supabase-js": "^2.112.3",
     "electron-updater": "^6.8.9",
     "livekit-client": "^2.22.3",
+    "lucide-react": "^1.49.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
@@ -61,6 +62,12 @@
       "electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
+    ],
     "directories": {
       "output": "release"
     },
@@ -76,6 +83,14 @@
       "electron/screen-capture-gdi.exe",
       "electron/screen-capture-wgc.exe"
     ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
     "protocols": [
       {
         "name": "Mamacos Voip Auth",
@@ -129,6 +144,7 @@
       ],
       "icon": "build/icon.png",
       "category": "Network",
+      "maintainer": "Mamacos Voip",
       "synopsis": "Chat em texto, voz e vídeo",
       "syncDesktopName": true
     },
@@ -141,14 +157,16 @@
     "appx": {
       "applicationId": "MamacosVoip",
       "displayName": "Mamacos Voip",
-      "publisherDisplayName": "Felipe M. Soares",
+      "publisherDisplayName": "zom1n1",
       "backgroundColor": "#07070a",
       "languages": [
         "pt-BR",
         "en-US"
       ],
       "showNameOnTiles": true,
-      "artifactName": "MamacosVoip-Store.${ext}"
+      "artifactName": "MamacosVoip-Store.${ext}",
+      "identityName": "zom1n1.MamacosVoip",
+      "publisher": "CN=7C32AF9F-38B6-40EA-B20F-D1219940C232"
     }
   }
 }

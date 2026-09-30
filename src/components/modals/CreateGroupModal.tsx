@@ -71,7 +71,7 @@ export function CreateGroupModal({
             onChange={(e) => setName(e.target.value)}
             placeholder="Ex: Squad de sexta"
             maxLength={60}
-            className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
+            className="w-full px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
           />
         </div>
 
@@ -104,11 +104,11 @@ export function CreateGroupModal({
                     aria-checked={isSelected}
                     onClick={() => toggle(f.profile.id)}
                     className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-[10px] text-sm transition-colors ${
-                      isSelected ? 'bg-discord-blurple/[0.12]' : 'hover:bg-white/[0.05]'
+                      isSelected ? 'bg-mv-accent/[0.12]' : 'hover:bg-white/[0.05]'
                     }`}
                   >
                     <Avatar name={f.profile.username} avatarUrl={f.profile.avatar_url} size={32} />
-                    <span className="flex-1 text-left text-[14px] text-discord-text truncate">
+                    <span className="flex-1 text-left text-[14px] text-mv-text truncate">
                       {f.profile.display_name || f.profile.username}
                     </span>
                     <CheckMark checked={isSelected} />

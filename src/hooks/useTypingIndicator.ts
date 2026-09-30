@@ -2,8 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { openSharedChannel } from '../lib/realtimeChannel'
 
-const TYPING_TIMEOUT_MS = 4000
-const SEND_THROTTLE_MS = 2000
+// Cada "digitando" é um broadcast que o Supabase cobra como 1 + (quantos
+// estão no canal) mensagens de Realtime — é a maior fatia da cota em
+// canal movimentado (ver loadtest/CAPACIDADE.md). 1 aviso a cada 3s (era
+// 2s) corta ~1/3 disso; o indicador do outro lado dura 5s, então não pisca.
+const TYPING_TIMEOUT_MS = 5000
+const SEND_THROTTLE_MS = 3000
 const EMPTY: string[] = []
 
 export function useTypingIndicator(channelId: string | null, userId: string | undefined) {
@@ -58,8 +62,8 @@ export function useTypingIndicator(channelId: string | null, userId: string | un
   const notifyTyping = useCallback(() => {
     if (!channelRef.current || !userId) return
     const now = Date.now()
-    // Não manda um broadcast a cada tecla — no máximo 1 a cada 2s já é
-    // suficiente pra manter o indicador vivo do outro lado.
+    // Não manda um broadcast a cada tecla — no máximo 1 a cada 3s já é
+    // suficiente pra manter o indicador vivo do outro lado (1 a cada 3s).
     if (now - lastSentRef.current < SEND_THROTTLE_MS) return
     lastSentRef.current = now
     void channelRef.current.send({ type: 'broadcast', event: 'typing', payload: { userId } })

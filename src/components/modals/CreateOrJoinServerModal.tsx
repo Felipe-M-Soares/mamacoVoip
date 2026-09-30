@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { useServers } from '../../hooks/useServers'
 import { ConfirmDialog } from './ConfirmDialog'
+import { EditIcon, ImageAddIcon } from '../ui/icons'
 
 const ICON_MAX_BYTES = 5 * 1024 * 1024 // precisa bater com o file_size_limit do bucket 'server-icons'
 
@@ -97,7 +98,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
 
   const tabClass = (active: boolean) =>
     `flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
-      active ? 'bg-discord-lighter text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]' : 'text-discord-text-muted hover:text-discord-text'
+      active ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]' : 'text-mv-muted hover:text-mv-text'
     }`
 
   return (
@@ -122,7 +123,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
         </>
       }
     >
-      <div role="tablist" aria-label="Criar ou entrar" className="flex gap-1 p-1 mb-5 rounded-xl bg-discord-darker border border-[var(--color-line)]">
+      <div role="tablist" aria-label="Criar ou entrar" className="flex gap-1 p-1 mb-5 rounded-xl bg-mv-canvas border border-[var(--color-line)]">
         <button role="tab" aria-selected={tab === 'create'} onClick={() => setTab('create')} className={tabClass(tab === 'create')}>
           Criar servidor
         </button>
@@ -133,7 +134,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
 
       {tab === 'create' ? (
         <div className="space-y-5">
-          <p className="text-sm text-discord-text-muted leading-relaxed">
+          <p className="text-sm text-mv-muted leading-relaxed">
             Seu servidor é onde você e seus amigos se encontram. Dê um nome, escolha um ícone e comece a conversar —
             dá pra ajustar tudo de novo depois, nas configurações do servidor.
           </p>
@@ -150,40 +151,32 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
                 igual ao padrão usado no avatar do EditProfileModal. */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="relative w-24 h-24 rounded-full bg-discord-darker border-2 border-dashed border-white/[0.18] flex items-center justify-center hover:border-discord-blurple transition-colors group"
+              className="relative w-24 h-24 rounded-full bg-mv-canvas border-2 border-dashed border-white/[0.18] flex items-center justify-center hover:border-mv-accent transition-colors group"
               aria-label={iconPreview ? 'Trocar ícone do servidor' : 'Adicionar ícone do servidor'}
             >
               {iconPreview ? (
                 <>
                   <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover rounded-full" />
                   <span className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-white">
-                      <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                    </svg>
+                    <EditIcon className="w-5 h-5 text-white" aria-hidden />
                     <span className="text-[10px] font-medium text-white">Trocar</span>
                   </span>
                 </>
               ) : (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8 text-discord-text-muted group-hover:text-discord-blurple transition-colors">
-                  <rect x="3" y="3" width="18" height="18" rx="3" />
-                  <circle cx="8.5" cy="9.5" r="1.5" />
-                  <path d="M21 15l-5-5-9 9" />
-                </svg>
+                <ImageAddIcon className="w-8 h-8 text-mv-muted group-hover:text-mv-accent transition-colors" strokeWidth={1.5} aria-hidden />
               )}
               {/* Selo de "editar" no canto — mesma linguagem visual que a
                   troca de avatar/banner usa em EditProfileModal, deixa
                   claro que dá pra clicar de novo pra trocar. */}
-              <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-discord-blurple flex items-center justify-center border-2 border-[var(--color-elevated)] group-hover:brightness-110 transition-all">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 text-white">
-                  <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+              <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-mv-accent flex items-center justify-center border-2 border-[var(--color-elevated)] group-hover:brightness-110 transition-all">
+                <EditIcon className="w-3.5 h-3.5 text-white" aria-hidden />
               </span>
             </button>
             <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleIconChange} />
             {!iconPreview && (
-              <p className="text-xs font-medium text-discord-text-muted text-center">Adicionar ícone</p>
+              <p className="text-xs font-medium text-mv-muted text-center">Adicionar ícone</p>
             )}
-            <p className="text-[11px] text-discord-text-muted text-center">
+            <p className="text-[11px] text-mv-muted text-center">
               PNG, JPG, WEBP ou GIF animado — até 5MB. Recomendado: imagem quadrada.
             </p>
             {iconError && <p className="text-xs text-rose-400">{iconError}</p>}
@@ -200,13 +193,13 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setName(e.target.value)}
               placeholder="Servidor do João"
               maxLength={60}
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
           </div>
 
           <div>
             <label htmlFor="server-create-description" className="field-label">
-              Sobre o servidor <span className="normal-case font-normal text-discord-text-muted/70">(opcional)</span>
+              Sobre o servidor <span className="normal-case font-normal text-mv-muted/70">(opcional)</span>
             </label>
             <textarea
               id="server-create-description"
@@ -215,7 +208,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
               placeholder="Do que é esse servidor? (aparece pra quem vê o servidor antes de entrar)"
               maxLength={200}
               rows={2}
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none resize-none"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none resize-none"
             />
           </div>
 
@@ -223,7 +216,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-discord-text-muted">Cole um convite abaixo para entrar em um servidor existente.</p>
+          <p className="text-sm text-mv-muted">Cole um convite abaixo para entrar em um servidor existente.</p>
 
           <div>
             <label htmlFor="server-join-code" className="field-label">
@@ -235,7 +228,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="ex: a1b2c3d4"
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
           </div>
 

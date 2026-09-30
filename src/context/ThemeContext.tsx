@@ -2,16 +2,22 @@ import { createContext, useCallback, useEffect, useMemo, useState, type ReactNod
 
 export const THEMES = [
   { id: 'vermelho', label: 'Vermelho', description: 'O padrão da Mamacos Voip', swatch: '#ee3a34' },
-  { id: 'azul', label: 'Clássico', description: 'O visual tradicional, estilo Discord', swatch: '#5865f2' },
+  { id: 'azul', label: 'Clássico', description: 'Tons neutros em azul-acinzentado', swatch: '#6366f1' },
   { id: 'roxo', label: 'Roxo Meia-noite', description: 'Escuro e roxo', swatch: '#8b5cf6' },
   { id: 'oceano', label: 'Oceano', description: 'Azul-petróleo, calmo pra longas sessões', swatch: '#14b8a6' },
+  { id: 'neon', label: 'Neon', description: 'Magenta elétrico com brilho ciano', swatch: '#c616c6' },
+  { id: 'floresta', label: 'Floresta', description: 'Verde-musgo, fundo quase preto', swatch: '#1a8646' },
+  { id: 'por-do-sol', label: 'Pôr do sol', description: 'Rosa-coral e dourado sobre vinho', swatch: '#d42a5f' },
+  { id: 'grafite', label: 'Grafite', description: 'Monocromático, acento branco', swatch: '#e4e4e7' },
+  { id: 'sakura', label: 'Sakura', description: 'Rosa suave com fundo ameixa', swatch: '#cc2b7a' },
+  { id: 'cyber', label: 'Cyber', description: 'Ciano com destaques em amarelo', swatch: '#facc15' },
 ] as const
 
 export type ThemeId = (typeof THEMES)[number]['id']
 
 const STORAGE_KEY = 'mamacos-theme'
 // O vermelho é a identidade da marca (foco em público gamer) — fica
-// como padrão. O tema "Clássico" (paleta estilo Discord) continua
+// como padrão. O tema "Clássico" (paleta azul-acinzentada) continua
 // disponível em Configurações → Aparência pra quem preferir, só não é
 // mais o que quem abre o app pela primeira vez recebe.
 const DEFAULT_THEME: ThemeId = 'vermelho'

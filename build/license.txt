@@ -1,45 +1,73 @@
 ﻿MAMACOS VOIP — TERMO DE INSTALAÇÃO E USO
 
 Ao continuar esta instalação, você concorda com os Termos de Uso e a
-Política de Privacidade do Mamacos Voip, e reconhece que:
+Política de Privacidade do Mamacos Voip e declara ter 18 anos ou mais.
 
-1. PERMISSÕES DO APLICATIVO
+1. IDADE MÍNIMA
 
-O Mamacos Voip pode solicitar acesso a:
-  - Microfone (obrigatório para chamadas de voz)
-  - Câmera (opcional, apenas quando você ativar o vídeo)
-  - Compartilhamento de tela (opcional, apenas quando você ativar)
+O Mamacos Voip é destinado somente a maiores de 18 anos.
+
+2. PERMISSÕES DO APLICATIVO
+
+O Mamacos Voip pode usar:
+  - Microfone (necessário para chamadas de voz; só quando você entra
+    num canal de voz)
+  - Câmera (opcional, só quando você ativa o vídeo)
+  - Captura de tela e de áudio de aplicativos (opcional, só quando você
+    compartilha a tela)
+  - Teclado, em segundo plano, só para detectar a tecla de "apertar
+    para falar", se você ativar o atalho global. Nenhuma tecla é
+    registrada ou enviada.
   - Notificações do sistema (opcional)
 
-Nenhuma chamada de voz ou vídeo é gravada ou armazenada pelo Mamacos
-Voip. O áudio e o vídeo passam por um servidor de mídia (LiveKit) só
-para serem repassados aos outros participantes da chamada, sem
-gravação. O microfone e a câmera só são ativados quando você,
-explicitamente, entra em uma chamada.
+Chamadas de voz, vídeo e compartilhamentos de tela passam por um
+servidor de mídia (LiveKit Cloud) só para serem retransmitidos aos
+outros participantes da chamada. O Mamacos Voip não grava nem
+armazena esse conteúdo.
 
-2. DETECÇÃO DE JOGOS (OPCIONAL)
+3. DETECÇÃO DE JOGOS
 
-O aplicativo verifica periodicamente quais processos estão em
-execução no seu computador, comparando com uma lista de jogos
-conhecidos, apenas para exibir "Jogando X" no seu status. Nenhuma
-outra informação sobre processos em execução é coletada ou enviada.
+Enquanto está aberto e com você conectado, o aplicativo consulta
+periodicamente os processos em execução e a janela em primeiro plano,
+e compara isso, no próprio computador, com uma lista de jogos
+conhecidos e com as pastas de bibliotecas de jogos, para exibir
+"Jogando X" no seu perfil. Só o nome do jogo reconhecido é enviado.
+A lista de processos, os caminhos de arquivos e os títulos de janelas
+não saem do seu computador. Com Configurações > Privacidade > Só
+amigos, o app mostra o status "Jogando" apenas para seus amigos.
 
-3. DADOS COLETADOS
+4. ARQUIVOS NO SEU COMPUTADOR
 
-Consulte a Política de Privacidade completa para o detalhamento de
-quais dados são coletados, por quê, e quais são os seus direitos:
+O aplicativo guarda na pasta de dados dele a sua sessão de login
+(cifrada pelo sistema), suas preferências e um arquivo de diagnóstico
+(mamacos-debug.log) com erros técnicos. Esses arquivos não são
+enviados automaticamente e são apagados na desinstalação.
+
+5. ATUALIZAÇÕES
+
+O aplicativo verifica e baixa atualizações automaticamente pelo GitHub.
+
+6. DADOS COLETADOS E SEUS DIREITOS
+
+Consulte a Política de Privacidade completa:
 https://mamaco-voip.vercel.app/privacidade
 
-4. TERMOS DE USO
+7. TERMOS DE USO
 
-Consulte os Termos de Uso completos em:
+Consulte os Termos de Uso completos:
 https://mamaco-voip.vercel.app/termos
 
-5. IDADE MÍNIMA
+8. SOFTWARE DE TERCEIROS
 
-O uso do Mamacos Voip requer idade mínima de 13 anos. Entre 13 e 18
-anos, o uso deve ser autorizado por um responsável legal. Canais
-marcados como +18 exigem que você confirme ter 18 anos ou mais.
+Este aplicativo inclui componentes de código aberto de terceiros
+(Electron/Chromium, entre outros), usados sob suas próprias licenças.
+Veja LICENSE.electron.txt e LICENSES.chromium.html na pasta de
+instalação e o arquivo THIRD_PARTY_NOTICES.md no repositório do
+projeto: https://github.com/Felipe-M-Soares/mamacoVoip
 
-Ao clicar em "Concordo" abaixo, você confirma que leu e concorda com
-os termos acima e com os documentos completos referenciados.
+O aplicativo é fornecido gratuitamente, "no estado em que se
+encontra", sem garantias além das previstas na lei brasileira.
+
+Ao clicar em "Concordo", você confirma que tem 18 anos ou mais e que
+leu e concorda com os termos acima e com os documentos completos
+referenciados.

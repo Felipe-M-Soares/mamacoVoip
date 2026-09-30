@@ -2,7 +2,7 @@ import { createContext, useCallback, useEffect, useMemo, useRef, useState, type 
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { rateLimitError } from '../lib/rateLimit'
-import { uniqueTopic } from '../lib/realtimeChannel'
+import { changesChannel } from '../lib/realtimeChannel'
 import type { Server } from '../types/database'
 
 interface ServersContextValue {
@@ -122,8 +122,7 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     // dev, Fast Refresh, etc.) com o MESMO nome de canal, o Supabase
     // devolveria o canal já inscrito e o segundo `.on()` derrubaria o app
     // com "cannot add postgres_changes callbacks ... after subscribe()".
-    const channel = supabase
-      .channel(uniqueTopic(`server_membership:${userId}`))
+    const channel = changesChannel(`server_membership:${userId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'server_members', filter: `user_id=eq.${userId}` },
@@ -154,13 +153,21 @@ export function ServersProvider({ children }: { children: ReactNode }) {
       .single()
 
     if (error || !server) {
-      let debugInfo = ''
+      // Diagnóstico de permissão (RLS) só no log — nada de "[DEBUG …]"
+      // na mensagem mostrada pra pessoa.
       if (error?.code === '42501') {
-        const { data: whoami } = await supabase.rpc('debug_whoami')
-        const row = whoami?.[0]
-        debugInfo = ` [DEBUG — seu app: ${user.id} | banco enxerga: ${row?.jwt_uid ?? 'null'} (role: ${row?.jwt_role ?? 'null'})]`
+        try {
+          const { data: whoami } = await supabase.rpc('debug_whoami')
+          const row = whoami?.[0]
+          console.warn(
+            `[createServer] RLS recusou — app: ${user.id} | banco enxerga: ${row?.jwt_uid ?? 'null'} (role: ${row?.jwt_role ?? 'null'})`
+          )
+        } catch {
+          // diagnóstico é opcional
+        }
+        return { error: 'Sem permissão para criar o servidor. Saia e entre de novo na conta e tente outra vez.' }
       }
-      return { error: (error?.message ?? 'Erro ao criar servidor') + debugInfo }
+      return { error: error?.message ?? 'Erro ao criar servidor' }
     }
 
     let iconWarning: string | null = null

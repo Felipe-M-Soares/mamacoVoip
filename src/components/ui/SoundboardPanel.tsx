@@ -7,10 +7,10 @@ import { decodeAudioFile, trimAudioBufferToWav, MAX_SOUND_SECONDS } from '../../
 import type { SoundboardSound } from '../../types/database'
 
 // Soundboard — efeitos sonoros que qualquer um no canal de voz ouve na
-// hora, igual o Discord. Cada servidor tem o próprio catálogo de sons
+// hora, igual a apps de chat populares. Cada servidor tem o próprio catálogo de sons
 // (ver useSoundboard.ts + 006_soundboard.sql); tocar um som usa
 // voice.playSoundboardSound (VoiceContext.tsx), que toca localmente E
-// avisa todo mundo mais no canal pra tocarem a mesma URL aí também —
+// avisa todo mundo mais no canal (RPC play_soundboard_sound) pra tocarem o mesmo som aí também —
 // nenhum áudio é misturado no microfone, cada um ouve pelo próprio
 // alto-falante (e no volume PRÓPRIO que cada um escolher — ver o
 // controle de "Volume dos efeitos" abaixo).
@@ -55,7 +55,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
 
   const query = search.trim().toLowerCase()
   const filtered = query ? soundboard.sounds.filter((s) => s.name.toLowerCase().includes(query)) : soundboard.sounds
-  // "Usados com frequência" — igual o Discord separa os sons mais
+  // "Usados com frequência" — igual a apps de chat populares separa os sons mais
   // tocados numa seção própria em cima. Só mostra enquanto não há busca
   // ativa, pra não duplicar resultado com "Todos os sons" logo abaixo.
   const frequent = [...soundboard.sounds]
@@ -68,8 +68,12 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
   }
 
   function handlePlay(sound: SoundboardSound) {
-    voice.playSoundboardSound(soundboard.getUrl(sound))
-    soundboard.bumpPlayCount(sound.id)
+    // A RPC play_soundboard_sound (migration 016) já soma o uso no banco;
+    // aqui só reflete o +1 na lista local.
+    void voice.playSoundboardSound(sound).then(({ error: playError }) => {
+      if (playError) setError(playError)
+      else soundboard.bumpPlayCount(sound.id, { localOnly: true })
+    })
   }
 
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
@@ -176,7 +180,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
       >
         <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="w-9 h-9 rounded-[10px] bg-discord-blurple/15 text-discord-blurple ring-1 ring-inset ring-discord-blurple/25 flex items-center justify-center shrink-0">
+            <span className="w-9 h-9 rounded-[10px] bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 flex items-center justify-center shrink-0">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden>
                 <path d="M9 18V5l12-2v13" />
                 <circle cx="6" cy="18" r="3" />
@@ -185,7 +189,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
             </span>
             <div className="min-w-0">
               <h2 id="soundboard-title" className="font-display text-lg font-semibold text-white leading-tight">Soundboard</h2>
-              <p className="text-[12px] text-discord-text-muted">Todo mundo no canal ouve na hora</p>
+              <p className="text-[12px] text-mv-muted">Todo mundo no canal ouve na hora</p>
             </div>
           </div>
           <button onClick={onClose} className="icon-btn w-9 h-9 shrink-0" aria-label="Fechar" title="Fechar">
@@ -200,10 +204,10 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
             o próprio volume dos sons pra não levar susto com efeito
             alto, sem precisar mexer no volume de quem está falando. */}
         <div className="mb-3 px-3 py-2.5 rounded-xl bg-white/[0.03] border border-[var(--color-line)] shrink-0 flex items-center gap-3">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-discord-text-muted shrink-0" aria-hidden>
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-mv-muted shrink-0" aria-hidden>
             <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8z" />
           </svg>
-          <label htmlFor="soundboard-volume" className="text-[12px] font-medium text-discord-text shrink-0">Volume dos efeitos</label>
+          <label htmlFor="soundboard-volume" className="text-[12px] font-medium text-mv-text shrink-0">Volume dos efeitos</label>
           <input
             id="soundboard-volume"
             type="range"
@@ -211,13 +215,13 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
             max={100}
             value={voice.soundboardVolume}
             onChange={(e) => voice.setSoundboardVolume(Number(e.target.value))}
-            className="flex-1 min-w-0 accent-discord-blurple"
+            className="flex-1 min-w-0 accent-mv-accent"
           />
-          <span className="text-[12px] tabular-nums text-discord-text-muted w-9 text-right shrink-0">{voice.soundboardVolume}%</span>
+          <span className="text-[12px] tabular-nums text-mv-muted w-9 text-right shrink-0">{voice.soundboardVolume}%</span>
         </div>
 
         <div className="relative mb-4 shrink-0">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-discord-text-muted pointer-events-none" aria-hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mv-muted pointer-events-none" aria-hidden>
             <circle cx="11" cy="11" r="7" />
             <path d="m20 20-3.5-3.5" />
           </svg>
@@ -227,7 +231,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Pesquisar sons"
             aria-label="Pesquisar sons"
-            className="w-full h-10 pl-9 pr-3 bg-discord-darker text-discord-text text-sm outline-none"
+            className="w-full h-10 pl-9 pr-3 bg-mv-canvas text-mv-text text-sm outline-none"
           />
         </div>
 
@@ -241,20 +245,20 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
           ) : soundboard.sounds.length === 0 ? (
             <div className="flex flex-col items-center text-center py-8">
               <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center mb-3">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7 text-discord-text-muted" aria-hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7 text-mv-muted" aria-hidden>
                   <path d="M9 18V5l12-2v13" />
                   <circle cx="6" cy="18" r="3" />
                   <circle cx="18" cy="16" r="3" />
                 </svg>
               </div>
               <p className="text-[14px] font-semibold text-white">Nenhum som ainda</p>
-              <p className="text-[13px] text-discord-text-muted mt-0.5">Envie o primeiro efeito lá embaixo!</p>
+              <p className="text-[13px] text-mv-muted mt-0.5">Envie o primeiro efeito lá embaixo!</p>
             </div>
           ) : (
             <>
               {!query && frequent.length > 0 && (
                 <div className="mb-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-2 flex items-center gap-1.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-2 flex items-center gap-1.5">
                     <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 text-amber-400" aria-hidden>
                       <path d="m12 2 2.9 6.9L22 9.5l-5.5 4.8 1.7 7.2L12 17.8 5.8 21.5l1.7-7.2L2 9.5l7.1-.6L12 2z" />
                     </svg>
@@ -274,10 +278,10 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
               )}
               <div>
                 {!query && (
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-2">Todos os sons</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-2">Todos os sons</p>
                 )}
                 {filtered.length === 0 ? (
-                  <p className="text-[13px] text-discord-text-muted text-center py-6">Nenhum som encontrado pra “{search.trim()}”.</p>
+                  <p className="text-[13px] text-mv-muted text-center py-6">Nenhum som encontrado pra “{search.trim()}”.</p>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {filtered.map((s) => (
@@ -302,13 +306,13 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
             </p>
           )}
           {decoding ? (
-            <div className="h-10 flex items-center justify-center gap-2 text-[13px] text-discord-text-muted">
-              <span className="w-4 h-4 rounded-full border-2 border-white/20 border-t-discord-blurple animate-spin" aria-hidden />
+            <div className="h-10 flex items-center justify-center gap-2 text-[13px] text-mv-muted">
+              <span className="w-4 h-4 rounded-full border-2 border-white/20 border-t-mv-accent animate-spin" aria-hidden />
               Analisando áudio...
             </div>
           ) : trimState ? (
-            <div className="p-3.5 rounded-xl bg-discord-blurple/[0.06] border border-discord-blurple/30">
-              <p className="text-[13px] text-discord-text mb-2.5">
+            <div className="p-3.5 rounded-xl bg-mv-accent/[0.06] border border-mv-accent/30">
+              <p className="text-[13px] text-mv-text mb-2.5">
                 Esse áudio tem {trimState.duration.toFixed(1)}s — o soundboard só aceita até {MAX_SOUND_SECONDS}s.
                 Escolha o trecho:
               </p>
@@ -319,9 +323,9 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
                 step={0.1}
                 value={trimState.start}
                 onChange={(e) => setTrimState((prev) => (prev ? { ...prev, start: Number(e.target.value) } : prev))}
-                className="w-full accent-discord-blurple"
+                className="w-full accent-mv-accent"
               />
-              <p className="text-[12px] tabular-nums text-discord-text-muted mt-1">
+              <p className="text-[12px] tabular-nums text-mv-muted mt-1">
                 Tocando de {trimState.start.toFixed(1)}s até {(trimState.start + MAX_SOUND_SECONDS).toFixed(1)}s
               </p>
               <div className="flex flex-wrap gap-2 mt-3">
@@ -349,7 +353,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
                 placeholder="Nome do som"
                 autoFocus
                 aria-label="Nome do som"
-                className="flex-1 min-w-0 h-10 px-3 bg-discord-darker text-discord-text text-sm outline-none"
+                className="flex-1 min-w-0 h-10 px-3 bg-mv-canvas text-mv-text text-sm outline-none"
               />
               <button
                 onClick={handleConfirmUpload}
@@ -369,7 +373,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
           ) : (
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-full py-3 px-3 rounded-xl border border-dashed border-[var(--color-line-strong)] text-discord-text-muted hover:text-white hover:border-discord-blurple/60 hover:bg-discord-blurple/[0.06] transition-colors flex items-center justify-center gap-2.5"
+              className="w-full py-3 px-3 rounded-xl border border-dashed border-[var(--color-line-strong)] text-mv-muted hover:text-white hover:border-mv-accent/60 hover:bg-mv-accent/[0.06] transition-colors flex items-center justify-center gap-2.5"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4 shrink-0" aria-hidden>
                 <path d="M12 5v14M5 12h14" />
@@ -394,7 +398,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
 
 // Antes cada som virava um quadrado grande com ícone + nome (tipo card),
 // gastando MUITO espaço vertical pra pouca informação — com uma lista
-// de sons um pouco maior, o painel virava um scroll infinito. O Discord
+// de sons um pouco maior, o painel virava um scroll infinito. Um app de chat popular
 // de verdade mostra só o NOME num botãozinho compacto (só o texto,
 // sem ícone), bem mais denso — é esse o visual que reproduzimos aqui.
 function SoundButton({
@@ -412,14 +416,14 @@ function SoundButton({
         onClick={onPlay}
         title={sound.name}
         aria-label={`Tocar ${sound.name}`}
-        className="w-full h-11 pl-2.5 pr-3 rounded-xl bg-white/[0.04] border border-[var(--color-line)] hover:bg-discord-blurple/[0.12] hover:border-discord-blurple/50 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] transition-all flex items-center gap-2 text-left"
+        className="w-full h-11 pl-2.5 pr-3 rounded-xl bg-white/[0.04] border border-[var(--color-line)] hover:bg-mv-accent/[0.12] hover:border-mv-accent/50 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] transition-all flex items-center gap-2 text-left"
       >
-        <span className="w-6 h-6 rounded-full bg-white/[0.06] group-hover:bg-discord-blurple text-discord-text-muted group-hover:text-white flex items-center justify-center shrink-0 transition-colors" aria-hidden>
+        <span className="w-6 h-6 rounded-full bg-white/[0.06] group-hover:bg-mv-accent text-mv-muted group-hover:text-white flex items-center justify-center shrink-0 transition-colors" aria-hidden>
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 ml-px">
             <path d="M8 5v14l11-7z" />
           </svg>
         </span>
-        <span className="text-[13px] font-medium text-discord-text truncate">{sound.name}</span>
+        <span className="text-[13px] font-medium text-mv-text truncate">{sound.name}</span>
       </button>
       {onDelete && (
         <button

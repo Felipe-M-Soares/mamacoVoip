@@ -45,12 +45,12 @@ export function ModerationLogModal({ serverId, onClose }: { serverId: string; on
 
   const tabClass = (active: boolean) =>
     `flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
-      active ? 'bg-discord-lighter text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]' : 'text-discord-text-muted hover:text-discord-text'
+      active ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]' : 'text-mv-muted hover:text-mv-text'
     }`
 
   return (
     <Modal title="Moderação" onClose={onClose} maxWidth="max-w-lg">
-      <div role="tablist" aria-label="Moderação" className="flex gap-1 p-1 mb-4 rounded-xl bg-discord-darker border border-[var(--color-line)]">
+      <div role="tablist" aria-label="Moderação" className="flex gap-1 p-1 mb-4 rounded-xl bg-mv-canvas border border-[var(--color-line)]">
         <button role="tab" aria-selected={tab === 'log'} onClick={() => setTab('log')} className={tabClass(tab === 'log')}>
           Registro
         </button>
@@ -79,11 +79,11 @@ export function ModerationLogModal({ serverId, onClose }: { serverId: string; on
           <div className="space-y-0.5 max-h-96 overflow-y-auto">
             {logs.map((log) => (
               <div key={log.id} className="flex gap-3 px-3 py-2.5 rounded-[10px] hover:bg-white/[0.04] transition-colors">
-                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-discord-blurple shrink-0" aria-hidden="true" />
+                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-mv-accent shrink-0" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[14px] text-discord-text">{formatLog(log)}</p>
-                  {log.reason && <p className="text-[12.5px] text-discord-text-muted mt-0.5">Motivo: {log.reason}</p>}
-                  <p className="text-[11.5px] text-discord-text-muted mt-0.5">{formatDate(log.created_at)}</p>
+                  <p className="text-[14px] text-mv-text">{formatLog(log)}</p>
+                  {log.reason && <p className="text-[12.5px] text-mv-muted mt-0.5">Motivo: {log.reason}</p>}
+                  <p className="text-[11.5px] text-mv-muted mt-0.5">{formatDate(log.created_at)}</p>
                 </div>
               </div>
             ))}
@@ -106,7 +106,7 @@ export function ModerationLogModal({ serverId, onClose }: { serverId: string; on
               <Avatar name={b.profile.username} avatarUrl={b.profile.avatar_url} size={32} />
               <div className="flex-1 min-w-0">
                 <p className="text-[14px] text-white truncate">{b.profile.display_name || b.profile.username}</p>
-                {b.reason && <p className="text-[12px] text-discord-text-muted truncate">Motivo: {b.reason}</p>}
+                {b.reason && <p className="text-[12px] text-mv-muted truncate">Motivo: {b.reason}</p>}
               </div>
               <button onClick={() => unbanMember(b.user_id)} className="btn-secondary h-8 px-3 text-[13px] shrink-0">
                 Desbanir

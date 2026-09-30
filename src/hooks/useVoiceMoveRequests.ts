@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { uniqueTopic } from '../lib/realtimeChannel'
+import { changesChannel } from '../lib/realtimeChannel'
 import { shouldApplyVoiceMove } from '../lib/voiceMove'
 import type { VoiceMoveRequest } from '../types/database'
 import { useAuth } from './useAuth'
@@ -115,8 +115,7 @@ export function useVoiceMoveRequests() {
   useEffect(() => {
     const userId = user?.id
     if (!userId) return
-    const channel = supabase
-      .channel(uniqueTopic(`voice_moves:${userId}`))
+    const channel = changesChannel(`voice_moves:${userId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'voice_move_requests', filter: `target_user_id=eq.${userId}` },

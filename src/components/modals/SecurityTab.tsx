@@ -182,16 +182,16 @@ export function SecurityTab() {
             {factors.map((f) => (
               <div
                 key={f.id}
-                className="flex items-center justify-between gap-3 rounded-xl bg-discord-green/[0.06] border border-discord-green/25 px-3.5 py-3"
+                className="flex items-center justify-between gap-3 rounded-xl bg-mv-green/[0.06] border border-mv-green/25 px-3.5 py-3"
               >
-                <span className="text-[14px] text-discord-text flex items-center gap-2.5 min-w-0">
-                  <span className="w-7 h-7 rounded-lg bg-discord-green/15 text-discord-green flex items-center justify-center shrink-0">
+                <span className="text-[14px] text-mv-text flex items-center gap-2.5 min-w-0">
+                  <span className="w-7 h-7 rounded-lg bg-mv-green/15 text-mv-green flex items-center justify-center shrink-0">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                       <path d="M5 12.5l4.5 4.5L19 7.5" />
                     </svg>
                   </span>
                   <span className="truncate">{f.friendly_name || 'Autenticador'}</span>
-                  <span className="chip !text-discord-green !border-discord-green/30 !bg-discord-green/10">Ativado</span>
+                  <span className="chip !text-mv-green !border-mv-green/30 !bg-mv-green/10">Ativado</span>
                 </span>
                 <button
                   onClick={() => removeFactor(f.id)}
@@ -204,21 +204,21 @@ export function SecurityTab() {
             ))}
           </div>
         ) : enrolling ? (
-          <div className="rounded-xl bg-discord-darker/60 border border-[var(--color-line)] p-4 space-y-4 animate-fade-slide-in">
+          <div className="rounded-xl bg-mv-canvas/60 border border-[var(--color-line)] p-4 space-y-4 animate-fade-slide-in">
             <div className="flex flex-col sm:flex-row gap-4 items-center">
               {qrCode && (
                 <div className="shrink-0 bg-white rounded-xl p-2.5">
                   <img src={qrCode} alt="QR code de configuração" className="w-36 h-36" />
                 </div>
               )}
-              <div className="space-y-2 text-[13px] text-discord-text-muted">
+              <div className="space-y-2 text-[13px] text-mv-muted">
                 <p>
                   <span className="text-white font-medium">1.</span> Escaneie com seu app autenticador.
                 </p>
                 {secret && (
                   <p>
                     Não consegue escanear? Digite o código manualmente:{' '}
-                    <span className="font-mono text-discord-text break-all">{secret}</span>
+                    <span className="font-mono text-mv-text break-all">{secret}</span>
                   </p>
                 )}
                 <p>
@@ -235,7 +235,7 @@ export function SecurityTab() {
               onKeyDown={(e) => e.key === 'Enter' && confirmEnroll()}
               placeholder="000000"
               autoFocus
-              className="w-full px-3 py-3 text-center text-2xl tracking-[0.4em] bg-discord-darker text-white outline-none font-mono"
+              className="w-full px-3 py-3 text-center text-2xl tracking-[0.4em] bg-mv-canvas text-white outline-none font-mono"
             />
             {error && <InlineMessage tone="error">{error}</InlineMessage>}
             <div className="flex justify-end gap-2">

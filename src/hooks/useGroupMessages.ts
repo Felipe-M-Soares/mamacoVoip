@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { uniqueTopic } from '../lib/realtimeChannel'
+import { removeAttachmentObjects } from '../lib/storageUrls'
+import { changesChannel } from '../lib/realtimeChannel'
 import { useAuth } from './useAuth'
 import { notify } from '../lib/notifications'
+import { describeMessageContent } from '../lib/stickers'
+import { playMessageSound } from '../lib/sounds'
 import { describeError } from '../lib/errors'
 import { rateLimitError } from '../lib/rateLimit'
 import { MESSAGE_PAGE_SIZE } from './useMessages'
@@ -137,8 +140,7 @@ export function useGroupMessages(groupId: string | null) {
     let active = true
     let hadProblem = false
 
-    const channel = supabase
-      .channel(uniqueTopic(`group_messages:${groupId}`))
+    const channel = changesChannel(`group_messages:${groupId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
@@ -146,7 +148,8 @@ export function useGroupMessages(groupId: string | null) {
           const newMessage = payload.new as GroupMessage
           setMessages((prev) => (prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]))
           if (newMessage.author_id !== userIdRef.current) {
-            notify('Nova mensagem no grupo', newMessage.content.slice(0, 120))
+            notify('Nova mensagem no grupo', describeMessageContent(newMessage.content).slice(0, 120))
+            if (document.hidden || !document.hasFocus()) playMessageSound()
           }
         }
       )
@@ -237,12 +240,13 @@ export function useGroupMessages(groupId: string | null) {
             continue
           }
 
-          const { data: urlData } = supabase.storage.from('group-attachments').getPublicUrl(path)
+          // Bucket privado (migration 017): grava só o CAMINHO dentro do
+          // bucket; quem exibe gera uma URL assinada (useAttachmentUrl).
           const { data: att, error: attError } = await supabase
             .from('group_message_attachments')
             .insert({
               message_id: message.id,
-              file_url: urlData.publicUrl,
+              file_url: path,
               file_name: file.name,
               file_size: file.size,
               mime_type: file.type || 'application/octet-stream',
@@ -284,9 +288,17 @@ export function useGroupMessages(groupId: string | null) {
 
   const deleteMessage = useCallback(async (messageId: string) => {
     try {
+      // Anexos lidos ANTES de apagar (o delete da mensagem leva as
+      // linhas de anexo junto, em cascata) — pra remover os arquivos do
+      // Storage depois.
+      const { data: attRows } = await supabase.from('group_message_attachments').select('file_url').eq('message_id', messageId)
       const { error } = await supabase.from('group_messages').delete().eq('id', messageId)
       if (error) return { error: describeError(error, 'Não foi possível excluir a mensagem') }
       setMessages((prev) => prev.filter((m) => m.id !== messageId))
+      // Best-effort: não segura a UI nem transforma a exclusão em erro.
+      if (attRows && attRows.length > 0) {
+        void removeAttachmentObjects('group-attachments', attRows.map((r) => r.file_url))
+      }
       return { error: null }
     } catch (err) {
       return { error: describeError(err, 'Não foi possível excluir a mensagem') }

@@ -2,8 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { notify } from '../lib/notifications'
+import { playFriendRequestSound } from '../lib/sounds'
 import { rateLimitError } from '../lib/rateLimit'
-import { uniqueTopic } from '../lib/realtimeChannel'
+import { changesChannel } from '../lib/realtimeChannel'
 import type { BlockedUser, Friendship, Profile } from '../types/database'
 
 export type FriendshipWithProfile = Friendship & { profile: Profile }
@@ -141,11 +142,11 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
       const row = payload.new as { friend_id?: string; status?: string } | null
       if (payload.eventType === 'INSERT' && row?.friend_id === userId && row?.status === 'pending') {
         notify('Pedido de amizade', 'Alguém quer ser seu amigo no Mamacos Voip')
+        playFriendRequestSound()
       }
       void refresh()
     }
-    const channel = supabase
-      .channel(uniqueTopic(`friendships:${userId}`))
+    const channel = changesChannel(`friendships:${userId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'friendships', filter: `friend_id=eq.${userId}` }, onChange)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'friendships', filter: `user_id=eq.${userId}` }, onChange)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'friendships', filter: `friend_id=eq.${userId}` }, onChange)

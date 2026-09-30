@@ -1,6 +1,8 @@
+import { describeMessageContent } from '../../lib/stickers'
 import { useEffect, useRef, useState } from 'react'
 import { Avatar } from '../ui/Avatar'
 import type { Message, Profile } from '../../types/database'
+import { CloseIcon, PinIcon, WarningIcon } from '../ui/icons'
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -68,20 +70,16 @@ export function PinnedMessagesPanel({
         role="dialog"
         aria-modal="true"
         aria-label="Mensagens fixadas"
-        className="w-full max-w-sm h-full bg-discord-sidebar border-l border-[var(--color-line)] flex flex-col shadow-[-24px_0_60px_-12px_rgb(0_0_0/0.6)] animate-fade-slide-in"
+        className="w-full max-w-sm h-full bg-mv-side border-l border-[var(--color-line)] flex flex-col shadow-[-24px_0_60px_-12px_rgb(0_0_0/0.6)] animate-fade-slide-in"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-14 px-4 flex items-center justify-between border-b border-[var(--color-line)] shrink-0">
           <h2 className="font-display font-semibold text-white flex items-center gap-2">
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-discord-text-muted" aria-hidden="true">
-              <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
-            </svg>
+            <PinIcon className="w-5 h-5 text-mv-muted" aria-hidden />
             Mensagens fixadas
           </h2>
           <button onClick={onClose} aria-label="Fechar" title="Fechar" className="icon-btn w-9 h-9">
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-              <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
-            </svg>
+            <CloseIcon className="w-5 h-5" aria-hidden />
           </button>
         </div>
 
@@ -101,22 +99,17 @@ export function PinnedMessagesPanel({
           ) : error ? (
             <div className="flex flex-col items-center text-center gap-2 pt-12 px-4">
               <span className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-6 h-6 text-rose-400" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 8v5M12 16.5v.01" />
-                </svg>
+                <WarningIcon className="w-6 h-6 text-rose-400" aria-hidden />
               </span>
               <p className="text-sm text-rose-300">{error}</p>
             </div>
           ) : pinned.length === 0 ? (
             <div className="flex flex-col items-center text-center gap-2 pt-12 px-6">
               <span className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center mb-1">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-discord-text-muted" aria-hidden="true">
-                  <path d="M16 3l5 5-3.5 3.5L19 14l-1.4 1.4-3.5-2.5L10.5 16.5 9 15l3.6-3.6L10 8.9 13.5 5.4 16 3z" />
-                </svg>
+                <PinIcon className="w-8 h-8 text-mv-muted" aria-hidden />
               </span>
               <p className="font-display font-semibold text-white">Nada fixado ainda</p>
-              <p className="text-sm text-discord-text-muted">
+              <p className="text-sm text-mv-muted">
                 Clique com o botão direito numa mensagem e escolha "Fixar mensagem".
               </p>
             </div>
@@ -130,17 +123,17 @@ export function PinnedMessagesPanel({
                     <span className="text-sm font-semibold text-white truncate">
                       {author?.display_name || author?.username || 'Usuário'}
                     </span>
-                    <span className="text-[11px] text-discord-text-muted shrink-0">{formatDate(message.created_at)}</span>
+                    <span className="text-[11px] text-mv-muted shrink-0">{formatDate(message.created_at)}</span>
                     {canUnpin && (
                       <button
                         onClick={() => void handleUnpin(message.id)}
-                        className="ml-auto text-xs font-medium px-2 h-7 rounded-lg text-discord-text-muted hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition shrink-0"
+                        className="ml-auto text-xs font-medium px-2 h-7 rounded-lg text-mv-muted hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition shrink-0"
                       >
                         Desafixar
                       </button>
                     )}
                   </div>
-                  <p className="text-sm text-discord-text break-words whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                  <p className="text-sm text-mv-text break-words whitespace-pre-wrap leading-relaxed">{describeMessageContent(message.content)}</p>
                 </div>
               )
             })

@@ -8,7 +8,7 @@ export function extractFirstUrl(text: string): string | null {
   return match ? match[0] : null
 }
 
-export function isDirectImageUrl(url: string): boolean {
+function isDirectImageUrl(url: string): boolean {
   return IMAGE_EXTENSION_REGEX.test(url)
 }
 
@@ -16,7 +16,7 @@ export function isDirectImageUrl(url: string): boolean {
 // é exatamente o que o seletor de GIF manda: `onSend(gifUrl, [])`, sem
 // nenhum texto além do link). Nesse caso o link em si não deveria
 // aparecer como texto normal, só a prévia da imagem embaixo — igual o
-// Discord de verdade faz. Se a pessoa colar um link de imagem NO MEIO
+// apps de chat populares faz. Se a pessoa colar um link de imagem NO MEIO
 // de uma frase, isso continua false e o texto aparece normal, com a
 // prévia por baixo (mesmo comportamento de antes).
 export function isPureMediaMessage(content: string): boolean {
@@ -44,16 +44,16 @@ function LinkPreviewCardInner({ url }: { url: string }) {
       href={data.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="mt-2 flex max-w-md rounded-xl overflow-hidden border border-[var(--color-line)] border-l-[3px] border-l-discord-blurple bg-discord-darker/70 hover:bg-discord-darker hover:border-[var(--color-line-strong)] transition-colors"
+      className="mt-2 flex max-w-md rounded-xl overflow-hidden border border-[var(--color-line)] border-l-[3px] border-l-mv-accent bg-mv-canvas/70 hover:bg-mv-canvas hover:border-[var(--color-line-strong)] transition-colors"
     >
       {data.image && (
         <img src={data.image} alt="" className="w-28 shrink-0 object-cover" onError={(e) => (e.currentTarget.style.display = 'none')} />
       )}
       <div className="min-w-0 px-3.5 py-3 flex-1">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-discord-text-muted truncate">{data.siteName}</p>
-        {data.title && <p className="text-sm font-semibold text-discord-text hover:underline truncate mt-0.5">{data.title}</p>}
+        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-mv-muted truncate">{data.siteName}</p>
+        {data.title && <p className="text-sm font-semibold text-mv-text hover:underline truncate mt-0.5">{data.title}</p>}
         {data.description && (
-          <p className="text-xs text-discord-text-muted mt-1 line-clamp-2 leading-relaxed">{data.description}</p>
+          <p className="text-xs text-mv-muted mt-1 line-clamp-2 leading-relaxed">{data.description}</p>
         )}
       </div>
     </a>

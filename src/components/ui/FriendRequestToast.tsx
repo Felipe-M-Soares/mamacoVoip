@@ -16,8 +16,8 @@ export function FriendRequestToast() {
           role="status"
           className="surface-elevated rounded-2xl p-4 animate-pop-in"
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-2.5 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-discord-blurple" aria-hidden="true" />
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-2.5 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-mv-accent" aria-hidden="true" />
             Pedido de amizade
           </p>
           <div className="flex items-start gap-3">
@@ -26,9 +26,9 @@ export function FriendRequestToast() {
               <p className="text-sm font-semibold text-white truncate">
                 {req.profile.display_name || req.profile.username}
               </p>
-              <p className="text-xs text-discord-text-muted mt-0.5">quer ser seu amigo</p>
+              <p className="text-xs text-mv-muted mt-0.5">quer ser seu amigo</p>
               {req.request_note && (
-                <p className="text-xs text-discord-text mt-2 px-2.5 py-1.5 rounded-lg bg-white/[0.04] border border-[var(--color-line)] italic line-clamp-2">"{req.request_note}"</p>
+                <p className="text-xs text-mv-text mt-2 px-2.5 py-1.5 rounded-lg bg-white/[0.04] border border-[var(--color-line)] italic line-clamp-2">"{req.request_note}"</p>
               )}
             </div>
             <button onClick={() => dismiss(req.id)} title="Dispensar" aria-label="Dispensar" className="icon-btn w-7 h-7 -mt-8 -mr-1.5 shrink-0">
@@ -52,7 +52,7 @@ export function FriendRequestToast() {
                 await acceptRequest(req.id)
                 dismiss(req.id)
               }}
-              className="flex-1 h-9 rounded-[10px] bg-discord-green text-white text-sm font-semibold hover:brightness-110 active:scale-[0.99] transition"
+              className="flex-1 h-9 rounded-[10px] bg-mv-green text-white text-sm font-semibold hover:brightness-110 active:scale-[0.99] transition"
             >
               Aceitar
             </button>

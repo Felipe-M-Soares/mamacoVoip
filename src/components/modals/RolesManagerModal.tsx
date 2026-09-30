@@ -56,7 +56,7 @@ export function RolesManagerModal({ serverId, onClose }: { serverId: string; onC
     >
       <button
         onClick={() => setEditing('new')}
-        className="w-full h-11 mb-4 rounded-xl border border-dashed border-[var(--color-line-strong)] text-[14px] font-medium text-discord-text-muted hover:text-white hover:border-discord-blurple/60 hover:bg-discord-blurple/[0.06] transition-colors flex items-center justify-center gap-2"
+        className="w-full h-11 mb-4 rounded-xl border border-dashed border-[var(--color-line-strong)] text-[14px] font-medium text-mv-muted hover:text-white hover:border-mv-accent/60 hover:bg-mv-accent/[0.06] transition-colors flex items-center justify-center gap-2"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4" aria-hidden="true">
           <path d="M12 5v14M5 12h14" />
@@ -95,7 +95,7 @@ export function RolesManagerModal({ serverId, onClose }: { serverId: string; onC
                 {role.name}
               </span>
               <span className="chip">{role.permissions.length} permissões</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-discord-text-muted opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-mv-muted opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">
                 <path d="m9 6 6 6-6 6" />
               </svg>
             </button>
@@ -162,7 +162,7 @@ function RoleEditor({
           </>
         }
       >
-        <p className="text-[14px] text-discord-text-muted leading-relaxed">
+        <p className="text-[14px] text-mv-muted leading-relaxed">
           Tem certeza que deseja excluir o cargo <span className="text-white font-medium">{role?.name}</span>? Todos
           os membros perderão esse cargo.
         </p>
@@ -210,7 +210,7 @@ function RoleEditor({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full pl-8 pr-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+              className="w-full pl-8 pr-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
           </div>
         </div>
@@ -251,7 +251,7 @@ function RoleEditor({
           <div className="rounded-xl border border-[var(--color-line)] divide-y divide-[var(--color-line)] max-h-64 overflow-y-auto">
             {PERMISSIONS.map((p) => (
               <div key={p} className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-white/[0.015]">
-                <span className={`text-[13.5px] ${p === 'administrator' ? 'text-amber-300' : 'text-discord-text'}`}>
+                <span className={`text-[13.5px] ${p === 'administrator' ? 'text-amber-300' : 'text-mv-text'}`}>
                   {PERMISSION_LABELS[p]}
                 </span>
                 <Toggle size="sm" label={PERMISSION_LABELS[p]} checked={permissions.has(p)} onChange={() => togglePermission(p)} />

@@ -1,3 +1,4 @@
+import { describeMessageContent } from '../../lib/stickers'
 import { useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { Avatar } from '../ui/Avatar'
@@ -7,6 +8,7 @@ import { useServerMembers } from '../../hooks/useServerMembers'
 import { useServers } from '../../hooks/useServers'
 import { useAdultContent } from '../../hooks/useAdultContent'
 import type { Channel, Message, Profile, Server } from '../../types/database'
+import { SearchIcon } from '../ui/icons'
 
 interface ParsedQuery {
   freeText: string
@@ -204,10 +206,7 @@ export function SearchModal({
   return (
     <Modal title="Pesquisar mensagens" onClose={onClose} maxWidth="max-w-xl" headerless>
       <div className="flex items-center gap-3 pl-5 pr-14 h-16 border-b border-[var(--color-line)]">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5 text-discord-text-muted shrink-0" aria-hidden="true">
-          <circle cx="11" cy="11" r="6.5" />
-          <path d="m20 20-4.2-4.2" />
-        </svg>
+        <SearchIcon className="w-5 h-5 text-mv-muted shrink-0" aria-hidden />
         <input
           ref={inputRef}
           type="text"
@@ -220,7 +219,7 @@ export function SearchModal({
           // O CSS global desenha um anel de foco em todo input; aqui o campo
           // é "sem moldura" (a própria paleta é a moldura), então some com ele.
           style={{ boxShadow: 'none' }}
-          className="flex-1 min-w-0 bg-transparent outline-none text-[17px] text-white placeholder:text-discord-text-muted"
+          className="flex-1 min-w-0 bg-transparent outline-none text-[17px] text-white placeholder:text-mv-muted"
         />
         <button onClick={handleSearch} className="btn-primary h-8 px-3.5 text-[13px] shrink-0">
           Buscar
@@ -228,7 +227,7 @@ export function SearchModal({
       </div>
 
       <div className="px-4 pt-3 pb-2 flex flex-wrap items-center gap-1.5 border-b border-[var(--color-line)]">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mr-1">Filtros</span>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mr-1">Filtros</span>
         {FILTER_HINTS.map((f) => (
           <button
             key={f}
@@ -240,7 +239,7 @@ export function SearchModal({
           </button>
         ))}
         {servers.length > 1 && (
-          <span className="ml-auto flex items-center gap-2 text-[12px] text-discord-text-muted select-none">
+          <span className="ml-auto flex items-center gap-2 text-[12px] text-mv-muted select-none">
             <Toggle
               size="sm"
               id="search-cross-server"
@@ -272,31 +271,28 @@ export function SearchModal({
         ) : searched && results.length === 0 ? (
           !filterError && (
             <div className="flex flex-col items-center text-center py-8">
-              <span className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center text-discord-text-muted mb-3">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="w-6 h-6" aria-hidden="true">
-                  <circle cx="11" cy="11" r="6.5" />
-                  <path d="m20 20-4.2-4.2M8.5 11h5" />
-                </svg>
+              <span className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-[var(--color-line)] flex items-center justify-center text-mv-muted mb-3">
+                <SearchIcon className="w-6 h-6" strokeWidth={1.8} aria-hidden />
               </span>
               <p className="text-[14px] font-medium text-white">Nenhuma mensagem encontrada</p>
-              <p className="text-[12.5px] text-discord-text-muted mt-0.5">Tente outras palavras ou tire algum filtro.</p>
+              <p className="text-[12.5px] text-mv-muted mt-0.5">Tente outras palavras ou tire algum filtro.</p>
             </div>
           )
         ) : !searched ? (
-          <div className="px-3 py-4 space-y-2 text-[12.5px] text-discord-text-muted">
+          <div className="px-3 py-4 space-y-2 text-[12.5px] text-mv-muted">
             <p>
               Combine texto com filtros, por exemplo{' '}
-              <code className="font-mono text-discord-text bg-discord-darker px-1.5 py-0.5 rounded">de:ana em:geral clip</code>
+              <code className="font-mono text-mv-text bg-mv-canvas px-1.5 py-0.5 rounded">de:ana em:geral clip</code>
             </p>
             <p>
-              Datas no formato <code className="font-mono text-discord-text">DD/MM/AAAA</code> em{' '}
-              <code className="font-mono text-discord-text">antes:</code> e <code className="font-mono text-discord-text">depois:</code>.
-              Aperte <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-discord-darker border border-[var(--color-line-strong)]">Enter</kbd> pra buscar.
+              Datas no formato <code className="font-mono text-mv-text">DD/MM/AAAA</code> em{' '}
+              <code className="font-mono text-mv-text">antes:</code> e <code className="font-mono text-mv-text">depois:</code>.
+              Aperte <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-mv-canvas border border-[var(--color-line-strong)]">Enter</kbd> pra buscar.
             </p>
           </div>
         ) : (
           <div className="space-y-0.5 max-h-[min(420px,55vh)] overflow-y-auto">
-            <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">
+            <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted">
               {results.length} resultado{results.length !== 1 ? 's' : ''}
             </p>
             {results.map((message) => {
@@ -319,14 +315,14 @@ export function SearchModal({
                       <span className="text-[14px] font-medium text-white shrink-0">
                         {author?.display_name || author?.username || 'Usuário'}
                       </span>
-                      <span className="text-[11.5px] text-discord-text-muted truncate">
+                      <span className="text-[11.5px] text-mv-muted truncate">
                         em #{channel?.name ?? '?'}
                         {server ? ` · ${server.name}` : ''} · {formatDate(message.created_at)}
                       </span>
                     </div>
-                    <p className="text-[13.5px] text-discord-text truncate">{message.content}</p>
+                    <p className="text-[13.5px] text-mv-text truncate">{describeMessageContent(message.content)}</p>
                   </div>
-                  <span aria-hidden="true" className="self-center text-[11px] text-discord-text-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  <span aria-hidden="true" className="self-center text-[11px] text-mv-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                     Ir →
                   </span>
                 </button>

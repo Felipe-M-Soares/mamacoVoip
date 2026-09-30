@@ -105,14 +105,14 @@ export function ContextMenu({
             className={`group w-full flex items-center gap-2.5 text-left px-2.5 py-[7px] rounded-lg text-[14px] font-medium outline-none transition-colors ${
               item.danger
                 ? 'text-rose-400 hover:bg-rose-500/12 focus-visible:bg-rose-500/12'
-                : 'text-discord-text hover:bg-discord-blurple hover:text-white focus-visible:bg-discord-blurple focus-visible:text-white'
+                : 'text-mv-text hover:bg-mv-accent hover:text-white focus-visible:bg-mv-accent focus-visible:text-white'
             } ${item.disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
             {item.icon && (
               <span
                 aria-hidden="true"
                 className={`w-4 h-4 shrink-0 flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4 ${
-                  item.danger ? '' : 'text-discord-text-muted group-hover:text-white group-focus-visible:text-white'
+                  item.danger ? '' : 'text-mv-muted group-hover:text-white group-focus-visible:text-white'
                 }`}
               >
                 {item.icon}

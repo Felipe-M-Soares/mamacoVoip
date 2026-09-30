@@ -9,4 +9,11 @@ contextBridge.exposeInMainWorld('overlayAPI', {
     ipcRenderer.on('overlay:voice-state', handler)
     return () => ipcRenderer.removeListener('overlay:voice-state', handler)
   },
+  // Canto escolhido nas configurações ({ corner }) — a página alinha a
+  // lista pro lado/borda certos (ver overlay.html).
+  onSettings: (callback) => {
+    const handler = (_event, settings) => callback(settings)
+    ipcRenderer.on('overlay:settings', handler)
+    return () => ipcRenderer.removeListener('overlay:settings', handler)
+  },
 })

@@ -41,7 +41,7 @@ export function EventsModal({
         {canCreate && !showCreate && (
           <button
             onClick={() => setShowCreate(true)}
-            className="w-full h-11 rounded-xl border border-dashed border-[var(--color-line-strong)] text-[14px] font-medium text-discord-text-muted hover:text-white hover:border-discord-blurple/60 hover:bg-discord-blurple/[0.06] transition-colors flex items-center justify-center gap-2"
+            className="w-full h-11 rounded-xl border border-dashed border-[var(--color-line-strong)] text-[14px] font-medium text-mv-muted hover:text-white hover:border-mv-accent/60 hover:bg-mv-accent/[0.06] transition-colors flex items-center justify-center gap-2"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4" aria-hidden="true">
               <path d="M12 5v14M5 12h14" />
@@ -63,7 +63,7 @@ export function EventsModal({
         )}
 
         <div>
-          <h3 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-2.5">
+          <h3 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-2.5">
             Próximos <span className="chip !py-0">{upcoming.length}</span>
           </h3>
           {upcoming.length === 0 ? (
@@ -91,14 +91,14 @@ export function EventsModal({
                         <div className="bg-brand-gradient text-[10px] font-bold uppercase text-white py-0.5">
                           {d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}
                         </div>
-                        <div className="font-display text-lg font-semibold text-white py-0.5 bg-discord-darker">{d.getDate()}</div>
+                        <div className="font-display text-lg font-semibold text-white py-0.5 bg-mv-canvas">{d.getDate()}</div>
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-[15px] font-semibold text-white truncate">{event.name}</p>
-                        <p className="text-[12.5px] text-discord-blurple font-medium">{formatEventDate(event.starts_at)}</p>
-                        {channel && <p className="text-[12px] text-discord-text-muted mt-0.5">🔊 {channel.name}</p>}
+                        <p className="text-[12.5px] text-mv-accent font-medium">{formatEventDate(event.starts_at)}</p>
+                        {channel && <p className="text-[12px] text-mv-muted mt-0.5">🔊 {channel.name}</p>}
                         {event.description && (
-                          <p className="text-[13px] text-discord-text-muted mt-1.5 leading-relaxed">{event.description}</p>
+                          <p className="text-[13px] text-mv-muted mt-1.5 leading-relaxed">{event.description}</p>
                         )}
                       </div>
                       {(event.created_by === user?.id || canCreate) && (
@@ -124,7 +124,7 @@ export function EventsModal({
                             </span>
                           ))}
                         </div>
-                        <span className="pl-2.5 text-[12px] text-discord-text-muted">
+                        <span className="pl-2.5 text-[12px] text-mv-muted">
                           {attendees.length > 0
                             ? `${attendees.length} confirmado${attendees.length !== 1 ? 's' : ''}`
                             : 'Ninguém confirmou ainda'}
@@ -135,7 +135,7 @@ export function EventsModal({
                         aria-pressed={going}
                         className={`h-8 px-3.5 text-[13px] rounded-full font-medium transition-colors ${
                           going
-                            ? 'bg-discord-green/15 text-discord-green border border-discord-green/30'
+                            ? 'bg-mv-green/15 text-mv-green border border-mv-green/30'
                             : 'btn-secondary !rounded-full'
                         }`}
                       >
@@ -151,12 +151,12 @@ export function EventsModal({
 
         {past.length > 0 && (
           <div>
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-2">Passados</h3>
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-2">Passados</h3>
             <div className="rounded-xl border border-[var(--color-line)] divide-y divide-[var(--color-line)] overflow-hidden">
               {past.map((event) => (
                 <div key={event.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-white/[0.015]">
-                  <span className="text-[13.5px] text-discord-text-muted truncate">{event.name}</span>
-                  <span className="text-[12px] text-discord-text-muted shrink-0">{formatEventDate(event.starts_at)}</span>
+                  <span className="text-[13.5px] text-mv-muted truncate">{event.name}</span>
+                  <span className="text-[12px] text-mv-muted shrink-0">{formatEventDate(event.starts_at)}</span>
                 </div>
               ))}
             </div>
@@ -223,7 +223,7 @@ function CreateEventForm({
   }
 
   return (
-    <div className="rounded-2xl bg-white/[0.02] border border-discord-blurple/30 p-4 space-y-3 animate-fade-slide-in">
+    <div className="rounded-2xl bg-white/[0.02] border border-mv-accent/30 p-4 space-y-3 animate-fade-slide-in">
       <p className="text-[14px] font-semibold text-white">Novo evento</p>
       <input
         aria-label="Nome do evento"
@@ -231,7 +231,7 @@ function CreateEventForm({
         onChange={(e) => setName(e.target.value)}
         placeholder="Nome do evento"
         maxLength={100}
-        className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
+        className="w-full px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
       />
       <textarea
         value={description}
@@ -240,7 +240,7 @@ function CreateEventForm({
         placeholder="Descrição (opcional)"
         rows={2}
         maxLength={300}
-        className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none resize-none"
+        className="w-full px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none resize-none"
       />
       <div className="grid grid-cols-2 gap-2">
         <input
@@ -248,14 +248,14 @@ function CreateEventForm({
           aria-label="Data"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
+          className="px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
         />
         <input
           type="time"
           aria-label="Horário"
           value={time}
           onChange={(e) => setTime(e.target.value)}
-          className="px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
+          className="px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
         />
       </div>
       {voiceChannels.length > 0 && (
@@ -263,7 +263,7 @@ function CreateEventForm({
           value={channelId}
           onChange={(e) => setChannelId(e.target.value)}
           aria-label="Canal de voz"
-          className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
+          className="w-full px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
         >
           <option value="">Sem canal de voz específico</option>
           {voiceChannels.map((c) => (

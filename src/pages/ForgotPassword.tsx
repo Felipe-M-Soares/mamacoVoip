@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { createEphemeralAuthClient } from '../lib/supabase'
 import { PUBLIC_WEB_URL } from '../lib/config'
 import { traduzErro } from '../context/AuthContext'
 import { normalizeEmail, validateEmail } from '../lib/authValidation'
@@ -32,7 +32,16 @@ export function ForgotPassword() {
     // e-mail sempre abre o navegador do sistema, então a redefinição
     // acontece lá. Depois é só entrar de novo no app (web ou desktop)
     // com a senha nova.
-    const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), {
+    //
+    // B3/PKCE: o cliente principal usa PKCE, que só funciona se o link
+    // for aberto no MESMO navegador que pediu (é lá que fica o
+    // code_verifier). Como o link quase sempre abre em outro lugar (o
+    // app desktop pede, o navegador abre; ou o e-mail é lido no
+    // celular), o pedido de recuperação sai de um cliente descartável no
+    // fluxo implícito. ResetPassword.tsx aceita os três formatos de volta
+    // (#access_token, ?code= e ?token_hash= — este último é o
+    // recomendado, ver supabase/README.md).
+    const { error } = await createEphemeralAuthClient('implicit').auth.resetPasswordForEmail(normalizeEmail(email), {
       redirectTo: `${PUBLIC_WEB_URL}/redefinir-senha`,
     })
     setLoading(false)

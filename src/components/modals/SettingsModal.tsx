@@ -1,21 +1,49 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
-import { supabase } from '../../lib/supabase'
+import { createEphemeralAuthClient, supabase } from '../../lib/supabase'
+import { checkRateLimit } from '../../lib/rateLimit'
 import { useAuth } from '../../hooks/useAuth'
 import { useVoiceCore } from '../../hooks/useVoice'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
 import { useTheme } from '../../hooks/useTheme'
 import { THEMES, type ThemeId } from '../../context/ThemeContext'
 import { getNotificationPermission, requestNotificationPermission } from '../../lib/notifications'
-import { isSoundEnabled, setSoundEnabled, playConnectSound } from '../../lib/sounds'
+import {
+  SOUND_CATALOG,
+  getSoundVolume,
+  isSoundEnabled,
+  previewUiSound,
+  setSoundEnabled,
+  setSoundVolume,
+  playConnectSound,
+  type UiSoundId,
+} from '../../lib/sounds'
 import { SecurityTab } from './SecurityTab'
 import { exportUserData } from '../../lib/exportUserData'
+import { deleteOwnProfileFiles } from '../../lib/deleteOwnProfileFiles'
 import { useAdultContent } from '../../hooks/useAdultContent'
+import { useIsAppAdmin } from '../../hooks/useAppAdmin'
+import { getShowPlaying, setShowPlaying, subscribeShowPlaying } from '../../lib/gamePrivacy'
 import { validatePassword } from '../../lib/authValidation'
 import { traduzErro } from '../../context/AuthContext'
 import { NetworkDiagnosticsPanel } from './NetworkDiagnosticsPanel'
 import { Avatar } from '../ui/Avatar'
 import { Toggle } from '../ui/Toggle'
+import {
+  BellIcon,
+  CheckIcon,
+  CloseIcon,
+  LockIcon,
+  LogOutIcon,
+  MicIcon,
+  PaletteIcon,
+  PlayIcon,
+  ShieldCheckIcon,
+  UserIcon,
+  InfoIcon,
+  AdminIcon,
+  type AppIcon,
+} from '../ui/icons'
 import { TabHeader, SettingsCard, SettingRow, RowList, RangeSlider, Segmented, Kbd, InlineMessage } from './settingsUI'
 import {
   createNoiseSuppressor,
@@ -24,48 +52,23 @@ import {
   MAX_MIC_SENSITIVITY,
 } from '../../lib/noiseSuppression'
 
-type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'notifications' | 'privacy'
+type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'notifications' | 'privacy' | 'licenses' | 'admin'
 
-// Ícones de traço fino (estilo Lucide) pro menu lateral — 24x24, herdam a cor.
-const TAB_ICONS: Record<Tab, ReactNode> = {
-  account: (
-    <>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 21a8 8 0 0 1 16 0" />
-    </>
-  ),
-  security: (
-    <>
-      <path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6L12 3z" />
-      <path d="m9 12 2 2 4-4" />
-    </>
-  ),
-  privacy: (
-    <>
-      <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
-      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
-    </>
-  ),
-  appearance: (
-    <>
-      <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.8-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.3 0-1 .8-1.8 1.9-1.8H17a4 4 0 0 0 4-4C21 6.4 17 3 12 3z" />
-      <circle cx="7.5" cy="11.5" r="1" fill="currentColor" />
-      <circle cx="10.5" cy="7.5" r="1" fill="currentColor" />
-      <circle cx="15.5" cy="8" r="1" fill="currentColor" />
-    </>
-  ),
-  audio: (
-    <>
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
-    </>
-  ),
-  notifications: (
-    <>
-      <path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16z" />
-      <path d="M10 20.5a2 2 0 0 0 4 0" />
-    </>
-  ),
+// Abas pesadas/raras, carregadas só quando abertas (a de licenças traz o
+// texto inteiro do THIRD_PARTY_NOTICES.md).
+const LicensesTab = lazy(() => import('./LicensesTab').then((m) => ({ default: m.LicensesTab })))
+const AdminReportsTab = lazy(() => import('./AdminReportsTab').then((m) => ({ default: m.AdminReportsTab })))
+
+// Ícones do menu lateral (Lucide, via ui/icons) — herdam a cor.
+const TAB_ICONS: Record<Tab, AppIcon> = {
+  account: UserIcon,
+  security: ShieldCheckIcon,
+  privacy: LockIcon,
+  appearance: PaletteIcon,
+  audio: MicIcon,
+  notifications: BellIcon,
+  licenses: InfoIcon,
+  admin: AdminIcon,
 }
 
 const TAB_GROUPS: { label: string; tabs: { id: Tab; label: string }[] }[] = [
@@ -85,28 +88,33 @@ const TAB_GROUPS: { label: string; tabs: { id: Tab; label: string }[] }[] = [
       { id: 'notifications', label: 'Notificações' },
     ],
   },
+  {
+    label: 'Sobre',
+    tabs: [{ id: 'licenses', label: 'Licenças' }],
+  },
 ]
 
+// Só pra equipe do Mamacos Voip (is_app_admin()).
+const ADMIN_GROUP: (typeof TAB_GROUPS)[number] = {
+  label: 'Administração',
+  tabs: [{ id: 'admin', label: 'Denúncias da plataforma' }],
+}
+
 function NavIcon({ tab, className = 'w-[18px] h-[18px]' }: { tab: Tab; className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      {TAB_ICONS[tab]}
-    </svg>
-  )
+  const Icon = TAB_ICONS[tab]
+  return <Icon className={className} strokeWidth={1.8} aria-hidden />
 }
 
 function CloseGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-[18px] h-[18px]" aria-hidden="true">
-      <path d="M6 6l12 12M18 6 6 18" />
-    </svg>
-  )
+  return <CloseIcon className="w-[18px] h-[18px]" aria-hidden />
 }
 
 export function SettingsModal({ onClose, initialTab }: { onClose: () => void; initialTab?: Tab }) {
   const { user, profile, signOut } = useAuth()
   const [tab, setTab] = useState<Tab>(initialTab ?? 'account')
   const contentRef = useRef<HTMLDivElement>(null)
+  const isAppAdmin = useIsAppAdmin()
+  const tabGroups = isAppAdmin ? [...TAB_GROUPS, ADMIN_GROUP] : TAB_GROUPS
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -129,13 +137,13 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
       role="dialog"
       aria-modal="true"
       aria-label="Configurações"
-      className="fixed inset-0 z-[500] bg-discord-channels flex flex-col md:flex-row animate-fade-in"
+      className="fixed inset-0 z-[500] bg-mv-main flex flex-col md:flex-row animate-fade-in"
     >
       {/* Navegação — coluna à esquerda no desktop; no celular vira uma
           faixa de abas roláveis no topo. */}
       <nav
         aria-label="Seções das configurações"
-        className="shrink-0 bg-discord-sidebar border-b md:border-b-0 md:border-r border-[var(--color-line)] md:flex-[1_0_250px] md:h-full md:overflow-y-auto flex flex-col"
+        className="shrink-0 bg-mv-side border-b md:border-b-0 md:border-r border-[var(--color-line)] md:flex-[1_0_250px] md:h-full md:overflow-y-auto flex flex-col"
       >
         <div className="md:ml-auto w-full md:max-w-[232px] px-3 md:px-3 pt-3 md:pt-14 md:pb-8">
           {/* Topo mobile: título + fechar */}
@@ -151,15 +159,15 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
               <Avatar name={profile.username} avatarUrl={profile.avatar_url} size={36} />
               <div className="min-w-0">
                 <p className="text-[14px] font-semibold text-white truncate">{profile.display_name || profile.username}</p>
-                <p className="text-[12px] text-discord-text-muted truncate">@{profile.username}</p>
+                <p className="text-[12px] text-mv-muted truncate">@{profile.username}</p>
               </div>
             </div>
           )}
 
           <div className="flex md:flex-col gap-1 md:gap-5 overflow-x-auto md:overflow-visible pb-2 md:pb-0 -mx-1 px-1">
-            {TAB_GROUPS.map((group) => (
+            {tabGroups.map((group) => (
               <div key={group.label} className="flex md:flex-col gap-1 md:gap-0.5 shrink-0">
-                <p className="hidden md:block px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">
+                <p className="hidden md:block px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted">
                   {group.label}
                 </p>
                 {group.tabs.map((t) => {
@@ -172,13 +180,13 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
                       className={`relative shrink-0 flex items-center gap-2.5 whitespace-nowrap text-left px-2.5 py-[7px] rounded-lg text-[14px] font-medium transition-colors ${
                         active
                           ? 'bg-white/[0.08] text-white'
-                          : 'text-discord-text-muted hover:bg-white/[0.04] hover:text-discord-text'
+                          : 'text-mv-muted hover:bg-white/[0.04] hover:text-mv-text'
                       }`}
                     >
                       {active && (
                         <span aria-hidden="true" className="hidden md:block absolute -left-3 top-1.5 bottom-1.5 w-1 rounded-r-full bg-brand-gradient" />
                       )}
-                      <span className={active ? 'text-discord-blurple' : ''}>
+                      <span className={active ? 'text-mv-accent' : ''}>
                         <NavIcon tab={t.id} />
                       </span>
                       {t.label}
@@ -194,9 +202,7 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
               onClick={signOut}
               className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[14px] font-medium text-rose-400 hover:bg-rose-500/10 transition-colors"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden="true">
-                <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4" />
-              </svg>
+              <LogOutIcon className="w-[18px] h-[18px]" strokeWidth={1.8} aria-hidden />
               Sair
             </button>
           </div>
@@ -213,9 +219,14 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
             {tab === 'audio' && <AudioTab />}
             {tab === 'notifications' && <NotificationsTab />}
             {tab === 'privacy' && <PrivacyTab />}
+            {(tab === 'licenses' || (tab === 'admin' && isAppAdmin)) && (
+              <Suspense fallback={<p className="text-[13px] text-mv-muted">Carregando...</p>}>
+                {tab === 'licenses' ? <LicensesTab /> : <AdminReportsTab />}
+              </Suspense>
+            )}
           </div>
 
-          {/* Fechar estilo Discord: círculo + "ESC" embaixo. Fica na coluna
+          {/* Fechar estilo apps de chat: círculo + "ESC" embaixo. Fica na coluna
               ao lado do conteúdo e acompanha a rolagem (sticky).
               top-14 (não top-6) — essa tela cobre a janela inteira (fixed
               inset-0) desde y=0, mas os botões NATIVOS de
@@ -229,13 +240,13 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
             <div className="sticky top-14 flex flex-col items-center gap-1.5">
               <button
                 onClick={onClose}
-                className="w-10 h-10 rounded-full border-2 border-[var(--color-line-strong)] text-discord-text-muted hover:border-discord-text-muted hover:text-white hover:bg-white/[0.04] flex items-center justify-center transition-colors"
+                className="w-10 h-10 rounded-full border-2 border-[var(--color-line-strong)] text-mv-muted hover:border-mv-muted hover:text-white hover:bg-white/[0.04] flex items-center justify-center transition-colors"
                 aria-label="Fechar"
                 title="Fechar (Esc)"
               >
                 <CloseGlyph />
               </button>
-              <span aria-hidden="true" className="text-[11px] font-semibold tracking-wider text-discord-text-muted">
+              <span aria-hidden="true" className="text-[11px] font-semibold tracking-wider text-mv-muted">
                 ESC
               </span>
             </div>
@@ -262,7 +273,7 @@ function AppVersionInfo() {
 
   return (
     <div className="flex items-center justify-between gap-3 px-1 pt-1">
-      <p className="text-[12px] text-discord-text-muted">Mamacos Voip — versão {version}</p>
+      <p className="text-[12px] text-mv-muted">Mamacos Voip — versão {version}</p>
       <button
         onClick={() => {
           setChecking(true)
@@ -270,7 +281,7 @@ function AppVersionInfo() {
           setTimeout(() => setChecking(false), 3000)
         }}
         disabled={checking}
-        className="text-[12px] font-medium text-discord-blurple hover:underline disabled:opacity-60"
+        className="text-[12px] font-medium text-mv-accent hover:underline disabled:opacity-60"
       >
         {checking ? 'Verificando...' : 'Verificar atualização agora'}
       </button>
@@ -286,12 +297,55 @@ function gradientFor(seed: string) {
 }
 
 function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut: () => void }) {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
+  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  // Conta sem senha (entrou com Google) ou esqueceu a atual: confirma a
+  // identidade com o código que o Supabase manda por e-mail
+  // (reauthenticate + nonce) em vez da senha atual.
+  const [useEmailCode, setUseEmailCode] = useState(false)
+  const [emailCode, setEmailCode] = useState('')
+  const [codeSent, setCodeSent] = useState(false)
+  const [sendingCode, setSendingCode] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+
+  async function handleSendCode() {
+    setError(null)
+    if (sendingCode) return
+    const limit = checkRateLimit('password-change-code', 2, 5 * 60_000)
+    if (!limit.allowed) {
+      setError(`Espere ${limit.retryAfterSeconds}s antes de pedir outro código.`)
+      return
+    }
+    setSendingCode(true)
+    const { error } = await supabase.auth.reauthenticate()
+    setSendingCode(false)
+    if (error) {
+      setError(traduzErro(error.message))
+      return
+    }
+    setCodeSent(true)
+  }
+
+  // M4 — confere a senha atual SEM mexer na sessão desta janela: o
+  // login de conferência roda num cliente descartável (não substitui a
+  // sessão atual nem derruba o 2FA dela) e é encerrado logo em seguida.
+  async function verifyCurrentPassword(): Promise<string | null> {
+    if (!email) return 'Não foi possível identificar o e-mail da conta.'
+    if (!currentPassword) return 'Digite a sua senha atual.'
+    const verifier = createEphemeralAuthClient()
+    const { data, error } = await verifier.auth.signInWithPassword({ email, password: currentPassword })
+    if (data.session) await verifier.auth.signOut({ scope: 'local' }).catch(() => {})
+    if (error) {
+      if (/invalid login credentials/i.test(error.message)) return 'Senha atual incorreta.'
+      return traduzErro(error.message)
+    }
+    if (!data.user || data.user.id !== user?.id) return 'Senha atual incorreta.'
+    return null
+  }
 
   async function handleChangePassword() {
     setError(null)
@@ -306,14 +360,53 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
       setError('As senhas não conferem.')
       return
     }
+    if (useEmailCode && !/^\d{6,10}$/.test(emailCode.trim())) {
+      setError(codeSent ? 'Digite o código que chegou no seu e-mail.' : 'Peça o código por e-mail primeiro.')
+      return
+    }
+    // Freio local contra tentativa e erro da senha atual (o Supabase
+    // também limita por IP no servidor).
+    const limit = checkRateLimit('password-change', 5, 10 * 60_000)
+    if (!limit.allowed) {
+      setError(`Muitas tentativas. Espere ${limit.retryAfterSeconds}s e tente de novo.`)
+      return
+    }
     setLoading(true)
-    const { error } = await supabase.auth.updateUser({ password: newPassword })
-    setLoading(false)
+    if (!useEmailCode) {
+      const reauthError = await verifyCurrentPassword()
+      if (reauthError) {
+        setLoading(false)
+        setError(reauthError)
+        return
+      }
+    }
+    const { error } = await supabase.auth.updateUser(
+      useEmailCode ? { password: newPassword, nonce: emailCode.trim() } : { password: newPassword }
+    )
     if (error) {
+      setLoading(false)
+      if (/reauthentication|nonce/i.test(error.message)) {
+        if (useEmailCode) {
+          setError('Código inválido ou expirado. Peça um novo código.')
+        } else {
+          // "Secure password change" ligado no Supabase e a sessão não é
+          // recente: o servidor exige o código por e-mail.
+          setUseEmailCode(true)
+          setError('Por segurança, confirme com o código enviado por e-mail (botão "Enviar código").')
+        }
+        return
+      }
       setError(traduzErro(error.message))
       return
     }
+    // Senha trocada = derruba as sessões dos outros aparelhos (quem
+    // tinha a senha antiga não continua logado). Esta fica.
+    await supabase.auth.signOut({ scope: 'others' }).catch(() => {})
+    setLoading(false)
+    setCurrentPassword('')
     setConfirmPassword('')
+    setEmailCode('')
+    setCodeSent(false)
     setSuccess(true)
     setNewPassword('')
   }
@@ -333,28 +426,28 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
           }
         />
         <div className="px-5 pb-5 flex items-start gap-4">
-          <div className="-mt-9 shrink-0 rounded-full ring-[5px] ring-[var(--color-discord-channels)] bg-discord-channels">
+          <div className="-mt-9 shrink-0 rounded-full ring-[5px] ring-[var(--color-mv-main)] bg-mv-main">
             <Avatar name={profile?.username ?? email ?? '?'} avatarUrl={profile?.avatar_url} size={72} />
           </div>
           <div className="min-w-0 pt-2.5">
             <p className="font-display text-lg font-semibold text-white truncate">
               {profile?.display_name || profile?.username || 'Você'}
             </p>
-            {profile && <p className="text-[13px] text-discord-text-muted truncate">@{profile.username}</p>}
+            {profile && <p className="text-[13px] text-mv-muted truncate">@{profile.username}</p>}
           </div>
         </div>
-        <div className="mx-5 mb-5 rounded-xl bg-discord-darker/60 border border-[var(--color-line)] divide-y divide-[var(--color-line)]">
+        <div className="mx-5 mb-5 rounded-xl bg-mv-canvas/60 border border-[var(--color-line)] divide-y divide-[var(--color-line)]">
           <div className="flex items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">E-mail</p>
-              <p className="text-[14px] text-discord-text truncate mt-0.5">{email}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted">E-mail</p>
+              <p className="text-[14px] text-mv-text truncate mt-0.5">{email}</p>
             </div>
           </div>
           {profile && (
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">Nome de usuário</p>
-                <p className="text-[14px] text-discord-text truncate mt-0.5">{profile.username}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted">Nome de usuário</p>
+                <p className="text-[14px] text-mv-text truncate mt-0.5">{profile.username}</p>
               </div>
             </div>
           )}
@@ -362,6 +455,62 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
       </section>
 
       <SettingsCard title="Alterar senha" description="Use pelo menos 8 caracteres, com letras e números.">
+        {useEmailCode ? (
+          <div className="mb-3">
+            <label htmlFor="settings-email-code" className="field-label">
+              Código enviado por e-mail
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="settings-email-code"
+                type="text"
+                inputMode="numeric"
+                value={emailCode}
+                onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                placeholder="000000"
+                autoComplete="one-time-code"
+                className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none text-sm"
+              />
+              <button onClick={handleSendCode} disabled={sendingCode} className="btn-secondary h-10 px-4 text-sm shrink-0">
+                {sendingCode ? 'Enviando...' : codeSent ? 'Reenviar' : 'Enviar código'}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setUseEmailCode(false)
+                setError(null)
+              }}
+              className="mt-1.5 text-xs text-mv-accent font-medium hover:underline"
+            >
+              Usar a senha atual
+            </button>
+          </div>
+        ) : (
+          <div className="mb-3">
+            <label htmlFor="settings-current-password" className="field-label">
+              Senha atual
+            </label>
+            <input
+              id="settings-current-password"
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setUseEmailCode(true)
+                setError(null)
+              }}
+              className="mt-1.5 text-xs text-mv-accent font-medium hover:underline"
+            >
+              Entrou com Google ou não lembra a senha atual? Confirmar por código no e-mail
+            </button>
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor="settings-new-password" className="field-label">
@@ -374,7 +523,7 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="Mínimo 8 caracteres, com letra e número"
               autoComplete="new-password"
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none text-sm"
             />
           </div>
           <div>
@@ -387,7 +536,7 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               autoComplete="new-password"
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none text-sm"
             />
           </div>
         </div>
@@ -395,7 +544,9 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
         {(error || success) && (
           <div className="mt-3">
             {error && <InlineMessage tone="error">{error}</InlineMessage>}
-            {success && <InlineMessage tone="success">Senha alterada com sucesso.</InlineMessage>}
+            {success && (
+              <InlineMessage tone="success">Senha alterada com sucesso. Os outros aparelhos foram desconectados.</InlineMessage>
+            )}
           </div>
         )}
 
@@ -430,7 +581,7 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
 }
 
 function DeleteAccountSection() {
-  const { signOut } = useAuth()
+  const { signOut, user, profile } = useAuth()
   const [confirming, setConfirming] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [loading, setLoading] = useState(false)
@@ -440,6 +591,11 @@ function DeleteAccountSection() {
     if (confirmText.trim().toLowerCase() !== 'excluir') return
     setLoading(true)
     setError(null)
+    // Imagens de perfil (avatar/banner/decoração) ficam no Storage, fora
+    // do alcance do delete_own_account — apaga antes (best-effort).
+    if (user) {
+      await deleteOwnProfileFiles(user.id, [profile?.avatar_url, profile?.banner_url, profile?.avatar_decoration_url])
+    }
     const { error } = await supabase.rpc('delete_own_account')
     if (error) {
       setLoading(false)
@@ -464,12 +620,12 @@ function DeleteAccountSection() {
       {confirming && (
         <div className="mt-3 rounded-xl bg-rose-500/[0.06] border border-rose-500/25 p-4 space-y-3 animate-fade-slide-in">
           <p className="text-[14px] text-rose-300 font-semibold">Isso não pode ser desfeito.</p>
-          <p className="text-[13px] text-discord-text-muted leading-relaxed">
+          <p className="text-[13px] text-mv-muted leading-relaxed">
             Sua conta, mensagens e servidores que você é dono são apagados de vez. Se você é dono de algum
             servidor, ele é apagado inteiro pra todo mundo — considere transferir a propriedade antes, se quiser
             manter o servidor de pé.
           </p>
-          <label htmlFor="settings-delete-confirm" className="block text-[13px] text-discord-text-muted">
+          <label htmlFor="settings-delete-confirm" className="block text-[13px] text-mv-muted">
             Digite <span className="text-white font-mono">excluir</span> pra confirmar.
           </label>
           <input
@@ -477,7 +633,7 @@ function DeleteAccountSection() {
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
             placeholder="excluir"
-            className="w-full px-3 py-2.5 text-sm bg-discord-darker text-discord-text outline-none"
+            className="w-full px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
           />
           {error && <InlineMessage tone="error">{error}</InlineMessage>}
           <div className="flex justify-end gap-2">
@@ -521,7 +677,7 @@ function NotificationsTab() {
     permission === 'unsupported'
       ? { chip: 'Indisponível', chipClass: '', text: 'Seu navegador não suporta notificações.' }
       : permission === 'granted'
-        ? { chip: 'Ativadas', chipClass: '!text-discord-green !border-discord-green/30 !bg-discord-green/10', text: 'Tudo certo — você vai ser avisado de novas mensagens.' }
+        ? { chip: 'Ativadas', chipClass: '!text-mv-green !border-mv-green/30 !bg-mv-green/10', text: 'Tudo certo — você vai ser avisado de novas mensagens.' }
         : permission === 'denied'
           ? {
               chip: 'Bloqueadas',
@@ -538,7 +694,7 @@ function NotificationsTab() {
       />
       <SettingsCard>
         <div className="flex items-center gap-4">
-          <span className="w-11 h-11 shrink-0 rounded-xl bg-discord-blurple/15 text-discord-blurple flex items-center justify-center">
+          <span className="w-11 h-11 shrink-0 rounded-xl bg-mv-accent/15 text-mv-accent flex items-center justify-center">
             <NavIcon tab="notifications" className="w-5 h-5" />
           </span>
           <div className="flex-1 min-w-0">
@@ -546,7 +702,7 @@ function NotificationsTab() {
               <p className="text-[14px] font-medium text-white">Notificações na área de trabalho</p>
               <span className={`chip ${state.chipClass}`}>{state.chip}</span>
             </div>
-            <p className="text-[13px] text-discord-text-muted mt-0.5">{state.text}</p>
+            <p className="text-[13px] text-mv-muted mt-0.5">{state.text}</p>
           </div>
           {permission !== 'unsupported' && permission !== 'granted' && permission !== 'denied' && (
             <button onClick={handleEnable} className="btn-primary h-9 px-4 text-sm shrink-0">
@@ -559,19 +715,106 @@ function NotificationsTab() {
   )
 }
 
+// Sons do app: liga/desliga, volume dos efeitos e prévia de cada som da
+// identidade sonora (lib/sounds.ts). A prévia toca mesmo com os sons
+// desligados — é um clique explícito da pessoa.
+function SoundEffectsCard() {
+  const [soundsOn, setSoundsOn] = useState(() => isSoundEnabled())
+  const [volume, setVolume] = useState(() => getSoundVolume())
+  const [lastPlayed, setLastPlayed] = useState<UiSoundId | null>(null)
+  const volumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const playedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current)
+      if (playedTimerRef.current) clearTimeout(playedTimerRef.current)
+    },
+    []
+  )
+
+  function handleVolume(next: number) {
+    setVolume(next)
+    setSoundVolume(next)
+    // Toca uma amostra quando a pessoa para de arrastar.
+    if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current)
+    volumeTimerRef.current = setTimeout(() => previewUiSound('message'), 250)
+  }
+
+  function preview(id: UiSoundId) {
+    previewUiSound(id)
+    setLastPlayed(id)
+    if (playedTimerRef.current) clearTimeout(playedTimerRef.current)
+    playedTimerRef.current = setTimeout(() => setLastPlayed(null), 700)
+  }
+
+  return (
+    <SettingsCard title="Sons do app">
+      <RowList>
+        <SettingRow
+          title="Sons de interface"
+          description="Toques originais do Mamacos ao entrar e sair da voz, mutar, receber mensagens, menções e pedidos de amizade."
+          control={
+            <Toggle
+              label="Sons de interface"
+              checked={soundsOn}
+              onChange={(checked) => {
+                setSoundsOn(checked)
+                setSoundEnabled(checked)
+                if (checked) playConnectSound()
+              }}
+            />
+          }
+        />
+        <SettingRow title="Volume dos efeitos" description="Só dos sons do app — não mexe no volume das pessoas na call.">
+          <div className="flex items-center gap-3 pt-1">
+            <RangeSlider label="Volume dos efeitos" min={0} max={100} value={volume} onChange={handleVolume} />
+            <span className="w-10 text-right text-[13px] tabular-nums text-mv-muted">{volume}%</span>
+          </div>
+        </SettingRow>
+        <SettingRow title="Ouvir os sons" description="Clique pra ouvir cada som do app.">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+            {SOUND_CATALOG.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => preview(s.id)}
+                aria-label={`Tocar som: ${s.label}`}
+                className={`group flex items-center gap-2.5 h-9 pl-1.5 pr-3 rounded-lg text-left text-[13px] transition-colors ${
+                  lastPlayed === s.id ? 'bg-mv-accent/15 text-white' : 'bg-white/[0.03] text-mv-text hover:bg-white/[0.07]'
+                }`}
+              >
+                <span
+                  className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
+                    lastPlayed === s.id ? 'bg-mv-accent text-white' : 'bg-white/[0.06] text-mv-muted group-hover:text-white'
+                  }`}
+                >
+                  <PlayIcon className="w-3 h-3" fill="currentColor" aria-hidden />
+                </span>
+                <span className="truncate">{s.label}</span>
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+      </RowList>
+    </SettingsCard>
+  )
+}
+
 // Os valores do tema padrão (vermelho) moram no @theme do index.css, que
 // vale pro :root — não existe um bloco [data-theme='vermelho'] pra
 // "reaplicar" dentro da prévia quando outro tema está ativo. Por isso a
 // prévia dele recebe as mesmas variáveis explicitamente (espelho do
 // @theme; se mudar lá, mudar aqui).
 const VERMELHO_PREVIEW_VARS = {
-  '--color-discord-darker': '#07070a',
-  '--color-discord-channels': '#121218',
-  '--color-discord-sidebar': '#0d0d12',
-  '--color-discord-lighter': '#25252e',
-  '--color-discord-blurple': '#ee3a34',
+  '--color-mv-canvas': '#07070a',
+  '--color-mv-main': '#121218',
+  '--color-mv-side': '#0d0d12',
+  '--color-mv-raised': '#25252e',
+  '--color-mv-accent': '#ee3a34',
   '--color-accent-2': '#ff8a3d',
-  '--color-discord-text-muted': '#9d9dab',
+  '--color-accent-text': '#ee3a34',
+  '--color-mv-muted': '#9d9dab',
 } as React.CSSProperties
 
 function ThemePreview({ id }: { id: ThemeId }) {
@@ -580,30 +823,31 @@ function ThemePreview({ id }: { id: ThemeId }) {
       data-theme={id === 'vermelho' ? undefined : id}
       style={id === 'vermelho' ? VERMELHO_PREVIEW_VARS : undefined}
       aria-hidden="true"
-      className="h-[104px] rounded-xl overflow-hidden flex bg-discord-darker border border-[var(--color-line)]"
+      className="h-[104px] rounded-xl overflow-hidden flex bg-mv-canvas border border-[var(--color-line)]"
     >
       <div className="w-7 flex flex-col items-center gap-1.5 pt-2">
         <span className="w-4 h-4 rounded-[6px] bg-brand-gradient" />
-        <span className="w-4 h-4 rounded-full bg-discord-lighter" />
-        <span className="w-4 h-4 rounded-full bg-discord-lighter" />
+        <span className="w-4 h-4 rounded-full bg-mv-raised" />
+        <span className="w-4 h-4 rounded-full bg-mv-raised" />
       </div>
-      <div className="w-16 bg-discord-sidebar rounded-tl-lg mt-1.5 p-1.5 space-y-1.5">
-        <span className="block h-1.5 w-10 rounded-full bg-discord-text-muted/40" />
-        <span className="block h-2.5 w-full rounded bg-discord-lighter" />
-        <span className="block h-1.5 w-9 rounded-full bg-discord-text-muted/30" />
-        <span className="block h-1.5 w-11 rounded-full bg-discord-text-muted/30" />
+      <div className="w-16 bg-mv-side rounded-tl-lg mt-1.5 p-1.5 space-y-1.5">
+        <span className="block h-1.5 w-10 rounded-full bg-mv-muted/40" />
+        <span className="block h-2.5 w-full rounded bg-mv-raised" />
+        <span className="block h-1.5 w-9 rounded-full bg-mv-muted/30" />
+        <span className="block h-1.5 w-11 rounded-full bg-mv-muted/30" />
       </div>
-      <div className="flex-1 bg-discord-channels mt-1.5 p-2 flex flex-col justify-end gap-1.5">
+      <div className="flex-1 bg-mv-main mt-1.5 p-2 flex flex-col justify-end gap-1.5">
         <div className="flex items-center gap-1.5">
-          <span className="w-3.5 h-3.5 rounded-full bg-discord-lighter shrink-0" />
-          <span className="h-1.5 w-16 rounded-full bg-discord-text-muted/40" />
+          <span className="w-3.5 h-3.5 rounded-full bg-mv-raised shrink-0" />
+          <span className="h-1.5 w-16 rounded-full bg-mv-muted/40" />
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="w-3.5 h-3.5 rounded-full bg-discord-blurple shrink-0" />
-          <span className="h-1.5 w-20 rounded-full bg-discord-text-muted/30" />
+          <span className="w-3.5 h-3.5 rounded-full bg-mv-accent shrink-0" />
+          <span className="h-1.5 w-7 rounded-full bg-[var(--color-accent-text,var(--color-mv-accent))]" />
+          <span className="h-1.5 w-12 rounded-full bg-mv-muted/30" />
         </div>
-        <div className="h-4 rounded-md bg-discord-lighter/70 flex items-center justify-end px-1">
-          <span className="w-2.5 h-2.5 rounded-full bg-discord-blurple" />
+        <div className="h-4 rounded-md bg-mv-raised/70 flex items-center justify-end px-1">
+          <span className="w-2.5 h-2.5 rounded-full bg-mv-accent" />
         </div>
       </div>
     </div>
@@ -617,7 +861,7 @@ function AppearanceTab() {
     <div className="space-y-5">
       <TabHeader title="Aparência" description="Escolha a paleta de cores do app. A troca é na hora e vale só pra este aparelho." />
       <SettingsCard title="Tema">
-        <div role="radiogroup" aria-label="Tema" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div role="radiogroup" aria-label="Tema" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {THEMES.map((t) => {
             const active = theme === t.id
             return (
@@ -628,7 +872,7 @@ function AppearanceTab() {
                 onClick={() => setTheme(t.id)}
                 className={`group text-left rounded-2xl p-2 transition-all ${
                   active
-                    ? 'bg-discord-blurple/[0.08] shadow-[0_0_0_2px_var(--color-discord-blurple)]'
+                    ? 'bg-mv-accent/[0.08] shadow-[0_0_0_2px_var(--color-mv-accent)]'
                     : 'bg-white/[0.02] shadow-[0_0_0_1px_var(--color-line)] hover:shadow-[0_0_0_1px_var(--color-line-strong)] hover:bg-white/[0.04]'
                 }`}
               >
@@ -636,18 +880,16 @@ function AppearanceTab() {
                 <div className="flex items-center gap-2.5 px-1.5 pt-2.5 pb-1">
                   <span
                     className={`w-[18px] h-[18px] rounded-full shrink-0 flex items-center justify-center border-2 transition-colors ${
-                      active ? 'border-discord-blurple bg-discord-blurple' : 'border-[var(--color-line-strong)]'
+                      active ? 'border-mv-accent bg-mv-accent' : 'border-[var(--color-line-strong)]'
                     }`}
                   >
                     {active && (
-                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" className="w-2.5 h-2.5">
-                        <path d="M5 12.5l4.5 4.5L19 7.5" />
-                      </svg>
+                      <CheckIcon className="w-2.5 h-2.5 text-white" strokeWidth={4} aria-hidden />
                     )}
                   </span>
                   <div className="min-w-0">
                     <p className="text-[14px] font-medium text-white">{t.label}</p>
-                    <p className="text-[12px] text-discord-text-muted truncate">{t.description}</p>
+                    <p className="text-[12px] text-mv-muted truncate">{t.description}</p>
                   </div>
                 </div>
               </button>
@@ -866,7 +1108,7 @@ function AudioTab() {
     []
   )
 
-  // Igual o próprio Discord faz na tela de configurações: se o teste de
+  // Igual o app de chat popular faz na tela de configurações: se o teste de
   // microfone já está rodando, ligar/desligar redução de ruído (ou eco,
   // ou ganho automático) reinicia o teste na hora com a config nova —
   // assim dá pra OUVIR/VER a diferença na barra de nível imediatamente,
@@ -892,9 +1134,8 @@ function AudioTab() {
 
   // "Sons de interface" era um checkbox não controlado (defaultChecked) —
   // agora é um Toggle, que precisa de estado pra desenhar a posição.
-  const [soundsOn, setSoundsOn] = useState(() => isSoundEnabled())
 
-  const selectClass = 'w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm disabled:opacity-50'
+  const selectClass = 'w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none text-sm disabled:opacity-50'
 
   return (
     <div className="space-y-5">
@@ -902,11 +1143,11 @@ function AudioTab() {
       <TabHeader title="Voz e Vídeo" description="Dispositivos, processamento de voz e testes rápidos pra deixar a call redonda." />
 
       {!audio.permissionGranted && (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-discord-blurple/30 bg-discord-blurple/[0.07] p-4">
-          <span className="w-10 h-10 shrink-0 rounded-xl bg-discord-blurple/15 text-discord-blurple flex items-center justify-center">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-mv-accent/30 bg-mv-accent/[0.07] p-4">
+          <span className="w-10 h-10 shrink-0 rounded-xl bg-mv-accent/15 text-mv-accent flex items-center justify-center">
             <NavIcon tab="audio" className="w-5 h-5" />
           </span>
-          <p className="flex-1 text-[13px] text-discord-text">
+          <p className="flex-1 text-[13px] text-mv-text">
             Autorize o acesso ao microfone pra ver os nomes dos seus dispositivos de áudio.
           </p>
           <button onClick={handleRequestPermission} className="btn-primary h-9 px-4 text-sm shrink-0">
@@ -955,7 +1196,7 @@ function AudioTab() {
               ))}
             </select>
             {!audio.supportsOutputSelection && (
-              <p className="text-[11px] text-discord-text-muted mt-1.5">Não suportado neste navegador.</p>
+              <p className="text-[11px] text-mv-muted mt-1.5">Não suportado neste navegador.</p>
             )}
           </div>
 
@@ -976,12 +1217,13 @@ function AudioTab() {
                 </option>
               ))}
             </select>
-            <p className="text-[12px] text-discord-text-muted mt-2 leading-relaxed">
+            <p className="text-[12px] text-mv-muted mt-2 leading-relaxed">
               Se você usa OBS (ou outro programa de captura) e liga a "Câmera Virtual" dele, pode escolher ela aqui — a
               câmera do app passa a mostrar o que o OBS estiver capturando, em vez da sua webcam de verdade. Útil se o
               compartilhamento de tela normal não funcionar bem com algum jogo específico, mas o OBS captura ele sem
               problema.
             </p>
+            <CameraTest cameraId={audio.cameraId ?? null} />
           </div>
         </div>
       </SettingsCard>
@@ -1005,7 +1247,7 @@ function AudioTab() {
             }
           >
             <div
-              className="mt-3 h-2.5 rounded-full bg-discord-darker border border-[var(--color-line)] overflow-hidden"
+              className="mt-3 h-2.5 rounded-full bg-mv-canvas border border-[var(--color-line)] overflow-hidden"
               role="meter"
               aria-label="Nível do microfone"
               aria-valuemin={0}
@@ -1013,7 +1255,7 @@ function AudioTab() {
               aria-valuenow={level}
             >
               <div
-                className="h-full rounded-full bg-gradient-to-r from-discord-green via-discord-green to-amber-400 transition-[width] duration-75"
+                className="h-full rounded-full bg-gradient-to-r from-mv-green via-mv-green to-amber-400 transition-[width] duration-75"
                 style={{ width: `${level}%` }}
               />
             </div>
@@ -1092,7 +1334,7 @@ function AudioTab() {
                 ]}
               />
               {audio.micSensitivityMode === 'auto' ? (
-                <p className="text-[12.5px] text-discord-text-muted leading-relaxed">
+                <p className="text-[12.5px] text-mv-muted leading-relaxed">
                   O app mede o ruído do seu ambiente sozinho e ajusta o corte automaticamente enquanto você está numa
                   chamada — não precisa mexer em nada.
                 </p>
@@ -1105,7 +1347,7 @@ function AudioTab() {
                     value={audio.micSensitivity}
                     onChange={handleSensitivityChange}
                   />
-                  <div className="flex justify-between text-[11px] text-discord-text-muted mt-2">
+                  <div className="flex justify-between text-[11px] text-mv-muted mt-2">
                     <span>Menos sensível</span>
                     <span>Mais sensível</span>
                   </div>
@@ -1119,21 +1361,6 @@ function AudioTab() {
       <SettingsCard title="Entrada e interface">
         <RowList>
           <PushToTalkSection />
-          <SettingRow
-            title="Sons de interface"
-            description="Toques originais ao conectar/desconectar da voz, mutar e quando alguém entra ou sai da chamada."
-            control={
-              <Toggle
-                label="Sons de interface"
-                checked={soundsOn}
-                onChange={(checked) => {
-                  setSoundsOn(checked)
-                  setSoundEnabled(checked)
-                  if (checked) playConnectSound()
-                }}
-              />
-            }
-          />
           {window.electronAPI?.isElectron && (
             <SettingRow
               title="Sobreposição em jogos"
@@ -1148,6 +1375,8 @@ function AudioTab() {
           )}
         </RowList>
       </SettingsCard>
+
+      <SoundEffectsCard />
 
       <SettingsCard title="Transmissão de tela">
         <SettingRow
@@ -1223,14 +1452,14 @@ function PushToTalkSection() {
       }
     >
       {voice.pushToTalkEnabled && (
-        <div className="flex items-center justify-between gap-3 mt-3 rounded-xl bg-discord-darker/70 border border-[var(--color-line)] px-3 py-2.5">
-          <span className="text-[13px] text-discord-text-muted">Tecla de atalho</span>
+        <div className="flex items-center justify-between gap-3 mt-3 rounded-xl bg-mv-canvas/70 border border-[var(--color-line)] px-3 py-2.5">
+          <span className="text-[13px] text-mv-muted">Tecla de atalho</span>
           <button
             onClick={handleCaptureClick}
             className={`min-w-[7rem] h-8 px-3 rounded-lg font-mono text-[12px] transition-colors border ${
               capturing
-                ? 'bg-discord-blurple/15 border-discord-blurple text-white animate-pulse'
-                : 'bg-discord-lighter border-[var(--color-line-strong)] border-b-2 text-discord-text hover:text-white'
+                ? 'bg-mv-accent/15 border-mv-accent text-white animate-pulse'
+                : 'bg-mv-raised border-[var(--color-line-strong)] border-b-2 text-mv-text hover:text-white'
             }`}
           >
             {capturing ? 'Pressione uma tecla...' : currentKeyLabel}
@@ -1303,20 +1532,20 @@ function PrivacyTab() {
                 disabled={saving}
                 className={`w-full flex items-start gap-3 text-left px-3.5 py-3 rounded-xl border transition-colors disabled:opacity-60 ${
                   active
-                    ? 'border-discord-blurple/60 bg-discord-blurple/[0.08]'
-                    : 'border-[var(--color-line)] bg-discord-darker/50 hover:bg-white/[0.04]'
+                    ? 'border-mv-accent/60 bg-mv-accent/[0.08]'
+                    : 'border-[var(--color-line)] bg-mv-canvas/50 hover:bg-white/[0.04]'
                 }`}
               >
                 <span
                   className={`mt-0.5 w-[18px] h-[18px] rounded-full shrink-0 border-2 flex items-center justify-center ${
-                    active ? 'border-discord-blurple' : 'border-[var(--color-line-strong)]'
+                    active ? 'border-mv-accent' : 'border-[var(--color-line-strong)]'
                   }`}
                 >
-                  {active && <span className="w-2 h-2 rounded-full bg-discord-blurple" />}
+                  {active && <span className="w-2 h-2 rounded-full bg-mv-accent" />}
                 </span>
                 <span>
                   <span className="block text-[14px] text-white font-medium">{o.title}</span>
-                  <span className="block text-[12.5px] text-discord-text-muted mt-0.5">{o.text}</span>
+                  <span className="block text-[12.5px] text-mv-muted mt-0.5">{o.text}</span>
                 </span>
               </button>
             )
@@ -1324,14 +1553,16 @@ function PrivacyTab() {
         </div>
       </SettingsCard>
 
+      <GameActivityCard />
+
       <AdultContentCard />
 
       <SettingsCard>
         <div className="flex gap-3">
-          <span className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.05] text-discord-text-muted flex items-center justify-center">
+          <span className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.05] text-mv-muted flex items-center justify-center">
             <NavIcon tab="security" className="w-[18px] h-[18px]" />
           </span>
-          <div className="space-y-2 text-[13px] text-discord-text-muted leading-relaxed">
+          <div className="space-y-2 text-[13px] text-mv-muted leading-relaxed">
             <p>
               Para gerenciar quem pode te adicionar como amigo, use a lista de bloqueados na aba{' '}
               <span className="text-white">Amigos</span> na tela inicial.
@@ -1354,6 +1585,26 @@ function PrivacyTab() {
         }
       />
     </div>
+  )
+}
+
+// "Jogando X" — ver lib/gamePrivacy.ts e useGamePresence.ts.
+function GameActivityCard() {
+  const showPlaying = useSyncExternalStore(subscribeShowPlaying, getShowPlaying, () => true)
+  return (
+    <SettingsCard title="Atividade de jogo">
+      <RowList>
+        <SettingRow
+          title="Mostrar o jogo que estou jogando"
+          description={
+            window.electronAPI
+              ? 'Desligado: o app para de verificar quais programas estão abertos e ninguém vê "Jogando…" no seu perfil. Vale para este computador.'
+              : 'Desligado: o "Jogando…" some do seu perfil. A detecção de jogos só existe no app para computador.'
+          }
+          control={<Toggle label="Mostrar o jogo que estou jogando" checked={showPlaying} onChange={setShowPlaying} />}
+        />
+      </RowList>
+    </SettingsCard>
   )
 }
 
@@ -1407,5 +1658,71 @@ function AdultContentCard() {
         </div>
       )}
     </SettingsCard>
+  )
+}
+
+// Prévia da câmera escolhida, sem precisar entrar numa call — pra
+// conferir sozinho que a imagem está chegando. A câmera só abre quando a
+// pessoa clica, e é solta ao parar, trocar de câmera ou fechar a tela.
+function CameraTest({ cameraId }: { cameraId: string | null }) {
+  const [stream, setStream] = useState<MediaStream | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [opening, setOpening] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.srcObject = stream
+  }, [stream])
+  // Solta a câmera ao desmontar e ao trocar de dispositivo.
+  useEffect(() => () => stream?.getTracks().forEach((t) => t.stop()), [stream])
+  useEffect(() => {
+    setStream(null)
+  }, [cameraId])
+
+  async function start() {
+    if (opening) return
+    setError(null)
+    setOpening(true)
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({
+        video: { ...(cameraId ? { deviceId: { exact: cameraId } } : {}), width: { ideal: 1280 }, height: { ideal: 720 } },
+      })
+      setStream(s)
+    } catch (err) {
+      const name = err instanceof Error ? err.name : ''
+      setError(
+        name === 'NotAllowedError'
+          ? 'Permissão da câmera negada. Libere o acesso à câmera nas permissões do navegador/sistema.'
+          : name === 'NotFoundError' || name === 'OverconstrainedError'
+            ? 'Câmera não encontrada. Confira se ela está conectada (ou se a câmera virtual está ligada).'
+            : name === 'NotReadableError'
+              ? 'A câmera está sendo usada por outro programa. Feche-o e tente de novo.'
+              : 'Não foi possível abrir a câmera.'
+      )
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="relative aspect-video w-full max-w-sm rounded-xl overflow-hidden bg-mv-canvas border border-[var(--color-line)]">
+        {stream ? (
+          <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-[12px] text-mv-muted px-4 text-center">
+            {error ?? 'A prévia aparece aqui. Só você vê.'}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => (stream ? setStream(null) : void start())}
+        disabled={opening}
+        className="btn-secondary mt-2 h-9 px-4 text-sm"
+      >
+        {opening ? 'Abrindo câmera...' : stream ? 'Parar teste' : 'Testar câmera'}
+      </button>
+    </div>
   )
 }

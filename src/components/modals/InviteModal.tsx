@@ -56,18 +56,18 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
           <label htmlFor="invite-link" className="field-label">
             Link de convite
           </label>
-          <div className="flex items-center gap-1.5 p-1.5 rounded-xl bg-discord-darker border border-[var(--color-line-strong)]">
+          <div className="flex items-center gap-1.5 p-1.5 rounded-xl bg-mv-canvas border border-[var(--color-line-strong)]">
             <input
               id="invite-link"
               readOnly
               value={link}
               onFocus={(e) => e.target.select()}
               style={{ boxShadow: 'none' }}
-              className="flex-1 min-w-0 px-2 bg-transparent text-discord-text outline-none text-sm font-mono"
+              className="flex-1 min-w-0 px-2 bg-transparent text-mv-text outline-none text-sm font-mono"
             />
             <button
               onClick={handleCopy}
-              className={`h-8 px-4 text-sm shrink-0 ${copied ? 'rounded-[10px] font-semibold bg-discord-green text-white' : 'btn-primary'}`}
+              className={`h-8 px-4 text-sm shrink-0 ${copied ? 'rounded-[10px] font-semibold bg-mv-green text-white' : 'btn-primary'}`}
             >
               {copied ? 'Copiado!' : 'Copiar'}
             </button>

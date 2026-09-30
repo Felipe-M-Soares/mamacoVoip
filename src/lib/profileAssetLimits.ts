@@ -25,7 +25,7 @@ function formatMB(bytes: number): string {
 // Validação client-side simples (tipo + tamanho) — a Storage do Supabase
 // também confere isso no bucket, mas checar antes evita gastar tempo de
 // upload só pra descobrir que passou do limite.
-export function validateProfileAsset(file: File, maxBytes: number, accept: string): string | null {
+function validateProfileAsset(file: File, maxBytes: number, accept: string): string | null {
   const allowed = accept.split(',')
   if (!allowed.includes(file.type)) {
     return 'Formato de arquivo não aceito.'

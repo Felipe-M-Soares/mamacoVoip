@@ -35,3 +35,10 @@ export function takePendingGameShareHint(): PendingGameShareHint | null {
   pendingGameShareHint = null
   return value
 }
+
+// Lê SEM apagar — usado pela captura (VoiceContext.tsx) pra saber, logo
+// depois da escolha no seletor, se a fonte é um jogo detectado e aplicar o
+// preset automático "Jogo" antes de abrir a captura.
+export function peekPendingGameShareHint(): PendingGameShareHint | null {
+  return pendingGameShareHint
+}

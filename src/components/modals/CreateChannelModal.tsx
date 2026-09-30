@@ -4,6 +4,7 @@ import { Toggle } from '../ui/Toggle'
 import { OptionCard, ToggleRow } from './settingsUI'
 import { useChannels } from '../../hooks/useChannels'
 import type { Category, ChannelType } from '../../types/database'
+import { TextChannelIcon, VoiceChannelIcon } from '../ui/icons'
 
 export function CreateChannelModal({
   categories,
@@ -65,14 +66,14 @@ export function CreateChannelModal({
             <OptionCard
               selected={type === 'text'}
               onSelect={() => setType('text')}
-              icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-[18px] h-[18px]"><path d="M5 9h14M5 15h14M10 3 8 21M16 3l-2 18" /></svg>}
+              icon={<TextChannelIcon className="w-[18px] h-[18px]" aria-hidden />}
               title="Texto"
               description="Enviar mensagens, imagens e links"
             />
             <OptionCard
               selected={type === 'voice'}
               onSelect={() => setType('voice')}
-              icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]"><path d="M11 5 6 9H3v6h3l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /></svg>}
+              icon={<VoiceChannelIcon className="w-[18px] h-[18px]" aria-hidden />}
               title="Voz"
               description="Conversar por voz e vídeo"
             />
@@ -84,7 +85,7 @@ export function CreateChannelModal({
             Nome do canal
           </label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-discord-text-muted pointer-events-none" aria-hidden="true">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-mv-muted pointer-events-none" aria-hidden="true">
               {type === 'text' ? '#' : '🔊'}
             </span>
             <input
@@ -93,7 +94,7 @@ export function CreateChannelModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="novo-canal"
-              className="w-full pl-8 pr-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+              className="w-full pl-8 pr-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
           </div>
         </div>
@@ -126,7 +127,7 @@ export function CreateChannelModal({
                 id="create-channel-limit"
                 value={userLimit}
                 onChange={(e) => setUserLimit(Number(e.target.value))}
-                className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+                className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
               >
                 <option value={0}>Sem limite</option>
                 {[2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 50].map((n) => (
@@ -147,7 +148,7 @@ export function CreateChannelModal({
                 id="create-channel-category"
                 value={categoryId}
                 onChange={(e) => setCategoryId(e.target.value)}
-                className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+                className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
               >
                 <option value="">Sem categoria</option>
                 {categories.map((c) => (

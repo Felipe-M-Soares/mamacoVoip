@@ -1,6 +1,6 @@
 # Mamacos Voip
 
-Um clone funcional do Discord, construído com React + Vite + TypeScript +
+Um app completo de comunicação (servidores, texto, voz e vídeo), construído com React + Vite + TypeScript +
 Tailwind no frontend e Supabase (Postgres + Auth + Storage + Realtime) no
 backend. Todas as 9 fases do plano original foram implementadas, mais
 identidade visual própria, app desktop instalável e configurações de áudio.
@@ -20,15 +20,20 @@ npm install
 cp .env.example .env   # preencha com as chaves do seu projeto Supabase
 ```
 
-No **SQL Editor** do seu projeto Supabase, rode as migrations em ordem
-(`supabase/migrations/001_...` até `012_...` — ou o arquivo único
-consolidado, se você tiver um). Veja `supabase/README.md` para detalhes de
-cada uma e das configurações de Auth necessárias.
+No **SQL Editor** do seu projeto Supabase, rode as migrations em ordem:
+`supabase/migrations/001_...` até `007_...` (banco novo). **Já tinha rodado
+as antigas 001–012 (ou até a 017)?** Rode só o
+`007_seguranca_e_recursos_2026.sql` — ele é idempotente, pode rodar de novo
+sem medo. Veja `supabase/README.md` para detalhes de cada uma e das
+configurações de Auth necessárias.
 
 ```bash
 npm run dev       # desenvolvimento
 npm run build     # build de produção (saída em dist/)
 ```
+
+Latência (ping) e região: `docs/PING.md`. Teste de carga e capacidade por
+plano do Supabase/LiveKit: `loadtest/README.md` e `loadtest/CAPACIDADE.md`.
 
 ## O que foi construído, fase por fase
 
@@ -61,7 +66,7 @@ src/
   types/            # tipos do banco (Database) e dos modelos
 
 supabase/
-  migrations/       # 001 a 012, na ordem que devem ser executadas
+  migrations/       # 001 a 007, na ordem que devem ser executadas
   functions/        # Edge Functions (livekit-token, link-preview)
   README.md         # como aplicar as migrations e configurar o Auth
 ```
@@ -77,9 +82,12 @@ supabase/
 - **Notificações** só disparam para conversas com uma aba/subscription já
   aberta (não é push de verdade — exigiria Web Push + Service Worker com
   VAPID keys).
-- **Buckets de storage são públicos** (ícones, avatares, anexos) — RLS
-  protege *quem descobre* o link pela aplicação, mas um link vazado
-  funciona sem autenticação, igual ao CDN de anexos do Discord.
+- **Storage**: anexos (canais, DMs e grupos) ficam em buckets **privados**,
+  lidos só por URL assinada de curta duração. Ícones, avatares, banners,
+  emojis e sons do soundboard continuam em buckets públicos (quem tem o
+  link consegue abrir). Arquivos órfãos (de mensagens ou contas apagadas)
+  só saem com a limpeza periódica (`orphan_attachment_objects()`), que
+  ainda precisa ser agendada — ver `SECURITY_CHECKLIST.md`.
 
 Veja `SECURITY_CHECKLIST.md` para o mapeamento completo de cada item do
 plano de segurança original contra o que foi implementado.
@@ -103,7 +111,7 @@ de tela e notificações automaticamente (não fica perguntando toda vez) — ve
 
 **Atualizações automáticas**: usa `electron-updater`, configurado pra checar releases no GitHub. Pra
 funcionar de verdade, você precisa:
-1. Trocar `SEU_USUARIO_GITHUB`/`SEU_REPOSITORIO` no bloco `"publish"` do `package.json` pelo seu repositório real
+1. Conferir o bloco `"publish"` do `package.json` (hoje aponta pra `Felipe-M-Soares/mamacoVoip`)
 2. Publicar os instaladores gerados como um GitHub Release
 3. Trocar a mesma URL em `src/lib/config.ts` (é o link do botão "Baixar o app pra PC" na tela de login)
 
@@ -113,7 +121,7 @@ Mac e Linux e já publica como um novo GitHub Release. Como o `electron-updater`
 `electron/main.cjs`) checa por atualizações toda vez que o app abre, isso significa que o mesmo `push` que
 atualiza o site na Vercel também deixa uma atualização pronta pra quem já tem o app instalado — na próxima
 vez que a pessoa abrir o Mamacos Voip, ele baixa e aplica sozinho. Só precisa:
-1. Trocar `SEU_USUARIO_GITHUB`/`SEU_REPOSITORIO` no `package.json` (bloco `"publish"`)
+1. Conferir o repositório no `package.json` (bloco `"publish"`)
 2. Isso já é suficiente — o workflow usa o token automático do GitHub Actions, não precisa configurar nada a mais
 
 **Testar em desenvolvimento** (sem gerar instalador):
@@ -123,14 +131,16 @@ npm run electron:start   # em outro terminal, abre a janela do Electron apontand
 ```
 
 **Reconhecimento de jogos**: o app desktop verifica a cada 15 segundos quais processos estão rodando no
-seu PC (comparando com uma lista de jogos populares em `electron/main.cjs`) e atualiza automaticamente
-seu status pra "🎮 Jogando X". Isso só funciona no app desktop — nenhum navegador dá acesso à lista de
+seu PC (comparando com o catálogo em `electron/gameCatalog.cjs` e com as pastas de bibliotecas das lojas de
+jogos) e atualiza automaticamente seu status pra "🎮 Jogando X". Só o nome do jogo vai pro servidor; a
+lista de processos fica no PC. Isso está descrito na Política de Privacidade (seção 4) — se mudar o que é
+detectado ou enviado, atualize o texto também. Isso só funciona no app desktop — nenhum navegador dá acesso à lista de
 processos do sistema por segurança, então essa função não existe na versão web. A detecção funciona melhor
 no Windows; no Mac/Linux a cobertura é mais limitada porque os nomes de processo variam mais.
 
 ## Segurança
 
-Um app "impossível de invadir" não existe — nem pra Mamacos Voip, nem pro Discord de verdade, nem pra nenhum
+Um app "impossível de invadir" não existe — nem pra Mamacos Voip, nem pro apps de chat populares, nem pra nenhum
 software que roda no computador de alguém. Quem tem o `.exe` instalado sempre consegue, em algum grau,
 inspecionar como ele funciona. O que dá pra fazer de verdade é: (1) fechar as portas que existem no app
 desktop, e (2) garantir que a decisão de "quem pode ver/editar o quê" fique no servidor, não no aplicativo —
@@ -181,3 +191,21 @@ Depois do primeiro deploy, volte no dashboard do Supabase em
 **Authentication → URL Configuration** e adicione o domínio da Vercel
 como Site URL / Redirect URL — senão o fluxo de confirmação de e-mail e
 reset de senha vai redirecionar pro `localhost`.
+
+## Documentos legais, licenças e marcas
+
+- **Termos de Uso** e **Política de Privacidade**: `src/pages/legal/` (rotas `/termos` e `/privacidade`).
+  Responsável: Felipe Moreira Soares — contato: mamacovoip@gmail.com (se mudar, troque nos dois arquivos e em `DeleteAccountInfo.tsx`).
+  O termo mostrado pelo instalador do Windows fica em `build/license.txt`. Sempre que o app passar a
+  coletar ou enviar algum dado novo (novo provedor, analytics, gravação etc.), atualize os três.
+- **Exclusão de conta pela web** (exigida pela Google Play): `/privacidade#excluir-conta` explica o passo a
+  passo; o ideal é ter uma rota própria (ex.: `/excluir-conta`).
+- **Componentes de terceiros**: `THIRD_PARTY_NOTICES.md` lista as licenças das dependências que vão no app
+  (gerado com `npx license-checker --production`). Regere ao atualizar dependências. Nenhuma dependência de
+  produção é GPL/AGPL; a `libuiohook` (dentro do `uiohook-napi`) é LGPL-3.0 e o Electron traz o FFmpeg
+  (LGPL-2.1) — os avisos estão no arquivo.
+- **Código deste repositório**: todos os direitos reservados ao autor (o `package.json` está como
+  `private`, sem licença de código aberto). Se quiser abrir o código, adicione um arquivo `LICENSE`.
+- **Marcas**: nomes de jogos, lojas e anti-cheats aparecem só para identificar o jogo detectado (uso
+  nominativo). Não use logotipos de terceiros nem sugira parceria ou endosso. Evite citar apps concorrentes
+  por nome em textos, telas e descrições de loja.

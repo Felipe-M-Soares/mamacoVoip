@@ -195,7 +195,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
         </>
       }
     >
-      <div role="tablist" aria-label="Seções do perfil" className="flex gap-1 p-1 mb-5 rounded-xl bg-discord-darker border border-[var(--color-line)]">
+      <div role="tablist" aria-label="Seções do perfil" className="flex gap-1 p-1 mb-5 rounded-xl bg-mv-canvas border border-[var(--color-line)]">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -204,8 +204,8 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
             onClick={() => setTab(t.id)}
             className={`flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
               tab === t.id
-                ? 'bg-discord-lighter text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
-                : 'text-discord-text-muted hover:text-discord-text'
+                ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
+                : 'text-mv-muted hover:text-mv-text'
             }`}
           >
             {t.label}
@@ -223,7 +223,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
                 overlay escuro com lápis + "Trocar". */}
             <button
               onClick={() => avatarInputRef.current?.click()}
-              className="relative w-20 h-20 rounded-full bg-discord-darker border-2 border-dashed border-white/[0.18] flex items-center justify-center overflow-hidden hover:border-discord-blurple transition-colors group"
+              className="relative w-20 h-20 rounded-full bg-mv-canvas border-2 border-dashed border-white/[0.18] flex items-center justify-center overflow-hidden hover:border-mv-accent transition-colors group"
             >
               {avatarPreview ? (
                 <>
@@ -236,7 +236,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
                   </span>
                 </>
               ) : (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7 text-discord-text-muted group-hover:text-discord-blurple transition-colors">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7 text-mv-muted group-hover:text-mv-accent transition-colors">
                   <rect x="3" y="3" width="18" height="18" rx="3" />
                   <circle cx="8.5" cy="9.5" r="1.5" />
                   <path d="M21 15l-5-5-9 9" />
@@ -251,9 +251,9 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
               onChange={handleAvatarChange}
             />
             {!avatarPreview && (
-              <p className="text-xs font-medium text-discord-text-muted text-center">Enviar foto</p>
+              <p className="text-xs font-medium text-mv-muted text-center">Enviar foto</p>
             )}
-            <p className="text-[11px] text-discord-text-muted text-center max-w-[280px]">{AVATAR_HELP}</p>
+            <p className="text-[11px] text-mv-muted text-center max-w-[280px]">{AVATAR_HELP}</p>
             {avatarError && <p className="text-xs text-rose-400">{avatarError}</p>}
           </div>
 
@@ -266,7 +266,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               maxLength={32}
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
           </div>
 
@@ -280,7 +280,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setCustomStatus(e.target.value)}
               placeholder="O que você está pensando?"
               maxLength={100}
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
           </div>
 
@@ -292,9 +292,9 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setPlaying(e.target.value)}
               placeholder="Nome do jogo (opcional)"
               maxLength={60}
-              className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none"
+              className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
-            <p className="text-xs text-discord-text-muted mt-1.5">
+            <p className="text-xs text-mv-muted mt-1.5">
               No site, esse campo é manual — detectar automaticamente qual jogo está aberto só é possível no app
               desktop (nenhum navegador consegue ver quais programas estão rodando no seu computador, por segurança).
               Deixe em branco pra não mostrar nada.
@@ -307,7 +307,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
         <div className="space-y-3">
           <button
             onClick={() => bannerInputRef.current?.click()}
-            className="w-full h-40 rounded-xl overflow-hidden border border-[var(--color-line-strong)] hover:border-discord-blurple/70 transition-colors relative group"
+            className="w-full h-40 rounded-xl overflow-hidden border border-[var(--color-line-strong)] hover:border-mv-accent/70 transition-colors relative group"
             style={!bannerPreview ? { background: gradientFor(profile.username) } : undefined}
           >
             {bannerPreview && (
@@ -326,7 +326,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
             className="hidden"
             onChange={handleBannerChange}
           />
-          <p className="text-[11px] text-discord-text-muted">{BANNER_HELP}</p>
+          <p className="text-[11px] text-mv-muted">{BANNER_HELP}</p>
           {bannerError && <p className="text-xs text-rose-400">{bannerError}</p>}
           {bannerPreview && (
             <button
@@ -347,13 +347,13 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
                 pra dar pra ver o efeito direito. */}
             <div className="relative" style={{ width: 96 * 1.3, height: 96 * 1.3 }}>
               <div
-                className="absolute rounded-full overflow-hidden bg-discord-darker"
+                className="absolute rounded-full overflow-hidden bg-mv-canvas"
                 style={{ top: 96 * 0.15, left: 96 * 0.15, width: 96, height: 96 }}
               >
                 {avatarPreview ? (
                   <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-white text-3xl font-medium bg-discord-blurple">
+                  <div className="w-full h-full flex items-center justify-center text-white text-3xl font-medium bg-mv-accent">
                     {profile.username.charAt(0).toUpperCase()}
                   </div>
                 )}
@@ -380,7 +380,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
             className="hidden"
             onChange={handleDecorationChange}
           />
-          <p className="text-[11px] text-discord-text-muted">{DECORATION_HELP}</p>
+          <p className="text-[11px] text-mv-muted">{DECORATION_HELP}</p>
           {decorationError && <p className="text-xs text-rose-400">{decorationError}</p>}
           {decorationPreview && (
             <button

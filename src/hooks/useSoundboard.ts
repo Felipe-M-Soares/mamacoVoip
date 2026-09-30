@@ -67,26 +67,34 @@ export function useSoundboard(serverId: string | null) {
     const ext = file.name.split('.').pop()?.toLowerCase() || 'mp3'
     const path = `${serverId}/${soundId}.${ext}`
 
-    const { error: uploadError } = await supabase.storage.from('soundboard').upload(path, file, {
-      cacheControl: '3600',
-      upsert: false,
-    })
-    if (uploadError) return { error: 'Não foi possível enviar o arquivo (formato aceito: mp3, wav, ogg ou webm).' }
-
+    // Ordem: primeiro a LINHA, depois o arquivo. Desde a migration 007
+    // (parte 19) o Storage só aceita upload no soundboard se o caminho
+    // for o storage_path de uma linha sua — e o banco aplica os limites
+    // de sons por servidor/pessoa já na criação da linha.
     const { error: insertError } = await supabase
       .from('soundboard_sounds')
       .insert({ id: soundId, server_id: serverId, name: trimmed, storage_path: path, uploaded_by: user.id })
 
     if (insertError) {
-      // O arquivo já subiu mas a linha não pôde ser criada (nome
-      // duplicado, por exemplo) — remove o órfão do bucket pra não
-      // deixar lixo acumulando lá.
-      await supabase.storage.from('soundboard').remove([path])
+      const msg = insertError.message ?? ''
       return {
-        error: insertError.message.toLowerCase().includes('duplicate')
+        error: msg.toLowerCase().includes('duplicate')
           ? 'Já existe um som com esse nome neste servidor.'
-          : 'Não foi possível salvar o som.',
+          : /^Limite de \d+ sons/.test(msg)
+            ? `${msg}.`
+            : 'Não foi possível salvar o som.',
       }
+    }
+
+    const { error: uploadError } = await supabase.storage.from('soundboard').upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+    })
+    if (uploadError) {
+      // A linha já existe mas o arquivo não subiu — desfaz a linha pra
+      // não sobrar um som "mudo" na lista (best-effort).
+      await supabase.rpc('delete_soundboard_sound', { p_sound_id: soundId })
+      return { error: 'Não foi possível enviar o arquivo (formato aceito: mp3, wav, ogg ou webm).' }
     }
 
     await refresh()
@@ -104,11 +112,15 @@ export function useSoundboard(serverId: string | null) {
   // refetch completo da lista só pra refletir "+1 uso", e a ordenação
   // de "usados com frequência" (ver SoundboardPanel.tsx) já se beneficia
   // do valor novo na hora.
-  function bumpPlayCount(soundId: string) {
-    supabase.rpc('bump_soundboard_play_count', { p_sound_id: soundId }).then(
-      () => {},
-      () => {}
-    )
+  // `localOnly`: a RPC play_soundboard_sound (migration 016) já contou o
+  // uso no banco — só atualiza a lista local.
+  function bumpPlayCount(soundId: string, opts?: { localOnly?: boolean }) {
+    if (!opts?.localOnly) {
+      supabase.rpc('bump_soundboard_play_count', { p_sound_id: soundId }).then(
+        () => {},
+        () => {}
+      )
+    }
     setSounds((prev) => prev.map((s) => (s.id === soundId ? { ...s, play_count: s.play_count + 1 } : s)))
   }
 

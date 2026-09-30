@@ -85,7 +85,7 @@ export function ManageMemberModal({
           </>
         }
       >
-        <p className="text-[14px] text-discord-text-muted leading-relaxed">
+        <p className="text-[14px] text-mv-muted leading-relaxed">
           {confirming === 'kick' ? 'Expulsar' : 'Banir'}{' '}
           <span className="text-white font-medium">{targetProfile.display_name || targetProfile.username}</span> do
           servidor?
@@ -100,7 +100,7 @@ export function ManageMemberModal({
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="Motivo (opcional)"
-          className="w-full px-3 py-2.5 bg-discord-darker text-discord-text outline-none text-sm"
+          className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none text-sm"
         />
         {error && <p className="text-sm text-rose-400 mt-3">{error}</p>}
       </Modal>
@@ -142,7 +142,7 @@ export function ManageMemberModal({
               {roles.map((role) => (
                 <div key={role.id} className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white/[0.015]">
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: role.color }} />
-                  <span className="flex-1 text-[14px] text-discord-text truncate">{role.name}</span>
+                  <span className="flex-1 text-[14px] text-mv-text truncate">{role.name}</span>
                   <Toggle
                     size="sm"
                     label={`Cargo ${role.name}`}
@@ -163,7 +163,7 @@ export function ManageMemberModal({
                 <button
                   key={preset.minutes}
                   onClick={() => handleTimeout(preset.minutes)}
-                  className="h-9 rounded-[10px] bg-white/[0.03] border border-[var(--color-line)] text-discord-text text-[13px] font-medium hover:bg-white/[0.07] hover:border-[var(--color-line-strong)] transition-colors"
+                  className="h-9 rounded-[10px] bg-white/[0.03] border border-[var(--color-line)] text-mv-text text-[13px] font-medium hover:bg-white/[0.07] hover:border-[var(--color-line-strong)] transition-colors"
                 >
                   {preset.label}
                 </button>

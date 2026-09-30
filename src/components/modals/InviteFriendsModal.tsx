@@ -113,7 +113,7 @@ export function InviteFriendsModal({
               <label
                 key={f.profile.id}
                 className={`flex items-center gap-3 px-2.5 py-2 rounded-[10px] cursor-pointer transition-colors ${
-                  selected.has(f.profile.id) ? 'bg-discord-blurple/[0.12]' : 'hover:bg-white/[0.05]'
+                  selected.has(f.profile.id) ? 'bg-mv-accent/[0.12]' : 'hover:bg-white/[0.05]'
                 }`}
               >
                 <input
@@ -122,14 +122,14 @@ export function InviteFriendsModal({
                   onChange={() => toggle(f.profile.id)}
                   className="sr-only peer"
                 />
-                <span className="rounded-md peer-focus-visible:ring-2 peer-focus-visible:ring-discord-blurple">
+                <span className="rounded-md peer-focus-visible:ring-2 peer-focus-visible:ring-mv-accent">
                   <CheckMark checked={selected.has(f.profile.id)} />
                 </span>
                 <Avatar name={f.profile.username} avatarUrl={f.profile.avatar_url} status={f.profile.status} userId={f.profile.id} size={32} />
                 <span className="text-sm text-white flex-1 truncate">
                   {f.profile.display_name || f.profile.username}
                 </span>
-                {sentTo.has(f.profile.id) && <span className="chip !text-discord-green !border-discord-green/30 !bg-discord-green/10">Enviado</span>}
+                {sentTo.has(f.profile.id) && <span className="chip !text-mv-green !border-mv-green/30 !bg-mv-green/10">Enviado</span>}
               </label>
             ))}
           </div>

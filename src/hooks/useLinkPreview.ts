@@ -34,7 +34,7 @@ export function clearLinkPreviewCache() {
 // Function) — nunca confia nele direto: o link e a imagem só passam se
 // forem http(s) (um "javascript:" no href do card executaria código no
 // app ao clicar), e os textos são limitados em tamanho.
-export function sanitizeLinkPreview(raw: unknown): LinkPreviewData | null {
+function sanitizeLinkPreview(raw: unknown): LinkPreviewData | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   const url = safeHttpUrl(typeof r.url === 'string' ? r.url : null)

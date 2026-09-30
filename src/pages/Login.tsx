@@ -102,7 +102,7 @@ export function Login() {
           autoComplete="current-password"
           placeholder="Sua senha"
           labelAside={
-            <Link to="/esqueci-senha" className="mb-[0.45rem] text-[12px] font-medium text-discord-blurple hover:underline">
+            <Link to="/esqueci-senha" className="mb-[0.45rem] text-[12px] font-medium text-mv-accent hover:underline">
               Esqueceu a senha?
             </Link>
           }
@@ -120,9 +120,9 @@ export function Login() {
 
       <GoogleSignInButton label="Entrar com Google" />
 
-      <p className="mt-6 text-center text-[14px] text-discord-text-muted">
+      <p className="mt-6 text-center text-[14px] text-mv-muted">
         Precisa de uma conta?{' '}
-        <Link to="/cadastro" className="font-medium text-discord-blurple hover:underline">
+        <Link to="/cadastro" className="font-medium text-mv-accent hover:underline">
           Cadastre-se
         </Link>
       </p>

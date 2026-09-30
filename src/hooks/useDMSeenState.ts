@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { changesChannel } from '../lib/realtimeChannel'
 
 // Retorna até quando a OUTRA pessoa da conversa leu — usado pra
 // mostrar "Visto" embaixo da sua última mensagem quando ela já foi
@@ -27,8 +28,7 @@ export function useDMSeenState(conversationId: string | null, otherUserId: strin
     }
     fetchState()
 
-    const channel = supabase
-      .channel(`dm_seen:${convoId}:${Math.random().toString(36).slice(2)}`)
+    const channel = changesChannel(`dm_seen:${convoId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'dm_read_state', filter: `conversation_id=eq.${convoId}` },

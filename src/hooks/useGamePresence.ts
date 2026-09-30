@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import { useAuth } from './useAuth'
+import { getShowPlaying, subscribeShowPlaying } from '../lib/gamePrivacy'
 
 export interface UpdateStatusPayload {
   status: 'checking' | 'downloading' | 'up-to-date' | 'ready' | 'error'
@@ -79,6 +80,25 @@ export interface ScreenShareSuggestion {
   // ScreenSharePicker.tsx oferece um botão de restaurar em vez de
   // simplesmente não ter nada pra escolher.
   looksMinimized: boolean
+  // Nome legível do anti-cheat do jogo sugerido (ex.: "Riot Vanguard"),
+  // quando conhecido — só informativo (ver ScreenSharePicker.tsx). O app
+  // nunca injeta nada no jogo, então a captura funciona igual.
+  antiCheat?: string | null
+}
+
+export interface CurrentGameInfo {
+  label: string
+  antiCheat: string | null
+  // true = reconhecido pela pasta da loja (Steam/Epic/...), fora do catálogo
+  generic: boolean
+}
+
+export type OverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+export interface OverlaySettings {
+  corner: OverlayCorner
+  visible: boolean
+  shortcutRegistered?: boolean
 }
 
 export interface ScreenShareSourcesPayload {
@@ -93,6 +113,9 @@ declare global {
       platform: string
       getVersion: () => Promise<string>
       getCurrentGame: () => Promise<string | null>
+      // Privacidade — opcionais pra continuar compatível com um preload antigo.
+      getGameDetectionEnabled?: () => Promise<boolean>
+      setGameDetectionEnabled?: (enabled: boolean) => Promise<boolean>
       onGameStatusChanged: (callback: (game: string | null) => void) => () => void
       onUpdateStatus: (callback: (payload: UpdateStatusPayload) => void) => () => void
       // Resolve `true` se o reinício pra instalar foi agendado, `false` se
@@ -122,6 +145,12 @@ declare global {
       setGlobalPTTKey: (keycode: number | null) => Promise<void>
       onPTTState: (callback: (active: boolean) => void) => () => void
       sendVoiceStateToOverlay: (state: unknown) => void
+      // Sobreposição — opcionais pra continuar compatível com um preload antigo.
+      getOverlaySettings?: () => Promise<OverlaySettings>
+      setOverlayVisible?: (visible: boolean) => Promise<boolean>
+      setOverlayCorner?: (corner: OverlayCorner) => Promise<{ corner: OverlayCorner }>
+      onOverlayVisibilityChanged?: (callback: (visible: boolean) => void) => () => void
+      getCurrentGameInfo?: () => Promise<CurrentGameInfo | null>
       checkForUpdatesNow: () => void
       // Vigia de foco do jogo — enquanto um compartilhamento de tela
       // cheia "atalho de jogo" está ativo, o processo principal observa
@@ -144,6 +173,8 @@ declare global {
       // native/process-audio-capture/capture.cpp. `startProcessAudioCapture`
       // nunca lança: sempre devolve { ok, error? }.
       startProcessAudioCapture: (pid: number) => Promise<{ ok: boolean; error?: string }>
+      // Áudio do sistema SEM o próprio app (sem eco da call) — ver main.cjs.
+      startSystemAudioExcludingSelf?: () => Promise<{ ok: boolean; error?: string }>
       stopProcessAudioCapture: () => Promise<void>
       onProcessAudioFormat: (
         callback: (format: { sampleRate: number; channels: number; sampleFormat: 'float32' | 'int16' }) => void
@@ -180,6 +211,15 @@ declare global {
       // (nem sempre óbvio como abrir, ou alcançável por atalho de
       // teclado, num app empacotado).
       logDebug: (message: string) => void
+      // Armazenamento cifrado (safeStorage do sistema) pra sessão do
+      // Supabase — só chaves "sb-". Ver src/lib/authStorage.ts e
+      // "secure-storage:*" em electron/main.cjs. Opcional: versões
+      // antigas do preload não têm.
+      secureStorage?: {
+        getItem: (key: string) => Promise<{ ok: boolean; value?: string | null }>
+        setItem: (key: string, value: string) => Promise<{ ok: boolean }>
+        removeItem: (key: string) => Promise<{ ok: boolean }>
+      }
     }
   }
 }
@@ -190,11 +230,30 @@ export function isElectron(): boolean {
 
 // Só faz alguma coisa dentro do app desktop — no navegador,
 // window.electronAPI simplesmente não existe, e o hook não faz nada.
+// Respeita "Mostrar o jogo que estou jogando" (lib/gamePrivacy.ts):
+// desligado = não grava `playing` e limpa o que estiver no perfil.
 export function useGamePresence() {
-  const { user, updateProfile } = useAuth()
+  const { user, profile, updateProfile } = useAuth()
+  const showPlaying = useSyncExternalStore(subscribeShowPlaying, getShowPlaying, () => true)
+  const hasPlaying = !!profile?.playing
+
+  // Mantém o processo principal alinhado com a preferência deste aparelho
+  // (ex.: preferência mudada com o app fechado / arquivo apagado).
+  useEffect(() => {
+    if (!window.electronAPI?.setGameDetectionEnabled) return
+    window.electronAPI.setGameDetectionEnabled(showPlaying).catch(() => {})
+  }, [showPlaying])
+
+  // Desligado: apaga o "Jogando X" do perfil (vale também pro site,
+  // caso tenha ficado gravado por uma sessão anterior do app).
+  useEffect(() => {
+    if (!user || showPlaying || !hasPlaying) return
+    updateProfile({ playing: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, showPlaying, hasPlaying])
 
   useEffect(() => {
-    if (!user || !window.electronAPI) return
+    if (!user || !window.electronAPI || !showPlaying) return
 
     // Evita atualizar o perfil depois do efeito já ter sido desmontado
     // (logout/troca de conta enquanto getCurrentGame ainda respondia) —
@@ -202,13 +261,13 @@ export function useGamePresence() {
     // errado/depois do logout.
     let cancelled = false
     const unsubscribe = window.electronAPI.onGameStatusChanged((game) => {
-      if (!cancelled) updateProfile({ playing: game })
+      if (!cancelled && getShowPlaying()) updateProfile({ playing: game })
     })
 
     window.electronAPI
       .getCurrentGame()
       .then((game) => {
-        if (game && !cancelled) updateProfile({ playing: game })
+        if (game && !cancelled && getShowPlaying()) updateProfile({ playing: game })
       })
       .catch(() => {
         // IPC indisponível — sem problema, o evento acima cobre as mudanças
@@ -219,5 +278,5 @@ export function useGamePresence() {
       unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id])
+  }, [user?.id, showPlaying])
 }

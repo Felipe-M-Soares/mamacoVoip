@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
-import { uniqueTopic } from '../lib/realtimeChannel'
+import { changesChannel } from '../lib/realtimeChannel'
 import type { Profile, ServerMember } from '../types/database'
 
 export type ServerMemberWithProfile = ServerMember & { profile: Profile }
@@ -127,8 +127,7 @@ function subscribe(serverId: string, listener: () => void): () => void {
     // Sem isso, quem entrasse no servidor com ele já aberto não tinha o
     // perfil carregado (o aviso "entrou no servidor" mostrava "Alguém").
     let hadProblem = false
-    const channel = supabase
-      .channel(uniqueTopic(`server_members:${serverId}`))
+    const channel = changesChannel(`server_members:${serverId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'server_members', filter: `server_id=eq.${serverId}` }, () =>
         scheduleReload(serverId, entry)
       )

@@ -1,9 +1,11 @@
+import { useState } from 'react'
+import { detectTransparency, getCachedTransparency, mayHaveTransparency } from '../../lib/imageTransparency'
 import { identityGradient } from '../../lib/identityColor'
 import type { ProfileStatus } from '../../types/database'
 import { useIsPresent } from '../../hooks/usePresence'
 
 const STATUS_COLOR: Record<ProfileStatus, string> = {
-  online: 'bg-discord-green',
+  online: 'bg-mv-green',
   idle: 'bg-amber-400',
   dnd: 'bg-rose-500',
   offline: 'bg-zinc-500',
@@ -60,7 +62,7 @@ export function Avatar({ name, avatarUrl, status, userId, size = 40, decorationU
     >
       <div className="absolute" style={{ top: pad, left: pad, width: size, height: size }}>
         {avatarUrl ? (
-          <img src={avatarUrl} alt={name} loading="lazy" decoding="async" className="w-full h-full rounded-full object-cover bg-discord-lighter" />
+          <AvatarImage key={avatarUrl} url={avatarUrl} name={name} />
         ) : (
           <div
             className="w-full h-full rounded-full flex items-center justify-center text-white font-semibold select-none"
@@ -89,10 +91,42 @@ export function Avatar({ name, avatarUrl, status, userId, size = 40, decorationU
             height: Math.max(8, size * 0.3),
             bottom: pad,
             right: pad,
-            boxShadow: `0 0 0 ${Math.max(2, Math.round(size * 0.07))}px var(--avatar-ring, var(--color-discord-sidebar))`,
+            boxShadow: `0 0 0 ${Math.max(2, Math.round(size * 0.07))}px var(--avatar-ring, var(--color-mv-side))`,
           }}
         />
       )}
     </div>
+  )
+}
+
+// Só lemos pixels (pra detectar PNG sem fundo) de imagens do próprio app
+// (Storage do Supabase) ou blob: da prévia local — ambos liberam CORS.
+// Fotos de outros domínios (ex.: foto do Google) carregam sem
+// crossOrigin, senão poderiam simplesmente não aparecer.
+function canInspectPixels(url: string): boolean {
+  if (url.startsWith('blob:') || url.startsWith('data:')) return true
+  try {
+    return new URL(url).hostname.endsWith('.supabase.co') && mayHaveTransparency(url)
+  } catch {
+    return false
+  }
+}
+
+// PNG/WebP/GIF sem fundo aparece "solto" (sem círculo e sem o fundo
+// cinza) — ver lib/imageTransparency. `key` = URL no pai, então o
+// estado recomeça quando a foto muda.
+function AvatarImage({ url, name }: { url: string; name: string }) {
+  const inspect = canInspectPixels(url)
+  const [transparent, setTransparent] = useState(() => (inspect ? getCachedTransparency(url) ?? false : false))
+  return (
+    <img
+      src={url}
+      alt={name}
+      loading="lazy"
+      decoding="async"
+      crossOrigin={inspect ? 'anonymous' : undefined}
+      onLoad={inspect ? (e) => setTransparent(detectTransparency(e.currentTarget)) : undefined}
+      className={`w-full h-full ${transparent ? 'object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.45)]' : 'rounded-full object-cover bg-mv-raised'}`}
+    />
   )
 }

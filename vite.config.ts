@@ -1,6 +1,17 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { readFileSync } from 'node:fs'
+
+// Versão do app (package.json) pra tela "Sobre → Licenças" — no site não
+// existe electronAPI.getVersion().
+const APP_VERSION: string = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version ?? ''
+  } catch {
+    return ''
+  }
+})()
 
 // O Vite adiciona crossorigin nas tags <script>/<link> por padrão — bom
 // pra um site normal, mas isso faz o Chromium tentar um fetch em modo
@@ -28,6 +39,9 @@ export default defineConfig(({ mode }) => ({
   // usa roteamento do lado do cliente), então só usamos "./" quando o
   // build é especificamente pro Electron (`npm run build:electron`).
   base: mode === 'electron' ? './' : '/',
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [react(), tailwindcss(), ...(mode === 'electron' ? [stripCrossoriginForElectron()] : [])],
   build: {
     rollupOptions: {

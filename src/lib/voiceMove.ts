@@ -75,7 +75,7 @@ export function describeVoiceMoveError(message: string | null | undefined): stri
   const text = (message ?? '').trim()
   if (!text) return 'Não foi possível mover o membro.'
   if (/could not find the function|does not exist|PGRST202/i.test(text)) {
-    return 'Mover membros ainda não está disponível neste servidor (falta aplicar a migration 014).'
+    return 'Mover membros ainda não está disponível neste servidor (falta aplicar a migration 007_seguranca_e_recursos_2026.sql).'
   }
   if (/failed to fetch|network|fetch/i.test(text)) {
     return 'Sem conexão — não foi possível mover o membro.'

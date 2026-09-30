@@ -1,6 +1,6 @@
 // Ferramenta de recorte de áudio pro soundboard — o pedido foi "limite
 // cada som a 5 segundo... mas ai tem q ter uma ferramenta para cortar o
-// audio como no discord" (o Discord deixa escolher um trecho de até 5s
+// audio como em outros apps" (um app de chat popular deixa escolher um trecho de até 5s
 // de qualquer áudio enviado, em vez de simplesmente rejeitar arquivos
 // longos). Tudo roda no navegador/Electron via Web Audio API — não
 // precisa de nenhum serviço externo nem upload prévio só pra cortar.

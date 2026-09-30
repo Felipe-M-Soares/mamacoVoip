@@ -35,8 +35,8 @@ export function InviteMessageCard({ invite }: { invite: InvitePayload }) {
   }
 
   return (
-    <div className="bg-discord-darker rounded-xl p-3.5 max-w-xs border border-[var(--color-line)]">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted mb-2">Convite</p>
+    <div className="bg-mv-canvas rounded-xl p-3.5 max-w-xs border border-[var(--color-line)]">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-2">Convite</p>
       <div className="flex items-center gap-3 mb-3">
         <span className="w-10 h-10 rounded-xl bg-brand-gradient flex items-center justify-center shrink-0">
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white">
@@ -46,7 +46,7 @@ export function InviteMessageCard({ invite }: { invite: InvitePayload }) {
         <div className="min-w-0">
           <p className="text-sm font-semibold text-white truncate">{invite.serverName}</p>
           {invite.channelName && (
-            <p className="text-xs text-discord-text-muted truncate">Sala de voz: {invite.channelName}</p>
+            <p className="text-xs text-mv-muted truncate">Sala de voz: {invite.channelName}</p>
           )}
         </div>
       </div>
@@ -56,7 +56,7 @@ export function InviteMessageCard({ invite }: { invite: InvitePayload }) {
           <button
             onClick={handleAccept}
             disabled={status === 'loading'}
-            className="flex-1 h-9 rounded-[10px] bg-discord-green text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-60"
+            className="flex-1 h-9 rounded-[10px] bg-mv-green text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-60"
           >
             {status === 'loading' ? 'Entrando...' : 'Aceitar'}
           </button>

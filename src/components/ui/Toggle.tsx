@@ -31,8 +31,8 @@ export function Toggle({
       onClick={() => onChange(!checked)}
       className={`relative inline-flex items-center shrink-0 rounded-full p-[3px] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed ${track} ${
         checked
-          ? 'bg-discord-blurple shadow-[inset_0_0_0_1px_rgb(255_255_255/0.12)]'
-          : 'bg-discord-lighter shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
+          ? 'bg-mv-accent shadow-[inset_0_0_0_1px_rgb(255_255_255/0.12)]'
+          : 'bg-mv-raised shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
       }`}
     >
       <span
@@ -42,7 +42,7 @@ export function Toggle({
         } flex items-center justify-center`}
       >
         {checked && size === 'md' && (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" className="w-2.5 h-2.5 text-discord-blurple">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" className="w-2.5 h-2.5 text-mv-accent">
             <path d="M5 12.5l4.5 4.5L19 7.5" />
           </svg>
         )}

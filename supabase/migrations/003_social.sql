@@ -696,3 +696,35 @@ begin
     alter publication supabase_realtime add table public.group_message_attachments;
   end if;
 end $$;
+
+-- ==== originalmente: 007_read_state.sql (parte das DMs) ====
+-- Movida de 002_messaging.sql (lá ela vinha antes de existir
+-- dm_conversations e quebrava a instalação do zero). Mesmo SQL de antes.
+create table if not exists public.dm_read_state (
+  conversation_id uuid not null references public.dm_conversations(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  last_read_at timestamptz not null default now(),
+  primary key (conversation_id, user_id)
+);
+
+alter table public.dm_read_state enable row level security;
+
+drop policy if exists "Usuário vê o próprio estado de leitura de DMs" on public.dm_read_state;
+create policy "Usuário vê o próprio estado de leitura de DMs"
+  on public.dm_read_state for select to authenticated
+  using (
+    exists (
+      select 1 from public.dm_conversations c
+      where c.id = conversation_id and (c.user_a = auth.uid() or c.user_b = auth.uid())
+    )
+  );
+
+drop policy if exists "Usuário marca suas DMs como lidas" on public.dm_read_state;
+create policy "Usuário marca suas DMs como lidas"
+  on public.dm_read_state for insert to authenticated
+  with check (user_id = auth.uid());
+
+drop policy if exists "Usuário atualiza o próprio estado de leitura de DMs" on public.dm_read_state;
+create policy "Usuário atualiza o próprio estado de leitura de DMs"
+  on public.dm_read_state for update to authenticated
+  using (user_id = auth.uid());

@@ -69,6 +69,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <vector>
 
 #pragma comment(lib, "ole32.lib")
@@ -240,12 +241,31 @@ uint16_t DetectSampleFormatTag(const WAVEFORMATEX* wfx) {
 }  // namespace
 
 int wmain(int argc, wchar_t* argv[]) {
+  // Uso:
+  //   process-audio-capture.exe <PID>             -> só o áudio da árvore do PID
+  //   process-audio-capture.exe --exclude <PID>   -> TODO o áudio do sistema
+  //                                                  MENOS a árvore do PID
+  // O modo --exclude é usado com o PID do próprio Mamacos Voip: transmite
+  // o "áudio do sistema" sem a voz da call junto (evita eco pra quem
+  // assiste). Só LÊ o áudio mixado pelo Windows — nada é injetado em
+  // processo nenhum (seguro com qualquer anti-cheat).
   if (argc < 2) {
-    LogError("uso: process-audio-capture.exe <PID>");
+    LogError("uso: process-audio-capture.exe [--exclude] <PID>");
     return 1;
   }
 
-  DWORD targetPid = static_cast<DWORD>(_wtoi(argv[1]));
+  bool excludeMode = false;
+  int pidArg = 1;
+  if (wcscmp(argv[1], L"--exclude") == 0) {
+    if (argc < 3) {
+      LogError("uso: process-audio-capture.exe --exclude <PID>");
+      return 1;
+    }
+    excludeMode = true;
+    pidArg = 2;
+  }
+
+  DWORD targetPid = static_cast<DWORD>(_wtoi(argv[pidArg]));
   if (targetPid == 0) {
     LogError("PID invalido");
     return 1;
@@ -283,7 +303,8 @@ int wmain(int argc, wchar_t* argv[]) {
   AUDIOCLIENT_ACTIVATION_PARAMS activationParams = {};
   activationParams.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
   activationParams.ProcessLoopbackParams.TargetProcessId = targetPid;
-  activationParams.ProcessLoopbackParams.ProcessLoopbackMode = PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+  activationParams.ProcessLoopbackParams.ProcessLoopbackMode =
+      excludeMode ? PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE : PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
 
   // PROPVARIANT é só uma struct comum (POD) — zerar tudo com "= {}"
   // equivale ao que PropVariantInit() faria, sem precisar de mais um

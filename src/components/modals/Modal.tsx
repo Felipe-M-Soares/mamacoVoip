@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { CloseIcon as CloseGlyph } from '../ui/icons'
 
 // Pilha de modais abertos (do mais antigo pro mais novo). Serve pra que
 // Esc e o "prende o foco" só valham pro modal DO TOPO — um modal aberto
@@ -147,7 +148,7 @@ export function Modal({
               <h2 id={titleId} className="font-display text-lg font-semibold text-white leading-tight">
                 {title}
               </h2>
-              {description && <p className="text-[13px] text-discord-text-muted mt-1 leading-snug">{description}</p>}
+              {description && <p className="text-[13px] text-mv-muted mt-1 leading-snug">{description}</p>}
             </div>
             <button
               type="button"
@@ -174,8 +175,6 @@ export function Modal({
 
 function CloseIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-[18px] h-[18px]" aria-hidden="true">
-      <path d="M6 6l12 12M18 6 6 18" />
-    </svg>
+    <CloseGlyph className="w-[18px] h-[18px]" aria-hidden />
   )
 }

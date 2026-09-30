@@ -31,7 +31,7 @@ export function GameDetectedToast() {
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-white truncate">Jogando {justDetectedGame}</p>
-          <p className="text-xs text-discord-text-muted mt-0.5">
+          <p className="text-xs text-mv-muted mt-0.5">
             {inVoiceCall ? 'Quer compartilhar sua tela na call?' : 'Já apareceu no seu status pros seus amigos.'}
           </p>
         </div>
@@ -41,6 +41,12 @@ export function GameDetectedToast() {
           </svg>
         </button>
       </div>
+
+      {inVoiceCall && (
+        <p className="text-[11px] leading-snug text-mv-muted mt-2" title="Sobreposição só aparece com o jogo em janela sem borda (sem injeção no jogo, seguro com anti-cheat).">
+          {voice.screenShareQuality.gameAuto ? 'Transmite em 1080p60. ' : ''}Sobreposição: Ctrl+Shift+O (jogo em janela sem borda).
+        </p>
+      )}
 
       {inVoiceCall && (
         <div className="flex gap-2 mt-3.5">

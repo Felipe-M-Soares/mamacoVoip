@@ -20,7 +20,9 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
   if (!voice.connectedChannelId || voice.connectedServerId) return null
 
   const participantIds = Object.keys(voice.participants)
-  const hasAnyVideo = participantIds.some((id) => voice.participants[id]?.cameraStream?.getVideoTracks().length)
+  const hasAnyVideo =
+    Boolean(voice.videoEnabled && voice.localCameraStream) ||
+    participantIds.some((id) => voice.participants[id]?.cameraStream?.getVideoTracks().length)
 
   return (
     <div
@@ -31,8 +33,8 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
       <div className="flex items-center justify-between gap-2 pl-3.5 pr-2 h-11 border-b border-[var(--color-line)]">
         <span className="flex items-center gap-2 min-w-0">
           <span className="relative flex w-2 h-2 shrink-0" aria-hidden>
-            <span className="absolute inset-0 rounded-full bg-discord-green animate-ping opacity-60" />
-            <span className="relative w-2 h-2 rounded-full bg-discord-green" />
+            <span className="absolute inset-0 rounded-full bg-mv-green animate-ping opacity-60" />
+            <span className="relative w-2 h-2 rounded-full bg-mv-green" />
           </span>
           <span className="text-[13px] font-semibold text-white truncate">
             {voice.connectedChannelName || 'Chamada'}
@@ -55,18 +57,17 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
 
       {!minimized && (
         <div className={`grid gap-2 p-2.5 ${hasAnyVideo ? 'grid-cols-2' : 'grid-cols-3'}`}>
-          {/* Sem preview da própria câmera aqui — mesma escolha já feita
-              em VoiceChannelView.tsx (o tile local nunca recebe um
-              cameraStream próprio, só mostra o avatar). */}
+          {/* Prévia da própria câmera (espelhada) quando ligada. */}
           <ParticipantMiniTile
             key="local"
             isLocal
             name="Você"
             avatarUrl={undefined}
             speakerId={selfId}
-            hasVideo={false}
-            stream={null}
+            hasVideo={Boolean(voice.videoEnabled && voice.localCameraStream)}
+            stream={voice.localCameraStream}
             sinkId={null}
+            mirror
           />
           {participantIds.map((id) => {
             const data = voice.participants[id]
@@ -95,7 +96,7 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
           aria-label={voice.muted ? 'Ativar microfone' : 'Silenciar'}
           aria-pressed={voice.muted}
           className={`w-10 h-10 flex items-center justify-center rounded-full transition-all active:scale-95 ${
-            voice.muted ? 'bg-rose-500/15 text-rose-400 ring-1 ring-inset ring-rose-500/35 hover:bg-rose-500/25' : 'bg-white/[0.07] text-discord-text hover:bg-white/[0.13] hover:text-white'
+            voice.muted ? 'bg-rose-500/15 text-rose-400 ring-1 ring-inset ring-rose-500/35 hover:bg-rose-500/25' : 'bg-white/[0.07] text-mv-text hover:bg-white/[0.13] hover:text-white'
           }`}
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
@@ -113,7 +114,7 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
           aria-label={voice.deafened ? 'Reativar áudio' : 'Ensurdecer'}
           aria-pressed={voice.deafened}
           className={`w-10 h-10 flex items-center justify-center rounded-full transition-all active:scale-95 ${
-            voice.deafened ? 'bg-rose-500/15 text-rose-400 ring-1 ring-inset ring-rose-500/35 hover:bg-rose-500/25' : 'bg-white/[0.07] text-discord-text hover:bg-white/[0.13] hover:text-white'
+            voice.deafened ? 'bg-rose-500/15 text-rose-400 ring-1 ring-inset ring-rose-500/35 hover:bg-rose-500/25' : 'bg-white/[0.07] text-mv-text hover:bg-white/[0.13] hover:text-white'
           }`}
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
@@ -127,7 +128,7 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
           aria-label={voice.videoEnabled ? 'Desligar câmera' : 'Ligar câmera'}
           aria-pressed={voice.videoEnabled}
           className={`w-10 h-10 flex items-center justify-center rounded-full transition-all active:scale-95 ${
-            voice.videoEnabled ? 'bg-discord-blurple text-white hover:brightness-110' : 'bg-white/[0.07] text-discord-text hover:bg-white/[0.13] hover:text-white'
+            voice.videoEnabled ? 'bg-mv-accent text-white hover:brightness-110' : 'bg-white/[0.07] text-mv-text hover:bg-white/[0.13] hover:text-white'
           }`}
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
@@ -157,8 +158,10 @@ function ParticipantMiniTile({
   hasVideo,
   stream,
   sinkId,
+  mirror = false,
 }: {
   isLocal: boolean
+  mirror?: boolean
   name: string
   avatarUrl?: string | null
   // Quem é (pra acender a borda quando fala) — lido direto do store de
@@ -171,16 +174,16 @@ function ParticipantMiniTile({
   const speaking = useVoiceSpeaking(speakerId)
   return (
     <div
-      className={`relative ${hasVideo && stream ? 'aspect-video' : 'aspect-[5/4] flex-col gap-1.5 pt-1'} bg-discord-darker rounded-xl flex items-center justify-center overflow-hidden border transition-[border-color,box-shadow] duration-200 ${
+      className={`relative ${hasVideo && stream ? 'aspect-video' : 'aspect-[5/4] flex-col gap-1.5 pt-1'} bg-mv-canvas rounded-xl flex items-center justify-center overflow-hidden border transition-[border-color,box-shadow] duration-200 ${
         speaking
-          ? 'border-discord-green/80 shadow-[0_0_0_1px_var(--color-discord-green),0_0_16px_-4px_var(--color-discord-green)]'
+          ? 'border-mv-green/80 shadow-[0_0_0_1px_var(--color-mv-green),0_0_16px_-4px_var(--color-mv-green)]'
           : 'border-[var(--color-line)]'
       }`}
     >
       {hasVideo && stream ? (
-        <VideoTile stream={stream} sinkId={sinkId} />
+        <VideoTile stream={stream} sinkId={sinkId} mirror={mirror} />
       ) : (
-        <div className={`rounded-full transition-shadow ${speaking ? 'ring-2 ring-discord-green ring-offset-2 ring-offset-discord-darker' : ''}`}>
+        <div className={`rounded-full transition-shadow ${speaking ? 'ring-2 ring-mv-green ring-offset-2 ring-offset-mv-canvas' : ''}`}>
           <Avatar name={name} avatarUrl={avatarUrl ?? null} size={34} />
         </div>
       )}
@@ -192,7 +195,7 @@ function ParticipantMiniTile({
           {name}
         </span>
       ) : (
-        <span className="text-[11px] font-medium text-discord-text truncate max-w-[90%]">{name}</span>
+        <span className="text-[11px] font-medium text-mv-text truncate max-w-[90%]">{name}</span>
       )}
     </div>
   )

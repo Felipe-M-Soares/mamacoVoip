@@ -5,6 +5,7 @@ import { GoogleSignInButton } from '../components/ui/GoogleSignInButton'
 import { MobileDownloadBanner } from '../components/ui/MobileDownloadBanner'
 import { AuthAlert, AuthDivider, AuthField, AuthHeader, AuthIcons, AuthShell, DesktopDownloadChip } from './AuthShell'
 import { supabase } from '../lib/supabase'
+import { acceptCurrentTerms, rememberPendingTerms } from '../lib/termsAcceptance'
 import {
   validateEmail,
   validatePassword,
@@ -23,11 +24,13 @@ export function Register() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [acceptedTerms, setAcceptedTerms] = useState(false)
+  const [isAdult, setIsAdult] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [confirmationSent, setConfirmationSent] = useState(false)
 
   const termsError = 'Você precisa aceitar os Termos de Uso e a Política de Privacidade pra continuar.'
+  const adultError = 'O Mamacos Voip é só para maiores de 18 anos. Confirme que você tem 18 anos ou mais pra continuar.'
 
   function validate(): string | null {
     const trimmedUsername = username.trim()
@@ -36,7 +39,8 @@ export function Register() {
       validateEmail(email) ??
       validatePassword(password, { email, username: trimmedUsername }) ??
       (password !== confirmPassword ? 'As senhas não são iguais.' : null) ??
-      (!acceptedTerms ? termsError : null)
+      (!acceptedTerms ? termsError : null) ??
+      (!isAdult ? adultError : null)
     )
   }
 
@@ -74,7 +78,16 @@ export function Register() {
       setError('Esse nome de usuário já está em uso. Escolha outro.')
       return
     }
+    // Aceite + 18+ ficam "pendentes" neste aparelho: com confirmação de
+    // e-mail ainda não há sessão pra chamar accept_terms agora — o
+    // TermsGate envia sozinho no primeiro login (ver lib/termsAcceptance.ts).
+    rememberPendingTerms(email)
     const { error } = await signUp(email, password, trimmedUsername)
+    if (!error) {
+      // Projeto sem confirmação de e-mail: já existe sessão — registra agora.
+      const { data } = await supabase.auth.getSession()
+      if (data.session) await acceptCurrentTerms()
+    }
     setLoading(false)
 
     if (error) {
@@ -85,18 +98,18 @@ export function Register() {
   }
 
   const strength = password ? passwordStrength(password) : 0
-  const strengthColor = ['bg-rose-500', 'bg-rose-500', 'bg-amber-400', 'bg-discord-green', 'bg-discord-green'][strength]
+  const strengthColor = ['bg-rose-500', 'bg-rose-500', 'bg-amber-400', 'bg-mv-green', 'bg-mv-green'][strength]
 
   if (confirmationSent) {
     return (
       <AuthShell>
         <div className="text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-discord-green/15 text-discord-green ring-1 ring-inset ring-discord-green/25">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-mv-green/15 text-mv-green ring-1 ring-inset ring-mv-green/25">
             {AuthIcons.mail}
           </div>
           <h1 className="font-display text-2xl font-semibold text-white">Confirme seu e-mail</h1>
-          <p className="mt-3 text-[14px] leading-relaxed text-discord-text-muted">
-            Enviamos um link de confirmação para <span className="font-medium text-discord-text">{email}</span>.
+          <p className="mt-3 text-[14px] leading-relaxed text-mv-muted">
+            Enviamos um link de confirmação para <span className="font-medium text-mv-text">{email}</span>.
             Clique no link para ativar sua conta e poder entrar.
           </p>
           <Link to="/login" className="btn-secondary mt-6 inline-flex h-10 items-center justify-center px-5 text-[14px]">
@@ -183,19 +196,29 @@ export function Register() {
             type="checkbox"
             checked={acceptedTerms}
             onChange={(e) => setAcceptedTerms(e.target.checked)}
-            className="mt-0.5 h-4 w-4 shrink-0 accent-discord-blurple"
+            className="mt-0.5 h-4 w-4 shrink-0 accent-mv-accent"
           />
-          <span className="text-[13px] leading-snug text-discord-text-muted">
+          <span className="text-[13px] leading-snug text-mv-muted">
             Eu li e concordo com os{' '}
-            <Link to="/termos" target="_blank" className="font-medium text-discord-blurple hover:underline">
+            <Link to="/termos" target="_blank" className="font-medium text-mv-accent hover:underline">
               Termos de Uso
             </Link>{' '}
             e a{' '}
-            <Link to="/privacidade" target="_blank" className="font-medium text-discord-blurple hover:underline">
+            <Link to="/privacidade" target="_blank" className="font-medium text-mv-accent hover:underline">
               Política de Privacidade
             </Link>
             .
           </span>
+        </label>
+
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-[10px] border border-[var(--color-line)] bg-white/[0.02] p-3">
+          <input
+            type="checkbox"
+            checked={isAdult}
+            onChange={(e) => setIsAdult(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-mv-accent"
+          />
+          <span className="text-[13px] leading-snug text-mv-muted">Tenho 18 anos ou mais.</span>
         </label>
 
         {error && <AuthAlert tone="error">{error}</AuthAlert>}
@@ -208,11 +231,18 @@ export function Register() {
 
       <AuthDivider />
 
-      <GoogleSignInButton label="Cadastrar com Google" beforeStart={() => (acceptedTerms ? null : termsError)} />
+      <GoogleSignInButton
+        label="Cadastrar com Google"
+        beforeStart={() => {
+          const problem = !acceptedTerms ? termsError : !isAdult ? adultError : null
+          if (!problem) rememberPendingTerms(null)
+          return problem
+        }}
+      />
 
-      <p className="mt-6 text-center text-[14px] text-discord-text-muted">
+      <p className="mt-6 text-center text-[14px] text-mv-muted">
         Já tem uma conta?{' '}
-        <Link to="/login" className="font-medium text-discord-blurple hover:underline">
+        <Link to="/login" className="font-medium text-mv-accent hover:underline">
           Entrar
         </Link>
       </p>

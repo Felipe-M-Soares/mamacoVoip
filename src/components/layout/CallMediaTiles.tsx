@@ -11,8 +11,8 @@ import { forwardRef, useEffect, useRef } from 'react'
 // principal, cancelando o efeito do lazy loading — daí o
 // compartilhado ficar isolado aqui, um arquivo pequeno que os dois
 // lados podem importar sem esse efeito colateral.
-export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sinkId?: string | null; fit?: 'cover' | 'contain' }>(
-  function VideoTile({ stream, sinkId, fit = 'cover' }, forwardedRef) {
+export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sinkId?: string | null; fit?: 'cover' | 'contain'; mirror?: boolean }>(
+  function VideoTile({ stream, sinkId, fit = 'cover', mirror = false }, forwardedRef) {
     const localRef = useRef<HTMLVideoElement>(null)
     useEffect(() => {
       if (localRef.current) localRef.current.srcObject = stream
@@ -34,7 +34,7 @@ export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sin
         autoPlay
         playsInline
         muted
-        className={`w-full h-full rounded-[inherit] bg-black ${fit === 'contain' ? 'object-contain' : 'object-cover'}`}
+        className={`w-full h-full rounded-[inherit] bg-black ${fit === 'contain' ? 'object-contain' : 'object-cover'} ${mirror ? '-scale-x-100' : ''}`}
       />
     )
   }

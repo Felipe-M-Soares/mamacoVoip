@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { moderateVoiceParticipant } from '../lib/livekit'
 import { useAuth } from './useAuth'
 import { PERMISSIONS, type Ban, type ModerationLog, type Permission, type Profile } from '../types/database'
 
 export type BanWithProfile = Ban & { profile: Profile }
 export type LogWithProfiles = ModerationLog & { actor: Profile | undefined; target: Profile | undefined }
 
-// Mesmo teto do banco (migration 013) e do Discord: 28 dias.
-export const MAX_TIMEOUT_MINUTES = 28 * 24 * 60
+// Mesmo teto do banco (migration 013) e de apps de chat populares: 28 dias.
+const MAX_TIMEOUT_MINUTES = 28 * 24 * 60
 const MAX_REASON_LENGTH = 500
 
 function cleanReason(reason: string | undefined): string | undefined {
@@ -120,6 +121,8 @@ export function useModeration(serverId: string | null) {
     if (!serverId) return { error: 'Nenhum servidor selecionado' }
     reason = cleanReason(reason)
     const { error } = await supabase.rpc('kick_member', { p_server_id: serverId, p_user_id: userId, p_reason: reason ?? null })
+    // Tira da voz também (best-effort, não segura a UI).
+    if (!error) void moderateVoiceParticipant({ serverId, userId, action: 'kick' })
     if (!error) await refresh()
     return { error: error?.message ?? null }
   }
@@ -128,6 +131,8 @@ export function useModeration(serverId: string | null) {
     if (!serverId) return { error: 'Nenhum servidor selecionado' }
     reason = cleanReason(reason)
     const { error } = await supabase.rpc('ban_member', { p_server_id: serverId, p_user_id: userId, p_reason: reason ?? null })
+    // Tira da voz também (best-effort, não segura a UI).
+    if (!error) void moderateVoiceParticipant({ serverId, userId, action: 'ban' })
     if (!error) await refresh()
     return { error: error?.message ?? null }
   }
@@ -151,6 +156,8 @@ export function useModeration(serverId: string | null) {
       p_minutes: minutes,
       p_reason: reason ?? null,
     })
+    // Tira da voz também (best-effort, não segura a UI).
+    if (!error) void moderateVoiceParticipant({ serverId, userId, action: 'timeout' })
     if (!error) await refresh()
     return { error: error?.message ?? null }
   }

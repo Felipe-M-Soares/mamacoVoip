@@ -3,7 +3,7 @@
 // qualquer participante podia mandar, pelo canal Realtime da call, uma
 // URL arbitrária (rastreador de IP, arquivo gigante, áudio de horas) que
 // o app de TODO mundo na call baixava e tocava sozinho.
-export function soundboardUrlPrefix(supabaseUrl: string): string {
+function soundboardUrlPrefix(supabaseUrl: string): string {
   return `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/public/soundboard/`
 }
 

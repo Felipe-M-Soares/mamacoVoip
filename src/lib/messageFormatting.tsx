@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { Profile, ServerEmoji, Role } from '../types/database'
+import { getSticker, parseStickerId } from './stickers'
 
 function Spoiler({ children }: { children: ReactNode }) {
   const [revealed, setRevealed] = useState(false)
@@ -11,8 +12,8 @@ function Spoiler({ children }: { children: ReactNode }) {
       }}
       className={`rounded px-1 transition-colors ${
         revealed
-          ? 'bg-discord-lighter/40'
-          : 'bg-discord-lighter text-transparent select-none cursor-pointer hover:bg-discord-lighter/80'
+          ? 'bg-mv-raised/40'
+          : 'bg-mv-raised text-transparent select-none cursor-pointer hover:bg-mv-raised/80'
       }`}
     >
       {children}
@@ -32,7 +33,7 @@ const PATTERNS: Pattern[] = [
     render: (inner, key) => (
       <pre
         key={key}
-        className="bg-discord-darker border border-[var(--color-line)] rounded-lg px-3 py-2.5 my-1.5 overflow-x-auto text-[13px] leading-relaxed font-mono whitespace-pre-wrap"
+        className="bg-mv-canvas border border-[var(--color-line)] rounded-lg px-3 py-2.5 my-1.5 overflow-x-auto text-[13px] leading-relaxed font-mono whitespace-pre-wrap"
       >
         <code>{inner.replace(/^\n/, '')}</code>
       </pre>
@@ -42,7 +43,7 @@ const PATTERNS: Pattern[] = [
     // código inline `...`
     regex: /`([^`\n]+)`/,
     render: (inner, key) => (
-      <code key={key} className="bg-discord-darker border border-[var(--color-line)] rounded-md px-1.5 py-0.5 text-[0.85em] font-mono">
+      <code key={key} className="bg-mv-canvas border border-[var(--color-line)] rounded-md px-1.5 py-0.5 text-[0.85em] font-mono">
         {inner}
       </code>
     ),
@@ -96,7 +97,38 @@ export function safeHttpUrl(url: string | null | undefined): string | null {
 
 const CODE_PATTERN_COUNT = 2 // os dois primeiros PATTERNS são de código (literal)
 
+// Figurinha: a mensagem inteira é `[[sticker:<id>]]` (ver lib/stickers.ts).
+// Vira uma imagem grande, sem nenhuma outra formatação em volta; id
+// desconhecido cai num texto discreto em vez de mostrar a marcação crua.
+function renderSticker(id: string): ReactNode {
+  const sticker = getSticker(id)
+  if (!sticker) {
+    return (
+      <span key="sticker" className="italic text-mv-muted" data-sticker-missing={id}>
+        [figurinha indisponível]
+      </span>
+    )
+  }
+  return (
+    <img
+      key="sticker"
+      src={sticker.url}
+      alt={`Figurinha: ${sticker.label}`}
+      title={sticker.label}
+      width={140}
+      height={140}
+      loading="lazy"
+      draggable={false}
+      data-sticker={sticker.id}
+      className="block w-[140px] h-[140px] my-1 select-none object-contain"
+    />
+  )
+}
+
 export function parseMessageContent(text: string, members: Profile[], emojis: ServerEmoji[] = [], roles: Role[] = []): ReactNode[] {
+  const stickerId = parseStickerId(text)
+  if (stickerId) return [renderSticker(stickerId)]
+
   const usernames = new Set(members.map((m) => m.username.toLowerCase()))
   const emojiByName = new Map(emojis.map((e) => [e.name.toLowerCase(), e]))
   const sortedRoles = [...roles].filter((r) => r.name.length > 0).sort((a, b) => b.name.length - a.name.length)
@@ -208,7 +240,7 @@ export function parseMessageContent(text: string, members: Profile[], emojis: Se
             className={
               isBroadcast
                 ? 'bg-amber-400/15 text-amber-300 rounded px-1 font-medium'
-                : 'bg-discord-blurple/15 text-discord-blurple rounded px-1 font-medium hover:bg-discord-blurple/25 transition-colors'
+                : 'bg-mv-accent/15 text-mv-accent rounded px-1 font-medium hover:bg-mv-accent/25 transition-colors'
             }
           >
             {mentionMatch[0]}

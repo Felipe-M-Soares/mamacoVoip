@@ -1,8 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
-import { uniqueTopic } from '../lib/realtimeChannel'
+import { changesChannel } from '../lib/realtimeChannel'
+import { invalidateSignedUrl } from '../lib/storageUrls'
 import type { GroupConversation, Profile } from '../types/database'
+
+const GROUP_BUCKET = 'group-attachments'
+// A API do Storage aceita vários caminhos por chamada; lotes pequenos
+// evitam requisição gigante em grupo com muito anexo.
+const STORAGE_REMOVE_BATCH = 100
 
 export interface GroupConversationWithMembers extends GroupConversation {
   members: Profile[]
@@ -13,6 +19,8 @@ interface GroupConversationsContextValue {
   loading: boolean
   createGroup: (name: string, memberIds: string[]) => Promise<{ error: string | null; groupId?: string }>
   leaveGroup: (groupId: string) => Promise<{ error: string | null }>
+  /** Só quem criou o grupo: apaga o grupo inteiro (mensagens, anexos, membros). */
+  deleteGroup: (groupId: string) => Promise<{ error: string | null }>
   refresh: () => Promise<void>
 }
 
@@ -83,14 +91,35 @@ export function GroupConversationsProvider({ children }: { children: ReactNode }
   useEffect(() => {
     if (!userId) return
     let active = true
-    const channel = supabase
-      // Nome único por montagem (ver lib/realtimeChannel.ts)
-      .channel(uniqueTopic(`group_conversation_membership:${userId}`))
+    // Nome único por montagem (ver lib/realtimeChannel.ts)
+    const channel = changesChannel(`group_conversation_membership:${userId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'group_conversation_members', filter: `user_id=eq.${userId}` },
-        () => void refresh()
+        (payload) => {
+          // O Realtime não filtra DELETE (manda o de todo mundo, só com a
+          // chave primária) — sem esta checagem, cada pessoa que saísse de
+          // QUALQUER grupo faria todos os clientes online recarregarem.
+          if (payload.eventType === 'DELETE') {
+            // (a chave primária é group_id + user_id, então as duas vêm)
+            const old = payload.old as { user_id?: string; group_id?: string }
+            if (old.user_id !== userId) return
+            if (old.group_id) setGroups((prev) => prev.filter((g) => g.id !== old.group_id))
+          }
+          void refresh()
+        }
       )
+      // Grupo apagado por quem criou: some da lista de todo mundo na hora.
+      // DELETE também chega sem filtro/RLS (só o id) — ignora id que não
+      // está na lista. UPDATE (nome/ícone) passa pela RLS: só membros.
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'group_conversations' }, (payload) => {
+        const id = (payload.old as { id?: string }).id
+        if (id) setGroups((prev) => (prev.some((g) => g.id === id) ? prev.filter((g) => g.id !== id) : prev))
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'group_conversations' }, (payload) => {
+        const row = payload.new as GroupConversation
+        setGroups((prev) => (prev.some((g) => g.id === row.id) ? prev.map((g) => (g.id === row.id ? { ...g, ...row } : g)) : prev))
+      })
       .subscribe((status) => {
         // `CLOSED` também vem da própria limpeza — não recarrega nesse caso
         if (!active) return
@@ -105,17 +134,25 @@ export function GroupConversationsProvider({ children }: { children: ReactNode }
   const createGroup = useCallback(
     async (name: string, memberIds: string[]): Promise<{ error: string | null; groupId?: string }> => {
       if (!userId) return { error: 'Não autenticado' }
-      const { data: group, error } = await supabase
+      // O id vem do cliente e o grupo é criado SEM ler de volta: desde a
+      // migration 007 (parte 19) só MEMBRO enxerga o grupo, e o banco
+      // põe quem criou como membro por gatilho logo depois do insert —
+      // um `.select()` aqui seria checado antes disso e falharia.
+      const group = { id: crypto.randomUUID() }
+      const { error } = await supabase
         .from('group_conversations')
-        .insert({ name: name.trim() || null, created_by: userId })
-        .select()
-        .single()
-      if (error || !group) return { error: error?.message ?? 'Erro ao criar grupo' }
+        .insert({ id: group.id, name: name.trim() || null, created_by: userId })
+      if (error) return { error: error.message ?? 'Erro ao criar grupo' }
 
+      // Quem criou já entrou pelo gatilho; `ignoreDuplicates` mantém isto
+      // funcionando também num banco que ainda não rodou a parte 19.
       const allMembers = [...new Set([userId, ...memberIds])]
       const { error: memberError } = await supabase
         .from('group_conversation_members')
-        .insert(allMembers.map((uid) => ({ group_id: group.id, user_id: uid })))
+        .upsert(
+          allMembers.map((uid) => ({ group_id: group.id, user_id: uid })),
+          { onConflict: 'group_id,user_id', ignoreDuplicates: true }
+        )
       if (memberError) {
         // Desfaz o grupo "órfão" (criado sem membros) — best-effort.
         await supabase.from('group_conversations').delete().eq('id', group.id)
@@ -141,9 +178,52 @@ export function GroupConversationsProvider({ children }: { children: ReactNode }
     [userId, refresh]
   )
 
+  // Apagar o grupo (só quem criou — a RLS confere de novo no banco).
+  // 1) lista e apaga os arquivos do grupo pela API do Storage (depois de
+  //    apagar o grupo ninguém mais passa na política de leitura); falha
+  //    aqui não impede apagar o grupo — o que sobrar vira órfão e sai na
+  //    limpeza periódica (orphan_attachment_objects);
+  // 2) apaga a linha do grupo: membros, mensagens e anexos vão junto em
+  //    cascata no banco, e o Realtime tira o grupo da lista dos outros.
+  const deleteGroup = useCallback(
+    async (groupId: string): Promise<{ error: string | null }> => {
+      if (!userId) return { error: 'Não autenticado' }
+      const group = groups.find((g) => g.id === groupId)
+      if (group && group.created_by !== userId) return { error: 'Só quem criou o grupo pode apagá-lo.' }
+
+      try {
+        for (let round = 0; round < 20; round++) {
+          const { data: paths, error: listError } = await supabase.rpc('group_attachment_objects', {
+            p_group_id: groupId,
+            p_limit: 1000,
+          })
+          if (listError || !paths || paths.length === 0) break
+          let removedAny = false
+          for (let i = 0; i < paths.length; i += STORAGE_REMOVE_BATCH) {
+            const batch = paths.slice(i, i + STORAGE_REMOVE_BATCH)
+            batch.forEach((p) => invalidateSignedUrl(GROUP_BUCKET, p))
+            const { data: removed, error: removeError } = await supabase.storage.from(GROUP_BUCKET).remove(batch)
+            if (!removeError && removed && removed.length > 0) removedAny = true
+          }
+          if (!removedAny || paths.length < 1000) break
+        }
+      } catch (err) {
+        console.warn('[GroupConversationsContext] Falha ao apagar arquivos do grupo (seguindo):', err)
+      }
+
+      const { data, error } = await supabase.from('group_conversations').delete().eq('id', groupId).select('id')
+      if (error) return { error: error.message }
+      if (!data || data.length === 0) return { error: 'Não foi possível apagar o grupo (só quem criou pode apagar).' }
+
+      setGroups((prev) => prev.filter((g) => g.id !== groupId))
+      return { error: null }
+    },
+    [userId, groups]
+  )
+
   const value = useMemo(
-    () => ({ groups, loading, createGroup, leaveGroup, refresh }),
-    [groups, loading, createGroup, leaveGroup, refresh]
+    () => ({ groups, loading, createGroup, leaveGroup, deleteGroup, refresh }),
+    [groups, loading, createGroup, leaveGroup, deleteGroup, refresh]
   )
 
   return <GroupConversationsContext.Provider value={value}>{children}</GroupConversationsContext.Provider>

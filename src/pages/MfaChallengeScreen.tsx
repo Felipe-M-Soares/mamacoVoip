@@ -42,11 +42,11 @@ export function MfaChallengeScreen() {
           placeholder="000000"
           autoFocus
           aria-invalid={!!error}
-          className="h-14 w-full bg-discord-darker px-3 text-center font-mono text-2xl tracking-[0.5em] text-white outline-none"
+          className="h-14 w-full bg-mv-canvas px-3 text-center font-mono text-2xl tracking-[0.5em] text-white outline-none"
         />
         <div className="mt-2 flex justify-center gap-1.5" aria-hidden>
           {Array.from({ length: 6 }, (_, n) => (
-            <span key={n} className={`h-1 w-6 rounded-full transition-colors ${n < code.length ? 'bg-discord-blurple' : 'bg-white/[0.08]'}`} />
+            <span key={n} className={`h-1 w-6 rounded-full transition-colors ${n < code.length ? 'bg-mv-accent' : 'bg-white/[0.08]'}`} />
           ))}
         </div>
       </div>

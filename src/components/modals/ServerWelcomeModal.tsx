@@ -68,15 +68,15 @@ export function ServerWelcomeModal({ server, onDismiss }: { server: Server; onDi
               className="w-20 h-20 rounded-[22px] object-cover mx-auto mb-3 ring-[6px] ring-[var(--color-elevated)] relative z-10 -mt-10"
             />
           ) : (
-            <div className="w-20 h-20 rounded-[22px] bg-discord-lighter mx-auto mb-3 ring-[6px] ring-[var(--color-elevated)] relative z-10 -mt-10 flex items-center justify-center font-display text-white font-semibold text-2xl">
+            <div className="w-20 h-20 rounded-[22px] bg-mv-raised mx-auto mb-3 ring-[6px] ring-[var(--color-elevated)] relative z-10 -mt-10 flex items-center justify-center font-display text-white font-semibold text-2xl">
               {server.name.slice(0, 2).toUpperCase()}
             </div>
           )}
-          <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-discord-text-muted">Boas-vindas</p>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-mv-muted">Boas-vindas</p>
           <h2 id="server-welcome-title" className="font-display text-xl font-semibold text-white mt-1 mb-3">
             Bem-vindo a <span className="text-gradient">{server.name}</span>!
           </h2>
-          <p className="text-[14px] text-discord-text-muted whitespace-pre-wrap leading-relaxed text-left rounded-xl bg-white/[0.02] border border-[var(--color-line)] px-4 py-3">
+          <p className="text-[14px] text-mv-muted whitespace-pre-wrap leading-relaxed text-left rounded-xl bg-white/[0.02] border border-[var(--color-line)] px-4 py-3">
             {server.description}
           </p>
           <button onClick={onDismiss} className="mt-5 w-full h-10 btn-primary text-sm">

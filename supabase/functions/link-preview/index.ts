@@ -183,7 +183,10 @@ async function assertPublicHost(hostname: string): Promise<void> {
   // interna. Não elimina 100% o DNS rebinding (o fetch resolve de novo),
   // mas fecha o caso comum de "nome público que aponta pra 127.0.0.1".
   const resolveDns = (Deno as unknown as { resolveDns?: (h: string, t: string) => Promise<string[]> }).resolveDns
-  if (typeof resolveDns !== 'function') return
+  // Falha FECHADO: sem como resolver o DNS não dá pra garantir que o nome
+  // não aponta pra rede interna (SSRF) — então não busca nada. (Antes
+  // simplesmente pulava a checagem e buscava assim mesmo.)
+  if (typeof resolveDns !== 'function') throw new PublicError('Pré-visualização indisponível no momento')
   const results = await Promise.allSettled([resolveDns(lower, 'A'), resolveDns(lower, 'AAAA')])
   const addresses = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
   if (addresses.length === 0) throw new PublicError('Não foi possível resolver esse endereço')

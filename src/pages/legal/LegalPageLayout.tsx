@@ -17,11 +17,11 @@ export function LegalPageLayout({ title, updatedAt, children }: { title: string;
           <img src="/logo-192.png" alt="Mamacos Voip" className="h-12 w-12 rounded-2xl object-cover ring-1 ring-[var(--color-line-strong)]" />
           <div className="min-w-0">
             <h1 className="font-display text-2xl font-semibold text-white sm:text-3xl">{title}</h1>
-            <p className="mt-1 text-[13px] text-discord-text-muted">Última atualização: {updatedAt}</p>
+            <p className="mt-1 text-[13px] text-mv-muted">Última atualização: {updatedAt}</p>
           </div>
         </header>
 
-        <article className="surface-elevated mt-8 space-y-5 rounded-2xl p-6 leading-relaxed text-discord-text sm:p-10 [&_a]:text-discord-blurple [&_a:hover]:underline [&_strong]:text-white">
+        <article className="surface-elevated mt-8 space-y-5 rounded-2xl p-6 leading-relaxed text-mv-text sm:p-10 [&_a]:text-mv-accent [&_a:hover]:underline [&_strong]:text-white">
           {children}
         </article>
       </div>
@@ -33,7 +33,7 @@ export function LegalSection({ title, children }: { title: string; children: Rea
   return (
     <section className="border-t border-[var(--color-line)] pt-6 first:border-t-0 first:pt-0">
       <h2 className="mb-3 font-display text-[17px] font-semibold text-white">{title}</h2>
-      <div className="space-y-2 text-[14px] text-discord-text/90">{children}</div>
+      <div className="space-y-2 text-[14px] text-mv-text/90">{children}</div>
     </section>
   )
 }

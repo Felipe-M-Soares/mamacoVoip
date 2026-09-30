@@ -1,4 +1,5 @@
-import { FunctionsHttpError } from '@supabase/supabase-js'
+import { FunctionRegion, FunctionsHttpError } from '@supabase/supabase-js'
+import type { Room } from 'livekit-client'
 import { supabase } from './supabase'
 
 // Sala/transmissão de voz e vídeo migrou de um mesh manual de
@@ -18,6 +19,16 @@ import { supabase } from './supabase'
 // perto do código do cliente — só o token de acesso, de vida curta,
 // assinado do lado do servidor (ver supabase/functions/livekit-token) já
 // com a identidade do usuário JÁ autenticado travada nele.
+
+// Região da Edge Function do token (opcional, VITE_SUPABASE_REGION, ex.:
+// "sa-east-1"). Por padrão a função roda no ponto mais perto de QUEM CHAMA;
+// como ela faz várias consultas ao banco, rodar na MESMA região do banco
+// economiza uma ida-e-volta intercontinental por consulta quando o banco
+// não está perto do usuário. Ver docs/PING.md.
+const FUNCTIONS_REGION: FunctionRegion | undefined = (() => {
+  const raw = (import.meta.env.VITE_SUPABASE_REGION as string | undefined)?.trim()
+  return raw && (Object.values(FunctionRegion) as string[]).includes(raw) ? (raw as FunctionRegion) : undefined
+})()
 
 export interface LiveKitTokenResult {
   token: string
@@ -61,7 +72,7 @@ export async function fetchLiveKitToken(params: {
 }): Promise<LiveKitTokenResult> {
   const { data, error } = await supabase.functions.invoke<
     Omit<LiveKitTokenResult, 'canPublish'> & { canPublish?: boolean; error?: string; code?: string }
-  >('livekit-token', { body: params })
+  >('livekit-token', { body: params, ...(FUNCTIONS_REGION ? { region: FUNCTIONS_REGION } : {}) })
   if (error) {
     const { message: detail, code } = await extractFunctionError(error)
     // Compara pelo `code` (estável) e, por compatibilidade com uma Edge
@@ -83,4 +94,83 @@ export async function fetchLiveKitToken(params: {
   }
   // Edge Function antiga (sem o campo) sempre permitia publicar.
   return { token: data.token, url: data.url, canPublish: data.canPublish !== false }
+}
+
+export type VoiceModerationAction = 'kick' | 'ban' | 'timeout' | 'move'
+
+/**
+ * Depois de expulsar/banir/silenciar alguém, tira a pessoa das salas de
+ * voz do servidor (ou corta o microfone, no timeout) direto no LiveKit —
+ * sem isso, quem já estava conectado continuava falando até o token
+ * expirar. Edge Function `livekit-moderate` (confere a permissão do
+ * moderador no banco). Best-effort: nunca lança, só avisa no console.
+ */
+export async function moderateVoiceParticipant(params: {
+  serverId: string
+  userId: string
+  action: VoiceModerationAction
+}): Promise<void> {
+  try {
+    const { error } = await supabase.functions.invoke('livekit-moderate', {
+      body: { server_id: params.serverId, user_id: params.userId, action: params.action },
+    })
+    if (error) {
+      const { message } = await extractFunctionError(error)
+      console.warn('[livekit-moderate]', message ?? error.message)
+    }
+  } catch (err) {
+    console.warn('[livekit-moderate]', err)
+  }
+}
+
+// ---------------------------------------------------------------------
+// Conexão mais rápida / ping real (ver docs/PING.md)
+// ---------------------------------------------------------------------
+
+const LIVEKIT_URL_STORAGE_KEY = 'mamacos:livekit-url'
+
+/** Guarda a URL do LiveKit (vem no token) pra pré-aquecer na próxima abertura do app. */
+export function rememberLiveKitUrl(url: string) {
+  try {
+    if (/^wss?:\/\//.test(url)) localStorage.setItem(LIVEKIT_URL_STORAGE_KEY, url)
+  } catch {
+    // armazenamento bloqueado — só perde o pré-aquecimento
+  }
+}
+
+function rememberedLiveKitUrl(): string | null {
+  try {
+    const url = localStorage.getItem(LIVEKIT_URL_STORAGE_KEY)
+    return url && /^wss?:\/\//.test(url) ? url : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Pré-aquece DNS + TLS com o servidor de voz logo que o app abre, usando a
+ * URL da última call (não há token ainda, então é só isso — a escolha da
+ * região acontece no `prepareConnection(url, token)` do join). Uma vez por
+ * sessão; nunca lança.
+ */
+let prewarmed = false
+export function prewarmLiveKitConnection(prepare: (url: string) => Promise<void>) {
+  if (prewarmed) return
+  const url = rememberedLiveKitUrl()
+  if (!url) return
+  prewarmed = true
+  void prepare(url).catch(() => {})
+}
+
+/**
+ * Sala LiveKit ativa (a da call atual), pra quem só precisa LER
+ * estatísticas dela (ex.: o ping real em useVoiceMediaRtt) sem passar a
+ * sala inteira por contexto React. Quem manda é o VoiceContext.
+ */
+let activeVoiceRoom: Room | null = null
+export function setActiveVoiceRoom(room: Room | null) {
+  activeVoiceRoom = room
+}
+export function getActiveVoiceRoom(): Room | null {
+  return activeVoiceRoom
 }

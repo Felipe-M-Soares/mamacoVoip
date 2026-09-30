@@ -474,6 +474,7 @@ function openExternalSafely(url) {
 // janela está em primeiro plano / onde ela está (user32, somente leitura)
 // — exatamente o que o Gerenciador de Tarefas faz. Vanguard, EAC,
 // BattlEye, Ricochet, FACEIT etc. não bloqueiam nem punem isso.
+const win32native = require('./win32native.cjs')
 const gameCatalog = require('./gameCatalog.cjs')
 const KNOWN_GAMES = gameCatalog.buildKnownGamesMap()
 
@@ -482,14 +483,9 @@ const KNOWN_GAMES = gameCatalog.buildKnownGamesMap()
 // ter esse sufixo — melhora um pouco a cobertura fora do Windows,
 // mesmo que a lista tenha sido pensada primariamente pra ele.
 const GAME_CHECK_INTERVAL_MS = 15_000
-// O "último app em primeiro plano" (lastForegroundApp, ver abaixo) tinha
-// esse mesmo intervalo de 15s — bom o bastante pra achar QUAL jogo está
-// rodando (tasklist inteiro, mais pesado), mas alto demais pra pegar o
-// jogo certo quando a pessoa alterna pra ele e volta rápido pro mamaco
-// pra compartilhar (ex: menos de 15s de diferença = ainda pegava o valor
-// ANTIGO/vazio). Como o snapshot de foreground é uma chamada leve e
-// separada (um PowerShell só, sem tasklist), roda numa frequência bem
-// maior, num timer próprio.
+// Intervalo do "último app em primeiro plano" (lastForegroundApp) — bem
+// menor que o da lista de processos pra pegar o jogo certo quando a pessoa
+// alterna pra ele e volta rápido pro app pra compartilhar.
 const FOREGROUND_CHECK_INTERVAL_MS = 3_000
 
 let mainWindow = null
@@ -497,14 +493,7 @@ let isQuitting = false
 let updateReadyToInstall = false
 let gameCheckTimer = null
 let foregroundCheckTimer = null
-// Trava simples pra nunca ter duas chamadas de getForegroundWindowInfo() (que
-// abrem um PowerShell + compilam um pedacinho de C# via Add-Type CADA vez)
-// rodando ao mesmo tempo. Sem isso: se uma chamada demorar mais que
-// FOREGROUND_CHECK_INTERVAL_MS (bem provável com um jogo pesado tomando toda
-// a CPU/GPU — é justamente PowerShell+Add-Type que fica lento nessa hora), o
-// próximo tick do setInterval dispara outra chamada por cima da anterior
-// ainda rodando, empilhando cada vez mais processos concorrentes e piorando
-// a lentidão que causou o atraso em primeiro lugar (efeito bola de neve).
+// Evita duas consultas de primeiro plano sobrepostas.
 let foregroundCheckInFlight = false
 let currentGame = null
 // Última janela que esteve em primeiro plano ENQUANTO nossa própria janela
@@ -526,12 +515,8 @@ let genericDetectedGame = null
 // KNOWN_GAMES.
 let watchedProcessNames = []
 let watchedProcessWasSeen = false
-// NONA RODADA: contador de "vezes seguidas que detectamos um jogo
-// CADASTRADO pelo tasklist, mas o Windows não conseguiu achar NENHUMA
-// janela de verdade pra ele" — ver a verificação extra dentro de
-// startGameDetection logo abaixo. Existe pra não "piscar" o status
-// (mostrar "Jogando" e sumir de novo) por causa de uma falha isolada e
-// passageira do PowerShell.
+// Quantas vezes seguidas um jogo do catálogo apareceu na lista de processos
+// mas sem janela de verdade (processo zumbi de anti-cheat) — evita "piscar".
 let gameWindowMissStreak = 0
 let gameCheckTickCount = 0
 
@@ -554,6 +539,15 @@ let gameCheckTickCount = 0
 //     busca por trecho de texto de antes (nomes vêm com caminho no macOS
 //     e cortados em 15 caracteres no Linux).
 function getRunningProcessSnapshot() {
+  // Windows: lista direto do sistema (sem abrir nenhum processo e sem
+  // rodar tasklist a cada 15s). tasklist só como reserva.
+  if (process.platform === 'win32') {
+    const procs = win32native.listProcesses()
+    if (procs) {
+      const names = new Set(procs.map((p) => `${p.name}.exe`))
+      return Promise.resolve({ text: '', names, isWin: true })
+    }
+  }
   return new Promise((resolve) => {
     const isWin = process.platform === 'win32'
     const cmd = isWin ? 'tasklist /fo csv /nh' : process.platform === 'darwin' ? 'ps -Ao comm' : 'ps -eo comm'
@@ -596,8 +590,7 @@ function detectRunningGameFromSnapshot(snapshot) {
   return null
 }
 
-// Evita que duas verificações se sobreponham (tasklist + scanner podem
-// passar dos 15s do intervalo com a máquina sob carga pesada de um jogo).
+// Evita que duas verificações se sobreponham.
 let gameCheckInFlight = false
 
 function startGameDetection() {
@@ -639,28 +632,10 @@ async function runGameCheckTick() {
       }
     }
 
-    // NONA RODADA — corrige o status "Jogando X" ficando travado mesmo
-    // depois de fechar o jogo de verdade. `tasklist` sozinho só prova que
-    // EXISTE um processo com aquele nome — não que o jogo está de fato
-    // aberto e jogável. Jogos com anti-cheat (BattlEye/EasyAntiCheat, ex.:
-    // Rainbow Six Siege) são conhecidos por às vezes deixar o processo
-    // principal PENDURADO em segundo plano, sem janela nenhuma, mesmo
-    // depois da pessoa fechar o jogo — o `tasklist` nunca reflete isso,
-    // então o status ficava "Jogando" pra sempre.
-    //
-    // A correção: quando um jogo CADASTRADO é detectado, confirma com o
-    // Windows que existe uma JANELA de verdade pra esse processo
-    // (reaproveita getGameWindowInfo, a mesma varredura usada pro atalho
-    // de compartilhar — já lida bem com jogos borderless/minimizados, não
-    // depende de título). Só roda essa verificação extra (mais pesada,
-    // compila C# via Add-Type) na hora que o status MUDA (pra não mostrar
-    // "Jogando" nem por um instante se já nasce sem janela — caso clássico
-    // do processo zumbi) e, enquanto continuar "jogando", só de novo a
-    // cada ~1 minuto (a cada 4 verificações de 15s) — não a cada tick, pra
-    // não pesar à toa enquanto o jogo de verdade está rodando normal.
-    // Uma falha ISOLADA nessas re-checagens periódicas não derruba o
-    // status na hora (só na segunda falha SEGUIDA) — evita "piscar" por
-    // causa de um PowerShell lento/travado só daquela vez.
+    // Um jogo do catálogo precisa ter JANELA de verdade (anti-cheats às vezes
+    // deixam o processo pendurado sem janela depois de fechar o jogo). Confere
+    // na mudança de status e depois a cada ~1 min; uma falha isolada não
+    // derruba o status (só a segunda seguida).
     if (game && process.platform === 'win32') {
       const justChanged = game !== currentGame
       const periodicRecheck = gameCheckTickCount % 4 === 0
@@ -714,26 +689,8 @@ async function runForegroundCheckTick() {
       foregroundCheckInFlight = true
       try {
         const fg = await getForegroundWindowInfo()
-        // SÉTIMA RODADA — corrida de dados real, achada revendo com calma:
-        // o `!mainWindow.isFocused()` acima só é checado ANTES de chamar
-        // getForegroundWindowInfo(), que é ASSÍNCRONO e pode levar vários
-        // segundos (abre um PowerShell + compila C# na hora — daí o
-        // timeout de até 4.5s). Se a pessoa alternar PRA o mamaco bem
-        // nesse meio-tempo (exatamente o que acontece ao clicar em
-        // "Compartilhar tela" logo depois de sair do jogo), o resultado só
-        // chega DEPOIS que o mamaco já está em primeiro plano — e aí
-        // `lastForegroundApp` era sobrescrito com a janela do PRÓPRIO
-        // mamaco, bem na hora de abrir o seletor. Foi exatamente isso que
-        // explicou a sugestão aparecer como "Mamacos Voip" em vez do jogo.
-        // Rechecando o foco AGORA, depois do await, descarta esse
-        // resultado quando ele já está velho/contaminado, em vez de usá-lo.
-        // Segunda camada de proteção, independente da checagem de foco
-        // acima: `fg.pid` nunca pode ser o PID do PRÓPRIO mamaco
-        // (process.pid aqui é o processo principal do Electron, dono de
-        // toda janela nativa do app — inclusive a overlay). Rejeita isso
-        // incondicionalmente, mesmo que a checagem de foco por algum
-        // motivo não pegue (ex.: alguma janela secundária nossa ganhando
-        // foco sem mainWindow.isFocused() perceber).
+        // Recheca o foco DEPOIS da consulta (a pessoa pode ter voltado pro
+        // app nesse meio-tempo) e nunca aceita o PID do próprio app.
         if (fg && fg.pid !== process.pid && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
           lastForegroundApp = fg
           // Detecção genérica: o .exe em primeiro plano mora numa pasta de
@@ -761,7 +718,7 @@ function stopGameDetection() {
 
 // Privacidade: "Mostrar o jogo que estou jogando" (Configurações →
 // Privacidade). Desligado = o app nem olha a lista de processos (nada
-// de tasklist/PowerShell rodando em segundo plano). Fica salvo em
+// de consulta de processos rodando em segundo plano). Fica salvo em
 // privacy-settings.json na pasta de dados do app, pra valer já na
 // próxima abertura, antes mesmo da página carregar.
 function privacySettingsPath() {
@@ -798,29 +755,10 @@ function setGameDetectionEnabled(enabled) {
 }
 
 // ============================================================
-// "Vigia de foco do jogo" — pra evitar que compartilhar TELA CHEIA
-// (o fallback usado quando um jogo não aparece como janela separada,
-// ver 'screen-share-sources' mais abaixo e ScreenSharePicker.tsx) vaze
-// o que está na tela quando a pessoa alterna pra outro programa
-// (navegador, DMs, etc.) sem parar a transmissão.
-//
-// A ideia: enquanto uma dessas transmissões de tela cheia "sobre um
-// jogo" está ativa, fica de olho em qual é a janela em PRIMEIRO PLANO
-// (não só "o processo está rodando", que é o que detectRunningGameFromSnapshot()
-// já verifica) — assim que deixar de ser o próprio jogo, avisa o
-// renderer, que troca o vídeo enviado pelos outros por uma tela de
-// aviso (ver VoiceContext.tsx) até o jogo voltar a ser a janela ativa.
-//
-// Só existe no Windows (via user32.dll GetForegroundWindow, chamado de
-// dentro de um PowerShell) — não tem equivalente simples/portável em
-// Mac/Linux, então nesses sistemas essa proteção extra simplesmente não
-// liga (a transmissão de tela cheia continua funcionando normal, só
-// sem esse aviso automático).
-//
-// Um ÚNICO processo PowerShell fica vivo rodando um laço interno (em
-// vez de abrir um processo novo a cada verificação) — herdando o
-// custo de iniciar o PowerShell e compilar o pedacinho de C# (via
-// Add-Type) só UMA vez, não a cada poucos segundos.
+// "Vigia de foco do jogo": enquanto uma transmissão de TELA CHEIA sobre um
+// jogo está ativa, avisa o renderer quando a janela em primeiro plano deixa
+// de ser o jogo (a transmissão mostra um aviso em vez de vazar o que está
+// na tela). Só Windows.
 let foregroundWatcherProc = null
 let foregroundWatcherGames = []
 
@@ -845,569 +783,87 @@ function antiCheatForGameLabel(label) {
 }
 
 // ============================================================
-// "Compartilhar seu jogo" (fallback de tela cheia): antes disso, quando
-// o jogo não aparecia como uma JANELA separada pro desktopCapturer (caso
-// clássico de jogo em modo tela cheia exclusiva), o atalho simplesmente
-// chutava a tela PRINCIPAL — o que está errado pra qualquer pessoa que
-// joga com o jogo no monitor SECUNDÁRIO (setup comum: jogo numa tela,
-// chat/navegador na outra). Essa função pergunta pro Windows,
-// de verdade, em qual monitor a JANELA do próprio processo do jogo está
-// (e qual é o TÍTULO exato dessa janela) — mesmo que a janela esteja em
-// modo tela cheia exclusiva, ela quase sempre ainda tem um
-// "MainWindowHandle" válido por baixo (é assim que a maioria dos jogos
-// DirectX/OpenGL implementa tela cheia, por cima de uma janela normal já
-// existente) — daí só usa a própria API do .NET (Screen.FromHandle, que
-// já embute toda a conta de "qual monitor" sem precisar declarar
-// chamada nenhuma ao Win32 na mão) pra pegar os limites (bounds) desse
-// monitor, e MainWindowTitle pra pegar o nome exato da janela — esse
-// título é usado em dois lugares (ver setDisplayMediaRequestHandler
-// abaixo e ScreenSharePicker.tsx): (1) quando o jogo TEM uma janela
-// capturável na lista do desktopCapturer, casar pelo título EXATO em
-// vez de um chute por nome parecido é bem mais confiável; (2) quando
-// não tem (tela cheia exclusiva), os `bounds` dizem qual monitor
-// oferecer no fallback.
-//
-// ============================================================
-// DÉCIMA TERCEIRA RODADA — o motivo real de "o Rainbow Six nunca aparece
-// como sugestão mesmo com tudo mais certo" (KNOWN_GAMES tem
-// 'rainbowsix.exe', o PID resolve certinho pelo tasklist, o processo
-// existe): getGameWindowInfo/getForegroundWindowInfo, do jeito que
-// existiam antes, abriam um powershell.exe NOVO e recompilavam o mesmo
-// pedacinho de C# via Add-Type DO ZERO (o compilador csc.exe sendo
-// chamado por baixo) a CADA chamada — isso NUNCA foi "alguns
-// milissegundos", é bem mais pesado que isso, e com um jogo pesado
-// (exatamente o caso do Rainbow Six Siege) consumindo CPU/GPU ao mesmo
-// tempo, esse custo cresce ainda mais e passa fácil do timeout de 4.5s.
-// O problema não parava na checagem individual falhar: em
-// startGameDetection, a PRIMEIRA falha logo depois de detectar um jogo
-// (justChanged) zerava `currentGame` NA HORA — então bastava UMA
-// verificação lenta (bem provável logo que o jogo abre/carrega, quando
-// tem pico de CPU) pra sugestão "Jogo" nunca se estabilizar, mesmo com
-// o jogo rodando normal o resto do tempo. E o vigia de foreground (a
-// cada 3s) tinha o mesmo custo por chamada, competindo por CPU com o
-// próprio jogo o tempo todo.
-//
-// A correção: um ÚNICO processo PowerShell "scanner" fica vivo (mesma
-// ideia já usada em startForegroundWatch/foregroundWatcherProc acima,
-// generalizada agora pra também servir essas duas funções) — o Add-Type
-// roda UMA vez só, na primeira vez que o scanner é preciso, e cada
-// checagem seguinte é só mandar um comando de uma linha pelo stdin e
-// ler uma linha de resposta (JSON) pelo stdout: sem processo novo, sem
-// recompilar nada. Isso reduz o custo de cada checagem de "1-4+
-// segundos, bem variável" pra tipicamente bem menos de um segundo, de
-// forma CONSISTENTE — não dependente de quanto o resto do sistema (o
-// próprio jogo incluso) está ocupado no instante exato.
-let scannerProc = null
-let scannerReadyPromise = null
-let scannerQueue = []
-let scannerBuffer = ''
-
-const SCANNER_SCRIPT = `
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class MamacosScan {
-  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
-  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-  [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
-  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-  // Caminho do .exe de um processo — usado só pra detecção GENÉRICA de
-  // jogo (pasta steamapps/Epic/Riot/..., ver gameCatalog.cjs).
-  // PROCESS_QUERY_LIMITED_INFORMATION (0x1000) é o acesso MÍNIMO que o
-  // Windows oferece (o mesmo do Gerenciador de Tarefas): funciona até com
-  // processos protegidos por anti-cheat e não permite ler/escrever memória
-  // nem injetar nada. Falhou → string vazia (best-effort).
-  [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
-  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool QueryFullProcessImageName(IntPtr hProcess, uint flags, StringBuilder name, ref uint size);
-  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
-  public static string GetProcessPath(uint pid) {
-    IntPtr h = OpenProcess(0x1000, false, pid);
-    if (h == IntPtr.Zero) return "";
-    try {
-      StringBuilder sb = new StringBuilder(1024);
-      uint size = 1024;
-      return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : "";
-    } finally { CloseHandle(h); }
-  }
-  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-  public struct POINT { public int X; public int Y; }
-  public struct WINDOWPLACEMENT {
-    public int length; public int flags; public int showCmd;
-    public POINT ptMinPosition; public POINT ptMaxPosition;
-    public RECT rcNormalPosition;
-  }
-}
-"@
-
-function Find-MamacosGameWindow($names) {
-  $targetPids = @{}
-  foreach ($name in $names) {
-    if ($name -eq '') { continue }
-    Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object { $targetPids[[int]$_.Id] = $true }
-  }
-  $bestHwnd = [IntPtr]::Zero
-  $bestArea = 0
-  $bestTitle = ''
-  $bestPid = 0
-  $bestShowCmd = 1
-  $hwnd = [MamacosScan]::GetTopWindow([IntPtr]::Zero)
-  while ($hwnd -ne [IntPtr]::Zero) {
-    if ($targetPids.Count -gt 0 -and [MamacosScan]::IsWindowVisible($hwnd)) {
-      if ([MamacosScan]::GetAncestor($hwnd, 2) -eq $hwnd) {
-        $procId = 0
-        [MamacosScan]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
-        if ($targetPids.ContainsKey([int]$procId)) {
-          $wp = New-Object 'MamacosScan+WINDOWPLACEMENT'
-          $wp.length = 44
-          [MamacosScan]::GetWindowPlacement($hwnd, [ref]$wp) | Out-Null
-          $rect = $wp.rcNormalPosition
-          $w = $rect.Right - $rect.Left
-          $h = $rect.Bottom - $rect.Top
-          if ($w -ge 200 -and $h -ge 200) {
-            $area = $w * $h
-            if ($area -gt $bestArea) {
-              $bestArea = $area
-              $bestHwnd = $hwnd
-              $bestPid = $procId
-              $bestShowCmd = $wp.showCmd
-              $sb = New-Object System.Text.StringBuilder 512
-              [MamacosScan]::GetWindowText($hwnd, $sb, 512) | Out-Null
-              $bestTitle = $sb.ToString()
-            }
-          }
-        }
-      }
-    }
-    $hwnd = [MamacosScan]::GetWindow($hwnd, 2)
-  }
-  if ($bestHwnd -ne [IntPtr]::Zero) {
-    $s = [System.Windows.Forms.Screen]::FromHandle($bestHwnd)
-    $b = $s.Bounds
-    # DÉCIMA OITAVA RODADA: inclui o HWND agora (antes só bounds/title/pid)
-    # — é o que permite mandar "restaurar essa janela" (comando R| abaixo)
-    # quando ela está MINIMIZADA: GetWindowPlacement acima devolve os
-    # bounds "de quando estava restaurada" (rcNormalPosition) mesmo com o
-    # jogo minimizado agora, então esse achado continua valendo mesmo
-    # nesse estado — só faltava o HWND pra dar pra agir sobre ele.
-    #
-    # VIGÉSIMA QUINTA RODADA: inclui showCmd também — é o sinal CERTO de
-    # "está minimizado de verdade" (showCmd 2 = SW_SHOWMINIMIZED),
-    # diferente de tentar adivinhar isso indiretamente (jeito antigo, que
-    # tinha um problema real: jogo em TELA CHEIA EXCLUSIVA dá o mesmo
-    # sinal indireto de "nenhuma janela capturável" que um jogo
-    # minimizado de verdade — GetWindowPlacement, ao contrário disso,
-    # sabe a diferença exata sem chute nenhum).
-    return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $bestTitle; pid = $bestPid; hwnd = $bestHwnd.ToInt64(); showCmd = $bestShowCmd }
-  }
-  return $null
-}
-
-# DÉCIMA OITAVA RODADA: "compartilhamento de tela não reconhece tela
-# minimizada" — não é bug nosso, é o próprio Chromium (a base do
-# Electron) que EXCLUI janelas minimizadas da lista de fontes
-# capturáveis (desktopCapturer.getSources() em main.cjs), então elas
-# nunca aparecem no seletor pra escolher, ponto. Isso é assim pra
-# QUALQUER programa de captura no Windows, não só o nosso. O que dá pra
-# fazer de verdade: se a gente já sabe (via Find-MamacosGameWindow acima)
-# que o jogo detectado está minimizado, oferece um botão "Restaurar e
-# compartilhar" que chama isso aqui pra trazer a janela de volta ANTES
-# de buscar a lista de fontes de novo — depois de restaurada, ela some
-# do estado minimizado e passa a aparecer normalmente.
-function Restore-MamacosWindow($hwndStr) {
-  $ptr = [IntPtr][int64]$hwndStr
-  if (-not [MamacosScan]::IsWindow($ptr)) {
-    return [PSCustomObject]@{ ok = $false }
-  }
-  # SW_RESTORE = 9. Assíncrono (ShowWindowAsync) de propósito — ShowWindow
-  # comum pode travar esperando o processo dono da janela responder à
-  # mensagem, e um jogo pesado/travado momentaneamente não pode travar
-  # nosso scanner junto.
-  [MamacosScan]::ShowWindowAsync($ptr, 9) | Out-Null
-  [MamacosScan]::SetForegroundWindow($ptr) | Out-Null
-  return [PSCustomObject]@{ ok = $true }
-}
-
-function Find-MamacosForegroundWindow {
-  $hwnd = [MamacosScan]::GetForegroundWindow()
-  if ($hwnd -eq [IntPtr]::Zero) { return $null }
-  $procId = 0
-  [MamacosScan]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
-  try {
-    $proc = Get-Process -Id $procId -ErrorAction Stop
-  } catch {
-    return $null
-  }
-  $s = [System.Windows.Forms.Screen]::FromHandle($hwnd)
-  $b = $s.Bounds
-  $sb = New-Object System.Text.StringBuilder 512
-  [MamacosScan]::GetWindowText($hwnd, $sb, 512) | Out-Null
-  $exePath = [MamacosScan]::GetProcessPath([uint32]$procId)
-  return [PSCustomObject]@{ x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; title = $sb.ToString(); processName = $proc.ProcessName; pid = $procId; exePath = $exePath }
-}
-
-function Find-MamacosPidsForHandles($hwnds) {
-  $out = @()
-  foreach ($h in $hwnds) {
-    if ($h -eq '') { continue }
-    $ptr = [IntPtr][int64]$h
-    # IsWindow confirma que o handle ainda é válido AGORA — sem essa
-    # checagem, um número reaproveitado por outra janela (handles do
-    # Windows podem ser reciclados) poderia devolver um PID de um
-    # processo completamente diferente do esperado.
-    if ([MamacosScan]::IsWindow($ptr)) {
-      $procId = 0
-      [MamacosScan]::GetWindowThreadProcessId($ptr, [ref]$procId) | Out-Null
-      $out += [PSCustomObject]@{ hwnd = $h; pid = $procId }
-    } else {
-      $out += [PSCustomObject]@{ hwnd = $h; pid = 0 }
-    }
-  }
-  return ,$out
-}
-
-function Find-MamacosTitlePidMap {
-  $out = @()
-  Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object {
-    $out += [PSCustomObject]@{ title = $_.MainWindowTitle; pid = $_.Id }
-  }
-  return ,$out
-}
-
-Write-Output 'READY'
-while ($true) {
-  $line = [Console]::In.ReadLine()
-  if ($line -eq $null) { break }
-  $result = $null
-  try {
-    if ($line.StartsWith('G|')) {
-      $rest = $line.Substring(2)
-      $names = @()
-      if ($rest -ne '') { $names = $rest.Split(',') }
-      $result = Find-MamacosGameWindow $names
-    } elseif ($line -eq 'F') {
-      $result = Find-MamacosForegroundWindow
-    } elseif ($line.StartsWith('P|')) {
-      $rest = $line.Substring(2)
-      $hwnds = @()
-      if ($rest -ne '') { $hwnds = $rest.Split(',') }
-      $result = Find-MamacosPidsForHandles $hwnds
-    } elseif ($line -eq 'T') {
-      $result = Find-MamacosTitlePidMap
-    } elseif ($line.StartsWith('R|')) {
-      $result = Restore-MamacosWindow ($line.Substring(2))
-    }
-  } catch {
-    $result = $null
-  }
-  if ($result -eq $null) {
-    Write-Output 'null'
-  } else {
-    # -InputObject (em vez de PIPAR $result pro ConvertTo-Json) importa
-    # de verdade pros comandos P|/T acima: um ARRAY com 0 ou 1 item, se
-    # PIPADO, o PowerShell "desembrulha" item por item antes do
-    # ConvertTo-Json ver a coleção inteira — o resultado vira um objeto
-    # solto (ou nada, se vazio) em vez de um array JSON de verdade, e o
-    # JSON.parse(...) do lado do Node quebraria/interpretaria errado.
-    # Passando por -InputObject, o array inteiro chega de uma vez e o
-    # formato ([] / [x] / [x,y]) fica sempre correto, com 0, 1 ou mais
-    # itens.
-    Write-Output (ConvertTo-Json -InputObject $result -Compress)
-  }
-}
-`
-
-// Mata o scanner e libera (com null) qualquer pergunta que ainda estava
-// esperando resposta — melhor devolver "não sei" na hora do que deixar
-// a fila esperando pra sempre por uma resposta que nunca vai chegar.
-function killScanner() {
-  const queued = scannerQueue
-  scannerQueue = []
-  for (const pending of queued) {
-    clearTimeout(pending.timer)
-    pending.resolve(null)
-  }
-  if (scannerProc) {
-    try {
-      scannerProc.kill()
-    } catch {
-      // já pode ter morrido sozinho
-    }
-  }
-  scannerProc = null
-  scannerReadyPromise = null
-  scannerBuffer = ''
-}
-
-// Garante que existe um scanner vivo e devolve uma Promise que resolve
-// com o processo assim que ele sinalizar 'READY' (Add-Type já
-// compilado) — ou com null se não der pra usar (fora do Windows,
-// PowerShell bloqueado, etc.). Reaproveita a MESMA Promise/processo
-// entre chamadas concorrentes — sem isso, duas checagens pedidas quase
-// ao mesmo tempo (ex.: o vigia de foreground e o de jogo caindo juntos)
-// tentariam abrir um scanner CADA UMA.
+// "Compartilhar seu jogo": descobre em qual monitor está a janela do jogo e
+// o título dela (pra casar com a lista do desktopCapturer), inclusive com
+// o jogo em tela cheia exclusiva. Ver electron/win32native.cjs.
 function ensureScanner() {
-  if (process.platform !== 'win32') return Promise.resolve(null)
-  if (scannerProc && scannerReadyPromise) return scannerReadyPromise
+  return win32native.available()
+}
 
-  let proc
+// Jogos do catálogo nunca têm o processo aberto (ver win32native).
+function isCatalogProcess(baseName) {
+  return Boolean(gameCatalog.findGameByProcessName(baseName))
+}
+
+// Monitor em pixels físicos → coordenadas do Electron (DIP).
+function physicalToDip(rect) {
+  if (!rect) return null
   try {
-    const encoded = Buffer.from(SCANNER_SCRIPT, 'utf16le').toString('base64')
-    proc = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-      { windowsHide: true }
-    )
+    return screen.screenToDipRect(null, rect)
+  } catch {
+    return rect
+  }
+}
+
+// Só Windows, best-effort: null quando não acha janela do jogo.
+function getGameWindowInfo(processNames) {
+  if (process.platform !== 'win32' || !processNames || processNames.length === 0) return Promise.resolve(null)
+  try {
+    const r = win32native.findLargestWindowForProcessNames(processNames)
+    if (!r || !(r.pid > 0)) return Promise.resolve(null)
+    return Promise.resolve({
+      bounds: physicalToDip(r.monitor),
+      windowTitle: r.title || null,
+      pid: r.pid,
+      // Usado só pra oferecer "Restaurar e compartilhar" com o jogo minimizado.
+      hwnd: r.hwnd > 0 ? r.hwnd : null,
+      // showCmd 2 = SW_SHOWMINIMIZED (minimizado de verdade, diferente de
+      // tela cheia exclusiva).
+      isMinimized: r.showCmd === 2,
+    })
   } catch {
     return Promise.resolve(null)
   }
-  scannerProc = proc
-  scannerBuffer = ''
-  scannerQueue = []
-
-  scannerReadyPromise = new Promise((resolve) => {
-    let settled = false
-    const settleOnce = (value) => {
-      if (settled) return
-      settled = true
-      resolve(value)
-    }
-    // AUDITORIA: escrever no stdin de um PowerShell que acabou de morrer
-    // emite 'error' (EPIPE) no stream — sem listener, isso virava uma
-    // exceção não tratada no processo principal.
-    proc.stdin?.on('error', () => {})
-    proc.stdout?.on('data', (chunk) => {
-      // AUDITORIA: dados atrasados de um scanner ANTIGO (já substituído
-      // por um novo depois de um timeout) não podem consumir a fila de
-      // perguntas do scanner novo — isso dessincronizava respostas.
-      if (scannerProc !== proc) return
-      scannerBuffer += chunk.toString()
-      let idx
-      while ((idx = scannerBuffer.indexOf('\n')) >= 0) {
-        const line = scannerBuffer.slice(0, idx).trim()
-        scannerBuffer = scannerBuffer.slice(idx + 1)
-        if (line === 'READY') {
-          settleOnce(proc)
-          continue
-        }
-        const pending = scannerQueue.shift()
-        if (!pending) continue
-        clearTimeout(pending.timer)
-        if (line === 'null' || line === '') {
-          pending.resolve(null)
-          continue
-        }
-        try {
-          pending.resolve(JSON.parse(line))
-        } catch {
-          pending.resolve(null)
-        }
-      }
-    })
-    // AUDITORIA: só derruba o scanner ATUAL se for este mesmo processo —
-    // antes, o 'exit' atrasado de um scanner antigo (morto por timeout)
-    // chamava killScanner() e matava o scanner NOVO que já estava de pé.
-    proc.on('error', () => {
-      settleOnce(null)
-      if (scannerProc === proc) killScanner()
-    })
-    proc.on('exit', () => {
-      settleOnce(null)
-      if (scannerProc === proc) killScanner()
-    })
-    // Segurança: se o 'READY' nunca chegar (Add-Type falhando por algum
-    // motivo raro do ambiente/política do sistema), não trava pra
-    // sempre — só desiste e volta a se comportar como antes (best-effort).
-    // AUDITORIA: e mata esse PowerShell travado — antes ele ficava vivo
-    // (e a Promise resolvida com null ficava em cache pra sempre, então
-    // o scanner nunca mais era recriado nessa sessão do app).
-    const readyTimer = setTimeout(() => {
-      if (settled) return
-      settleOnce(null)
-      if (scannerProc === proc) killScanner()
-    }, 8000)
-    proc.once('exit', () => clearTimeout(readyTimer))
-  })
-
-  return scannerReadyPromise
-}
-
-// Manda um comando de uma linha pro scanner e devolve a resposta já
-// decodificada (ou null em qualquer falha — processo indisponível,
-// timeout individual, JSON inválido). Timeout por consulta bem mais
-// generoso que o antigo (que incluía o custo de Add-Type) porque agora
-// só cobre o Win32 scan em si — se mesmo assim estourar, tratamos como
-// sinal de que o processo travou de verdade e reiniciamos ele pra
-// próxima vez, em vez de deixar a fila fora de sincronia.
-function scannerQuery(command) {
-  return ensureScanner().then((proc) => {
-    if (!proc || proc.killed || !proc.stdin || !proc.stdin.writable) return null
-    return new Promise((resolve) => {
-      const pending = {
-        resolve,
-        timer: setTimeout(() => {
-          const idx = scannerQueue.indexOf(pending)
-          if (idx >= 0) scannerQueue.splice(idx, 1)
-          resolve(null)
-          killScanner()
-        }, 6000),
-      }
-      scannerQueue.push(pending)
-      try {
-        proc.stdin.write(command + '\n')
-      } catch {
-        const idx = scannerQueue.indexOf(pending)
-        if (idx >= 0) scannerQueue.splice(idx, 1)
-        clearTimeout(pending.timer)
-        resolve(null)
-      }
-    })
-  })
-}
-
-// Só Windows, best-effort — se o PowerShell não estiver disponível, ou
-// nenhum processo do jogo tiver janela (raro, mas possível logo no
-// instante de abrir o jogo), simplesmente devolve null e quem chama cai
-// de volta nos chutes de antes (nome parecido / tela principal).
-//
-// A varredura em si (comentários abaixo) é a mesma de sempre — só a
-// FORMA de rodar ela mudou (via scannerQuery, ver bloco grande acima em
-// vez de abrir+compilar um PowerShell novo aqui).
-function getGameWindowInfo(processNames) {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32') {
-      resolve(null)
-      return
-    }
-    if (!processNames || processNames.length === 0) {
-      resolve(null)
-      return
-    }
-    scannerQuery(`G|${processNames.map((n) => String(n).replace(/[,|\r\n]/g, '')).join(',')}`).then((r) => {
-      if (!r || typeof r.pid !== 'number' || !(r.pid > 0)) {
-        resolve(null)
-        return
-      }
-      resolve({
-        bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
-        windowTitle: typeof r.title === 'string' && r.title ? r.title : null,
-        pid: r.pid,
-        // DÉCIMA OITAVA RODADA: usado só pra oferecer "Restaurar e
-        // compartilhar" quando esse jogo está minimizado — ver
-        // screen-share:restore-window abaixo e Restore-MamacosWindow no
-        // SCANNER_SCRIPT.
-        hwnd: typeof r.hwnd === 'number' && r.hwnd > 0 ? r.hwnd : null,
-        // VIGÉSIMA QUINTA RODADA — sinal CERTO de "minimizado de
-        // verdade" (showCmd 2 = SW_SHOWMINIMIZED, vindo direto do
-        // GetWindowPlacement do Windows — ver Find-MamacosGameWindow no
-        // SCANNER_SCRIPT), em vez do jeito antigo de adivinhar isso
-        // indiretamente (que confundia minimizado com tela cheia
-        // exclusiva, já que as duas dão o mesmo sinal indireto de
-        // "nenhuma janela capturável pra esse PID").
-        isMinimized: r.showCmd === 2,
-      })
-    })
-  })
 }
 
 // ============================================================
-// Generalização de getGameWindowInfo acima: em vez de precisar saber de
-// ANTEMÃO o nome do processo (só possível pros jogos cadastrados em
-// KNOWN_GAMES), pergunta pro Windows QUAL é a janela em primeiro plano
-// agora e devolve os dados dela — funciona pra qualquer app/jogo, cadastrado
-// ou não. É o que dá suporte ao atalho genérico "Compartilhar [sua janela
-// ativa]" quando não reconhecemos o jogo pelo nome (ver startGameDetection,
-// que chama isso periodicamente e guarda em lastForegroundApp — chamar na
-// hora exata de abrir o seletor não funcionaria, porque nesse momento quem
-// está em primeiro plano é o NOSSO próprio app, não o jogo).
-//
-// Só Windows, best-effort — mesmas limitações de getGameWindowInfo acima.
-// Mesma troca da DÉCIMA TERCEIRA RODADA: agora via scannerQuery (processo
-// PowerShell persistente) em vez de abrir+compilar um PowerShell novo
-// aqui a cada chamada.
+// Janela em primeiro plano (qualquer app/jogo, cadastrado ou não) — base
+// do atalho genérico "Compartilhar [sua janela ativa]". Chamada
+// periodicamente (ver runForegroundCheckTick), porque na hora de abrir o
+// seletor quem está em primeiro plano é o próprio app.
 function getForegroundWindowInfo() {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32') {
-      resolve(null)
-      return
-    }
-    scannerQuery('F').then((r) => {
-      if (!r || typeof r.pid !== 'number' || !(r.pid > 0)) {
-        resolve(null)
-        return
-      }
-      resolve({
-        bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
-        windowTitle: typeof r.title === 'string' && r.title ? r.title : null,
-        processName: typeof r.processName === 'string' && r.processName ? r.processName.toLowerCase() : null,
-        pid: r.pid,
-        exePath: typeof r.exePath === 'string' && r.exePath ? r.exePath : null,
-      })
+  if (process.platform !== 'win32') return Promise.resolve(null)
+  try {
+    const r = win32native.foregroundWindow()
+    if (!r || !(r.pid > 0)) return Promise.resolve(null)
+    return Promise.resolve({
+      bounds: physicalToDip(r.monitor),
+      windowTitle: r.title || null,
+      processName: r.processName || null,
+      pid: r.pid,
+      exePath: win32native.processImagePath(r.pid, r.processName, isCatalogProcess),
     })
-  })
+  } catch {
+    return Promise.resolve(null)
+  }
 }
 
 // ============================================================
-// "Captura de áudio por processo" — pega o PID de CADA janela que
-// aparece na lista do seletor de compartilhamento (não só a sugerida),
-// casando pelo TÍTULO exato — é esse PID que a "Captura de áudio por
-// processo" (ver process-audio-capture.exe em native/process-audio-capture/
-// e startProcessAudioCapture mais abaixo) usa pra isolar o áudio de só
-// aquele app, em vez do sistema inteiro (que inclui o próprio Mamacos
-// Voip — ver o pedido que motivou isso todo: "nao tem como focar o
-// audio somente na janela em que estou transmitindo?").
-//
-// Só Windows, best-effort. Feature experimental: se der errado (Get-Process
-// falhar, PowerShell bloqueado por política do sistema, etc.), devolve um
-// mapa vazio — quem chama simplesmente não oferece a opção de "áudio só
-// deste app" pra essas janelas, sem quebrar o resto do seletor.
-// DÉCIMA OITAVA RODADA: isso ABRIA um powershell.exe NOVO — sem
-// Add-Type, mas ainda assim o custo normal de iniciar o interpretador do
-// zero (tipicamente algumas centenas de ms, bem mais sob carga) — TODA
-// VEZ que a pessoa clicava em "Compartilhar tela", e SOMADO ao
-// getPidsForWindowHandles abaixo (que reconstruía Add-Type do zero a
-// cada chamada, isso sim pesado) rodando em paralelo (Promise.all lá no
-// handler screen-share:get-sources): junto, isso segurava a lista de
-// janelas/telas na tela por 1-4+ segundos antes do seletor aparecer de
-// verdade — exatamente o "demora pra mostrar as janelas" relatado.
-// Reaproveita o MESMO processo PowerShell "scanner" que já fica vivo
-// pra detecção de jogo/foreground (ver SCANNER_SCRIPT/ensureScanner
-// acima) em vez de abrir um novo — normalmente o scanner já está de pé
-// (o vigia de jogo/foreground já o mantém rodando), então isso vira só
-// mandar uma linha por um processo já aberto, não iniciar+encerrar um
-// novo interpretador inteiro.
+// PID de cada janela do seletor, pela correspondência de TÍTULO — reserva
+// pra "áudio só deste app" (process-audio-capture.exe) quando o HWND do
+// id da fonte não resolver.
 function getWindowPidMap() {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32') {
-      resolve(new Map())
-      return
-    }
-    scannerQuery('T').then((rows) => {
-      const map = new Map()
-      if (Array.isArray(rows)) {
-        for (const row of rows) {
-          const title = typeof row?.title === 'string' ? row.title.trim() : ''
-          const pid = Number(row?.pid)
-          if (title && Number.isFinite(pid) && pid > 0) map.set(title, pid)
-        }
-      }
-      resolve(map)
-    })
-  })
+  if (process.platform !== 'win32') return Promise.resolve(new Map())
+  try {
+    return Promise.resolve(win32native.titlePidMap())
+  } catch {
+    return Promise.resolve(new Map())
+  }
 }
 
 // Casar pelo TÍTULO (acima) tem um problema real: o `desktopCapturer.getSources()`
 // tira uma "foto" do título de cada janela num instante, e getWindowPidMap()
-// roda um PowerShell separado um pouco DEPOIS — se o jogo mostra qualquer
+// roda um pouco DEPOIS — se o jogo mostra qualquer
 // coisa dinâmica no título (FPS, pontuação, nome da fase), os dois textos
 // já não batem mais e o casamento falha silenciosamente (era exatamente
 // isso que causava "não consegui identificar o processo dessa janela" —
@@ -1429,35 +885,14 @@ function parseHwndFromSourceId(id) {
   return Number.isFinite(value) && value > 0 ? value : null
 }
 
-// DÉCIMA OITAVA RODADA: essa era a parte mais pesada do atraso — abria
-// um powershell.exe NOVO e recompilava esse pedacinho de C# (Add-Type)
-// DO ZERO a cada clique em "Compartilhar tela" (mesmo custo, mesma
-// causa, já documentado em detalhe lá em cima no comentário sobre o
-// scanner persistente pro Rainbow Six Siege: ~1-4+ segundos, pior ainda
-// sob carga de CPU/GPU). Só que aqui isso rodava de novo a CADA
-// abertura do seletor, não só durante detecção de jogo. Agora reusa o
-// MamacosScan já compilado UMA vez no processo scanner persistente (que
-// já tem IsWindow/GetWindowThreadProcessId — ver SCANNER_SCRIPT acima)
-// via um novo comando "P|hwnd,hwnd,...", em vez de subir+recompilar um
-// interpretador inteiro só pra isso.
+// PID direto pelo HWND do id da fonte ("window:<HWND>:0").
 function getPidsForWindowHandles(hwnds) {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32' || !hwnds || hwnds.length === 0) {
-      resolve(new Map())
-      return
-    }
-    scannerQuery(`P|${hwnds.map((h) => String(h)).join(',')}`).then((rows) => {
-      const map = new Map()
-      if (Array.isArray(rows)) {
-        for (const row of rows) {
-          const h = Number(row?.hwnd)
-          const pid = Number(row?.pid)
-          if (Number.isFinite(h) && Number.isFinite(pid) && pid > 0) map.set(h, pid)
-        }
-      }
-      resolve(map)
-    })
-  })
+  if (process.platform !== 'win32' || !hwnds || hwnds.length === 0) return Promise.resolve(new Map())
+  try {
+    return Promise.resolve(win32native.pidsForWindowHandles(hwnds))
+  } catch {
+    return Promise.resolve(new Map())
+  }
 }
 
 // Casa os limites (bounds) devolvidos acima com um dos monitores que o
@@ -1492,79 +927,24 @@ function startForegroundWatch(processNames) {
     .filter(Boolean)
   if (foregroundWatcherGames.length === 0) return false
 
-  // -EncodedCommand (Base64, UTF-16LE) evita qualquer problema de
-  // aspas/escaping ao passar um script de várias linhas pela linha de
-  // comando — é a forma recomendada pela própria Microsoft pra isso.
-  const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class MamacosFg {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-}
-"@
-while ($true) {
-  # AUDITORIA: se o Mamacos Voip fechar/travar sem conseguir matar este
-  # PowerShell (queda do processo principal, "Finalizar tarefa"), ele
-  # ficava rodando esse laço PRA SEMPRE em segundo plano. Agora ele sai
-  # sozinho assim que o processo pai deixa de existir.
-  if (-not (Get-Process -Id ${process.pid} -ErrorAction SilentlyContinue)) { exit }
-  try {
-    $hwnd = [MamacosFg]::GetForegroundWindow()
-    $procId = 0
-    [MamacosFg]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
-    $proc = Get-Process -Id $procId -ErrorAction Stop
-    Write-Output $proc.ProcessName
-  } catch {
-    Write-Output ''
-  }
-  Start-Sleep -Milliseconds 700
-}
-`
-  try {
-    const encoded = Buffer.from(script, 'utf16le').toString('base64')
-    const watcher = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-      { windowsHide: true }
-    )
-    foregroundWatcherProc = watcher
-    let lineBuffer = ''
-    let lastFocused = null
-    watcher.stdout?.on('data', (chunk) => {
-      if (foregroundWatcherProc !== watcher) return
-      lineBuffer += chunk.toString()
-      let newlineIndex
-      while ((newlineIndex = lineBuffer.indexOf('\n')) >= 0) {
-        const processName = lineBuffer.slice(0, newlineIndex).trim().toLowerCase()
-        lineBuffer = lineBuffer.slice(newlineIndex + 1)
-        const isFocused = foregroundWatcherGames.some((name) => processName === name)
-        if (isFocused !== lastFocused) {
-          lastFocused = isFocused
-          sendToMain('game-foreground-changed', isFocused)
-        }
-      }
-    })
-    // AUDITORIA: só zera a referência se ainda for ESTE processo — antes,
-    // o 'exit' atrasado de um vigia antigo (morto por stopForegroundWatch
-    // logo antes de iniciar um novo) zerava a referência do vigia NOVO,
-    // que ficava órfão: ninguém mais conseguia matá-lo, nem ao fechar o
-    // app (um PowerShell rodando um laço a cada 700ms pra sempre).
-    watcher.on('error', () => {
-      // PowerShell pode não estar disponível/bloqueado por política do
-      // sistema — desiste dessa proteção extra sem quebrar nada mais.
-      if (foregroundWatcherProc === watcher) foregroundWatcherProc = null
-    })
-    watcher.on('exit', () => {
-      if (foregroundWatcherProc === watcher) foregroundWatcherProc = null
-    })
-    return true
-  } catch {
-    foregroundWatcherProc = null
-    return false
-  }
+  // Laço leve dentro do próprio app (antes era um PowerShell oculto).
+  let lastFocused = null
+  const timer = setInterval(() => {
+    let name = null
+    try {
+      name = win32native.foregroundProcessName()
+    } catch {
+      name = null
+    }
+    if (name === null) return
+    const isFocused = foregroundWatcherGames.some((g) => name === g)
+    if (isFocused !== lastFocused) {
+      lastFocused = isFocused
+      sendToMain('game-foreground-changed', isFocused)
+    }
+  }, 700)
+  foregroundWatcherProc = { kill: () => clearInterval(timer) }
+  return true
 }
 
 function stopForegroundWatch() {
@@ -2283,9 +1663,8 @@ app.whenReady().then(() => {
       // janela pelo título) não dependem da lista de fontes — começam JÁ,
       // em paralelo com o getSources(), em vez de esperar ele terminar.
       const gameLabelAtOpen = currentGame
-      // Teto de espera: se o PowerShell estiver lento (ou ainda subindo),
-      // o seletor abre mesmo assim — só sem a sugestão de jogo / áudio por
-      // app naquela abertura, em vez de ficar vários segundos parado.
+      // Teto de espera: o seletor abre mesmo se a consulta ao Windows
+      // demorar — só sem a sugestão de jogo / áudio por app nessa vez.
       const capped = (promise, fallback) =>
         Promise.race([promise.catch(() => fallback), new Promise((r) => setTimeout(() => r(fallback), 2500))])
       const gameInfoPromise = gameLabelAtOpen
@@ -2315,23 +1694,8 @@ app.whenReady().then(() => {
       } catch {
         // sem problema, só não vai ter como marcar qual é a principal
       }
-      // Pergunta em qual monitor E qual é o título exato da JANELA DO
-      // PRÓPRIO JOGO (ver getGameWindowInfo acima) — só quando tem um jogo
-      // CADASTRADO (KNOWN_GAMES) detectado rodando, pra não gastar tempo/CPU
-      // abrindo PowerShell à toa toda vez que alguém for compartilhar tela
-      // sem estar jogando nada reconhecido.
-      //
-      // Quando não tem jogo cadastrado — a reclamação real que motivou essa
-      // generalização: antes disso, um jogo fora da lista fixa KNOWN_GAMES
-      // nunca tinha o atalho "compartilhar seu jogo" e sempre caía pra
-      // "compartilhar a tela inteira" manual, o que parecia (e de fato
-      // era) bem mais limitado que o OBS — cai pro fallback
-      // genérico: a última janela que esteve em primeiro plano antes de a
-      // pessoa clicar em "Compartilhar tela" (lastForegroundApp, mantido
-      // fresco pelo laço em startGameDetection). Isso funciona pra
-      // QUALQUER app/jogo, cadastrado ou não — mesmo princípio do atalho de
-      // compartilhamento rápido de apps de chat populares, que também não depende de uma
-      // lista fixa.
+      // Qual é a janela do jogo (catálogo) — ou, sem jogo do catálogo, a
+      // última janela em primeiro plano antes de clicar em "Compartilhar".
       let windowInfo = null
       let isKnownGame = false
       let suggestionLabel = null
@@ -2391,7 +1755,7 @@ app.whenReady().then(() => {
       // MAIS de um monitor — antes disso, se um jogo CADASTRADO estava
       // rodando mas a varredura de janela falhou (tela cheia exclusiva de
       // verdade, sem MainWindowHandle nenhum pro Windows achar — ou o
-      // PowerShell simplesmente não deu tempo/travou), a sugestão "Jogo"
+      // a consulta simplesmente não deu tempo), a sugestão "Jogo"
       // desaparecia por completo pra quem tem 2+ monitores (o caso mais
       // comum é justamente jogo no monitor principal + chat/mamaco no
       // secundário, exatamente o setup que esse recado do topo do
@@ -2438,7 +1802,7 @@ app.whenReady().then(() => {
       // minimizados. Precisava do sinal DIRETO, não de uma dedução.
       //
       // Esse sinal direto existe: GetWindowPlacement (ver
-      // Find-MamacosGameWindow no SCANNER_SCRIPT) já devolve showCmd,
+      // findLargestWindowForProcessNames em win32native.cjs) já devolve showCmd,
       // que diz exatamente se a janela está minimizada de verdade
       // (SW_SHOWMINIMIZED) — sem precisar adivinhar nada a partir de
       // fontes de tela disponíveis ou não. Ver getGameWindowInfo acima
@@ -2537,19 +1901,18 @@ app.whenReady().then(() => {
     }
   })
 
-  // DÉCIMA OITAVA RODADA: pedido do botão "Restaurar e compartilhar" (ver
-  // looksMinimized/hwnd acima e ScreenSharePicker.tsx) — manda restaurar
-  // a janela via o scanner persistente (comando R|, ver
-  // Restore-MamacosWindow no SCANNER_SCRIPT) e espera um instante antes
-  // de devolver, pra dar tempo do Windows recompositar a janela de
-  // verdade (senão o próximo screen-share:get-sources rodaria rápido
-  // demais e ainda pegaria ela como minimizada). Best-effort: `ok: false`
-  // só significa "segue mostrando o aviso de sempre", nunca quebra nada.
+  // Botão "Restaurar e compartilhar": desminimiza a janela do jogo (a
+  // pedido da pessoa) e espera o Windows redesenhar antes da nova lista.
   handleTrusted('screen-share:restore-window', async (_event, hwnd) => {
     if (process.platform !== 'win32' || !Number.isFinite(hwnd) || hwnd <= 0) return { ok: false }
-    const result = await scannerQuery(`R|${Math.trunc(hwnd)}`)
+    let ok = false
+    try {
+      ok = win32native.restoreWindow(Math.trunc(hwnd))
+    } catch {
+      ok = false
+    }
     await new Promise((resolve) => setTimeout(resolve, 350))
-    return { ok: Boolean(result?.ok) }
+    return { ok }
   })
 
   // OITAVA RODADA: agora que a captura de vídeo em si acontece direto no
@@ -2770,10 +2133,8 @@ app.whenReady().then(() => {
   // focada — ver o before-input-event em createWindow.
 
   if (isGameDetectionEnabled()) startGameDetection()
-  // DESEMPENHO: sobe o scanner do Windows (PowerShell + Add-Type, 1 a 3s na
-  // primeira vez) logo depois da abertura, pra que o 1º "Compartilhar tela"
-  // já encontre ele pronto. Sem custo fora do Windows.
-  if (process.platform === 'win32') setTimeout(() => void ensureScanner(), 4000)
+  // Deixa a ponte nativa carregada antes do 1º "Compartilhar tela".
+  if (process.platform === 'win32') setTimeout(() => void ensureScanner(), 1500)
 
   handleTrusted('app:getGameDetectionEnabled', () => isGameDetectionEnabled())
   handleTrusted('app:setGameDetectionEnabled', (_event, enabled) => {
@@ -3427,13 +2788,8 @@ app.whenReady().then(() => {
         // já estamos fechando o app mesmo, sem problema
       }
     }
-    // Sem isso o processo do PowerShell (vigia de foco do jogo) ficaria
-    // rodando sozinho em segundo plano depois do app fechar.
+    // Para o vigia de foco do jogo.
     stopForegroundWatch()
-    // Idem pro scanner persistente (DÉCIMA TERCEIRA RODADA — ver
-    // ensureScanner/scannerQuery acima) e pro process-audio-capture.exe
-    // (captura de áudio por processo).
-    killScanner()
     stopProcessAudioCapture()
     // Idem pros dois .exe de fallback de captura de tela (WGC e GDI) —
     // ver o bloco grande logo acima.
@@ -3820,7 +3176,6 @@ app.on('web-contents-created', (_event, contents) => {
 app.on('window-all-closed', () => {
   stopGameDetection()
   stopForegroundWatch()
-  killScanner()
   globalShortcut.unregisterAll()
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()
   if (process.platform !== 'darwin') {

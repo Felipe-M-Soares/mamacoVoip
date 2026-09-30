@@ -1,14 +1,9 @@
-import { loadRnnoise, RnnoiseWorkletNode, NoiseGateWorkletNode } from '@sapphi-red/web-noise-suppressor'
+import { loadRnnoise, RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor'
 import rnnoiseWorkletPath from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url'
 import rnnoiseWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url'
 import rnnoiseWasmSimdPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url'
-// NÃO importar de '@sapphi-red/web-noise-suppressor/noiseGateWorklet.js?url'
-// aqui — esse arquivo, dentro do pacote, tem o MESMO nome
-// ("workletProcessor.js") que o do RNNoise (em subpastas diferentes), e
-// o Vite estava confundindo os dois no build, fazendo o worklet do gate
-// carregar o código errado (o do RNNoise) e quebrar. Ver o comentário
-// grande em vendor/noiseGateWorkletProcessor.js.
-import noiseGateWorkletPath from './vendor/noiseGateWorkletProcessor.js?url'
+// Porteiro de voz próprio, com rampas suaves (ver o arquivo).
+import voiceGateWorkletPath from './worklets/voiceGateWorklet.js?url&no-inline'
 
 // RNNoise (biblioteca da Xiph/Mozilla — mesma família usada dentro do
 // Firefox) é uma rede neural pequena, treinada especificamente pra
@@ -150,11 +145,11 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
   // AudioContext (não são compartilhados entre contextos diferentes) —
   // como esse contexto acabou de ser criado agora mesmo, isso só roda
   // uma vez por chamada de createNoiseSuppressor.
-  const { audioContext, wasmBinary } = await createProcessingContext([rnnoiseWorkletPath, noiseGateWorkletPath])
+  const { audioContext, wasmBinary } = await createProcessingContext([rnnoiseWorkletPath, voiceGateWorkletPath])
 
   let source: MediaStreamAudioSourceNode | null = null
   let rnnoiseNode: RnnoiseWorkletNode | null = null
-  let gateNode: NoiseGateWorkletNode | null = null
+  let gateNode: AudioWorkletNode | null = null
   let merger: ChannelMergerNode | null = null
   let destination: MediaStreamAudioDestinationNode | null = null
   let levelAnalyser: AnalyserNode | null = null
@@ -174,8 +169,9 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     }
     try {
       gateNode?.disconnect()
+      gateNode?.port.close()
     } catch {
-      // já desconectado — sem problema (NoiseGateWorkletNode não tem destroy() próprio)
+      // já desconectado — sem problema
     }
     try {
       merger?.disconnect()
@@ -195,46 +191,10 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     levelBuffer = null
   }
 
-  // Refaz só o trecho "depois do RNNoise" do gráfico (gate + ligação
-  // com o merger) — rnnoiseNode/source/levelAnalyser/destination
-  // continuam exatamente os mesmos objetos. Usa desconexões
-  // DIRECIONADAS (rnnoiseNode.disconnect(alvo)) em vez de um
-  // `.disconnect()` genérico, pra não derrubar por engano a ligação
-  // rnnoiseNode → levelAnalyser (essa precisa ficar viva o tempo todo).
+  // Muda só o limiar do porteiro (null = sem porteiro), por mensagem —
+  // o gráfico de áudio e a track de saída continuam os mesmos, sem estalo.
   function rewireGate(thresholdDb: number | null) {
-    if (!rnnoiseNode || !merger) return
-    try {
-      rnnoiseNode.disconnect(merger)
-    } catch {
-      // não estava conectado direto (havia um gate no meio) — sem problema
-    }
-    if (gateNode) {
-      try {
-        rnnoiseNode.disconnect(gateNode)
-      } catch {
-        // sem problema
-      }
-      try {
-        gateNode.disconnect(merger)
-      } catch {
-        // sem problema
-      }
-      gateNode = null
-    }
-
-    let tail: AudioNode = rnnoiseNode
-    if (thresholdDb !== null) {
-      gateNode = new NoiseGateWorkletNode(audioContext, {
-        openThreshold: thresholdDb,
-        closeThreshold: thresholdDb - 6, // um pouco mais baixo que o de abrir, pra não "tremer" (flutuar) perto do limiar
-        holdMs: 200, // segura o gate aberto por 200ms depois que o volume cai, pra não cortar o fim de cada palavra
-        maxChannels: 1,
-      })
-      tail.connect(gateNode)
-      tail = gateNode
-    }
-    tail.connect(merger, 0, 0)
-    tail.connect(merger, 0, 1)
+    gateNode?.port.postMessage({ thresholdDb })
   }
 
   function setInputTrack(rawTrack: MediaStreamTrack, sensitivity: number | null = DEFAULT_MIC_SENSITIVITY): MediaStreamTrack {
@@ -266,7 +226,18 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     // MediaStream de 1 canal só no alto-falante ESQUERDO em vez de nos
     // dois, e essa duplicação manual evita esse problema de vez.
     merger = audioContext.createChannelMerger(2)
-    rewireGate(sensitivity === null ? null : sensitivityToOpenThresholdDb(sensitivity))
+    gateNode = new AudioWorkletNode(audioContext, 'mv-voice-gate', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+      processorOptions: {
+        thresholdDb: sensitivity === null ? null : sensitivityToOpenThresholdDb(sensitivity),
+        holdMs: 250,
+      },
+    })
+    rnnoiseNode.connect(gateNode)
+    gateNode.connect(merger, 0, 0)
+    gateNode.connect(merger, 0, 1)
 
     destination = audioContext.createMediaStreamDestination()
     merger.connect(destination)

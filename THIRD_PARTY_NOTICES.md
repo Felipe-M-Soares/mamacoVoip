@@ -37,8 +37,6 @@ https://github.com/SnosMe/uiohook-napi. Texto da licença: https://www.gnu.org/l
   2003-2004 Mark Borgerding. Licença BSD-3-Clause (texto abaixo). https://github.com/xiph/rnnoise
 - **rnnoise-wasm** — Copyright (c) 2021-2025 Takeru Ohta e Shiguredo Inc. Licença Apache-2.0 (texto na
   seção 3, junto do `livekit-client`). https://github.com/shiguredo/rnnoise-wasm
-- `src/lib/vendor/noiseGateWorkletProcessor.js` é cópia literal de um arquivo do
-  `@sapphi-red/web-noise-suppressor` (MIT, Copyright (c) 2022 翠 / green — texto na seção 3).
 
 ```text
 Redistribution and use in source and binary forms, with or without modification, are permitted provided

@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { copyText } from '../lib/copyText'
 
 interface Props {
   children: ReactNode
@@ -42,7 +43,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </pre>
             <div className="flex gap-2">
               <button
-                onClick={() => navigator.clipboard.writeText(details)}
+                onClick={() => copyText(details)}
                 className="flex-1 py-2.5 rounded btn-secondary text-sm"
               >
                 Copiar detalhes

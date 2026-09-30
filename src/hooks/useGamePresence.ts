@@ -129,6 +129,7 @@ declare global {
       // comentário grande em electron/main.cjs sobre abandonar
       // setDisplayMediaRequestHandler.
       getScreenShareSources: () => Promise<ScreenShareSourcesPayload>
+      copyText?: (text: string) => Promise<boolean>
       // Áudio automático conforme o tipo da fonte (tela cheia = sistema,
       // janela = captura por processo) — ver electron/main.cjs.
       selectScreenShareSource: (sourceId: string | null) => Promise<void>

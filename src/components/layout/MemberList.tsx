@@ -10,6 +10,7 @@ import { useOnlineIds } from '../../hooks/usePresence'
 import type { Profile, Role } from '../../types/database'
 import { lazyModal } from '../modals/lazyModal'
 import { CloseIcon, GamepadIcon, SettingsIcon } from '../ui/icons'
+import { copyText } from '../../lib/copyText'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const ManageMemberModal = lazyModal(() => import('../modals/ManageMemberModal').then((m) => m.ManageMemberModal))
@@ -214,7 +215,7 @@ export function MemberList({
                     { label: 'Mensagem', onClick: () => onMessageUser?.(contextProfile.id) },
                     {
                       label: 'Mencionar (copiar @)',
-                      onClick: () => navigator.clipboard.writeText(`@${contextProfile.username}`),
+                      onClick: () => copyText(`@${contextProfile.username}`),
                     },
                     ...(!friends.some((f) => f.profile.id === contextProfile.id)
                       ? [
@@ -232,9 +233,9 @@ export function MemberList({
                 : []),
               {
                 label: 'Copiar nome de usuário',
-                onClick: () => navigator.clipboard.writeText(contextProfile.username),
+                onClick: () => copyText(contextProfile.username),
               },
-              { label: 'Copiar ID do usuário', onClick: () => navigator.clipboard.writeText(contextProfile.id) },
+              { label: 'Copiar ID do usuário', onClick: () => copyText(contextProfile.id) },
               ...(canModerate && contextProfile.id !== profile?.id
                 ? [
                     {

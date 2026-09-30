@@ -15,7 +15,7 @@ import {
   type RemoteTrackPublication,
 } from 'livekit-client'
 import { supabase } from '../lib/supabase'
-import { fetchLiveKitToken, prewarmLiveKitConnection, rememberLiveKitUrl, setActiveVoiceRoom } from '../lib/livekit'
+import { takeLiveKitToken, prewarmLiveKitConnection, rememberLiveKitUrl, setActiveVoiceRoom } from '../lib/livekit'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
 import {
@@ -2796,7 +2796,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // perdeu o acesso).
       logDebug(`join(${channelId}): pedindo token do LiveKit...`)
       const tokenPromise = withTimeout(
-        fetchLiveKitToken({ room: channelId, userLimit: serverId ? 0 : (options?.userLimit ?? 0) }),
+        takeLiveKitToken(channelId, serverId ? 0 : (options?.userLimit ?? 0)),
         15_000,
         'pedido de token do LiveKit'
       )
@@ -2819,9 +2819,43 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       presencePromise.catch((err) => {
         logDebug(`join(${channelId}): presença falhou (a call segue) — ${err instanceof Error ? err.message : String(err)}`)
       })
-      const [mic, , tokenResult] = await Promise.all([micPromise, channelInfoPromise, tokenPromise])
+      // DESEMPENHO: conecta na sala assim que acesso + token estiverem ok —
+      // o microfone (permissão + redutor de ruído) termina de preparar EM
+      // PARALELO com a conexão, e só é esperado depois dela.
+      const [, tokenResult] = await Promise.all([channelInfoPromise, tokenPromise])
       assertActive()
       logDebug(`join(${channelId}): mic + presença + token todos prontos, conectando na sala LiveKit (${tokenResult.url})...`)
+
+      // (Opções da sala em createVoiceRoom.) adaptiveStream DESLIGADO de propósito (era `true`): o
+      // adaptiveStream do LiveKit decide a qualidade/pausa de cada vídeo
+      // remoto observando os elementos <video> ligados via
+      // `track.attach()` — só que este app usa a MediaStreamTrack crua
+      // (ver recomputeParticipant/CallMediaTiles.tsx), nunca attach().
+      // Sem nenhum elemento "visível" registrado, o LiveKit considerava
+      // TODO vídeo remoto invisível e pedia pro servidor PAUSAR o envio
+      // (documentado no próprio `mediaStreamTrack` do RemoteVideoTrack:
+      // "your video tracks might never start") — câmera/tela dos outros
+      // podiam simplesmente não aparecer ou congelar. `dynacast`
+      // continua: ele é do lado de quem PUBLICA (para de codificar
+      // camadas que ninguém está assistindo) e não depende disso.
+      // Criada lá em cima (createVoiceRoom), assim que o token chegou, pra
+      // já ter feito o prepareConnection — ver docs/PING.md.
+      room = preparedRoom
+      // Dá até 300ms pro pré-aquecimento terminar (normalmente já terminou);
+      // não trava a entrada além disso.
+      await Promise.race([preparePromise, new Promise((resolve) => setTimeout(resolve, 300))])
+      assertActive()
+      // roomRef recebe a sala ANTES do connect: assim um leave() durante
+      // o handshake desconecta ESTA sala (connect rejeita na hora) em vez
+      // de esperar os 15s do timeout, e os handlers de evento já sabem
+      // que ela é a "atual".
+      roomRef.current = room
+      attachRoomEvents(room, user.id)
+      await withTimeout(room.connect(tokenResult.url, tokenResult.token), 15_000, 'conexão com o servidor de voz')
+      assertActive()
+      setActiveVoiceRoom(room)
+      const mic = await micPromise
+      assertActive()
 
       // Commit do microfone nos refs globais.
       micCommitted = true
@@ -2850,34 +2884,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           () => {}
         )
 
-      // (Opções da sala em createVoiceRoom.) adaptiveStream DESLIGADO de propósito (era `true`): o
-      // adaptiveStream do LiveKit decide a qualidade/pausa de cada vídeo
-      // remoto observando os elementos <video> ligados via
-      // `track.attach()` — só que este app usa a MediaStreamTrack crua
-      // (ver recomputeParticipant/CallMediaTiles.tsx), nunca attach().
-      // Sem nenhum elemento "visível" registrado, o LiveKit considerava
-      // TODO vídeo remoto invisível e pedia pro servidor PAUSAR o envio
-      // (documentado no próprio `mediaStreamTrack` do RemoteVideoTrack:
-      // "your video tracks might never start") — câmera/tela dos outros
-      // podiam simplesmente não aparecer ou congelar. `dynacast`
-      // continua: ele é do lado de quem PUBLICA (para de codificar
-      // camadas que ninguém está assistindo) e não depende disso.
-      // Criada lá em cima (createVoiceRoom), assim que o token chegou, pra
-      // já ter feito o prepareConnection — ver docs/PING.md.
-      room = preparedRoom
-      // Dá até 800ms pro pré-aquecimento terminar (normalmente já terminou
-      // enquanto o mic/presença carregavam); não trava a entrada além disso.
-      await Promise.race([preparePromise, new Promise((resolve) => setTimeout(resolve, 800))])
-      assertActive()
-      // roomRef recebe a sala ANTES do connect: assim um leave() durante
-      // o handshake desconecta ESTA sala (connect rejeita na hora) em vez
-      // de esperar os 15s do timeout, e os handlers de evento já sabem
-      // que ela é a "atual".
-      roomRef.current = room
-      attachRoomEvents(room, user.id)
-      await withTimeout(room.connect(tokenResult.url, tokenResult.token), 15_000, 'conexão com o servidor de voz')
-      assertActive()
-      setActiveVoiceRoom(room)
 
       const allowedToPublish = tokenResult.canPublish && room.localParticipant.permissions?.canPublish !== false
       setCanPublish(allowedToPublish)

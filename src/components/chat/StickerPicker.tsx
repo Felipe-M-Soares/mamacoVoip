@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getRecentStickers, searchStickers, type Sticker } from '../../lib/stickers'
+import {
+  STICKER_PACKS,
+  getRecentStickers,
+  getSticker,
+  searchStickers,
+  stickersInPack,
+  type Sticker,
+  type StickerPackId,
+} from '../../lib/stickers'
 import { CloseIcon, SearchIcon, StickerIcon } from '../ui/icons'
 
-// Seletor de figurinhas do pacote original do app (lib/stickers.ts).
+// Seletor de figurinhas dos pacotes originais do app (lib/stickers.ts),
+// com uma aba por pacote (e "Recentes").
 // Mesmo formato de popover do GifPicker, ancorado acima do botão.
 export function StickerPicker({ onSelect, onClose }: { onSelect: (sticker: Sticker) => void; onClose: () => void }) {
   const [query, setQuery] = useState('')
@@ -10,6 +19,7 @@ export function StickerPicker({ onSelect, onClose }: { onSelect: (sticker: Stick
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   const [recent] = useState(getRecentStickers)
+  const [tab, setTab] = useState<StickerPackId | 'recentes'>(() => (getRecentStickers().length > 0 ? 'recentes' : 'mamacos'))
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -69,6 +79,47 @@ export function StickerPicker({ onSelect, onClose }: { onSelect: (sticker: Stick
           <CloseIcon className="w-4 h-4" aria-hidden />
         </button>
       </div>
+      {!searching && (
+        <div role="tablist" aria-label="Pacotes de figurinhas" className="flex gap-1 px-2.5 pt-2 overflow-x-auto">
+          {recent.length > 0 && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'recentes'}
+              onClick={() => setTab('recentes')}
+              title="Recentes"
+              className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+                tab === 'recentes' ? 'bg-mv-accent/20 ring-1 ring-inset ring-mv-accent/50' : 'hover:bg-white/[0.06]'
+              }`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5 text-mv-muted" aria-hidden>
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              <span className="sr-only">Recentes</span>
+            </button>
+          )}
+          {STICKER_PACKS.map((p) => {
+            const cover = getSticker(p.coverId)
+            return (
+              <button
+                key={p.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === p.id}
+                onClick={() => setTab(p.id)}
+                title={p.label}
+                className={`shrink-0 w-10 h-10 p-1 rounded-xl transition-colors ${
+                  tab === p.id ? 'bg-mv-accent/20 ring-1 ring-inset ring-mv-accent/50' : 'hover:bg-white/[0.06]'
+                }`}
+              >
+                {cover && <img src={cover.url} alt="" draggable={false} className="w-full h-full object-contain" />}
+                <span className="sr-only">{p.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       <div className="p-2.5 max-h-80 overflow-y-auto space-y-3">
         {searching ? (
           results.length > 0 ? (
@@ -80,19 +131,13 @@ export function StickerPicker({ onSelect, onClose }: { onSelect: (sticker: Stick
               <p className="text-xs text-mv-muted">Tente “gg”, “rindo” ou “macaco”.</p>
             </div>
           )
+        ) : tab === 'recentes' ? (
+          renderGrid(recent, 'Figurinhas recentes')
         ) : (
-          <>
-            {recent.length > 0 && (
-              <section>
-                <p className={sectionLabel}>Recentes</p>
-                {renderGrid(recent, 'Figurinhas recentes')}
-              </section>
-            )}
-            <section>
-              <p className={sectionLabel}>Pacote Mamacos</p>
-              {renderGrid(results, 'Todas as figurinhas')}
-            </section>
-          </>
+          <section>
+            <p className={sectionLabel}>{STICKER_PACKS.find((p) => p.id === tab)?.label}</p>
+            {renderGrid(stickersInPack(tab), `Pacote ${STICKER_PACKS.find((p) => p.id === tab)?.label ?? ''}`)}
+          </section>
         )}
       </div>
     </div>

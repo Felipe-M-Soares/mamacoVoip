@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // setDisplayMediaRequestHandler). ScreenSharePicker.tsx agora chama isso
   // diretamente assim que abre, em vez de ficar esperando um evento.
   getScreenShareSources: () => ipcRenderer.invoke('screen-share:get-sources'),
+  copyText: (text) => ipcRenderer.invoke('clipboard:write-text', text),
   // Áudio agora é automático conforme o tipo da fonte escolhida (captura
   // separada em VoiceContext.tsx via getUserMedia com
   // chromeMediaSource: 'desktop') — esse invoke só dispara o efeito

@@ -1,6 +1,7 @@
 import { Avatar } from '../ui/Avatar'
 import { useIsPresent } from '../../hooks/usePresence'
 import type { Profile, ProfileStatus } from '../../types/database'
+import { useAvatarTransparent } from '../../hooks/useAvatarTransparent'
 
 const STATUS_LABEL: Record<ProfileStatus, string> = {
   online: 'Online',
@@ -46,6 +47,7 @@ export function ProfileSidePanel({
   onViewFullProfile: () => void
 }) {
   const isPresent = useIsPresent(profile.id)
+  const avatarTransparent = useAvatarTransparent(profile.avatar_url)
   // Perfil próprio: sempre "efetivamente online" do jeito que a pessoa
   // escolheu (ela sabe o próprio status). Perfil de outra pessoa: só
   // conta como online se a presença em tempo real confirmar (mesmo
@@ -65,7 +67,7 @@ export function ProfileSidePanel({
       />
       </div>
       <div className="px-4 pb-4 -mt-10">
-        <div className="inline-block rounded-full ring-[6px] ring-mv-side ml-2">
+        <div className={`inline-block ml-2 ${avatarTransparent ? '' : 'rounded-full ring-[6px] ring-mv-side'}`}>
         <Avatar
           name={profile.username}
           avatarUrl={profile.avatar_url}

@@ -26,7 +26,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
   const [decoding, setDecoding] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Enquanto o arquivo escolhido for mais longo que o limite, guarda o
-  // AudioBuffer decodificado + o início do trecho de 5s escolhido — a
+  // AudioBuffer decodificado + o início do trecho escolhido (até MAX_SOUND_SECONDS) — a
   // ferramenta de recorte abaixo mexe só nisso até a pessoa confirmar,
   // sem tocar em pendingFile (que só existe pro arquivo final, já dentro
   // do limite, pronto pra nomear e enviar).
@@ -119,7 +119,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  // Toca só o trecho de 5s escolhido no slider abaixo, direto do arquivo
+  // Toca só o trecho escolhido no slider abaixo, direto do arquivo
   // original (sem precisar cortar de verdade só pra ouvir) — para
   // sozinho ao fim da janela.
   function handlePreviewTrim() {

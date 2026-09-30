@@ -27,19 +27,30 @@ export function useConnectionPing() {
       // um número que ninguém está olhando (e que o Chromium distorce de
       // qualquer jeito, já que ele atrasa timers de abas em background).
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      // Três idas seguidas e fica a MENOR: a primeira às vezes paga a
+      // reabertura da conexão segura (TLS) — que não é latência de rede —
+      // e variações pontuais do servidor não viram "ping alto" na tela.
+      let best: number | null = null
+      for (let i = 0; i < 3 && !cancelled; i++) {
+        const sample = await sampleOnce()
+        if (sample !== null && (best === null || sample < best)) best = sample
+      }
+      if (!cancelled) setPingMs(best)
+    }
+
+    async function sampleOnce(): Promise<number | null> {
       const start = performance.now()
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 5000)
       try {
         const res = await fetch(PING_URL, { method: 'GET', signal: controller.signal, cache: 'no-store' })
+        const elapsed = performance.now() - start
         // Só o vai-e-volta importa; descarta o corpo (pequeno) sem ler.
         void res.body?.cancel().catch(() => {})
-        if (!cancelled) setPingMs(Math.round(performance.now() - start))
+        return Math.round(elapsed)
       } catch {
-        if (!cancelled) setPingMs(null)
+        return null
       } finally {
-        // Antes só era limpo no caminho de sucesso — num erro de rede o
-        // timer continuava pendurado até disparar.
         clearTimeout(timeout)
       }
     }

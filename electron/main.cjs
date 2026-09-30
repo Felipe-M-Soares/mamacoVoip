@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut, screen, powerMonitor, safeStorage } = require('electron')
+const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut, screen, powerMonitor, safeStorage, clipboard } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { exec, spawn } = require('node:child_process')
@@ -1603,7 +1603,9 @@ app.whenReady().then(() => {
     // transmissão funcionar — sem ela, o navegador nega o pedido de
     // element.requestFullscreen() em silêncio (sem erro nenhum no
     // console), e o botão simplesmente não fazia nada.
-    const allowed = ['media', 'display-capture', 'notifications', 'fullscreen']
+    // clipboard-sanitized-write: sem ela, navigator.clipboard.writeText()
+    // falhava no app ("Copiar link" dava erro).
+    const allowed = ['media', 'display-capture', 'notifications', 'fullscreen', 'clipboard-sanitized-write']
     // AUDITORIA: antes a permissão era concedida pra QUALQUER origem que
     // pedisse (inclusive um iframe de terceiros embutido numa mensagem,
     // que ganharia microfone/câmera/captura de tela sem perguntar nada).
@@ -1903,6 +1905,14 @@ app.whenReady().then(() => {
 
   // Botão "Restaurar e compartilhar": desminimiza a janela do jogo (a
   // pedido da pessoa) e espera o Windows redesenhar antes da nova lista.
+  // Copiar texto pela área de transferência do sistema (não depende de
+  // permissão/foco do navegador).
+  handleTrusted('clipboard:write-text', (_event, text) => {
+    if (typeof text !== 'string' || text.length > 100_000) return false
+    clipboard.writeText(text)
+    return true
+  })
+
   handleTrusted('screen-share:restore-window', async (_event, hwnd) => {
     if (process.platform !== 'win32' || !Number.isFinite(hwnd) || hwnd <= 0) return { ok: false }
     let ok = false

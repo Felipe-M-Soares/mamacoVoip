@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { useAuth } from '../../hooks/useAuth'
 import { useChannels } from '../../hooks/useChannels'
@@ -26,6 +26,8 @@ import {
   type VoiceMemberDragPayload,
 } from '../../lib/voiceMove'
 import { AnnouncementIcon, BellOffIcon, CalendarIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, LockIcon, PinIcon, PlusIcon, ScreenShareIcon, SettingsIcon, TextChannelIcon, VoiceChannelIcon, WarningIcon } from '../ui/icons'
+import { copyText } from '../../lib/copyText'
+import { prefetchLiveKitToken } from '../../lib/livekit'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const InviteModal = lazyModal(() => import('../modals/InviteModal').then((m) => m.InviteModal))
@@ -291,8 +293,29 @@ function ChannelRow({
   onContextMenu: (e: React.MouseEvent) => void
 }) {
   const voice = useVoiceCore()
+  // Canal de voz: pede o token de entrada ao parar o mouse em cima (ou
+  // focar pelo teclado) — o clique encontra ele pronto.
+  const hoverTimer = useRef<number | null>(null)
+  const isVoice = channel.type === 'voice'
+  const schedulePrefetch = () => {
+    if (!isVoice || voice.connectedChannelId === channel.id || hoverTimer.current !== null) return
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = null
+      prefetchLiveKitToken(channel.id)
+    }, 120)
+  }
+  const cancelPrefetch = () => {
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current)
+      hoverTimer.current = null
+    }
+  }
   return (
     <div
+      onPointerEnter={isVoice ? schedulePrefetch : undefined}
+      onPointerLeave={isVoice ? cancelPrefetch : undefined}
+      onPointerDown={isVoice ? () => prefetchLiveKitToken(channel.id) : undefined}
+      onFocus={isVoice ? schedulePrefetch : undefined}
       draggable={isOwner}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
@@ -983,7 +1006,7 @@ export function ChannelSidebar({
             },
             {
               label: 'Copiar nome do canal',
-              onClick: () => navigator.clipboard.writeText(contextChannel.name),
+              onClick: () => copyText(contextChannel.name),
             },
             {
               label:

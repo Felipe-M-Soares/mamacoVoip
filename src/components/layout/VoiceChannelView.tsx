@@ -15,6 +15,7 @@ import { SoundboardPanel } from '../ui/SoundboardPanel'
 import { SettingsModal } from '../modals/SettingsModal'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { Channel, Profile, Role } from '../../types/database'
+import { copyText } from '../../lib/copyText'
 
 // VideoTile mora em CallMediaTiles.tsx (arquivo pequeno, compartilhado
 // com DMCallOverlay.tsx) — ver o comentário lá pra saber por quê (tem
@@ -396,7 +397,7 @@ function ParticipantTile({
   const menuItems = [
     { label: 'Ver perfil', onClick: () => onViewProfile?.(userId) },
     { label: 'Mensagem', onClick: () => onMessageUser?.(userId) },
-    ...(username ? [{ label: 'Mencionar (copiar @)', onClick: () => navigator.clipboard.writeText(`@${username}`) }] : []),
+    ...(username ? [{ label: 'Mencionar (copiar @)', onClick: () => copyText(`@${username}`) }] : []),
     { label: 'Ajustar volume', onClick: () => setShowVolumeSlider(true) },
     {
       label: videoHiddenLocally ? 'Mostrar vídeo' : 'Desativar vídeo (só pra você)',
@@ -406,7 +407,7 @@ function ParticipantTile({
       ? [{ label: 'Adicionar amigo', onClick: () => onAddFriend?.(username) }]
       : []),
     ...(onInvite ? [{ label: 'Convidar para o servidor', onClick: () => onInvite() }] : []),
-    { label: 'Copiar ID do usuário', onClick: () => navigator.clipboard.writeText(userId) },
+    { label: 'Copiar ID do usuário', onClick: () => copyText(userId) },
     ...(roles && roles.length > 0 && canModerate
       ? roles.map((r) => ({
           label: `${myRoleIds.has(r.id) ? '✓ ' : '   '} Cargo: ${r.name}`,
@@ -424,7 +425,7 @@ function ParticipantTile({
   if (compact) {
     return (
       <div
-        className="flex flex-col items-center gap-1.5 w-[76px] shrink-0 p-2 rounded-2xl bg-white/[0.03] border border-[var(--color-line)]"
+        className="flex flex-col items-center gap-1.5 w-[76px] shrink-0 p-2 rounded-2xl hover:bg-white/[0.04] transition-colors"
         onMouseLeave={() => setShowVolumeSlider(false)}
         onContextMenu={!isLocal ? openMenu : undefined}
       >

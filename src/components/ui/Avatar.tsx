@@ -112,8 +112,8 @@ function canInspectPixels(url: string): boolean {
   }
 }
 
-// PNG/WebP/GIF sem fundo aparece "solto" (sem círculo e sem o fundo
-// cinza) — ver lib/imageTransparency. `key` = URL no pai, então o
+// PNG/WebP/GIF sem fundo aparece "solto" (sem círculo, sem fundo e sem
+// sombra/contorno em volta) — ver lib/imageTransparency. `key` = URL no pai, então o
 // estado recomeça quando a foto muda.
 function AvatarImage({ url, name }: { url: string; name: string }) {
   const inspect = canInspectPixels(url)
@@ -126,7 +126,7 @@ function AvatarImage({ url, name }: { url: string; name: string }) {
       decoding="async"
       crossOrigin={inspect ? 'anonymous' : undefined}
       onLoad={inspect ? (e) => setTransparent(detectTransparency(e.currentTarget)) : undefined}
-      className={`w-full h-full ${transparent ? 'object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.45)]' : 'rounded-full object-cover bg-mv-raised'}`}
+      className={`w-full h-full ${transparent ? 'object-contain' : 'rounded-full object-cover bg-mv-raised'}`}
     />
   )
 }

@@ -7,6 +7,7 @@ import { describeMessageContent, parseStickerId } from '../../lib/stickers'
 import { LinkPreviewCard, extractFirstUrl, isPureMediaMessage } from './LinkPreviewCard'
 import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji, Thread, Role } from '../../types/database'
 import { AddReactionIcon, ArrowRightIcon, DownloadIcon, EditIcon, FileIcon, PinIcon, ReplyIcon, ThreadIcon, TrashIcon } from '../ui/icons'
+import { copyText } from '../../lib/copyText'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉']
 
@@ -536,10 +537,10 @@ function MessageItemImpl({
           onClose={closeMenu}
           items={[
             { label: 'Responder', onClick: () => onReply(message) },
-            { label: 'Copiar texto', onClick: () => navigator.clipboard.writeText(message.content) },
+            { label: 'Copiar texto', onClick: () => copyText(message.content) },
             {
               label: 'Copiar link da mensagem',
-              onClick: () => navigator.clipboard.writeText(`mamacos://message/${message.channel_id}/${message.id}`),
+              onClick: () => copyText(`mamacos://message/${message.channel_id}/${message.id}`),
             },
             { label: 'Adicionar reação', onClick: () => setShowReactionPicker(true) },
             ...(onForward ? [{ label: 'Encaminhar', onClick: () => onForward(message.id) }] : []),
@@ -574,7 +575,7 @@ function MessageItemImpl({
           onClose={closeUserMenu}
           items={[
             { label: 'Ver perfil', onClick: () => onViewProfile(author) },
-            { label: 'Copiar nome de usuário', onClick: () => navigator.clipboard.writeText(author.username) },
+            { label: 'Copiar nome de usuário', onClick: () => copyText(author.username) },
           ]}
         />
       )}

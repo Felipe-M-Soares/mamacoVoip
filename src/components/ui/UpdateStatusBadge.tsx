@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
+import { copyText } from '../../lib/copyText'
 
 export function UpdateStatusBadge() {
   const { status, restart } = useAppUpdater()
@@ -169,7 +170,7 @@ export function UpdateStatusBadge() {
             <div className="flex items-center gap-3 mt-1.5">
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(status.message ?? '').catch(() => {
+                  copyText(status.message ?? '').catch(() => {
                     // sem permissão de área de transferência — nada a fazer
                   })
                 }}

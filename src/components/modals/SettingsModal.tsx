@@ -45,6 +45,7 @@ import {
   type AppIcon,
 } from '../ui/icons'
 import { TabHeader, SettingsCard, SettingRow, RowList, RangeSlider, Segmented, Kbd, InlineMessage } from './settingsUI'
+import { useAvatarTransparent } from '../../hooks/useAvatarTransparent'
 import {
   createNoiseSuppressor,
   type NoiseSuppressor,
@@ -299,6 +300,7 @@ function gradientFor(seed: string) {
 function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut: () => void }) {
   const { profile, user } = useAuth()
   const [currentPassword, setCurrentPassword] = useState('')
+  const avatarTransparent = useAvatarTransparent(profile?.avatar_url)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   // Conta sem senha (entrou com Google) ou esqueceu a atual: confirma a
@@ -426,7 +428,7 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
           }
         />
         <div className="px-5 pb-5 flex items-start gap-4">
-          <div className="-mt-9 shrink-0 rounded-full ring-[5px] ring-[var(--color-mv-main)] bg-mv-main">
+          <div className={`-mt-9 shrink-0 ${avatarTransparent ? '' : 'rounded-full ring-[5px] ring-[var(--color-mv-main)] bg-mv-main'}`}>
             <Avatar name={profile?.username ?? email ?? '?'} avatarUrl={profile?.avatar_url} size={72} />
           </div>
           <div className="min-w-0 pt-2.5">

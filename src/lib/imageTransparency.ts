@@ -11,6 +11,14 @@
 
 const cache = new Map<string, boolean>()
 const MAX_CACHE = 500
+// Quem precisa saber quando uma foto foi detectada como transparente
+// (ex.: a moldura em volta do avatar no cartão de perfil).
+const listeners = new Set<() => void>()
+
+export function subscribeTransparency(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
 
 /** Formatos que podem ter transparência (JPEG nunca tem). */
 export function mayHaveTransparency(url: string): boolean {
@@ -59,5 +67,6 @@ export function detectTransparency(img: HTMLImageElement): boolean {
   }
   if (cache.size >= MAX_CACHE) cache.delete(cache.keys().next().value as string)
   cache.set(url, result)
+  if (result) listeners.forEach((l) => l())
   return result
 }

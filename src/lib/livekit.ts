@@ -174,3 +174,31 @@ export function setActiveVoiceRoom(room: Room | null) {
 export function getActiveVoiceRoom(): Room | null {
   return activeVoiceRoom
 }
+
+// Pré-busca do token ao passar o mouse/focar num canal de voz: quando a
+// pessoa clica, o pedido (Edge Function, que pode estar "fria") já foi
+// feito. Uso único e vida curta (o limite de vagas é conferido na hora
+// do pedido; 45s mantém isso praticamente atual).
+const PREFETCH_TTL_MS = 45_000
+const prefetchedTokens = new Map<string, { at: number; userLimit: number; promise: Promise<LiveKitTokenResult> }>()
+
+export function prefetchLiveKitToken(room: string, userLimit = 0) {
+  const cached = prefetchedTokens.get(room)
+  if (cached && Date.now() - cached.at < PREFETCH_TTL_MS) return
+  const promise = fetchLiveKitToken({ room, userLimit })
+  // Falhou → some do cache (a entrada de verdade pede de novo).
+  promise.catch(() => {
+    if (prefetchedTokens.get(room)?.promise === promise) prefetchedTokens.delete(room)
+  })
+  prefetchedTokens.set(room, { at: Date.now(), userLimit, promise })
+}
+
+/** Token pré-buscado (se ainda válido) ou um pedido novo. */
+export function takeLiveKitToken(room: string, userLimit = 0): Promise<LiveKitTokenResult> {
+  const cached = prefetchedTokens.get(room)
+  prefetchedTokens.delete(room)
+  if (cached && cached.userLimit === userLimit && Date.now() - cached.at < PREFETCH_TTL_MS) {
+    return cached.promise.catch(() => fetchLiveKitToken({ room, userLimit }))
+  }
+  return fetchLiveKitToken({ room, userLimit })
+}

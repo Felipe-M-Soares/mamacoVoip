@@ -9,6 +9,7 @@ import { useIsPresent } from '../../hooks/usePresence'
 import { useRoles } from '../../hooks/useRoles'
 import { getUserNote, setUserNote } from '../../lib/pinnedItems'
 import type { Profile } from '../../types/database'
+import { useAvatarTransparent } from '../../hooks/useAvatarTransparent'
 
 // Mesmo truque de gradiente-por-nome de ProfileSidePanel.tsx/ServerBar.tsx.
 function gradientFor(seed: string) {
@@ -40,6 +41,7 @@ export function UserProfileModal({
   // perfil é aberto de dentro de um servidor).
   const { rolesForUser } = useRoles(serverId ?? null)
   const memberRoles = serverId ? rolesForUser(targetProfile.id) : []
+  const avatarTransparent = useAvatarTransparent(targetProfile.avatar_url)
 
   // "Jogando X" fica desatualizado assim que a pessoa fecha o app (o
   // campo playing no perfil só é limpo na próxima vez que ela abrir um
@@ -94,7 +96,7 @@ export function UserProfileModal({
       />
       <div className="px-5 pb-5">
         <div className="flex items-end justify-between gap-3 -mt-11">
-          <div className="rounded-full ring-[6px] ring-[var(--color-elevated)] bg-[var(--color-elevated)]">
+          <div className={avatarTransparent ? '' : 'rounded-full ring-[6px] ring-[var(--color-elevated)] bg-[var(--color-elevated)]'}>
             <Avatar
               name={targetProfile.username}
               avatarUrl={targetProfile.avatar_url}

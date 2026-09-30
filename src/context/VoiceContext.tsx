@@ -2789,14 +2789,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // permissão de falar (canal Palco). `name` não é mais enviado: era
       // `options.displayName`, que numa DM é o nome da OUTRA pessoa (o
       // título da conversa), não o seu — a identidade já é o user.id.
-      const tokenPromise = channelInfoPromise.then((info) => {
-        logDebug(`join(${channelId}): info do canal ok, pedindo token do LiveKit...`)
-        return withTimeout(
-          fetchLiveKitToken({ room: channelId, userLimit: info.userLimit }),
-          15_000,
-          'pedido de token do LiveKit'
-        )
-      })
+      // DESEMPENHO: não espera mais a consulta do canal — pra canal de
+      // servidor a Edge Function lê o limite de vagas direto do banco, e
+      // pra DM/grupo o limite já vem em `options`. A consulta do canal
+      // continua em paralelo (nome na tela + mensagem clara se a pessoa
+      // perdeu o acesso).
+      logDebug(`join(${channelId}): pedindo token do LiveKit...`)
+      const tokenPromise = withTimeout(
+        fetchLiveKitToken({ room: channelId, userLimit: serverId ? 0 : (options?.userLimit ?? 0) }),
+        15_000,
+        'pedido de token do LiveKit'
+      )
 
       // Pré-aquecimento da conexão (docs/PING.md): assim que o token chega —
       // em paralelo com microfone e presença — a sala resolve DNS/TLS e, no
@@ -2810,7 +2813,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {})
 
-      const [mic, , tokenResult] = await Promise.all([micPromise, presencePromise, tokenPromise])
+      // DESEMPENHO: a presença (sidebar "quem está na sala") não segura
+      // mais a entrada — só microfone, acesso ao canal e token. Se ela
+      // falhar depois, a call continua e o erro fica no log.
+      presencePromise.catch((err) => {
+        logDebug(`join(${channelId}): presença falhou (a call segue) — ${err instanceof Error ? err.message : String(err)}`)
+      })
+      const [mic, , tokenResult] = await Promise.all([micPromise, channelInfoPromise, tokenPromise])
       assertActive()
       logDebug(`join(${channelId}): mic + presença + token todos prontos, conectando na sala LiveKit (${tokenResult.url})...`)
 
@@ -2824,7 +2833,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       watchRawMicTrack(mic.raw)
       mutedRef.current = false
       setMuted(false)
-      presenceRef.current = presence.channel
+      // A presença pode ainda estar se inscrevendo: o canal é criado de
+      // forma síncrona depois do ensureRealtimeAuth(), então registra
+      // quando ficar pronto (e descarta se esta entrada já foi cancelada).
+      if (presence.channel) presenceRef.current = presence.channel
+      else
+        void presencePromise.then(
+          () => {
+            if (!presence.channel) return
+            if (isStale() || abandoned) {
+              void supabase.removeChannel(presence.channel).catch(() => {})
+            } else {
+              presenceRef.current = presence.channel
+            }
+          },
+          () => {}
+        )
 
       // (Opções da sala em createVoiceRoom.) adaptiveStream DESLIGADO de propósito (era `true`): o
       // adaptiveStream do LiveKit decide a qualidade/pausa de cada vídeo

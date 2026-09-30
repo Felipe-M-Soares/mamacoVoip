@@ -2279,6 +2279,19 @@ app.whenReady().then(() => {
   // em "Compartilhar tela".
   handleTrusted('screen-share:get-sources', async () => {
     try {
+      // DESEMPENHO: as consultas ao Windows (qual é o jogo, PID de cada
+      // janela pelo título) não dependem da lista de fontes — começam JÁ,
+      // em paralelo com o getSources(), em vez de esperar ele terminar.
+      const gameLabelAtOpen = currentGame
+      // Teto de espera: se o PowerShell estiver lento (ou ainda subindo),
+      // o seletor abre mesmo assim — só sem a sugestão de jogo / áudio por
+      // app naquela abertura, em vez de ficar vários segundos parado.
+      const capped = (promise, fallback) =>
+        Promise.race([promise.catch(() => fallback), new Promise((r) => setTimeout(() => r(fallback), 2500))])
+      const gameInfoPromise = gameLabelAtOpen
+        ? capped(getGameWindowInfo(processNamesForGameLabel(gameLabelAtOpen)), null)
+        : Promise.resolve(null)
+      const titlePidMapPromise = capped(getWindowPidMap(), new Map())
       const sources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
         thumbnailSize: { width: 320, height: 200 },
@@ -2324,14 +2337,13 @@ app.whenReady().then(() => {
       let suggestionLabel = null
       let watchProcessNamesForShare = []
 
-      if (currentGame) {
-        const knownNames = processNamesForGameLabel(currentGame)
-        const info = await getGameWindowInfo(knownNames)
+      if (gameLabelAtOpen) {
+        const info = await gameInfoPromise
         if (info) {
           windowInfo = info
           isKnownGame = true
-          suggestionLabel = currentGame
-          watchProcessNamesForShare = knownNames
+          suggestionLabel = gameLabelAtOpen
+          watchProcessNamesForShare = processNamesForGameLabel(gameLabelAtOpen)
         }
       }
       if (!windowInfo && lastForegroundApp) {
@@ -2353,7 +2365,7 @@ app.whenReady().then(() => {
         .filter((s) => s.id.startsWith('window:'))
         .map((s) => parseHwndFromSourceId(s.id))
         .filter((h) => h !== null)
-      const [hwndPidMap, titlePidMap] = await Promise.all([getPidsForWindowHandles(windowHwnds), getWindowPidMap()])
+      const [hwndPidMap, titlePidMap] = await Promise.all([capped(getPidsForWindowHandles(windowHwnds), new Map()), titlePidMapPromise])
 
       let gameDisplayId = matchDisplayIdForBounds(windowInfo?.bounds ?? null)
       // SÉTIMA RODADA: quando tem um jogo CADASTRADO (KNOWN_GAMES) rodando
@@ -2452,7 +2464,11 @@ app.whenReady().then(() => {
           return {
             id: s.id,
             name: s.name,
-            thumbnail: s.thumbnail.toDataURL(),
+            // JPEG em vez de PNG: codifica bem mais rápido e manda ~5x
+            // menos dados pro renderer com dezenas de janelas abertas.
+            thumbnail: s.thumbnail.isEmpty()
+              ? ''
+              : `data:image/jpeg;base64,${s.thumbnail.toJPEG(75).toString('base64')}`,
             // O id que o desktopCapturer devolve sempre começa com "screen:" ou
             // "window:" (formato documentado e estável da API) — usamos esse
             // prefixo pra dizer pro renderer se cada opção é uma tela inteira ou
@@ -2754,6 +2770,10 @@ app.whenReady().then(() => {
   // focada — ver o before-input-event em createWindow.
 
   if (isGameDetectionEnabled()) startGameDetection()
+  // DESEMPENHO: sobe o scanner do Windows (PowerShell + Add-Type, 1 a 3s na
+  // primeira vez) logo depois da abertura, pra que o 1º "Compartilhar tela"
+  // já encontre ele pronto. Sem custo fora do Windows.
+  if (process.platform === 'win32') setTimeout(() => void ensureScanner(), 4000)
 
   handleTrusted('app:getGameDetectionEnabled', () => isGameDetectionEnabled())
   handleTrusted('app:setGameDetectionEnabled', (_event, enabled) => {

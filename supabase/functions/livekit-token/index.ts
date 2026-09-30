@@ -83,12 +83,10 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
     })
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser()
-    if (userErr || !user) throw new HttpError('Sessão inválida ou expirada.', 401)
-
+    // DESEMPENHO: validar a sessão e ler o corpo em paralelo com as
+    // consultas de acesso logo abaixo (as consultas já rodam com o JWT do
+    // usuário e passam pela RLS, então não dependem do getUser()).
+    const userPromise = supabase.auth.getUser()
     const body = await req.json().catch(() => ({}))
     const room = typeof body.room === 'string' ? body.room.trim() : ''
     const name = typeof body.name === 'string' ? body.name.trim().slice(0, 100) : undefined
@@ -120,11 +118,14 @@ Deno.serve(async (req: Request) => {
     // sido expulso/banido, que já remove a membership em
     // `server_members`). Sem duplicar a lógica de permissão em dois
     // lugares — a fonte de verdade continua sendo a RLS do banco.
-    const [{ data: channelRow }, { data: groupRow }, { data: dmRow }] = await Promise.all([
+    const [userRes, { data: channelRow }, { data: groupRow }, { data: dmRow }] = await Promise.all([
+      userPromise,
       supabase.from('channels').select('id, server_id, type, user_limit, is_stage').eq('id', room).maybeSingle(),
       supabase.from('group_conversations').select('id').eq('id', room).maybeSingle(),
       supabase.from('dm_conversations').select('id').eq('id', room).maybeSingle(),
     ])
+    const user = userRes.data.user
+    if (userRes.error || !user) throw new HttpError('Sessão inválida ou expirada.', 401)
     if (!channelRow && !groupRow && !dmRow) {
       return jsonResponse({ error: 'Você não tem acesso a essa sala de voz.', code: 'not_authorized' }, 403)
     }
@@ -158,34 +159,6 @@ Deno.serve(async (req: Request) => {
         : null
       : clientUserLimit
 
-    // Canal "Palco" (is_stage): só quem pode moderar canais fala — antes
-    // isso era aplicado SÓ no cliente (VoiceChannelView mutava o
-    // microfone depois de entrar), então qualquer cliente modificado
-    // podia falar/transmitir num palco. Agora o próprio token nega
-    // publicação pra quem não tem `manage_channels` (mesma regra do
-    // cliente, via a função has_permission do banco).
-    let canPublish = true
-    if (channelRow?.is_stage) {
-      const { data: isModerator, error: permErr } = await supabase.rpc('has_permission', {
-        p_server_id: channelRow.server_id,
-        p_user_id: user.id,
-        p_permission: 'manage_channels',
-      })
-      canPublish = !permErr && isModerator === true
-    }
-
-    // Membro em castigo (timeout) entra só pra OUVIR — antes o token
-    // liberava microfone/câmera/tela normalmente. Falha fechado: se a
-    // checagem der erro, também não publica. (Quem já estava na sala na
-    // hora do castigo é tratado pela Edge Function livekit-moderate.)
-    if (channelRow && canPublish) {
-      const { data: timedOut, error: timeoutErr } = await supabase.rpc('is_timed_out', {
-        p_server_id: channelRow.server_id,
-        p_user_id: user.id,
-      })
-      if (timeoutErr || timedOut === true) canPublish = false
-    }
-
     const livekitUrl = Deno.env.get('LIVEKIT_URL')
     const apiKey = Deno.env.get('LIVEKIT_API_KEY')
     const apiSecret = Deno.env.get('LIVEKIT_API_SECRET')
@@ -195,30 +168,49 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Limite de participantes do canal (vem da coluna channels.user_limit,
-    // ou de options.userLimit pra chamada de DM/grupo — ver join() em
-    // VoiceContext.tsx) — checado aqui, do lado do servidor, contra a
-    // contagem REAL de participantes que o próprio LiveKit já tem pra
-    // essa sala agora. Isso substitui a checagem antiga (feita no
-    // cliente, via ordenação de presence do Realtime) por uma
-    // autoritativa e sem corrida: o LiveKit é a fonte da verdade de quem
-    // está OU NÃO na sala, não uma contagem que cada cliente calcula por
-    // conta própria.
-    if (userLimit) {
-      try {
-        const roomService = new RoomServiceClient(livekitUrl.replace(/^ws/, 'http'), apiKey, apiSecret)
-        const participants = await roomService.listParticipants(room)
-        const alreadyIn = participants.some((p) => p.identity === user.id)
-        if (!alreadyIn && participants.length >= userLimit) {
-          return jsonResponse({ error: 'A sala está cheia.', code: 'room_full' }, 403)
-        }
-      } catch {
-        // A sala pode simplesmente não existir ainda no servidor LiveKit
-        // (ninguém entrou nela ainda) — a chamada do RoomService rejeita
-        // nesse caso, mas isso não é motivo pra bloquear quem está
-        // tentando ser a PRIMEIRA pessoa a entrar.
-      }
+    // DESEMPENHO: as três checagens abaixo são independentes — antes rodavam
+    // uma depois da outra (cada uma é uma ida ao banco ou ao LiveKit).
+    //
+    // 1) Canal "Palco" (is_stage): só quem pode moderar canais fala (mesma
+    //    regra do cliente, via has_permission). Falha fechado.
+    const stagePromise: Promise<boolean> = channelRow?.is_stage
+      ? Promise.resolve(
+          supabase.rpc('has_permission', {
+            p_server_id: channelRow.server_id,
+            p_user_id: user.id,
+            p_permission: 'manage_channels',
+          })
+        ).then(({ data, error }) => !error && data === true, () => false)
+      : Promise.resolve(true)
+
+    // 2) Membro em castigo (timeout) entra só pra OUVIR. Falha fechado.
+    //    (Quem já estava na sala na hora do castigo é tratado pela Edge
+    //    Function livekit-moderate.)
+    const notTimedOutPromise: Promise<boolean> = channelRow
+      ? Promise.resolve(
+          supabase.rpc('is_timed_out', { p_server_id: channelRow.server_id, p_user_id: user.id })
+        ).then(({ data, error }) => !error && data !== true, () => false)
+      : Promise.resolve(true)
+
+    // 3) Limite de vagas contra a contagem REAL do LiveKit (fonte da
+    //    verdade de quem está na sala). Se a sala ainda não existe no
+    //    LiveKit (ninguém entrou), a chamada rejeita — não bloqueia a
+    //    primeira pessoa.
+    const roomFullPromise: Promise<boolean> = userLimit
+      ? new RoomServiceClient(livekitUrl.replace(/^ws/, 'http'), apiKey, apiSecret)
+          .listParticipants(room)
+          .then(
+            (participants) =>
+              !participants.some((p) => p.identity === user.id) && participants.length >= userLimit,
+            () => false
+          )
+      : Promise.resolve(false)
+
+    const [stageOk, notTimedOut, roomFull] = await Promise.all([stagePromise, notTimedOutPromise, roomFullPromise])
+    if (roomFull) {
+      return jsonResponse({ error: 'A sala está cheia.', code: 'room_full' }, 403)
     }
+    const canPublish = stageOk && notTimedOut
 
     const at = new AccessToken(apiKey, apiSecret, {
       identity: user.id,

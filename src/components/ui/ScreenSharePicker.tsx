@@ -1,10 +1,20 @@
-import { useEffect, useState } from 'react'
-import type { ScreenShareSource, ScreenShareSuggestion } from '../../hooks/useGamePresence'
-import { setPendingGameShareHint } from '../../lib/screenShareGameHint'
-import { setPendingAppAudioPid } from '../../lib/pendingAppAudioCapture'
-import { subscribeScreenSharePicker, resolveScreenSharePicker } from '../../lib/screenSharePickerBridge'
-import { buildGamePreset, loadGameAutoPreset, loadQualityPreset } from '../../hooks/useScreenShareQuality'
-import { armScreenShareChoice } from '../../lib/chooseScreenShareSource'
+import { useEffect, useState } from "react";
+import type {
+  ScreenShareSource,
+  ScreenShareSuggestion,
+} from "../../hooks/useGamePresence";
+import { setPendingGameShareHint } from "../../lib/screenShareGameHint";
+import { setPendingAppAudioPid } from "../../lib/pendingAppAudioCapture";
+import {
+  subscribeScreenSharePicker,
+  resolveScreenSharePicker,
+} from "../../lib/screenSharePickerBridge";
+import {
+  buildGamePreset,
+  loadGameAutoPreset,
+  loadQualityPreset,
+} from "../../hooks/useScreenShareQuality";
+import { armScreenShareChoice } from "../../lib/chooseScreenShareSource";
 
 // Versão enxuta: só o essencial — as fontes agrupadas por categoria
 // (Jogo / Tela cheia / Janela). Sem parágrafo de explicação por card — a
@@ -36,8 +46,10 @@ import { armScreenShareChoice } from '../../lib/chooseScreenShareSource'
 // porque isGameDisplay nunca era usado aqui apesar de já vir calculado
 // do processo principal).
 export function ScreenSharePicker() {
-  const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
-  const [suggestion, setSuggestion] = useState<ScreenShareSuggestion | null>(null)
+  const [sources, setSources] = useState<ScreenShareSource[] | null>(null);
+  const [suggestion, setSuggestion] = useState<ScreenShareSuggestion | null>(
+    null,
+  );
 
   // OITAVA RODADA: em vez de escutar um evento que chega sozinho, agora
   // se inscreve na "caixa de correio" de screenSharePickerBridge.ts —
@@ -47,51 +59,56 @@ export function ScreenSharePicker() {
   // abaixo).
   useEffect(() => {
     return subscribeScreenSharePicker((payload) => {
-      setSources(payload?.sources ?? null)
-      setSuggestion(payload?.suggestion ?? null)
-    })
-  }, [])
+      setSources(payload?.sources ?? null);
+      setSuggestion(payload?.suggestion ?? null);
+    });
+  }, []);
 
   // Esc cancela o seletor (antes só dava pra cancelar clicando fora ou no
   // botão) — cancelar resolve a Promise pendente em VoiceContext como
   // "cancelado", sem deixar o botão de compartilhar preso em "Conectando".
-  const isOpen = sources !== null
+  const isOpen = sources !== null;
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== 'Escape') return
-      e.preventDefault()
-      setPendingGameShareHint(null)
-      setPendingAppAudioPid(null)
-      resolveScreenSharePicker(null)
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setPendingGameShareHint(null);
+      setPendingAppAudioPid(null);
+      resolveScreenSharePicker(null);
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [isOpen])
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen]);
 
-  if (!sources) return null
+  if (!sources) return null;
   // TypeScript não propaga o `if (!sources) return null` acima pra
   // dentro de `choose` (uma função aninhada, fechamento separado) —
   // essa constante com tipo explícito (não-nulo) resolve isso sem
   // precisar de `!` no meio do código.
-  const confirmedSources: ScreenShareSource[] = sources
+  const confirmedSources: ScreenShareSource[] = sources;
 
   // Prioriza uma JANELA exata quando existe; só cai pro fallback de TELA
   // CHEIA (isGameDisplay) quando não tem janela capturável pro jogo —
   // exatamente o caso mais comum de jogo em modo exclusivo/borderless
   // sem título, que antes ficava sem destaque nenhum.
-  const suggestedSource = sources.find((s) => s.isExactGameWindow) ?? sources.find((s) => s.isGameDisplay) ?? null
-  const gameCard = suggestion ? suggestedSource : null
-  const gameCardTitle = suggestion?.isKnownGame ? 'Jogo' : 'Sugestão'
-  const screens = sources.filter((s) => s.type === 'screen' && s !== gameCard)
-  const windows = sources.filter((s) => s.type === 'window' && s !== gameCard)
+  const suggestedSource =
+    sources.find((s) => s.isExactGameWindow) ??
+    sources.find((s) => s.isGameDisplay) ??
+    null;
+  const gameCard = suggestion ? suggestedSource : null;
+  const gameCardTitle = suggestion?.isKnownGame ? "Jogo" : "Sugestão";
+  const screens = sources.filter((s) => s.type === "screen" && s !== gameCard);
+  const windows = sources.filter((s) => s.type === "window" && s !== gameCard);
 
-  const currentQualityPreset = loadQualityPreset()
+  const currentQualityPreset = loadQualityPreset();
   // Preset automático "Jogo" (1080p60 — ver buildGamePreset): aplicado só
   // se a pessoa escolher o card do jogo detectado. A rede fraca é decidida
   // na hora de transmitir (pode cair pra 720p60).
   const gamePresetLabel =
-    suggestion?.isKnownGame && loadGameAutoPreset() ? buildGamePreset(currentQualityPreset, { weakNetwork: false }).label : null
+    suggestion?.isKnownGame && loadGameAutoPreset()
+      ? buildGamePreset(currentQualityPreset, { weakNetwork: false }).label
+      : null;
 
   // DÉCIMA QUARTA RODADA: a lógica de "qual PID usar pra essa escolha, e
   // qual recado deixar pro fechamento automático" (antes vivia só aqui,
@@ -119,17 +136,26 @@ export function ScreenSharePicker() {
   // apontar) — a pessoa só vê as listas normais de "Tela cheia"/"Janela"
   // embaixo, do jeito que já eram exibidas antes de qualquer detecção
   // especial de jogo existir.
-  function choose(id: string | null, viaGameShortcut?: { processNames: string[]; label: string }) {
+  function choose(
+    id: string | null,
+    viaGameShortcut?: { processNames: string[]; label: string },
+  ) {
     if (id) {
-      armScreenShareChoice(id, confirmedSources, gameCard, suggestion, viaGameShortcut)
+      armScreenShareChoice(
+        id,
+        confirmedSources,
+        gameCard,
+        suggestion,
+        viaGameShortcut,
+      );
     } else {
       // Cancelou — limpa qualquer recado pendente de uma escolha
       // anterior, defensivo, pra nunca "vazar" pra uma captura sem
       // relação com ele.
-      setPendingGameShareHint(null)
-      setPendingAppAudioPid(null)
+      setPendingGameShareHint(null);
+      setPendingAppAudioPid(null);
     }
-    resolveScreenSharePicker(id)
+    resolveScreenSharePicker(id);
   }
 
   return (
@@ -147,15 +173,25 @@ export function ScreenSharePicker() {
         <div className="flex items-start justify-between gap-3 mb-5">
           <div className="flex items-center gap-3 min-w-0">
             <span className="w-10 h-10 rounded-xl bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 flex items-center justify-center shrink-0">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5" aria-hidden>
+              <svg
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="w-5 h-5"
+                aria-hidden
+              >
                 <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
               </svg>
             </span>
             <div className="min-w-0">
-              <h2 id="screen-share-picker-title" className="font-display text-lg font-semibold text-white leading-tight">
+              <h2
+                id="screen-share-picker-title"
+                className="font-display text-lg font-semibold text-white leading-tight"
+              >
                 Escolha o que compartilhar
               </h2>
-              <p className="text-[12px] text-mv-muted">O áudio é escolhido sozinho conforme a fonte.</p>
+              <p className="text-[12px] text-mv-muted">
+                O áudio é escolhido sozinho conforme a fonte.
+              </p>
             </div>
           </div>
           <span className="chip shrink-0" title="Qualidade da transmissão">
@@ -183,18 +219,27 @@ export function ScreenSharePicker() {
                 // ainda sendo só um placeholder.
                 source={{ ...gameCard, name: suggestion.label }}
                 highlighted
-                onClick={() => choose(gameCard.id, { processNames: suggestion.processNames, label: suggestion.label })}
+                onClick={() =>
+                  choose(gameCard.id, {
+                    processNames: suggestion.processNames,
+                    label: suggestion.label,
+                  })
+                }
               />
-              {gameCard.type === 'screen' && (
+              {gameCard.type === "screen" && (
                 <p className="col-span-2 sm:col-span-3 text-[11px] leading-snug text-mv-muted -mt-1">
-                  A miniatura pode não corresponder ao jogo (o Windows não gera preview de tela cheia exclusiva) — clicar
-                  aqui compartilha o jogo de verdade mesmo assim.
+                  A miniatura pode não corresponder ao jogo (o Windows não gera
+                  preview de tela cheia exclusiva) — clicar aqui compartilha o
+                  jogo de verdade mesmo assim.
                 </p>
               )}
               {(gamePresetLabel || suggestion.antiCheat) && (
                 <div className="col-span-2 sm:col-span-3 -mt-1 flex flex-wrap items-center gap-1.5 text-[11px] leading-snug text-mv-muted">
                   {gamePresetLabel && (
-                    <span className="chip" title="Qualidade automática para jogos — dá pra desligar em Configurações de transmissão">
+                    <span
+                      className="chip"
+                      title="Qualidade automática para jogos — dá pra desligar em Configurações de transmissão"
+                    >
                       {gamePresetLabel}
                     </span>
                   )}
@@ -202,7 +247,8 @@ export function ScreenSharePicker() {
                     <span
                       title={`${suggestion.label} usa ${suggestion.antiCheat}. O Mamacos Voip não injeta nada no jogo: a captura usa a API oficial do Windows, então é seguro. Pra sobreposição aparecer por cima, deixe o jogo em "janela sem borda".`}
                     >
-                      Anti-cheat {suggestion.antiCheat}: captura segura, sem injeção no jogo.
+                      Anti-cheat {suggestion.antiCheat}: captura segura, sem
+                      injeção no jogo.
                     </span>
                   )}
                 </div>
@@ -212,7 +258,11 @@ export function ScreenSharePicker() {
           {screens.length > 0 && (
             <SourceSection title="Tela cheia">
               {screens.map((s) => (
-                <SourceCard key={s.id} source={s} onClick={() => choose(s.id)} />
+                <SourceCard
+                  key={s.id}
+                  source={s}
+                  onClick={() => choose(s.id)}
+                />
               ))}
             </SourceSection>
           )}
@@ -223,7 +273,11 @@ export function ScreenSharePicker() {
                   ("Jogo"/"Sugestão") e é excluída desta lista — nunca
                   sobra uma janela sugerida pra destacar aqui dentro. */}
               {windows.map((s) => (
-                <SourceCard key={s.id} source={s} onClick={() => choose(s.id)} />
+                <SourceCard
+                  key={s.id}
+                  source={s}
+                  onClick={() => choose(s.id)}
+                />
               ))}
             </SourceSection>
           )}
@@ -240,35 +294,59 @@ export function ScreenSharePicker() {
             Windows. Precisa estar pelo menos visível (pode estar atrás
             de outra janela) na hora de abrir esse seletor. */}
         <div className="mt-4 flex gap-2.5 rounded-xl bg-white/[0.03] border border-[var(--color-line)] px-3 py-2.5">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4 text-mv-muted shrink-0 mt-px" aria-hidden>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            className="w-4 h-4 text-mv-muted shrink-0 mt-px"
+            aria-hidden
+          >
             <circle cx="12" cy="12" r="9" />
             <path d="M12 11v5M12 8h.01" />
           </svg>
           <div className="space-y-1 text-[11px] leading-snug text-mv-muted">
-            <p>Jogo não aparece como janela? Troque pra "tela cheia sem bordas" nas configurações dele.</p>
             <p>
-              Não vê a janela que procura? Ela pode estar minimizada — o Windows só mostra aqui janelas abertas e visíveis (restaure a janela e tente de novo).
+              Jogo não aparece como janela? Troque pra "tela cheia sem bordas"
+              nas configurações dele.
+            </p>
+            <p>
+              Não vê a janela que procura? Ela pode estar minimizada — o Windows
+              só mostra aqui janelas abertas e visíveis (restaure a janela e
+              tente de novo).
             </p>
           </div>
         </div>
 
         <div className="mt-4 flex justify-end">
-          <button onClick={() => choose(null)} className="h-10 px-5 btn-secondary text-[14px]">
+          <button
+            onClick={() => choose(null)}
+            className="h-10 px-5 btn-secondary text-[14px]"
+          >
             Cancelar
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-function SourceSection({ title, children }: { title: string; children: React.ReactNode }) {
+function SourceSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <section aria-label={title}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-2">{title}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-2">
+        {title}
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{children}</div>
     </section>
-  )
+  );
 }
 
 function SourceCard({
@@ -276,9 +354,9 @@ function SourceCard({
   highlighted,
   onClick,
 }: {
-  source: ScreenShareSource
-  highlighted?: boolean
-  onClick: () => void
+  source: ScreenShareSource;
+  highlighted?: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
@@ -286,18 +364,33 @@ function SourceCard({
       title={source.name}
       className={`group text-left rounded-xl overflow-hidden border bg-mv-canvas transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 ${
         highlighted
-          ? 'border-mv-accent shadow-[0_0_0_1px_var(--color-mv-accent),0_10px_28px_-12px_var(--color-mv-accent)]'
-          : 'border-[var(--color-line)] hover:border-mv-accent/60 hover:shadow-[0_10px_28px_-14px_rgb(0_0_0/0.9)]'
+          ? "border-mv-accent shadow-[0_0_0_1px_var(--color-mv-accent),0_10px_28px_-12px_var(--color-mv-accent)]"
+          : "border-[var(--color-line)] hover:border-mv-accent/60 hover:shadow-[0_10px_28px_-14px_rgb(0_0_0/0.9)]"
       }`}
     >
       <div className="relative">
-        <img src={source.thumbnail} alt={source.name} className="w-full aspect-video object-cover bg-black" />
-        <span className="absolute inset-0 bg-mv-accent/0 group-hover:bg-mv-accent/10 transition-colors" aria-hidden />
+        {source.thumbnail ? (
+          <img
+            src={source.thumbnail}
+            alt={source.name}
+            className="w-full aspect-video object-cover bg-black"
+          />
+        ) : (
+          <div className="w-full aspect-video bg-black" aria-hidden />
+        )}
+        <span
+          className="absolute inset-0 bg-mv-accent/0 group-hover:bg-mv-accent/10 transition-colors"
+          aria-hidden
+        />
         {highlighted && (
-          <span className="absolute top-2 left-2 chip !bg-mv-accent !text-white !border-transparent">Recomendado</span>
+          <span className="absolute top-2 left-2 chip !bg-mv-accent !text-white !border-transparent">
+            Recomendado
+          </span>
         )}
       </div>
-      <p className="text-[12px] font-medium text-mv-text px-2.5 py-2 truncate">{source.name}</p>
+      <p className="text-[12px] font-medium text-mv-text px-2.5 py-2 truncate">
+        {source.name}
+      </p>
     </button>
-  )
+  );
 }

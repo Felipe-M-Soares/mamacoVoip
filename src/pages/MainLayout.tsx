@@ -31,6 +31,7 @@ import { VoiceMovedToast } from '../components/ui/VoiceMovedToast'
 import { OverlayStateSync } from '../components/layout/OverlayStateSync'
 import { AutoIdleStatus } from '../components/layout/AutoIdleStatus'
 import type { Channel, Profile, Server } from '../types/database'
+import { setWindowPlace } from '../lib/windowTitle'
 
 const VoiceChannelView = lazyComponent(() =>
   import('../components/layout/VoiceChannelView').then((m) => m.VoiceChannelView)
@@ -55,6 +56,7 @@ function ActiveServerBody({
   onViewProfile,
   onMessageUser,
   onToggleMembers,
+  membersOpen,
 }: {
   server: Server
   activeChannel: Channel | null
@@ -63,6 +65,7 @@ function ActiveServerBody({
   onViewProfile: (profile: Profile) => void
   onMessageUser?: (userId: string) => void
   onToggleMembers: () => void
+  membersOpen?: boolean
 }) {
   const { channels, loading: loadingChannels } = useChannels()
   // O canal ativo guardado lá em cima é uma CÓPIA de quando foi clicado —
@@ -119,6 +122,7 @@ function ActiveServerBody({
       onViewProfile={onViewProfile}
       onJumpToChannel={onSelectChannel}
       onToggleMembers={onToggleMembers}
+      membersOpen={membersOpen}
     />
   )
 }
@@ -160,6 +164,27 @@ function ActiveServerContent({
   onMessageUser?: (userId: string) => void
 }) {
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false)
+  // No computador a lista de membros começa escondida; o botão "Membros"
+  // do topo do chat mostra/esconde (lembra a escolha).
+  const [desktopMembersOpen, setDesktopMembersOpen] = useState(() => {
+    try {
+      return localStorage.getItem('mv-members-open') === '1'
+    } catch {
+      return false
+    }
+  })
+  function toggleMembers() {
+    if (window.matchMedia('(min-width: 1024px)').matches) {
+      setDesktopMembersOpen((v) => {
+        try {
+          localStorage.setItem('mv-members-open', v ? '0' : '1')
+        } catch {
+          // sem armazenamento — só não lembra
+        }
+        return !v
+      })
+    } else setMobileMembersOpen((v) => !v)
+  }
 
   return (
     <ChannelsProvider serverId={server.id} key={server.id}>
@@ -210,7 +235,8 @@ function ActiveServerContent({
         onSelectChannel={onSelectChannel}
         onViewProfile={onViewProfile}
         onMessageUser={onMessageUser}
-        onToggleMembers={() => setMobileMembersOpen((v) => !v)}
+        onToggleMembers={toggleMembers}
+        membersOpen={desktopMembersOpen}
       />
       )}
 
@@ -219,6 +245,7 @@ function ActiveServerContent({
         onViewProfile={onViewProfile}
         onMessageUser={onMessageUser}
         mobileOpen={mobileMembersOpen}
+        desktopOpen={desktopMembersOpen && !dmConversation}
         onCloseMobile={() => setMobileMembersOpen(false)}
       />
     </ChannelsProvider>
@@ -437,6 +464,21 @@ function MainLayoutInner() {
     setActiveChannel(channel)
     setMobileSidebarOpen(false)
   }
+
+  // Nome de onde você está, no centro da barra de título (e no título da janela).
+  const placeConversation = activeServer ? null : conversations.find((c) => c.id === activeConversationId)
+  const placeGroupName = activeServer || homeView !== 'group' ? null : (groups.find((g) => g.id === activeGroupId)?.name ?? null)
+  useEffect(() => {
+    if (activeServer) setWindowPlace({ label: activeServer.name, iconUrl: activeServer.icon_url })
+    else if (homeView === 'conversation' && placeConversation)
+      setWindowPlace({
+        label: placeConversation.otherProfile.display_name || placeConversation.otherProfile.username,
+        iconUrl: placeConversation.otherProfile.avatar_url,
+      })
+    else if (homeView === 'group' && placeGroupName) setWindowPlace({ label: placeGroupName })
+    else setWindowPlace({ label: 'Início' })
+  }, [activeServer, homeView, placeConversation, placeGroupName])
+  useEffect(() => () => setWindowPlace(null), [])
 
   // Cartão de usuário da sala de voz (VoiceMemberCard) pede DM / perfil.
   useEffect(() => {

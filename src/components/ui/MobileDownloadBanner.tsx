@@ -1,4 +1,5 @@
 import { DESKTOP_DOWNLOAD_URL } from '../../lib/config'
+import { isNativeMobileApp } from '../../lib/platform'
 
 // VIGÉSIMA SEXTA RODADA — pedido explícito: "colocar modo de baixar o
 // app no mobile". O app já tinha um link discreto de "Baixar o app pra
@@ -16,7 +17,8 @@ import { DESKTOP_DOWNLOAD_URL } from '../../lib/config'
 // o texto é claro sobre ser "a versão de computador", em vez de deixar
 // a pessoa achar que está baixando um app pro celular dela.
 export function MobileDownloadBanner() {
-  if (window.electronAPI?.isElectron) return null
+  // Também some dentro do app Android (já está no app).
+  if (window.electronAPI?.isElectron || isNativeMobileApp()) return null
 
   return (
     <a

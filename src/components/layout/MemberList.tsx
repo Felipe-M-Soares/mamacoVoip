@@ -11,6 +11,8 @@ import type { Profile, Role } from '../../types/database'
 import { lazyModal } from '../modals/lazyModal'
 import { CloseIcon, GamepadIcon, SettingsIcon } from '../ui/icons'
 import { copyText } from '../../lib/copyText'
+import { useVoiceRoster } from '../../lib/voiceRoster'
+import { useChannels } from '../../hooks/useChannels'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const ManageMemberModal = lazyModal(() => import('../modals/ManageMemberModal').then((m) => m.ManageMemberModal))
@@ -21,12 +23,15 @@ export function MemberList({
   onViewProfile,
   onMessageUser,
   mobileOpen = false,
+  desktopOpen = false,
   onCloseMobile,
 }: {
   serverId: string
   onViewProfile: (profile: Profile) => void
   onMessageUser?: (userId: string) => void
   mobileOpen?: boolean
+  /** No computador a lista fica escondida até clicar no botão "Membros" */
+  desktopOpen?: boolean
   onCloseMobile?: () => void
 }) {
   const { profile } = useAuth()
@@ -47,38 +52,62 @@ export function MemberList({
   // (ver usePresence.ts) — sem isso, quem fechou o app de qualquer jeito
   // continuava listado aqui em cima pra sempre.
   const isEffectivelyOnline = (p: Profile) => p.status !== 'offline' && onlineIds.has(p.id)
-  const others = members.filter((m) => m.profile.id !== profile?.id)
-  const online = others.filter((m) => isEffectivelyOnline(m.profile))
-  const offline = others.filter((m) => !isEffectivelyOnline(m.profile))
+  const roster = useVoiceRoster()
+  const { channels } = useChannels()
+  const voiceChannelName = (userId: string) => {
+    const channelId = roster.get(userId)
+    return channelId ? (channels.find((c) => c.id === channelId)?.name ?? 'sala de voz') : null
+  }
+  // Você entra na contagem como online (mesmo invisível pra você mesmo ver).
+  const isShownOnline = (p: Profile) => p.id === profile?.id || isEffectivelyOnline(p)
+  const online = members.filter((m) => isShownOnline(m.profile))
+  const offline = members.filter((m) => !isShownOnline(m.profile))
 
-  // Agrupa quem está online pelo cargo mais alto de cada um — igual
-  // a apps de chat populares, com o nome e a cor do cargo como título do grupo.
-  // Quem não tem nenhum cargo cai num grupo "ONLINE" genérico no final.
+  // Agrupa quem está online pelo cargo mais alto de cada um, com o nome e
+  // a cor do cargo como título. Sem cargo → "Disponível".
   const groupedOnline: { role: Role | null; members: typeof online }[] = []
-  for (const role of roles) {
+  for (const role of [...roles].sort((a, b) => b.position - a.position)) {
     const inRole = online.filter((m) => rolesForUser(m.profile.id)[0]?.id === role.id)
     if (inRole.length > 0) groupedOnline.push({ role, members: inRole })
   }
   const noRole = online.filter((m) => !rolesForUser(m.profile.id)[0])
-  if (noRole.length > 0 || groupedOnline.length === 0) groupedOnline.push({ role: null, members: noRole })
+  if (noRole.length > 0) groupedOnline.push({ role: null, members: noRole })
+
+  // "Atividade": quem está jogando agora.
+  const activity = online.filter((m) => m.profile.playing)
 
   function MemberRow({ member }: { member: (typeof members)[number] }) {
-    const topRole = rolesForUser(member.profile.id)[0]
+    const p = member.profile
+    const topRole = rolesForUser(p.id)[0]
+    const isMe = p.id === profile?.id
+    const online = isShownOnline(p)
+    const inVoice = online ? voiceChannelName(p.id) : null
     return (
       <div
-        className="group w-full flex items-center gap-2 px-2 py-[6px] rounded-lg hover:bg-white/[0.05] transition-colors"
+        className="group relative w-full flex items-center gap-2 px-2 py-[6px] rounded-lg overflow-hidden hover:bg-white/[0.05] transition-colors"
         onContextMenu={(e) => {
-          setContextProfile(member.profile)
+          setContextProfile(p)
           openMenu(e)
         }}
       >
-        <button onClick={() => onViewProfile(member.profile)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left rounded-md">
+        {/* Banner do perfil como fundo do cartão (quando a pessoa tem). */}
+        {p.banner_url && online && (
+          <>
+            <img src={p.banner_url} alt="" aria-hidden className="absolute inset-0 w-full h-full object-cover opacity-70 pointer-events-none" />
+            <span
+              aria-hidden
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: 'linear-gradient(90deg, var(--color-mv-side) 25%, color-mix(in srgb, var(--color-mv-side) 55%, transparent) 70%, transparent)' }}
+            />
+          </>
+        )}
+        <button onClick={() => onViewProfile(p)} className="relative flex items-center gap-2.5 flex-1 min-w-0 text-left rounded-md">
           <Avatar
-            name={member.profile.username}
-            avatarUrl={member.profile.avatar_url}
-            decorationUrl={member.profile.avatar_decoration_url}
-            status={member.profile.status}
-            userId={member.profile.id}
+            name={p.username}
+            avatarUrl={p.avatar_url}
+            decorationUrl={p.avatar_decoration_url}
+            status={p.status}
+            userId={p.id}
             size={32}
           />
           <div className="min-w-0 leading-tight">
@@ -86,26 +115,34 @@ export function MemberList({
               className={`text-[14px] font-medium truncate block ${topRole ? '' : 'text-mv-text'}`}
               style={topRole ? { color: topRole.color } : undefined}
             >
-              {member.profile.display_name || member.profile.username}
+              {p.display_name || p.username}
+              {isMe && <span className="text-mv-muted font-normal"> (você)</span>}
             </span>
-            {member.profile.playing && isEffectivelyOnline(member.profile) ? (
+            {inVoice ? (
+              <span className="text-[11px] text-mv-green truncate flex items-center gap-1 mt-0.5">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 shrink-0" aria-hidden>
+                  <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8z" />
+                </svg>
+                <span className="truncate">Em voz · {inVoice}</span>
+              </span>
+            ) : p.playing && online ? (
               <span className="text-[11px] text-mv-muted truncate flex items-center gap-1 mt-0.5">
                 <GamepadIcon className="w-3 h-3 shrink-0 text-mv-green" aria-hidden />
                 <span className="truncate">
-                  Jogando <strong className="font-semibold text-mv-text/90">{member.profile.playing}</strong>
+                  Jogando <strong className="font-semibold text-mv-text/90">{p.playing}</strong>
                 </span>
               </span>
-            ) : member.profile.custom_status && isEffectivelyOnline(member.profile) ? (
-              <span className="text-[11px] text-mv-muted truncate block mt-0.5">{member.profile.custom_status}</span>
+            ) : p.custom_status && online ? (
+              <span className="text-[11px] text-mv-muted truncate block mt-0.5">{p.custom_status}</span>
             ) : null}
           </div>
         </button>
-        {canModerate && (
+        {canModerate && !isMe && (
           <button
-            onClick={() => setManagingProfile(member.profile)}
+            onClick={() => setManagingProfile(p)}
             title="Gerenciar membro"
             aria-label="Gerenciar membro"
-            className="icon-btn w-7 h-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            className="relative icon-btn w-7 h-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           >
             <SettingsIcon className="w-4 h-4" aria-hidden />
           </button>
@@ -121,7 +158,7 @@ export function MemberList({
       )}
       <aside
         aria-label="Membros"
-        className={`w-60 bg-mv-side shrink-0 overflow-y-auto py-4 px-2.5 lg:block lg:static border-t border-l border-[var(--color-line)] ${
+        className={`w-64 bg-mv-side shrink-0 overflow-y-auto py-4 px-2.5 ${desktopOpen ? 'lg:block lg:static' : 'lg:!hidden'} border-t border-l border-[var(--color-line)] ${
           mobileOpen ? 'fixed inset-y-0 right-0 z-40 block animate-fade-slide-in shadow-[-24px_0_60px_-12px_rgb(0_0_0/0.6)]' : 'hidden'
         }`}
       >
@@ -143,38 +180,47 @@ export function MemberList({
         </div>
       ) : (
         <>
-          {profile && (
-            <div>
-              <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-1.5">Você</h3>
-              <button
-                onClick={() => onViewProfile(profile)}
-                className="w-full flex items-center gap-2.5 px-2 py-[6px] rounded-lg hover:bg-white/[0.05] transition-colors text-left"
-              >
-                <Avatar
-                  name={profile.username}
-                  avatarUrl={profile.avatar_url}
-                  decorationUrl={profile.avatar_decoration_url}
-                  status={profile.status}
-                  userId={profile.id}
-                  size={32}
-                />
-                <span className="min-w-0 leading-tight">
-                  <span className="text-[14px] font-medium text-mv-text truncate block">
-                    {profile.display_name || profile.username}
-                  </span>
-                  {profile.custom_status && (
-                    <span className="text-[11px] text-mv-muted truncate block mt-0.5">{profile.custom_status}</span>
-                  )}
-                </span>
-              </button>
+          {activity.length > 0 && (
+            <div className="mb-4">
+              <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-1.5">
+                Atividade <span className="text-mv-muted/70">— {activity.length}</span>
+              </h3>
+              <div className="space-y-1.5">
+                {activity.slice(0, 6).map((m) => {
+                  const topRole = rolesForUser(m.profile.id)[0]
+                  return (
+                    <button
+                      key={m.user_id}
+                      onClick={() => onViewProfile(m.profile)}
+                      className="w-full text-left rounded-xl bg-white/[0.035] border border-[var(--color-line)] hover:bg-white/[0.06] px-2.5 py-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="flex items-center gap-1.5 text-[12px] truncate">
+                          <Avatar name={m.profile.username} avatarUrl={m.profile.avatar_url} size={16} />
+                          <span className="truncate font-medium" style={topRole ? { color: topRole.color } : undefined}>
+                            {m.profile.display_name || m.profile.username}
+                          </span>
+                        </p>
+                        <p className="text-[13px] font-semibold text-white truncate mt-0.5">{m.profile.playing}</p>
+                        <p className="text-[11px] text-mv-muted flex items-center gap-1 mt-0.5">
+                          <GamepadIcon className="w-3 h-3 text-mv-green" aria-hidden /> Jogando agora
+                        </p>
+                      </div>
+                      <span className="w-10 h-10 rounded-lg bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 flex items-center justify-center shrink-0">
+                        <GamepadIcon className="w-5 h-5" aria-hidden />
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           )}
 
           {groupedOnline.map(({ role, members: group }) => (
             <div key={role?.id ?? 'no-role'}>
-              <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mt-5 mb-1.5 flex items-center gap-1.5">
+              <h3 className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mt-4 first:mt-0 mb-1.5 flex items-center gap-1.5">
                 {role && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: role.color }} aria-hidden="true" />}
-                <span className="truncate">{role?.name ?? 'Online'}</span>
+                <span className="truncate">{role?.name ?? 'Disponível'}</span>
                 <span className="text-mv-muted/70">— {group.length}</span>
               </h3>
               {group.map((m) => (

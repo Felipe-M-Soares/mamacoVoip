@@ -1016,6 +1016,8 @@ export interface VoiceContextValue {
   connectedChannelName: string | null
   joiningChannelId: string | null
   connectedAt: number | null
+  /** Desde quando a sala atual tem alguém (tempo da sala, não o seu) */
+  roomStartedAt: number | null
   connectionQuality: Record<string, VoiceConnectionQuality>
   // Qualidade da SUA PRÓPRIA conexão com o servidor de voz (LiveKit) —
   // diferente de `connectionQuality` acima, que é sobre cada OUTRO
@@ -1139,6 +1141,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [joiningChannelId, setJoiningChannelId] = useState<string | null>(null)
   const [connectedServerId, setConnectedServerId] = useState<string | null>(null)
   const [connectedAt, setConnectedAt] = useState<number | null>(null)
+  // Desde quando a SALA tem gente (ver o 'sync' de presença em join()).
+  const [roomStartedAt, setRoomStartedAt] = useState<number | null>(null)
   const [connectionQuality, setConnectionQuality] = useState<Record<string, VoiceConnectionQuality>>({})
   const [localConnectionQuality, setLocalConnectionQuality] = useState<VoiceConnectionQuality | null>(null)
   const localConnectionQualityRef = useRef<VoiceConnectionQuality | null>(null)
@@ -2764,11 +2768,34 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           const rt = supabase.channel(topic, privateChannelParams({ config: { presence: { key: user.id } } }))
           presence.channel = rt
 
+          // Tempo da SALA (não o seu): cada pessoa anuncia o "início da
+          // sala" que conhece; quem entra herda o menor entre os presentes.
+          // Assim o tempo conta desde a primeira pessoa que chegou e só
+          // zera quando TODO mundo sair.
+          let myRoomStart = joinedAtRef.current
+          rt.on('presence', { event: 'sync' }, () => {
+            if (isStale()) return
+            const state = rt.presenceState() as Record<string, { room_started_at?: number; joined_at?: number }[]>
+            let min = myRoomStart
+            for (const [key, metas] of Object.entries(state)) {
+              if (key.startsWith('observer-')) continue
+              for (const m of metas) {
+                const t = Number(m.room_started_at ?? m.joined_at)
+                if (Number.isFinite(t) && t > 0 && t < min) min = t
+              }
+            }
+            if (min < myRoomStart) {
+              myRoomStart = min
+              void rt.track({ user_id: user.id, joined_at: joinedAtRef.current, room_started_at: myRoomStart }).catch(() => {})
+            }
+            setRoomStartedAt(myRoomStart)
+          })
+
           await new Promise<void>((resolve, reject) => {
             rt.subscribe((status) => {
               logDebug(`join(${channelId}): status do canal de presença = ${status}`)
               if (status === 'SUBSCRIBED') {
-                rt.track({ user_id: user.id, joined_at: joinedAtRef.current })
+                rt.track({ user_id: user.id, joined_at: joinedAtRef.current, room_started_at: myRoomStart })
                   .then(() => {
                     logDebug(`join(${channelId}): presença anunciada.`)
                     resolve()
@@ -3069,6 +3096,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setConnectedChannelName(null)
     setConnectedServerId(null)
     setConnectedAt(null)
+    setRoomStartedAt(null)
     setConnecting(false)
     setJoiningChannelId(null)
     mutedRef.current = false
@@ -4210,6 +4238,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         connectedChannelName,
         joiningChannelId,
         connectedAt,
+        roomStartedAt,
         connectionQuality,
         localConnectionQuality,
         connectedServerId,

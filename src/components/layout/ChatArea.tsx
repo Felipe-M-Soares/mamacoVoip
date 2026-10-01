@@ -29,12 +29,14 @@ export function ChatArea({
   onViewProfile,
   onJumpToChannel,
   onToggleMembers,
+  membersOpen = false,
 }: {
   channel: Channel
   server: Server
   onViewProfile: (profile: Profile) => void
   onJumpToChannel: (channel: Channel, serverId?: string) => void
   onToggleMembers?: () => void
+  membersOpen?: boolean
 }) {
   const { user } = useAuth()
   const {
@@ -267,9 +269,10 @@ export function ChatArea({
         {onToggleMembers && (
           <button
             onClick={onToggleMembers}
-            title="Membros"
+            title={membersOpen ? 'Esconder lista de membros' : 'Mostrar lista de membros'}
             aria-label="Membros"
-            className="icon-btn w-9 h-9 lg:!hidden"
+            aria-pressed={membersOpen}
+            className={`icon-btn w-9 h-9 ${membersOpen ? 'lg:!text-white lg:!bg-white/[0.08]' : ''}`}
           >
             <MembersIcon className="w-5 h-5" aria-hidden />
           </button>

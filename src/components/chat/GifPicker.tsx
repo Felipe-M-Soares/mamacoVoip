@@ -129,7 +129,7 @@ export function GifPicker({
     // cortando todo o texto. Com largura fixa (w-80) ancorada em left-0,
     // o painel abre pra direita a partir do botão em vez de tentar
     // preencher a largura do próprio botão.
-    <div className="absolute bottom-full left-0 mb-3 w-80 max-w-[90vw] surface-elevated rounded-2xl overflow-hidden z-20 animate-pop-in" role="dialog" aria-label="Escolher GIF">
+    <div className="absolute bottom-full left-0 mb-3 w-80 max-w-[90vw] max-sm:fixed max-sm:left-2 max-sm:right-2 max-sm:bottom-[84px] max-sm:mb-0 max-sm:w-auto max-sm:max-w-none surface-elevated rounded-2xl overflow-hidden z-20 animate-pop-in" role="dialog" aria-label="Escolher GIF">
       <div className="p-2.5 border-b border-[var(--color-line)] flex items-center gap-1.5">
         <input
           ref={inputRef}

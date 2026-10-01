@@ -28,6 +28,7 @@ import {
 import { AnnouncementIcon, BellOffIcon, CalendarIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, LockIcon, PinIcon, PlusIcon, ScreenShareIcon, SettingsIcon, TextChannelIcon, VoiceChannelIcon, WarningIcon } from '../ui/icons'
 import { copyText } from '../../lib/copyText'
 import { prefetchLiveKitToken } from '../../lib/livekit'
+import { clearVoiceRoster, setVoiceRoster } from '../../lib/voiceRoster'
 import { VoiceMemberCard, type VoiceMemberCardTarget } from './VoiceMemberCard'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
@@ -101,6 +102,12 @@ function VoiceChannelPresence({
   const userIds = isConnectedHere
     ? [user?.id, ...Object.keys(voice.participants)].filter((id): id is string => Boolean(id))
     : observedIds
+
+  const rosterKey = userIds.join(',')
+  useEffect(() => {
+    setVoiceRoster(channelId, rosterKey ? rosterKey.split(',') : [])
+    return () => clearVoiceRoster(channelId)
+  }, [channelId, rosterKey])
 
   if (userIds.length === 0) return null
   return (
@@ -374,7 +381,7 @@ function ChannelRow({
       )}
       {unread && !active && !muted && <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-mv-text" />}
       {channel.type === 'voice' && voice.connectedChannelId === channel.id && voice.connectedAt && (
-        <CallDurationTimer startedAt={voice.connectedAt} />
+        <CallDurationTimer startedAt={voice.roomStartedAt ?? voice.connectedAt} />
       )}
       {muted && (
         <BellOffIcon className="w-3.5 h-3.5 text-mv-muted shrink-0" aria-hidden />

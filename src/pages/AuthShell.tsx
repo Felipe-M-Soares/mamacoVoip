@@ -1,5 +1,6 @@
 import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { DESKTOP_DOWNLOAD_URL } from '../lib/config'
+import { isNativeMobileApp } from '../lib/platform'
 
 // Peças visuais compartilhadas pelas telas de entrada (login, cadastro,
 // esqueci/redefinir senha, 2FA, convite). Só apresentação — toda a lógica
@@ -130,6 +131,7 @@ export function AuthDivider() {
 }
 
 export function DesktopDownloadChip() {
+  if (window.electronAPI?.isElectron || isNativeMobileApp()) return null
   return (
     <div className="mt-6 flex justify-center">
       <a

@@ -1204,7 +1204,7 @@ export function VoiceChannelView({
                 <select> sem legenda nenhuma, fácil de nem notar que dava
                 pra escolher qualidade/fps. */}
             {!voice.screenSharing && (
-              <div className="flex items-end gap-1.5 px-1">
+              <div className="flex items-end gap-1.5 px-1 max-sm:hidden">
                 <div className="flex flex-col items-start gap-0.5">
                   <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-mv-muted px-1">Resolução</span>
                   <select

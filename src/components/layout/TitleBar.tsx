@@ -1,3 +1,4 @@
+import { useWindowPlace } from '../../lib/windowTitle'
 // Barra de título CUSTOM do app desktop — substitui a barra nativa fina
 // e cinza do Windows (que não tinha nada a ver com a cara do app e não
 // dava pra deixar maior). Só existe dentro do Electron: no site (web),
@@ -21,6 +22,7 @@
 // conteúdo normal da página (que não usa z-index nenhum), nunca de um
 // modal/overlay de verdade.
 export function TitleBar() {
+  const place = useWindowPlace()
   if (!window.electronAPI?.isElectron) return null
 
   return (
@@ -30,6 +32,15 @@ export function TitleBar() {
     >
       <img src="/logo-192.png" alt="" className="w-5 h-5 rounded-md shrink-0 ring-1 ring-[var(--color-line-strong)]" />
       <span className="font-display font-semibold text-[13px] text-mv-muted">Mamacos <span className="text-mv-text">Voip</span></span>
+      {place && (
+        // Centralizado na janela inteira (não só no espaço que sobra).
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 max-w-[40%] pointer-events-none">
+          {place.iconUrl ? (
+            <img src={place.iconUrl} alt="" className="w-4 h-4 rounded-[5px] object-cover shrink-0" />
+          ) : null}
+          <span className="font-display font-semibold text-[13px] text-mv-text truncate">{place.label}</span>
+        </div>
+      )}
     </div>
   )
 }

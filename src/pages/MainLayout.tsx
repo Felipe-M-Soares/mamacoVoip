@@ -141,10 +141,13 @@ function ActiveServerContent({
   onServerGone,
   onViewProfile,
   onMessageUser,
+  dmConversation,
 }: {
   server: Server
   activeChannel: Channel | null
   pendingChannelId?: string | null
+  /** DM aberta por cima do servidor (a lateral do servidor continua) */
+  dmConversation?: { id: string; otherProfile: Profile } | null
   unreadChannelIds: Set<string>
   drawerOpen: boolean
   isElectronApp: boolean
@@ -187,7 +190,7 @@ function ActiveServerContent({
           />
           <ChannelSidebar
             server={server}
-            activeChannelId={activeChannel?.id ?? null}
+            activeChannelId={dmConversation ? null : (activeChannel?.id ?? null)}
             unreadChannelIds={unreadChannelIds}
             onSelectChannel={onSelectChannel}
             onServerDeleted={onServerGone}
@@ -197,6 +200,9 @@ function ActiveServerContent({
         <UserPanel />
       </div>
 
+      {dmConversation ? (
+        <DMChatArea key={dmConversation.id} conversationId={dmConversation.id} otherProfile={dmConversation.otherProfile} />
+      ) : (
       <ActiveServerBody
         server={server}
         activeChannel={activeChannel}
@@ -206,6 +212,7 @@ function ActiveServerContent({
         onMessageUser={onMessageUser}
         onToggleMembers={() => setMobileMembersOpen((v) => !v)}
       />
+      )}
 
       <MemberList
         serverId={server.id}
@@ -345,11 +352,19 @@ function MainLayoutInner() {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const { conversations, openConversationWith } = useConversations()
 
+  // Dentro de um servidor, a conversa privada abre no lugar do chat (a
+  // lateral do servidor continua); clicar num canal volta pro canal.
+  const [serverDmId, setServerDmId] = useState<string | null>(null)
   async function handleMessageUser(userId: string) {
     const { conversation, error } = await openConversationWith(userId)
     // antes um erro aqui era ignorado — o clique em "Mensagem" não fazia nada
     if (error) alert(error)
-    else if (conversation) handleOpenConversation(conversation.id)
+    else if (conversation) {
+      if (activeServer) {
+        setServerDmId(conversation.id)
+        setMobileSidebarOpen(false)
+      } else handleOpenConversation(conversation.id)
+    }
   }
   const { groups } = useGroupConversations()
   const unread = useUnreadOverview()
@@ -395,6 +410,7 @@ function MainLayoutInner() {
   }
 
   function handleSelectServer(server: Server) {
+    setServerDmId(null)
     setActiveServer(server)
     setActiveChannel(null)
     setMobileSidebarOpen(false)
@@ -417,6 +433,7 @@ function MainLayoutInner() {
         return
       }
     }
+    setServerDmId(null)
     setActiveChannel(channel)
     setMobileSidebarOpen(false)
   }
@@ -448,6 +465,7 @@ function MainLayoutInner() {
       const target = servers.find((s) => s.id === detail.serverId)
       if (!target) return
       if (activeServer?.id !== target.id) setActiveServer(target)
+      setServerDmId(null)
       setActiveChannel(null)
       setPendingChannelId(detail.channelId)
       setMobileSidebarOpen(false)
@@ -457,6 +475,7 @@ function MainLayoutInner() {
   }, [servers, activeServer?.id])
 
   function handleSelectHome() {
+    setServerDmId(null)
     setActiveServer(null)
     setActiveChannel(null)
     setHomeView('friends')
@@ -532,6 +551,7 @@ function MainLayoutInner() {
           onServerGone={handleServerGone}
           onViewProfile={setViewingProfile}
           onMessageUser={handleMessageUser}
+          dmConversation={serverDmId ? (conversations.find((c) => c.id === serverDmId) ?? null) : null}
         />
       ) : (
         <>

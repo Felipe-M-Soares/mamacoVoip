@@ -3,7 +3,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { useModeration } from '../../hooks/useModeration'
 import { useSoundboard } from '../../hooks/useSoundboard'
 import { useVoiceCore } from '../../hooks/useVoice'
-import { decodeAudioFile, trimAudioBufferToWav, isUploadReadyAudio, MAX_SOUND_SECONDS } from '../../lib/audioTrim'
+import { decodeAudioFile, isUploadReadyAudio, MAX_SOUND_SECONDS } from '../../lib/audioTrim'
 import { SoundTrimmer } from './SoundTrimmer'
 import type { SoundboardSound } from '../../types/database'
 
@@ -67,20 +67,10 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
     const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 32)
     try {
       const buffer = await decodeAudioFile(file)
-      if (buffer.duration > MAX_SOUND_SECONDS + 0.05) {
-        // Longo demais → ferramenta de recorte.
-        setTrimState({ buffer, fileName: file.name })
-        setPendingFile(null)
-      } else if (!isUploadReadyAudio(file)) {
-        // Formato que o servidor não aceita como está (m4a, aac, flac,
-        // vídeo mp4…) → converte pra WAV aqui mesmo.
-        const blob = trimAudioBufferToWav(buffer, 0, buffer.duration)
-        setPendingFile(new File([blob], `${baseName || 'som'}.wav`, { type: 'audio/wav' }))
-        setUploadName(baseName)
-      } else {
-        setPendingFile(file)
-        setUploadName(baseName)
-      }
+      // Todo som passa pelo editor (trecho + volume) — sons muito altos já
+      // chegam nivelados. Formatos que o servidor não aceita viram WAV.
+      setTrimState({ buffer, fileName: file.name })
+      setPendingFile(null)
     } catch {
       if (isUploadReadyAudio(file)) {
         // Não deu pra decodificar aqui, mas o formato é aceito: tenta

@@ -4,6 +4,7 @@ import { Avatar } from '../ui/Avatar'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { parseMessageContent } from '../../lib/messageFormatting'
 import { describeMessageContent, parseStickerId } from '../../lib/stickers'
+import { welcomeMessageParts } from '../../lib/welcomeMessages'
 import { LinkPreviewCard, extractFirstUrl, isPureMediaMessage } from './LinkPreviewCard'
 import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji, Thread, Role } from '../../types/database'
 import { AddReactionIcon, ArrowRightIcon, DownloadIcon, EditIcon, FileIcon, PinIcon, ReplyIcon, ThreadIcon, TrashIcon } from '../ui/icons'
@@ -170,6 +171,7 @@ function MessageItemImpl({
   }, [message.content, message.author_id, members, currentUserId])
 
   if (message.system_event === 'member_join') {
+    const welcome = welcomeMessageParts(message.id)
     const authorReactions = reactions.filter((r) => r.user_id === currentUserId && r.emoji === '👋')
     return (
       <div className="mx-2 px-2 py-1.5 flex items-center gap-3 group rounded-lg hover:bg-white/[0.025] transition-colors">
@@ -179,10 +181,11 @@ function MessageItemImpl({
           </span>
         </span>
         <p className="text-sm text-mv-muted min-w-0 truncate">
-          <button onClick={() => author && onViewProfile(author)} className="font-medium text-mv-text hover:underline">
+          {welcome.before}
+          <button onClick={() => author && onViewProfile(author)} className="font-semibold text-mv-text hover:underline">
             {author?.display_name || author?.username || 'Alguém'}
-          </button>{' '}
-          entrou no servidor.
+          </button>
+          {welcome.after}
         </p>
         <span className="text-[11px] text-mv-muted/80 shrink-0 tabular-nums">{formatTime(message.created_at)}</span>
         {currentUserId && currentUserId !== message.author_id && (

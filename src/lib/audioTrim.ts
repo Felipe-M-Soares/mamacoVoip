@@ -144,3 +144,4 @@ function encodeWavMono16(samples: Float32Array, sampleRate: number): Blob {
 
   return new Blob([buffer], { type: 'audio/wav' })
 }
+

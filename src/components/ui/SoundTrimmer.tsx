@@ -32,6 +32,13 @@ export function SoundTrimmer({
   const [start, setStart] = useState(0)
   const [end, setEnd] = useState(Math.min(duration, MAX_SOUND_SECONDS))
   const [playhead, setPlayhead] = useState<number | null>(null)
+  // Volume SÓ da prévia (pra ouvir enquanto corta, sem levar susto com
+  // som alto). O arquivo salvo mantém o volume original.
+  const [gain, setGain] = useState(0.5)
+  const gainNodeRef = useRef<GainNode | null>(null)
+  useEffect(() => {
+    if (gainNodeRef.current) gainNodeRef.current.gain.value = gain
+  }, [gain])
   const peaks = useMemo(() => computePeaks(buffer, BUCKETS), [buffer])
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -83,7 +90,11 @@ export function SoundTrimmer({
     const ctx = new AudioContext()
     const src = ctx.createBufferSource()
     src.buffer = buffer
-    src.connect(ctx.destination)
+    const gainNode = ctx.createGain()
+    gainNode.gain.value = gain
+    gainNodeRef.current = gainNode
+    src.connect(gainNode)
+    gainNode.connect(ctx.destination)
     const len = end - start
     const t0 = ctx.currentTime
     src.start(0, start, len)
@@ -244,6 +255,23 @@ export function SoundTrimmer({
         <span className="text-mv-text font-medium">Duração {fmt(len)}</span>
         <span>Fim {fmt(end)}</span>
       </div>
+      <div className="mt-3 flex items-center gap-2.5">
+        <label htmlFor="trim-gain" className="text-[12px] text-mv-muted shrink-0">
+          Volume pra ouvir
+        </label>
+        <input
+          id="trim-gain"
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={Math.round(gain * 100)}
+          onChange={(e) => setGain(Number(e.target.value) / 100)}
+          className="flex-1 accent-mv-accent"
+        />
+        <span className="text-[12px] tabular-nums text-mv-text w-9 text-right">{Math.round(gain * 100)}%</span>
+      </div>
+      <p className="text-[11px] text-mv-muted mt-1">Só muda o volume da prévia — o som é salvo no volume original.</p>
       <div className="flex flex-wrap gap-2 mt-3">
         <button
           type="button"

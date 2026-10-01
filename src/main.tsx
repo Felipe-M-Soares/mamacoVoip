@@ -2,6 +2,14 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 
+// No app desktop os botões nativos de minimizar/maximizar/fechar ficam
+// SEMPRE por cima de tudo (o Windows desenha eles). Marcando o <html>,
+// as telas cheias (visualizador de imagem, modais, tour) começam abaixo
+// da barra de título e o "X" do app nunca fica em cima do "X" delas.
+if (window.electronAPI?.isElectron) {
+  document.documentElement.classList.add('mv-electron')
+}
+
 const root = createRoot(document.getElementById('root')!)
 
 // Mostra QUALQUER erro que impeça o app de abrir direto na tela, em

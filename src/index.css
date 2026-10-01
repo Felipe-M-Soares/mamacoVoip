@@ -558,3 +558,10 @@ select.bg-mv-dark {
     scroll-behavior: auto !important;
   }
 }
+
+/* App desktop: sobreposições de tela cheia começam abaixo da barra de
+   título (40px), onde ficam os botões nativos da janela. Assim ninguém
+   clica no "X" do app achando que está fechando uma imagem/modal. */
+html.mv-electron .fixed.inset-0 {
+  top: var(--mv-titlebar-h, 40px);
+}

@@ -5,7 +5,7 @@ import { decodeAudioFile, MAX_SOUND_SECONDS } from '../lib/audioTrim'
 import type { SoundboardSound } from '../types/database'
 
 const MAX_SOUND_BYTES = 2 * 1024 * 1024 // precisa bater com o file_size_limit do bucket 'soundboard' (ver 006_soundboard.sql)
-// Pequena tolerância pra não rejeitar um arquivo de "5.02s" já cortado
+// Pequena tolerância pra não rejeitar um arquivo de "10.02s" já cortado
 // pela própria ferramenta de recorte (SoundboardPanel.tsx) por causa de
 // arredondamento de amostras — a intenção do limite é "efeito curto",
 // não uma trava cirúrgica no milissegundo.
@@ -94,7 +94,14 @@ export function useSoundboard(serverId: string | null) {
       // A linha já existe mas o arquivo não subiu — desfaz a linha pra
       // não sobrar um som "mudo" na lista (best-effort).
       await supabase.rpc('delete_soundboard_sound', { p_sound_id: soundId })
-      return { error: 'Não foi possível enviar o arquivo (formato aceito: mp3, wav, ogg ou webm).' }
+      const detail = (uploadError.message ?? '').toLowerCase()
+      return {
+        error: detail.includes('mime')
+          ? 'Formato não aceito pelo servidor (use mp3, wav, ogg ou webm — ou recorte o som, que vira wav).'
+          : detail.includes('size') || detail.includes('exceed') || detail.includes('large')
+            ? 'Arquivo muito grande (máximo 2MB).'
+            : `Não foi possível enviar o arquivo${uploadError.message ? ` (${uploadError.message})` : ''}.`,
+      }
     }
 
     await refresh()

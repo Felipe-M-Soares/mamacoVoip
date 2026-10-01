@@ -28,6 +28,7 @@ import {
 import { AnnouncementIcon, BellOffIcon, CalendarIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, LockIcon, PinIcon, PlusIcon, ScreenShareIcon, SettingsIcon, TextChannelIcon, VoiceChannelIcon, WarningIcon } from '../ui/icons'
 import { copyText } from '../../lib/copyText'
 import { prefetchLiveKitToken } from '../../lib/livekit'
+import { VoiceMemberCard, type VoiceMemberCardTarget } from './VoiceMemberCard'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const InviteModal = lazyModal(() => import('../modals/InviteModal').then((m) => m.InviteModal))
@@ -68,7 +69,6 @@ function VoiceChannelPresence({
   isOwner = false,
   onMemberDragStart,
   onMemberDragEnd,
-  onMemberContextMenu,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -83,13 +83,12 @@ function VoiceChannelPresence({
   isOwner?: boolean
   onMemberDragStart?: (payload: VoiceMemberDragPayload) => void
   onMemberDragEnd?: () => void
-  onMemberContextMenu?: (e: React.MouseEvent, userId: string, channelId: string) => void
   // A lista de participantes também aceita o "soltar" (igual à linha do canal).
   onDragOver?: (e: React.DragEvent) => void
   onDragLeave?: () => void
   onDrop?: (e: React.DragEvent) => void
 }) {
-  const { user } = useAuth()
+  const { user, profile: ownProfile } = useAuth()
   const voice = useVoiceCore()
   const isConnectedHere = voice.connectedChannelId === channelId || voice.joiningChannelId === channelId
 
@@ -98,12 +97,15 @@ function VoiceChannelPresence({
   // de novo no mesmo canal Realtime (o que quebrava ao voltar pra uma
   // sala em que você já estava).
   const observedIds = useVoicePresence(channelId, isConnectedHere)
+  const [memberCard, setMemberCard] = useState<VoiceMemberCardTarget | null>(null)
   const userIds = isConnectedHere
     ? [user?.id, ...Object.keys(voice.participants)].filter((id): id is string => Boolean(id))
     : observedIds
 
   if (userIds.length === 0) return null
   return (
+    <>
+    {memberCard && <VoiceMemberCard target={memberCard} onClose={() => setMemberCard(null)} />}
     <div
       className="relative flex flex-col gap-px ml-[18px] pl-3 pb-1.5 pt-0.5 border-l border-[var(--color-line-strong)]"
       onDragOver={onDragOver}
@@ -116,7 +118,9 @@ function VoiceChannelPresence({
         </p>
       )}
       {userIds.map((id) => {
-        const p = id === user?.id ? undefined : profileById[id]
+        // Você mesmo: usa o SEU perfil (sempre atualizado) — antes ficava
+        // sem foto (só a inicial "V" de "Você").
+        const p = id === user?.id ? (ownProfile ?? profileById[id]) : profileById[id]
         const name = id === user?.id ? 'Você' : p?.display_name || p?.username || '...'
         const isSharingScreen = id === user?.id ? voice.screenSharing : Boolean(voice.participants[id]?.screenStream)
         // Arrastar pra outra sala: não vale pra si mesmo (é só clicar no
@@ -138,18 +142,26 @@ function VoiceChannelPresence({
                 : undefined
             }
             onDragEnd={movable ? () => onMemberDragEnd?.() : undefined}
-            onContextMenu={
-              movable && onMemberContextMenu
+            onClick={
+              serverId
                 ? (e) => {
-                    e.preventDefault()
                     e.stopPropagation()
-                    onMemberContextMenu(e, id, channelId)
+                    setMemberCard({ userId: id, serverId, channelId, x: e.clientX, y: e.clientY })
                   }
                 : undefined
             }
-            title={movable ? `Arraste ${name} para outro canal de voz` : undefined}
-            className={`flex items-center gap-2 rounded-md px-1.5 py-[3px] hover:bg-white/[0.04] transition-colors ${
-              movable ? 'cursor-grab active:cursor-grabbing' : ''
+            onContextMenu={
+              serverId
+                ? (e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setMemberCard({ userId: id, serverId, channelId, x: e.clientX, y: e.clientY })
+                  }
+                : undefined
+            }
+            title={movable ? `Clique para opções · arraste ${name} para outra sala` : `Opções de ${name}`}
+            className={`flex items-center gap-2 rounded-md px-1.5 py-[3px] hover:bg-white/[0.06] transition-colors cursor-pointer ${
+              movable ? 'active:cursor-grabbing' : ''
             }`}
           >
             {/* Só a FOTO pisca ao detectar áudio, não a linha inteira — a
@@ -170,6 +182,7 @@ function VoiceChannelPresence({
         )
       })}
     </div>
+    </>
   )
 }
 
@@ -462,7 +475,6 @@ export function ChannelSidebar({
   const { menuState, openMenu, closeMenu } = useContextMenuState()
 
   function handleChannelContextMenu(e: React.MouseEvent, channel: Channel) {
-    setContextMember(null)
     setContextChannel(channel)
     openMenu(e)
   }
@@ -474,7 +486,6 @@ export function ChannelSidebar({
   const canMoveMembers = isOwner || Boolean(permissions.move_members) || Boolean(permissions.administrator)
   const [memberDrag, setMemberDrag] = useState<VoiceMemberDragPayload | null>(null)
   const [memberDropTarget, setMemberDropTarget] = useState<string | null>(null)
-  const [contextMember, setContextMember] = useState<{ userId: string; channelId: string } | null>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -491,12 +502,6 @@ export function ChannelSidebar({
       p_to_channel_id: toChannel.id,
     })
     if (error) setMoveError(describeVoiceMoveError(error.message))
-  }
-
-  function handleMemberContextMenu(e: React.MouseEvent, userId: string, channelId: string) {
-    setContextChannel(null)
-    setContextMember({ userId, channelId })
-    openMenu(e)
   }
 
   // Devolve true se o evento era de um participante sendo arrastado (e já
@@ -573,14 +578,6 @@ export function ChannelSidebar({
 
   const uncategorized = channels.filter((c) => c.category_id === null).sort((a, b) => a.position - b.position)
   const sortedCategories = [...categories].sort((a, b) => a.position - b.position)
-  // Canais de voz na mesma ordem da barra lateral (menu "Mover para").
-  const orderedVoiceChannels = [
-    ...uncategorized,
-    ...sortedCategories.flatMap((cat) =>
-      channels.filter((c) => c.category_id === cat.id).sort((a, b) => a.position - b.position)
-    ),
-  ].filter((c) => c.type === 'voice')
-
   return (
     <aside className="w-64 bg-mv-side flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
       {server.banner_url && (
@@ -762,7 +759,6 @@ export function ChannelSidebar({
                       setMemberDrag(null)
                       setMemberDropTarget(null)
                     }}
-                    onMemberContextMenu={handleMemberContextMenu}
                     onDragOver={(e) => handleMemberDragOver(e, channel)}
                     onDragLeave={() => setMemberDropTarget(null)}
                     onDrop={(e) => handleMemberDrop(e, channel)}
@@ -891,7 +887,6 @@ export function ChannelSidebar({
                       setMemberDrag(null)
                       setMemberDropTarget(null)
                     }}
-                    onMemberContextMenu={handleMemberContextMenu}
                     onDragOver={(e) => handleMemberDragOver(e, channel)}
                     onDragLeave={() => setMemberDropTarget(null)}
                     onDrop={(e) => handleMemberDrop(e, channel)}
@@ -971,27 +966,6 @@ export function ChannelSidebar({
       )}
       {showRoles && <RolesManagerModal serverId={server.id} onClose={() => setShowRoles(false)} />}
       {showModeration && <ModerationLogModal serverId={server.id} onClose={() => setShowModeration(false)} />}
-
-      {menuState && contextMember && (
-        <ContextMenu
-          x={menuState.x}
-          y={menuState.y}
-          onClose={closeMenu}
-          items={(() => {
-            const targets = orderedVoiceChannels.filter((c) => c.id !== contextMember.channelId)
-            if (targets.length === 0) {
-              return [{ label: 'Nenhum outro canal de voz', disabled: true, onClick: () => {} }]
-            }
-            return targets.map((c) => ({
-              label: `Mover para ${c.name}`,
-              icon: (
-                <VoiceChannelIcon className="w-4 h-4" aria-hidden />
-              ),
-              onClick: () => void moveVoiceMember(contextMember.userId, c),
-            }))
-          })()}
-        />
-      )}
 
       {menuState && contextChannel && (
         <ContextMenu

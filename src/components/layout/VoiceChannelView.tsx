@@ -8,6 +8,7 @@ import { isNativeMobileApp } from '../../lib/platform'
 import { useVoiceConnectionQuality, useVoiceCore, useVoiceSpeaking, type VoiceParticipantInfo } from '../../hooks/useVoice'
 import { useModeration } from '../../hooks/useModeration'
 import { useRoles } from '../../hooks/useRoles'
+import { VoiceMemberCard, type VoiceMemberCardTarget } from './VoiceMemberCard'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { useFriends } from '../../context/FriendsContext'
 import { InviteFriendsModal } from '../modals/InviteFriendsModal'
@@ -297,6 +298,7 @@ function ParticipantTile({
   onToggleRole,
   onAddFriend,
   onInvite,
+  onOpenCard,
   selfMuted = false,
   selfDeafened = false,
 }: {
@@ -320,6 +322,8 @@ function ParticipantTile({
   onToggleRole?: (userId: string, roleId: string) => void
   onAddFriend?: (username: string) => void
   onInvite?: () => void
+  /** Clique no quadro: abre o cartão de opções (VoiceMemberCard) */
+  onOpenCard?: (userId: string, x: number, y: number) => void
   // Só pro cartão local: o estado de mudo/ensurdecido é conhecido só do
   // próprio usuário (o LiveKit não expõe isso dos outros aqui).
   selfMuted?: boolean
@@ -427,6 +431,10 @@ function ParticipantTile({
       <div
         className="flex flex-col items-center gap-1.5 w-[76px] shrink-0 p-2 rounded-2xl hover:bg-white/[0.04] transition-colors"
         onMouseLeave={() => setShowVolumeSlider(false)}
+        onClick={(e) => {
+          if (!onOpenCard || (e.target as HTMLElement).closest('button, input, a')) return
+          onOpenCard(userId, e.clientX, e.clientY)
+        }}
         onContextMenu={!isLocal ? openMenu : undefined}
       >
         <div
@@ -463,6 +471,10 @@ function ParticipantTile({
           'radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--color-mv-raised) 55%, transparent), transparent 70%), var(--color-mv-canvas)',
       }}
       onMouseLeave={() => setShowVolumeSlider(false)}
+      onClick={(e) => {
+        if (!onOpenCard || (e.target as HTMLElement).closest('button, input, a')) return
+        onOpenCard(userId, e.clientX, e.clientY)
+      }}
       onContextMenu={!isLocal ? openMenu : undefined}
     >
       {hasCameraVideo && cameraStream && !videoHiddenLocally ? (
@@ -578,6 +590,11 @@ export function VoiceChannelView({
   // compartilhando nem quem mais está assistindo. Fica de fora da sala
   // de voz o tempo todo, só não aparece mais o vídeo em si.
   const [hiddenShareKeys, setHiddenShareKeys] = useState<Set<string>>(new Set())
+
+  const [memberCard, setMemberCard] = useState<VoiceMemberCardTarget | null>(null)
+  function openMemberCard(userId: string, x: number, y: number) {
+    setMemberCard({ userId, serverId, channelId: channel.id, x, y })
+  }
 
   function handleViewParticipantProfile(userId: string) {
     const p = members.find((m) => m.user_id === userId)?.profile
@@ -795,6 +812,7 @@ export function VoiceChannelView({
               <div className="flex flex-wrap gap-2.5 justify-center pt-1">
                 {profile && showOwnTile && (
                   <ParticipantTile
+                    onOpenCard={openMemberCard}
                     userId={profile.id}
                     name={profile.display_name || profile.username}
                     avatarUrl={profile.avatar_url}
@@ -813,6 +831,7 @@ export function VoiceChannelView({
                   const p = profileById[userId]
                   return (
                     <ParticipantTile
+                    onOpenCard={openMemberCard}
                       key={userId}
                       userId={userId}
                       name={p?.display_name || p?.username || 'Usuário'}
@@ -857,6 +876,7 @@ export function VoiceChannelView({
               <div className={`grid gap-3 w-full mx-auto ${gridColsClass}`}>
                 {profile && showOwnTile && (
                   <ParticipantTile
+                    onOpenCard={openMemberCard}
                     userId={profile.id}
                     name={profile.display_name || profile.username}
                     avatarUrl={profile.avatar_url}
@@ -874,6 +894,7 @@ export function VoiceChannelView({
                   const p = profileById[userId]
                   return (
                     <ParticipantTile
+                    onOpenCard={openMemberCard}
                       key={userId}
                       userId={userId}
                       name={p?.display_name || p?.username || 'Usuário'}
@@ -1342,6 +1363,7 @@ export function VoiceChannelView({
         />
       )}
       {showSoundboard && <SoundboardPanel serverId={serverId} onClose={() => setShowSoundboard(false)} />}
+      {memberCard && <VoiceMemberCard target={memberCard} onClose={() => setMemberCard(null)} />}
       {showSettingsFromVoice && (
         <SettingsModal initialTab="audio" onClose={() => setShowSettingsFromVoice(false)} />
       )}

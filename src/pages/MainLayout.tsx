@@ -421,6 +421,41 @@ function MainLayoutInner() {
     setMobileSidebarOpen(false)
   }
 
+  // Cartão de usuário da sala de voz (VoiceMemberCard) pede DM / perfil.
+  useEffect(() => {
+    function onMessage(e: Event) {
+      const userId = (e as CustomEvent<{ userId: string }>).detail?.userId
+      if (userId) void handleMessageUser(userId)
+    }
+    function onProfile(e: Event) {
+      const profile = (e as CustomEvent<{ profile: Profile }>).detail?.profile
+      if (profile) setViewingProfile(profile)
+    }
+    window.addEventListener('mv:message-user', onMessage)
+    window.addEventListener('mv:view-profile', onProfile)
+    return () => {
+      window.removeEventListener('mv:message-user', onMessage)
+      window.removeEventListener('mv:view-profile', onProfile)
+    }
+  })
+
+  // "Voz conectada" (UserPanel) clicado: volta pra tela da sala de voz,
+  // mesmo navegando por um canal de texto, outro servidor ou DMs.
+  useEffect(() => {
+    function onOpenVoiceRoom(e: Event) {
+      const detail = (e as CustomEvent<{ serverId: string; channelId: string }>).detail
+      if (!detail?.serverId || !detail.channelId) return
+      const target = servers.find((s) => s.id === detail.serverId)
+      if (!target) return
+      if (activeServer?.id !== target.id) setActiveServer(target)
+      setActiveChannel(null)
+      setPendingChannelId(detail.channelId)
+      setMobileSidebarOpen(false)
+    }
+    window.addEventListener('mv:open-voice-room', onOpenVoiceRoom)
+    return () => window.removeEventListener('mv:open-voice-room', onOpenVoiceRoom)
+  }, [servers, activeServer?.id])
+
   function handleSelectHome() {
     setActiveServer(null)
     setActiveChannel(null)

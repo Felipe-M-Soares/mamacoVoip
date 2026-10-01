@@ -529,6 +529,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.from('profiles').update(patch).eq('id', session.user.id)
     if (error) return { error: traduzErro(error.message) }
     await refreshProfile()
+    // Listas de membros (salas, servidores) recarregam com a foto/nome novos.
+    window.dispatchEvent(new Event('mv:profile-updated'))
     return { error: null }
   }
 

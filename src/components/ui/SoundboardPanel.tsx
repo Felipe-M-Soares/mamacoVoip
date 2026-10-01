@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useModeration } from '../../hooks/useModeration'
 import { useSoundboard } from '../../hooks/useSoundboard'
 import { useVoiceCore } from '../../hooks/useVoice'
-import { decodeAudioFile, trimAudioBufferToWav, MAX_SOUND_SECONDS } from '../../lib/audioTrim'
+import { decodeAudioFile, trimAudioBufferToWav, isUploadReadyAudio, MAX_SOUND_SECONDS } from '../../lib/audioTrim'
+import { SoundTrimmer } from './SoundTrimmer'
 import type { SoundboardSound } from '../../types/database'
 
 // Soundboard — efeitos sonoros que qualquer um no canal de voz ouve na
@@ -30,28 +31,9 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
   // ferramenta de recorte abaixo mexe só nisso até a pessoa confirmar,
   // sem tocar em pendingFile (que só existe pro arquivo final, já dentro
   // do limite, pronto pra nomear e enviar).
-  const [trimState, setTrimState] = useState<{ buffer: AudioBuffer; duration: number; start: number } | null>(null)
+  const [trimState, setTrimState] = useState<{ buffer: AudioBuffer; fileName: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const rawFileRef = useRef<File | null>(null)
-  const previewAudioRef = useRef<HTMLAudioElement>(null)
-  const previewStopTimeoutRef = useRef<number | undefined>(undefined)
-
-  // Fechar o painel no meio de um recorte/prévia deixava o áudio da
-  // prévia tocando, o timer pendurado e a object URL do arquivo (o
-  // arquivo INTEIRO em memória) sem revogar. Guardado num ref PRÓPRIO
-  // (não o ref do elemento, que o React já zera antes deste cleanup).
-  const activePreviewRef = useRef<HTMLAudioElement | null>(null)
-  useEffect(() => {
-    return () => {
-      window.clearTimeout(previewStopTimeoutRef.current)
-      const audio = activePreviewRef.current
-      if (audio) {
-        audio.pause()
-        if (audio.src) URL.revokeObjectURL(audio.src)
-        audio.removeAttribute('src')
-      }
-    }
-  }, [])
 
   const query = search.trim().toLowerCase()
   const filtered = query ? soundboard.sounds.filter((s) => s.name.toLowerCase().includes(query)) : soundboard.sounds
@@ -82,24 +64,33 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
     setError(null)
     rawFileRef.current = file
     setDecoding(true)
+    const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 32)
     try {
       const buffer = await decodeAudioFile(file)
       if (buffer.duration > MAX_SOUND_SECONDS + 0.05) {
-        // Longo demais — precisa passar pela ferramenta de recorte antes
-        // de virar um pendingFile de verdade.
-        setTrimState({ buffer, duration: buffer.duration, start: 0 })
+        // Longo demais → ferramenta de recorte.
+        setTrimState({ buffer, fileName: file.name })
         setPendingFile(null)
+      } else if (!isUploadReadyAudio(file)) {
+        // Formato que o servidor não aceita como está (m4a, aac, flac,
+        // vídeo mp4…) → converte pra WAV aqui mesmo.
+        const blob = trimAudioBufferToWav(buffer, 0, buffer.duration)
+        setPendingFile(new File([blob], `${baseName || 'som'}.wav`, { type: 'audio/wav' }))
+        setUploadName(baseName)
       } else {
         setPendingFile(file)
-        setUploadName(file.name.replace(/\.[^.]+$/, '').slice(0, 32))
+        setUploadName(baseName)
       }
     } catch {
-      // Não deu pra decodificar (formato incomum) — deixa passar direto
-      // pro fluxo normal; uploadSound ainda tenta checar a duração de
-      // novo lá, e se também não conseguir, só segue sem essa trava
-      // extra em vez de travar um arquivo válido.
-      setPendingFile(file)
-      setUploadName(file.name.replace(/\.[^.]+$/, '').slice(0, 32))
+      if (isUploadReadyAudio(file)) {
+        // Não deu pra decodificar aqui, mas o formato é aceito: tenta
+        // enviar assim mesmo.
+        setPendingFile(file)
+        setUploadName(baseName)
+      } else {
+        setError('Não foi possível ler esse arquivo de áudio. Tente mp3, wav, ogg, m4a ou um vídeo mp4.')
+        if (fileInputRef.current) fileInputRef.current.value = ''
+      }
     } finally {
       setDecoding(false)
     }
@@ -110,38 +101,11 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
     setUploadName('')
     setTrimState(null)
     rawFileRef.current = null
-    window.clearTimeout(previewStopTimeoutRef.current)
-    if (previewAudioRef.current) {
-      previewAudioRef.current.pause()
-      if (previewAudioRef.current.src) URL.revokeObjectURL(previewAudioRef.current.src)
-      previewAudioRef.current.removeAttribute('src')
-    }
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  // Toca só o trecho escolhido no slider abaixo, direto do arquivo
-  // original (sem precisar cortar de verdade só pra ouvir) — para
-  // sozinho ao fim da janela.
-  function handlePreviewTrim() {
-    if (!trimState || !rawFileRef.current) return
-    const audio = previewAudioRef.current
-    if (!audio) return
-    if (!audio.src) audio.src = URL.createObjectURL(rawFileRef.current)
-    activePreviewRef.current = audio
-    audio.currentTime = trimState.start
-    audio.play().catch(() => {})
-    window.clearTimeout(previewStopTimeoutRef.current)
-    previewStopTimeoutRef.current = window.setTimeout(() => audio.pause(), MAX_SOUND_SECONDS * 1000)
-  }
-
-  // Corta de verdade (via Web Audio, ver lib/audioTrim.ts) e transforma o
-  // resultado num File .wav — daí em diante segue o mesmo fluxo de
-  // nomear/enviar que um arquivo já curto usaria.
-  function handleConfirmTrim() {
-    if (!trimState) return
-    const blob = trimAudioBufferToWav(trimState.buffer, trimState.start, trimState.start + MAX_SOUND_SECONDS)
+  function handleTrimmed(trimmedFile: File) {
     const baseName = (rawFileRef.current?.name || 'som').replace(/\.[^.]+$/, '')
-    const trimmedFile = new File([blob], `${baseName}-recorte.wav`, { type: 'audio/wav' })
     setPendingFile(trimmedFile)
     setUploadName(baseName.slice(0, 32))
     setTrimState(null)
@@ -311,38 +275,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
               Analisando áudio...
             </div>
           ) : trimState ? (
-            <div className="p-3.5 rounded-xl bg-mv-accent/[0.06] border border-mv-accent/30">
-              <p className="text-[13px] text-mv-text mb-2.5">
-                Esse áudio tem {trimState.duration.toFixed(1)}s — o soundboard só aceita até {MAX_SOUND_SECONDS}s.
-                Escolha o trecho:
-              </p>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(0, trimState.duration - MAX_SOUND_SECONDS)}
-                step={0.1}
-                value={trimState.start}
-                onChange={(e) => setTrimState((prev) => (prev ? { ...prev, start: Number(e.target.value) } : prev))}
-                className="w-full accent-mv-accent"
-              />
-              <p className="text-[12px] tabular-nums text-mv-muted mt-1">
-                Tocando de {trimState.start.toFixed(1)}s até {(trimState.start + MAX_SOUND_SECONDS).toFixed(1)}s
-              </p>
-              <div className="flex flex-wrap gap-2 mt-3">
-                <button onClick={handlePreviewTrim} className="h-9 px-3 btn-secondary text-[13px] flex items-center gap-1.5">
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden>
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                  Ouvir trecho
-                </button>
-                <button onClick={handleConfirmTrim} className="h-9 px-3 btn-primary text-[13px]">
-                  Usar esse trecho
-                </button>
-                <button onClick={cancelUpload} className="h-9 px-3 btn-ghost text-[13px] ml-auto">
-                  Cancelar
-                </button>
-              </div>
-            </div>
+            <SoundTrimmer buffer={trimState.buffer} fileName={trimState.fileName} onConfirm={handleTrimmed} onCancel={cancelUpload} />
           ) : pendingFile ? (
             <div className="flex gap-2">
               <input
@@ -379,17 +312,16 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
                 <path d="M12 5v14M5 12h14" />
               </svg>
               <span className="text-[13px] font-medium">Adicionar som</span>
-              <span className="text-[11px] opacity-70 hidden sm:inline">mp3, wav, ogg — até 2MB, até {MAX_SOUND_SECONDS}s</span>
+              <span className="text-[11px] opacity-70 hidden sm:inline">mp3, wav, ogg, m4a… — até {MAX_SOUND_SECONDS}s (dá pra recortar)</span>
             </button>
           )}
           <input
             ref={fileInputRef}
             type="file"
-            accept="audio/mpeg,audio/ogg,audio/wav,audio/webm,.mp3,.ogg,.wav,.webm"
+            accept="audio/*,video/mp4,.mp3,.ogg,.wav,.webm,.m4a,.aac,.flac,.opus,.mp4"
             onChange={handleFilePicked}
             className="hidden"
           />
-          <audio ref={previewAudioRef} className="hidden" />
         </div>
       </div>
     </div>

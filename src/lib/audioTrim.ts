@@ -1,8 +1,6 @@
-// Ferramenta de recorte de áudio pro soundboard — o pedido foi "limite
-// cada som a 5 segundo... mas ai tem q ter uma ferramenta para cortar o
-// audio como em outros apps" (um app de chat popular deixa escolher um trecho de até 10s
-// de qualquer áudio enviado, em vez de simplesmente rejeitar arquivos
-// longos). Tudo roda no navegador/Electron via Web Audio API — não
+// Ferramenta de recorte de áudio pro soundboard: escolhe um trecho de
+// até MAX_SOUND_SECONDS de qualquer áudio, em vez de rejeitar arquivos
+// longos. Tudo roda no navegador/Electron via Web Audio API — não
 // precisa de nenhum serviço externo nem upload prévio só pra cortar.
 
 export const MAX_SOUND_SECONDS = 10
@@ -40,7 +38,7 @@ export function trimAudioBufferToWav(buffer: AudioBuffer, startSec: number, endS
   const endSample = Math.min(buffer.length, Math.floor(endSec * sampleRate))
   const frameCount = Math.max(0, endSample - startSample)
 
-  const mono = new Float32Array(frameCount)
+  let mono = new Float32Array(frameCount)
   for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
     const data = buffer.getChannelData(ch)
     for (let i = 0; i < frameCount; i++) {
@@ -48,7 +46,64 @@ export function trimAudioBufferToWav(buffer: AudioBuffer, startSec: number, endS
     }
   }
 
-  return encodeWavMono16(mono, sampleRate)
+  // Rampa curtinha (8ms) no começo e no fim: cortar no meio de uma onda
+  // gera um "clique" audível.
+  const fade = Math.min(Math.floor(sampleRate * 0.008), Math.floor(frameCount / 2))
+  for (let i = 0; i < fade; i++) {
+    const g = i / fade
+    mono[i] *= g
+    mono[frameCount - 1 - i] *= g
+  }
+
+  // Fontes de 88,2/96 kHz dobrariam o arquivo sem ganho audível num
+  // efeito curto — desce pra 48 kHz (mantém o limite de 2MB folgado).
+  let rate = sampleRate
+  if (rate > 48000) {
+    const ratio = rate / 48000
+    const outLen = Math.floor(mono.length / ratio)
+    const out = new Float32Array(outLen)
+    for (let i = 0; i < outLen; i++) {
+      const pos = i * ratio
+      const i0 = Math.floor(pos)
+      const i1 = Math.min(i0 + 1, mono.length - 1)
+      const t = pos - i0
+      out[i] = mono[i0] * (1 - t) + mono[i1] * t
+    }
+    mono = out
+    rate = 48000
+  }
+
+  return encodeWavMono16(mono, rate)
+}
+
+/** Picos (0..1) do áudio em `buckets` fatias — pra desenhar a forma de onda. */
+export function computePeaks(buffer: AudioBuffer, buckets: number): Float32Array {
+  const peaks = new Float32Array(buckets)
+  const step = Math.max(1, Math.floor(buffer.length / buckets))
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    const data = buffer.getChannelData(ch)
+    for (let b = 0; b < buckets; b++) {
+      let max = 0
+      const from = b * step
+      const to = Math.min(from + step, data.length)
+      for (let i = from; i < to; i += 4) {
+        const v = Math.abs(data[i])
+        if (v > max) max = v
+      }
+      if (max > peaks[b]) peaks[b] = max
+    }
+  }
+  let top = 0
+  for (let b = 0; b < buckets; b++) top = Math.max(top, peaks[b])
+  if (top > 0) for (let b = 0; b < buckets; b++) peaks[b] /= top
+  return peaks
+}
+
+/** Formatos que o bucket do soundboard aceita como estão. */
+export function isUploadReadyAudio(file: File): boolean {
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const okType = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm'].includes(file.type)
+  return okType && ['mp3', 'wav', 'ogg', 'webm'].includes(ext)
 }
 
 // Encoder WAV bem simples — cabeçalho RIFF/PCM padrão + amostras de

@@ -122,6 +122,7 @@ function subscribe(serverId: string, listener: () => void): () => void {
     entry.releaseTimer = null
   }
 
+  installProfileRefresh()
   if (!entry.channel) {
     void load(serverId)
     // Sem isso, quem entrasse no servidor com ele já aberto não tinha o
@@ -149,6 +150,27 @@ function subscribe(serverId: string, listener: () => void): () => void {
     entry.listeners.delete(listener)
     if (entry.listeners.size === 0) scheduleRelease(serverId, entry)
   }
+}
+
+// Fotos/nomes de perfil não chegam em tempo real (a tabela profiles não
+// está no Realtime, de propósito: status muda o tempo todo). Pra que uma
+// foto nova apareça nas listas e salas sem precisar reiniciar o app,
+// recarrega os servidores abertos ao voltar pra janela e a cada 90s com
+// ela visível — uma consulta leve por servidor aberto.
+let profileRefreshInstalled = false
+function installProfileRefresh() {
+  if (profileRefreshInstalled || typeof window === 'undefined') return
+  profileRefreshInstalled = true
+  const reloadAll = () => {
+    for (const [serverId, entry] of store) {
+      if (entry.listeners.size > 0) scheduleReload(serverId, entry)
+    }
+  }
+  window.addEventListener('focus', reloadAll)
+  window.addEventListener('mv:profile-updated', reloadAll)
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible') reloadAll()
+  }, 90_000)
 }
 
 export function useServerMembers(serverId: string | null) {

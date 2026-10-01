@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useLocalVoiceConnectionQuality, useVoiceCore } from '../../hooks/useVoice'
 import { useConnectionPing } from '../../hooks/useConnectionPing'
@@ -179,6 +179,12 @@ function PlayingActivityCard() {
 function VoiceHud() {
   const voice = useVoiceCore()
   const [showSoundboard, setShowSoundboard] = useState(false)
+  // Atalho "Abrir o soundboard" (KeybindsRunner).
+  useEffect(() => {
+    const open = () => setShowSoundboard(true)
+    window.addEventListener('mv:open-soundboard', open)
+    return () => window.removeEventListener('mv:open-soundboard', open)
+  }, [])
 
   if (!voice.connectedChannelId) return null
 
@@ -316,7 +322,7 @@ export function UserPanel() {
   if (!profile) return null
 
   return (
-    <div className="shrink-0 p-2 bg-mv-canvas">
+    <div data-tour="user-panel" className="shrink-0 p-2 bg-mv-canvas">
       <div className="rounded-2xl bg-[var(--color-elevated)] border border-[var(--color-line)] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.7)]">
       {/* Faixa de ping — ACIMA do painel principal (pedido explícito),
           igual uma barra de status permanente. Sempre visível, não só

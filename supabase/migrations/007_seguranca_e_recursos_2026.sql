@@ -4638,4 +4638,60 @@ grant execute on function public.admin_remove_reported_message(uuid) to authenti
 --   parte 016, item 2).
 -- ================================================================
 
+-- ================================================================
+-- PARTE 20) Ordem dos cargos (hierarquia) — sobe/desce um cargo,
+-- trocando a posição com o vizinho. Mesmas regras de update_role: só
+-- quem gerencia cargos, e nunca mexendo num cargo do seu nível ou acima
+-- (nem colocando um cargo acima do seu).
+-- ================================================================
+create or replace function public.move_role(p_role_id uuid, p_up boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_role public.roles;
+  v_other public.roles;
+  v_top int;
+begin
+  if not public.mfa_requirement_met() then
+    raise exception 'Confirme a verificação em duas etapas primeiro';
+  end if;
+  select * into v_role from public.roles where id = p_role_id for update;
+  if v_role.id is null then
+    raise exception 'Cargo não encontrado';
+  end if;
+  if not public.has_permission(v_role.server_id, auth.uid(), 'manage_roles') then
+    raise exception 'Você não tem permissão para gerenciar cargos';
+  end if;
+  v_top := public.top_role_position(v_role.server_id, auth.uid());
+  if v_role.position >= v_top then
+    raise exception 'Você não pode mover um cargo igual ou acima do seu próprio nível';
+  end if;
+
+  if p_up then
+    select * into v_other from public.roles
+      where server_id = v_role.server_id and position > v_role.position
+      order by position asc limit 1 for update;
+  else
+    select * into v_other from public.roles
+      where server_id = v_role.server_id and position < v_role.position
+      order by position desc limit 1 for update;
+  end if;
+  if v_other.id is null then
+    return; -- já está no topo/fundo
+  end if;
+  if v_other.position >= v_top then
+    raise exception 'Você não pode colocar um cargo acima do seu próprio nível';
+  end if;
+
+  update public.roles set position = v_other.position where id = v_role.id;
+  update public.roles set position = v_role.position where id = v_other.id;
+end;
+$$;
+
+revoke execute on function public.move_role(uuid, boolean) from public, anon;
+grant execute on function public.move_role(uuid, boolean) to authenticated;
+
 notify pgrst, 'reload schema';

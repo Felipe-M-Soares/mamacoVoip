@@ -3,6 +3,7 @@ import { Modal } from './Modal'
 import { useServers } from '../../hooks/useServers'
 import { useServerEmojis } from '../../hooks/useServerEmojis'
 import type { Server, Channel } from '../../types/database'
+import { RolesManagerModal } from './RolesManagerModal'
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -31,6 +32,7 @@ export function ServerSettingsModal({
   const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [bannerPreview, setBannerPreview] = useState<string | null>(server.banner_url)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [showRoles, setShowRoles] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -279,6 +281,17 @@ export function ServerSettingsModal({
             </div>
           </section>
         )}
+
+        <section className="rounded-2xl border border-[var(--color-line)] bg-white/[0.02] p-4 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[14px] font-semibold text-white">Cargos</p>
+            <p className="text-[12.5px] text-mv-muted mt-0.5">Crie cargos, escolha cor, permissões, ordem e quem tem cada um.</p>
+          </div>
+          <button type="button" onClick={() => setShowRoles(true)} className="btn-secondary h-9 px-4 text-sm shrink-0">
+            Gerenciar cargos
+          </button>
+        </section>
+        {showRoles && <RolesManagerModal serverId={server.id} onClose={() => setShowRoles(false)} />}
 
         <EmojiManagementSection serverId={server.id} isOwner={isOwner} />
 

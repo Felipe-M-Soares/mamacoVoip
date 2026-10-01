@@ -68,6 +68,12 @@ export function useRoles(serverId: string | null) {
     return { error: error?.message ?? null }
   }
 
+  async function moveRole(roleId: string, up: boolean) {
+    const { error } = await supabase.rpc('move_role', { p_role_id: roleId, p_up: up })
+    if (!error) await refresh()
+    return { error: error?.message ?? null }
+  }
+
   async function deleteRole(roleId: string) {
     const { error } = await supabase.rpc('delete_role', { p_role_id: roleId })
     if (!error) await refresh()
@@ -93,5 +99,5 @@ export function useRoles(serverId: string | null) {
     return roles.filter((r) => roleIds.includes(r.id)).sort((a, b) => b.position - a.position)
   }
 
-  return { roles, memberRoles, loading, refresh, createRole, updateRole, deleteRole, assignRole, removeRole, rolesForUser }
+  return { roles, memberRoles, loading, refresh, createRole, updateRole, deleteRole, moveRole, assignRole, removeRole, rolesForUser }
 }

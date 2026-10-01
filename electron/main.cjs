@@ -2114,6 +2114,37 @@ app.whenReady().then(() => {
   const registered = globalShortcut.register('Control+Shift+O', () => {
     setOverlayVisible(!overlayVisible)
   })
+  // Atalhos de teclado GLOBAIS (Configurações → Atalhos): funcionam com o
+  // jogo em primeiro plano. O renderer manda a lista { id, accelerator };
+  // cada um que dispara avisa o renderer com o id da ação. Só registra
+  // os nossos — o da sobreposição (acima) fica intacto.
+  let registeredKeybinds = []
+  handleTrusted('keybinds:set-global', (_event, list) => {
+    for (const acc of registeredKeybinds) {
+      try {
+        globalShortcut.unregister(acc)
+      } catch {
+        // já não estava registrado
+      }
+    }
+    registeredKeybinds = []
+    const failed = []
+    if (!Array.isArray(list)) return { failed }
+    for (const item of list.slice(0, 32)) {
+      const id = typeof item?.id === 'string' ? item.id.slice(0, 40) : ''
+      const acc = typeof item?.accelerator === 'string' ? item.accelerator.slice(0, 60) : ''
+      if (!id || !acc || acc === 'Control+Shift+O') continue
+      try {
+        const ok = globalShortcut.register(acc, () => sendToMain('keybind', id))
+        if (ok) registeredKeybinds.push(acc)
+        else failed.push(id)
+      } catch {
+        failed.push(id)
+      }
+    }
+    return { failed }
+  })
+
   // Mesmos controles pela interface (botão da sobreposição na tela da
   // call, ver OverlaySettingsButton em VoiceChannelView.tsx).
   handleTrusted('overlay:get-settings', () => ({

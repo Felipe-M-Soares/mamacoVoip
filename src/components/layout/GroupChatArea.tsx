@@ -16,6 +16,7 @@ import type { GroupMessage } from '../../types/database'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { MoreIcon, ReportIcon } from '../ui/icons'
 import { lazyComponent } from '../modals/lazyModal'
+import { ChatImage, ChatVideo } from '../chat/ChatMedia'
 
 const ReportModal = lazyComponent(() => import('../modals/ReportModal').then((m) => m.ReportModal))
 
@@ -345,14 +346,7 @@ export function GroupChatArea({
                           att.mime_type.startsWith('image/') ? (
                             <SignedAttachment key={att.id} bucket="group-attachments" fileUrl={att.file_url}>
                               {(url, onError) => (
-                                <a href={url} target="_blank" rel="noreferrer">
-                                  <img
-                                    src={url}
-                                    onError={onError}
-                                    alt={att.file_name}
-                                    className="rounded-xl max-h-80 object-cover border border-[var(--color-line)] hover:brightness-110 transition"
-                                  />
-                                </a>
+                                <ChatImage url={url} name={att.file_name} onError={onError} />
                               )}
                             </SignedAttachment>
                           ) : att.mime_type.startsWith('audio/') ? (
@@ -366,13 +360,7 @@ export function GroupChatArea({
                           ) : att.mime_type.startsWith('video/') ? (
                             <SignedAttachment key={att.id} bucket="group-attachments" fileUrl={att.file_url} autoRenew={false}>
                               {(url, onError) => (
-                                <video
-                                  controls
-                                  preload="metadata"
-                                  src={url}
-                                  onError={onError}
-                                  className="rounded-xl max-h-80 max-w-full border border-[var(--color-line)] bg-black"
-                                />
+                                <ChatVideo url={url} name={att.file_name} onError={onError} />
                               )}
                             </SignedAttachment>
                           ) : (

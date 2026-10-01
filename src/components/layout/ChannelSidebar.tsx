@@ -332,6 +332,7 @@ function ChannelRow({
   }
   return (
     <div
+      data-tour={isVoice ? 'voice-channel' : undefined}
       onPointerEnter={isVoice ? schedulePrefetch : undefined}
       onPointerLeave={isVoice ? cancelPrefetch : undefined}
       onPointerDown={isVoice ? () => prefetchLiveKitToken(channel.id) : undefined}
@@ -586,7 +587,7 @@ export function ChannelSidebar({
   const uncategorized = channels.filter((c) => c.category_id === null).sort((a, b) => a.position - b.position)
   const sortedCategories = [...categories].sort((a, b) => a.position - b.position)
   return (
-    <aside className="w-64 bg-mv-side flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
+    <aside data-tour="channels" className="w-64 bg-mv-side flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
       {server.banner_url && (
         <div className="relative h-24 w-full overflow-hidden shrink-0">
           <img src={server.banner_url} alt="" className="w-full h-full object-cover" />

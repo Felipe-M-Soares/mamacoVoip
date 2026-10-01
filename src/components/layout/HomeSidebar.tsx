@@ -144,7 +144,7 @@ export function HomeSidebar({
   }
 
   return (
-    <aside className="w-64 bg-mv-side flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
+    <aside data-tour="home-sidebar" className="w-64 bg-mv-side flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
       <div className="h-14 px-4 flex items-center gap-2.5 border-b border-[var(--color-line)] shrink-0">
         <img src="/logo-192.png" alt="" className="w-7 h-7 rounded-lg object-cover shrink-0 ring-1 ring-[var(--color-line-strong)]" />
         <span className="font-display text-white font-semibold text-[15px] truncate">Mamacos Voip</span>

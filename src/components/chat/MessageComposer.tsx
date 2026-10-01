@@ -213,6 +213,47 @@ export function MessageComposer({
     }
   }
 
+  // Ctrl+V com imagem/arquivo na área de transferência (print da tela,
+  // imagem copiada, arquivo copiado no Explorer) vira anexo, igual
+  // apps de chat. Texto continua colando normal.
+  function filesFromClipboard(data: DataTransfer | null): File[] {
+    if (!data) return []
+    const out: File[] = []
+    for (const item of Array.from(data.items ?? [])) {
+      if (item.kind !== 'file') continue
+      const f = item.getAsFile()
+      if (!f) continue
+      if (!f.name || f.name === 'image.png' || f.name === 'blob') {
+        const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+        out.push(new File([f], `print-${stamp}.${ext}`, { type: f.type || 'image/png' }))
+      } else out.push(f)
+    }
+    return out
+  }
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = filesFromClipboard(e.clipboardData)
+    if (pasted.length === 0) return
+    e.preventDefault()
+    setFiles((prev) => [...prev, ...pasted])
+  }
+  // Ctrl+V com o foco fora de qualquer campo (ex.: depois de clicar numa
+  // mensagem) também anexa — e já coloca o cursor na caixa de texto.
+  useEffect(() => {
+    function onDocPaste(e: ClipboardEvent) {
+      const el = document.activeElement as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      const pasted = filesFromClipboard(e.clipboardData)
+      if (pasted.length === 0) return
+      e.preventDefault()
+      setFiles((prev) => [...prev, ...pasted])
+      textareaRef.current?.focus()
+    }
+    document.addEventListener('paste', onDocPaste)
+    return () => document.removeEventListener('paste', onDocPaste)
+  }, [])
+
   function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(e.target.files ?? [])
     setFiles((prev) => [...prev, ...selected])
@@ -325,6 +366,7 @@ export function MessageComposer({
 
   return (
     <div
+      data-tour="composer"
       className="px-4 pb-5 shrink-0 relative"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -531,6 +573,7 @@ export function MessageComposer({
           value={value}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={placeholder ?? `Conversar em #${channelName}`}
           aria-label={placeholder ?? `Conversar em #${channelName}`}
           rows={1}

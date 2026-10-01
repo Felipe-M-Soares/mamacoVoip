@@ -190,7 +190,7 @@ export function ServerBar({
 
   return (
     <>
-      <nav aria-label="Servidores" className="w-[72px] bg-mv-canvas flex flex-col items-center py-3 gap-2.5 shrink-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none]">
+      <nav aria-label="Servidores" data-tour="servers" className="w-[72px] bg-mv-canvas flex flex-col items-center py-3 gap-2.5 shrink-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none]">
         <ServerIcon name="Início" variant="home" active={activeServerId === null} onClick={onSelectHome} />
         <div className="w-8 h-px bg-white/10 rounded-full my-0.5" />
 

@@ -130,6 +130,8 @@ declare global {
       // setDisplayMediaRequestHandler.
       getScreenShareSources: () => Promise<ScreenShareSourcesPayload>
       copyText?: (text: string) => Promise<boolean>
+      setGlobalKeybinds?: (list: { id: string; accelerator: string }[]) => Promise<{ failed: string[] }>
+      onKeybind?: (callback: (id: string) => void) => () => void
       // Áudio automático conforme o tipo da fonte (tela cheia = sistema,
       // janela = captura por processo) — ver electron/main.cjs.
       selectScreenShareSource: (sourceId: string | null) => Promise<void>

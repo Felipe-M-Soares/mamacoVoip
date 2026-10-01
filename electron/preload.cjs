@@ -84,6 +84,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // Auto-parar o compartilhamento de tela cheia quando o processo
   // compartilhado fecha de vez — ver electron/main.cjs.
+  // Atalhos globais (ver keybinds:set-global em main.cjs).
+  setGlobalKeybinds: (list) => ipcRenderer.invoke('keybinds:set-global', list),
+  onKeybind: (callback) => {
+    const handler = (_e, id) => callback(id)
+    ipcRenderer.on('keybind', handler)
+    return () => ipcRenderer.removeListener('keybind', handler)
+  },
   watchProcessExit: (processNames) => ipcRenderer.invoke('game-share:watch-process-exit', processNames),
   stopWatchProcessExit: () => ipcRenderer.invoke('game-share:stop-watch-process-exit'),
   onWatchedProcessExited: (callback) => {

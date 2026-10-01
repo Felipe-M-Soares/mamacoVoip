@@ -1,3 +1,4 @@
+import { openMedia } from '../../lib/mediaViewer'
 import { useLinkPreview } from '../../hooks/useLinkPreview'
 
 const URL_REGEX = /https?:\/\/[^\s<]+/
@@ -26,9 +27,14 @@ export function isPureMediaMessage(content: string): boolean {
 export function LinkPreviewCard({ url }: { url: string }) {
   if (isDirectImageUrl(url)) {
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="mt-2 block max-w-sm">
+      <button
+        type="button"
+        onClick={() => openMedia({ src: url, kind: 'image' })}
+        title="Clique para ampliar"
+        className="mt-2 block max-w-sm text-left cursor-zoom-in"
+      >
         <img src={url} alt="" className="rounded-xl max-h-80 object-cover border border-[var(--color-line)]" />
-      </a>
+      </button>
     )
   }
   return <LinkPreviewCardInner url={url} />

@@ -43,9 +43,11 @@ import {
   InfoIcon,
   AdminIcon,
   type AppIcon,
+  KeyboardIcon,
 } from '../ui/icons'
 import { TabHeader, SettingsCard, SettingRow, RowList, RangeSlider, Segmented, Kbd, InlineMessage } from './settingsUI'
 import { useAvatarTransparent } from '../../hooks/useAvatarTransparent'
+import { KeybindsTab } from './KeybindsTab'
 import {
   createNoiseSuppressor,
   type NoiseSuppressor,
@@ -53,7 +55,7 @@ import {
   MAX_MIC_SENSITIVITY,
 } from '../../lib/noiseSuppression'
 
-type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'notifications' | 'privacy' | 'licenses' | 'admin'
+type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'keybinds' | 'notifications' | 'privacy' | 'licenses' | 'admin'
 
 // Abas pesadas/raras, carregadas só quando abertas (a de licenças traz o
 // texto inteiro do THIRD_PARTY_NOTICES.md).
@@ -67,6 +69,7 @@ const TAB_ICONS: Record<Tab, AppIcon> = {
   privacy: LockIcon,
   appearance: PaletteIcon,
   audio: MicIcon,
+  keybinds: KeyboardIcon,
   notifications: BellIcon,
   licenses: InfoIcon,
   admin: AdminIcon,
@@ -86,6 +89,7 @@ const TAB_GROUPS: { label: string; tabs: { id: Tab; label: string }[] }[] = [
     tabs: [
       { id: 'appearance', label: 'Aparência' },
       { id: 'audio', label: 'Voz e Vídeo' },
+      { id: 'keybinds', label: 'Atalhos' },
       { id: 'notifications', label: 'Notificações' },
     ],
   },
@@ -198,7 +202,17 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
             ))}
           </div>
 
-          <div className="hidden md:block mt-5 pt-4 border-t border-[var(--color-line)]">
+          <div className="mt-5 pt-4 border-t border-[var(--color-line)] space-y-0.5">
+            <button
+              onClick={() => {
+                onClose()
+                setTimeout(() => window.dispatchEvent(new Event('mv:start-tour')), 150)
+              }}
+              className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[14px] font-medium text-mv-text hover:bg-white/[0.05] transition-colors"
+            >
+              <InfoIcon className="w-[18px] h-[18px]" strokeWidth={1.8} aria-hidden />
+              Fazer o tour guiado
+            </button>
             <button
               onClick={signOut}
               className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[14px] font-medium text-rose-400 hover:bg-rose-500/10 transition-colors"
@@ -218,6 +232,7 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
             {tab === 'security' && <SecurityTab />}
             {tab === 'appearance' && <AppearanceTab />}
             {tab === 'audio' && <AudioTab />}
+            {tab === 'keybinds' && <KeybindsTab />}
             {tab === 'notifications' && <NotificationsTab />}
             {tab === 'privacy' && <PrivacyTab />}
             {(tab === 'licenses' || (tab === 'admin' && isAppAdmin)) && (

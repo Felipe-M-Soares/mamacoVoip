@@ -51,6 +51,7 @@ export {
   MessagesSquare as ThreadIcon,
   Pin as PinIcon,
   Bell as BellIcon,
+  Keyboard as KeyboardIcon,
   BellOff as BellOffIcon,
   FaceSlightlySmilingPlus as AddReactionIcon,
   Sticker as StickerIcon,

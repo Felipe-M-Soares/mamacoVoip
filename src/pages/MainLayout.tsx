@@ -12,7 +12,8 @@ import { useGroupConversations } from '../context/GroupConversationsContext'
 import { GroupChatArea } from '../components/layout/GroupChatArea'
 import { FriendsPanel } from '../components/home/FriendsPanel'
 import { DMChatArea } from '../components/layout/DMChatArea'
-import { OnboardingModal, useOnboarding } from '../components/modals/OnboardingModal'
+import { useOnboarding } from '../components/modals/OnboardingModal'
+import { GuidedTour, TourOffer } from '../components/GuidedTour'
 import { DMCallOverlay } from '../components/layout/DMCallOverlay'
 import { VoiceCallAudio } from '../components/layout/VoiceCallAudio'
 import { ProfileSidePanel } from '../components/layout/ProfileSidePanel'
@@ -32,6 +33,8 @@ import { OverlayStateSync } from '../components/layout/OverlayStateSync'
 import { AutoIdleStatus } from '../components/layout/AutoIdleStatus'
 import type { Channel, Profile, Server } from '../types/database'
 import { setWindowPlace } from '../lib/windowTitle'
+import { MediaViewer } from '../components/ui/MediaViewer'
+import { KeybindsRunner } from '../components/KeybindsRunner'
 
 const VoiceChannelView = lazyComponent(() =>
   import('../components/layout/VoiceChannelView').then((m) => m.VoiceChannelView)
@@ -173,6 +176,13 @@ function ActiveServerContent({
       return false
     }
   })
+  useEffect(() => {
+    const onToggle = () => toggleMembersRef.current()
+    window.addEventListener('mv:toggle-members', onToggle)
+    return () => window.removeEventListener('mv:toggle-members', onToggle)
+  }, [])
+  const toggleMembersRef = useRef(toggleMembers)
+  toggleMembersRef.current = toggleMembers
   function toggleMembers() {
     if (window.matchMedia('(min-width: 1024px)').matches) {
       setDesktopMembersOpen((v) => {
@@ -278,6 +288,13 @@ function MainLayoutInner() {
   const pendingAutoJoinVoiceRef = useRef(false)
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
   const onboarding = useOnboarding(ownProfile?.id)
+  // Tour guiado (primeiro uso ou "Fazer o tour guiado" nas Configurações).
+  const [tourOpen, setTourOpen] = useState(false)
+  useEffect(() => {
+    const start = () => setTourOpen(true)
+    window.addEventListener('mv:start-tour', start)
+    return () => window.removeEventListener('mv:start-tour', start)
+  }, [])
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   // O drawer "mobile" (ServerBar virando um overlay fixed por cima de
@@ -322,19 +339,15 @@ function MainLayoutInner() {
   }, [activeServerId, servers, loadingServers])
 
   useEffect(() => {
-    function handleGlobalKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        // Ctrl+K de novo fecha (antes só abria)
-        setShowQuickSwitcher((v) => !v)
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
-        e.preventDefault()
-        setShowShortcuts((v) => !v)
-      }
+    // Atalhos configuráveis (ver KeybindsRunner / lib/keybinds).
+    const toggleSwitcher = () => setShowQuickSwitcher((v) => !v)
+    const toggleShortcuts = () => setShowShortcuts((v) => !v)
+    window.addEventListener('mv:quick-switcher', toggleSwitcher)
+    window.addEventListener('mv:show-shortcuts', toggleShortcuts)
+    return () => {
+      window.removeEventListener('mv:quick-switcher', toggleSwitcher)
+      window.removeEventListener('mv:show-shortcuts', toggleShortcuts)
     }
-    window.addEventListener('keydown', handleGlobalKeyDown)
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown)
   }, [])
 
   // Quem vem de um link de convite (/convite/CODIGO) chega aqui com o
@@ -673,6 +686,8 @@ function MainLayoutInner() {
       )}
 
       <Suspense fallback={null}>
+      <MediaViewer />
+      <KeybindsRunner />
       {viewingProfile && (
         <UserProfileModal
           targetProfile={viewingProfile}
@@ -683,7 +698,16 @@ function MainLayoutInner() {
       )}
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
       </Suspense>
-      {onboarding.show && <OnboardingModal onDismiss={onboarding.dismiss} />}
+      {onboarding.show && !tourOpen && (
+        <TourOffer
+          onStart={() => {
+            onboarding.dismiss()
+            setTourOpen(true)
+          }}
+          onDismiss={onboarding.dismiss}
+        />
+      )}
+      {tourOpen && <GuidedTour onClose={() => setTourOpen(false)} />}
       <DMCallOverlay profilesById={callProfilesById} />
 
       <VoiceCallAudio />

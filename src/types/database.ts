@@ -718,6 +718,10 @@ export type Database = {
         Args: { p_role_id: string }
         Returns: void
       }
+      move_role: {
+        Args: { p_role_id: string; p_up: boolean }
+        Returns: void
+      }
       assign_role: {
         Args: { p_server_id: string; p_user_id: string; p_role_id: string }
         Returns: void

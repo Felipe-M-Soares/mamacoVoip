@@ -1,16 +1,24 @@
 import { Modal } from './Modal'
 import { Kbd } from './settingsUI'
+import { KEYBIND_ACTIONS, useKeybinds } from '../../lib/keybinds'
 
-const SHORTCUTS: { keys: string; label: string }[] = [
-  { keys: 'Ctrl + K', label: 'Seletor rápido (pular pra servidor, canal ou conversa)' },
+const FIXED: { keys: string; label: string }[] = [
   { keys: 'Ctrl + Shift + O', label: 'Mostrar/esconder sobreposição dentro de jogos' },
+  { keys: 'Ctrl + V', label: 'Colar imagem/print como anexo' },
   { keys: 'Enter', label: 'Enviar mensagem' },
   { keys: 'Shift + Enter', label: 'Nova linha na mensagem' },
   { keys: 'Esc', label: 'Cancelar resposta / fechar um modal' },
-  { keys: 'Ctrl + /', label: 'Mostrar esses atalhos' },
 ]
 
 export function KeyboardShortcutsModal({ onClose }: { onClose: () => void }) {
+  const { bindings } = useKeybinds()
+  const SHORTCUTS = [
+    ...KEYBIND_ACTIONS.filter((a) => bindings[a.id]).map((a) => ({
+      keys: bindings[a.id]!.endsWith('++') ? bindings[a.id]!.slice(0, -2).split('+').concat('+').join(' + ') : bindings[a.id]!.split('+').join(' + '),
+      label: a.label,
+    })),
+    ...FIXED,
+  ]
   return (
     <Modal title="Atalhos de teclado" onClose={onClose} maxWidth="max-w-lg">
       <div className="rounded-xl border border-[var(--color-line)] divide-y divide-[var(--color-line)] overflow-hidden">
@@ -28,6 +36,7 @@ export function KeyboardShortcutsModal({ onClose }: { onClose: () => void }) {
           </div>
         ))}
       </div>
+      <p className="text-[12px] text-mv-muted mt-3">Dá pra trocar as teclas em Configurações → Atalhos.</p>
     </Modal>
   )
 }

@@ -439,7 +439,7 @@ function ParticipantTile({
       >
         <div
           className={`relative rounded-full transition-shadow duration-200 ${
-            speaking ? 'ring-2 ring-mv-green ring-offset-2 ring-offset-mv-main shadow-[0_0_14px_0] shadow-mv-green/50' : ''
+            speaking ? 'ring-2 ring-mv-speaking ring-offset-2 ring-offset-mv-main shadow-[0_0_14px_0] shadow-mv-speaking/50' : ''
           }`}
         >
           <Avatar name={name} avatarUrl={avatarUrl} decorationUrl={decorationUrl} size={44} />
@@ -463,7 +463,7 @@ function ParticipantTile({
     <div
       className={`relative aspect-video rounded-2xl flex items-center justify-center overflow-hidden border transition-[border-color,box-shadow] duration-200 group/tile animate-fade-in ${
         speaking
-          ? 'border-mv-green/70 shadow-[0_0_0_1px_var(--color-mv-green),0_0_28px_-6px_var(--color-mv-green)]'
+          ? 'border-mv-speaking/70 shadow-[0_0_0_1px_var(--color-mv-speaking),0_0_28px_-6px_var(--color-mv-speaking)]'
           : 'border-[var(--color-line)] hover:border-[var(--color-line-strong)]'
       }`}
       style={{
@@ -492,8 +492,8 @@ function ParticipantTile({
         <div className="relative flex items-center justify-center">
           {speaking && (
             <>
-              <span className="absolute -inset-3 rounded-full bg-mv-green/15 animate-ping [animation-duration:1.6s]" aria-hidden />
-              <span className="absolute -inset-1.5 rounded-full ring-[3px] ring-mv-green shadow-[0_0_24px_0] shadow-mv-green/50" aria-hidden />
+              <span className="absolute -inset-3 rounded-full bg-mv-speaking/15 animate-ping [animation-duration:1.6s]" aria-hidden />
+              <span className="absolute -inset-1.5 rounded-full ring-[3px] ring-mv-speaking shadow-[0_0_24px_0] shadow-mv-speaking/50" aria-hidden />
             </>
           )}
           <div className="relative">
@@ -503,7 +503,7 @@ function ParticipantTile({
         </div>
       )}
       <span className="glass absolute bottom-2.5 left-2.5 max-w-[calc(100%-5.5rem)] text-[13px] font-medium text-white pl-2.5 pr-2.5 py-1 rounded-full flex items-center gap-1.5">
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${speaking ? 'bg-mv-green' : 'bg-white/30'}`} aria-hidden />
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${speaking ? 'bg-mv-speaking' : 'bg-white/30'}`} aria-hidden />
         <span className="truncate">
           {name}
           {isLocal && ' (você)'}

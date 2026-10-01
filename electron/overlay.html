@@ -80,7 +80,7 @@
       box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
     }
     .participant.speaking .avatar {
-      box-shadow: 0 0 0 2.5px #22c55e;
+      box-shadow: 0 0 0 2.5px var(--speaking, #22c55e);
     }
     .avatar img { width: 100%; height: 100%; object-fit: cover; }
     .badge {
@@ -111,13 +111,32 @@
       text-overflow: ellipsis;
     }
     .participant.speaking .name-tag {
-      border-color: rgba(34, 197, 94, 0.7);
+      border-color: var(--speaking, rgba(34, 197, 94, 0.7));
     }
     .participant.silenced .name-tag { color: #a1a1aa; }
+    /* Aviso curto ao ligar a sobreposição (some sozinho). */
+    #notice {
+      position: fixed;
+      left: 6px;
+      right: 6px;
+      display: none;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.35;
+      color: #f4f4f7;
+      background: rgba(12, 12, 16, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 6px 10px;
+      border-radius: 10px;
+    }
+    body.corner-top-left #notice, body.corner-top-right #notice { bottom: 6px; }
+    body.corner-bottom-left #notice, body.corner-bottom-right #notice { top: 6px; }
+    #notice small { display: block; font-weight: 400; color: #a1a1aa; margin-top: 2px; }
   </style>
 </head>
 <body>
   <div id="panel"></div>
+  <div id="notice"></div>
 
   <script>
     const panel = document.getElementById('panel')
@@ -130,14 +149,34 @@
     // segundo (indicador de "falando"), mas só redesenha o DOM quando
     // algo visível mudou de fato.
     let lastSignature = ''
+    let connected = false
+    let noticeTimer = null
+    const notice = document.getElementById('notice')
+
+    function showNotice() {
+      notice.textContent = 'Mamacos Voip: sobreposição ligada'
+      if (!connected) {
+        const hint = document.createElement('small')
+        hint.textContent = 'Os nomes aparecem aqui quando você estiver numa sala de voz.'
+        notice.appendChild(hint)
+      }
+      notice.style.display = 'block'
+      clearTimeout(noticeTimer)
+      noticeTimer = setTimeout(() => { notice.style.display = 'none' }, connected ? 2000 : 4500)
+    }
 
     function render(state) {
+      connected = Boolean(state && state.connected)
       if (!state || !state.connected) {
         panel.style.display = 'none'
         lastSignature = ''
         return
       }
       const participants = state.participants || []
+      // Cor de "falando" do tema escolhido no app (só aceita rgb()/#hex).
+      if (typeof state.speakingColor === 'string' && /^(rgb\([\d.,\s]+\)|#[0-9a-fA-F]{3,8})$/.test(state.speakingColor)) {
+        document.documentElement.style.setProperty('--speaking', state.speakingColor)
+      }
       const signature = JSON.stringify([state.channelName || '', participants.map((p) => [p.name, p.avatarUrl, !!p.speaking, !!p.muted, !!p.deafened])])
       if (signature === lastSignature && panel.style.display === 'flex') return
       lastSignature = signature
@@ -196,7 +235,7 @@
     applySettings(null)
 
     if (window.overlayAPI) {
-      // requestAnimationFrame agrupa várias atualizações seguidas (o
+      // Agrupa várias atualizações seguidas (o
       // indicador de "falando" muda várias vezes por segundo) num único
       // redesenho por quadro, em vez de recriar a lista inteira a cada uma.
       let pendingState = null
@@ -205,12 +244,16 @@
         pendingState = state
         if (frameScheduled) return
         frameScheduled = true
-        requestAnimationFrame(() => {
+        // setTimeout em vez de requestAnimationFrame: numa janela que
+        // nunca recebe foco, por cima de um jogo, o rAF pode não rodar.
+        setTimeout(() => {
           frameScheduled = false
           render(pendingState)
-        })
+        }, 16)
       })
       if (window.overlayAPI.onSettings) window.overlayAPI.onSettings(applySettings)
+      // Espera o estado da call que chega junto ser aplicado primeiro.
+      if (window.overlayAPI.onShown) window.overlayAPI.onShown(() => setTimeout(showNotice, 60))
     }
   </script>
 </body>

@@ -86,7 +86,7 @@ export const DEFAULT_MIC_SENSITIVITY = 50
 const SENSITIVITY_MIN_DB = -80 // sensibilidade 100 — gate quase sempre aberto
 const SENSITIVITY_MAX_DB = -20 // sensibilidade 0 — só som bem alto abre
 
-function sensitivityToOpenThresholdDb(sensitivity: number): number {
+export function sensitivityToOpenThresholdDb(sensitivity: number): number {
   const clamped = Math.max(MIN_MIC_SENSITIVITY, Math.min(MAX_MIC_SENSITIVITY, sensitivity))
   const t = clamped / 100
   return SENSITIVITY_MAX_DB + t * (SENSITIVITY_MIN_DB - SENSITIVITY_MAX_DB)
@@ -105,7 +105,9 @@ export interface NoiseSuppressor {
   // `sensitivity` é 0-100 (ver MIN/MAX/DEFAULT_MIC_SENSITIVITY acima).
   // `null` desliga o gate por completo (só RNNoise, sem cortar nada por
   // volume).
-  setInputTrack: (rawTrack: MediaStreamTrack, sensitivity?: number | null) => MediaStreamTrack
+  // `options.denoise` false = pula o RNNoise e usa só o gate (a
+  // sensibilidade precisa funcionar mesmo com a redução de ruído desligada).
+  setInputTrack: (rawTrack: MediaStreamTrack, sensitivity?: number | null, options?: { denoise?: boolean }) => MediaStreamTrack
   // Troca só o limiar do gate (0-100, igual setInputTrack) SEM
   // reconstruir o resto do gráfico de áudio (RNNoise, destino) — a
   // track de SAÍDA continua sendo exatamente o mesmo objeto de antes.
@@ -153,7 +155,7 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
   let merger: ChannelMergerNode | null = null
   let destination: MediaStreamAudioDestinationNode | null = null
   let levelAnalyser: AnalyserNode | null = null
-  let levelBuffer: Uint8Array<ArrayBuffer> | null = null
+  let levelBuffer: Float32Array<ArrayBuffer> | null = null
 
   function teardownGraph() {
     try {
@@ -197,7 +199,12 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     gateNode?.port.postMessage({ thresholdDb })
   }
 
-  function setInputTrack(rawTrack: MediaStreamTrack, sensitivity: number | null = DEFAULT_MIC_SENSITIVITY): MediaStreamTrack {
+  function setInputTrack(
+    rawTrack: MediaStreamTrack,
+    sensitivity: number | null = DEFAULT_MIC_SENSITIVITY,
+    options: { denoise?: boolean } = {}
+  ): MediaStreamTrack {
+    const denoise = options.denoise !== false
     teardownGraph()
     source = audioContext.createMediaStreamSource(new MediaStream([rawTrack]))
     // Força o sinal que entra no RNNoise a ser mono de verdade,
@@ -209,16 +216,21 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
     source.channelCountMode = 'explicit'
     source.channelInterpretation = 'speakers'
 
-    rnnoiseNode = new RnnoiseWorkletNode(audioContext, { wasmBinary, maxChannels: 1 })
-    source.connect(rnnoiseNode)
+    // Sem redução de ruído: o "antes do gate" é o próprio microfone.
+    let preGate: AudioNode = source
+    if (denoise) {
+      rnnoiseNode = new RnnoiseWorkletNode(audioContext, { wasmBinary, maxChannels: 1 })
+      source.connect(rnnoiseNode)
+      preGate = rnnoiseNode
+    }
 
     // "Escuta" o sinal já limpo pelo RNNoise, sem se conectar em mais
     // nada além do analisador (é só uma leitura passiva, não faz parte
     // do caminho até o destino).
     levelAnalyser = audioContext.createAnalyser()
     levelAnalyser.fftSize = 512
-    levelBuffer = new Uint8Array(levelAnalyser.fftSize)
-    rnnoiseNode.connect(levelAnalyser)
+    levelBuffer = new Float32Array(levelAnalyser.fftSize)
+    preGate.connect(levelAnalyser)
 
     // Duplica o canal mono explicitamente pros dois lados (esquerdo e
     // direito) via um ChannelMergerNode, em vez de confiar no upmix
@@ -235,7 +247,7 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
         holdMs: 250,
       },
     })
-    rnnoiseNode.connect(gateNode)
+    preGate.connect(gateNode)
     gateNode.connect(merger, 0, 0)
     gateNode.connect(merger, 0, 1)
 
@@ -254,15 +266,19 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
 
   function sampleLevelDb(): number | null {
     if (!levelAnalyser || !levelBuffer) return null
-    levelAnalyser.getByteTimeDomainData(levelBuffer)
+    // Float (e não Byte): em 8 bits tudo abaixo de ~-42 dB virava "zero",
+    // então o ruído de fundo e vozes baixas sumiam da medição — o modo
+    // automático achava que o ambiente era silêncio total e o medidor de
+    // sensibilidade não mostrava nada pra quem fala baixo.
+    levelAnalyser.getFloatTimeDomainData(levelBuffer)
     let sumSquares = 0
     for (let i = 0; i < levelBuffer.length; i++) {
-      const v = (levelBuffer[i] - 128) / 128
+      const v = levelBuffer[i]
       sumSquares += v * v
     }
     const rms = Math.sqrt(sumSquares / levelBuffer.length)
     if (rms <= 0.0001) return -80
-    return 20 * Math.log10(rms)
+    return Math.max(-80, 20 * Math.log10(rms))
   }
 
   function destroy() {

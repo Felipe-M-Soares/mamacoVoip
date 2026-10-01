@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld('overlayAPI', {
   },
   // Canto escolhido nas configurações ({ corner }) — a página alinha a
   // lista pro lado/borda certos (ver overlay.html).
+  // Mostrada agora (atalho ou botão) — a página pisca um aviso curto.
+  onShown: (callback) => {
+    const handler = () => callback()
+    ipcRenderer.on('overlay:shown', handler)
+    return () => ipcRenderer.removeListener('overlay:shown', handler)
+  },
   onSettings: (callback) => {
     const handler = (_event, settings) => callback(settings)
     ipcRenderer.on('overlay:settings', handler)

@@ -28,6 +28,9 @@
   --color-mv-raised: #25252e;
   --color-mv-accent: #ee3a34;
   --color-mv-green: #22c55e;
+  /* Anel/brilho de "falando" — acompanha a cor do tema (versão um pouco
+     mais clara do destaque, pra aparecer bem em cima das fotos). */
+  --color-mv-speaking: color-mix(in oklab, var(--color-mv-accent) 78%, white);
   --color-mv-text: #f4f4f7;
   --color-mv-muted: #9d9dab;
 

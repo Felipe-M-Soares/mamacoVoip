@@ -45,7 +45,7 @@ import {
   type AppIcon,
   KeyboardIcon,
 } from '../ui/icons'
-import { TabHeader, SettingsCard, SettingRow, RowList, RangeSlider, Segmented, Kbd, InlineMessage } from './settingsUI'
+import { TabHeader, SettingsCard, SettingRow, RowList, RangeSlider, Segmented, InlineMessage } from './settingsUI'
 import { useAvatarTransparent } from '../../hooks/useAvatarTransparent'
 import { KeybindsTab } from './KeybindsTab'
 import {
@@ -935,6 +935,8 @@ function AudioTab() {
   const [testing, setTesting] = useState(false)
   const [echoing, setEchoing] = useState(false)
   const [level, setLevel] = useState(0)
+  // Nível do mic em dB (antes do corte da sensibilidade), pro medidor.
+  const [inputDb, setInputDb] = useState<number | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -953,6 +955,8 @@ function AudioTab() {
 
   function handleSensitivityChange(value: number) {
     audio.setMicSensitivity(value)
+    // No teste o efeito é na hora (sem reiniciar o microfone).
+    noiseSuppressorTestRef.current?.setSensitivity(value)
     if (sensitivityDebounceRef.current) window.clearTimeout(sensitivityDebounceRef.current)
     sensitivityDebounceRef.current = window.setTimeout(() => {
       voice.refreshAudioConstraints({ micSensitivity: value })
@@ -962,6 +966,16 @@ function AudioTab() {
   function handleSensitivityModeChange(mode: 'auto' | 'manual') {
     audio.setMicSensitivityMode(mode)
     voice.refreshAudioConstraints({ micSensitivityMode: mode })
+    const testSuppressor = noiseSuppressorTestRef.current
+    if (testSuppressor) {
+      if (mode === 'auto') {
+        testSuppressor.setSensitivity(null)
+        startTestAutoSensitivity(testSuppressor)
+      } else {
+        stopTestAutoSensitivity()
+        testSuppressor.setSensitivity(audio.micSensitivity)
+      }
+    }
   }
 
   // Réplica, só pro teste/eco daqui do modal (que usa seu próprio
@@ -1008,12 +1022,14 @@ function AudioTab() {
   // — devolve a stream já tratada (ou a crua sem alteração, se estiver
   // desligada ou o WASM falhar ao carregar).
   async function applyTestNoiseSuppression(rawStream: MediaStream): Promise<MediaStream> {
-    if (!audio.noiseSuppression) return rawStream
+    // Sempre monta o gráfico (com ou sem RNNoise): a sensibilidade mora nele.
     try {
       const suppressor = await createNoiseSuppressor()
       noiseSuppressorTestRef.current = suppressor
       const isAuto = audio.micSensitivityMode === 'auto'
-      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0], isAuto ? null : audio.micSensitivity)
+      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0], isAuto ? null : audio.micSensitivity, {
+        denoise: audio.noiseSuppression,
+      })
       if (isAuto) startTestAutoSensitivity(suppressor)
       return new MediaStream([processedTrack])
     } catch {
@@ -1043,6 +1059,7 @@ function AudioTab() {
         analyser.getByteFrequencyData(buffer)
         const avg = buffer.reduce((a, b) => a + b, 0) / buffer.length
         setLevel(Math.min(100, Math.round((avg / 100) * 100)))
+        setInputDb(noiseSuppressorTestRef.current?.sampleLevelDb() ?? null)
         rafRef.current = requestAnimationFrame(tick)
       }
       tick()
@@ -1063,6 +1080,7 @@ function AudioTab() {
     stopTestAutoSensitivity()
     setTesting(false)
     setLevel(0)
+    setInputDb(null)
   }
 
   // Eco de áudio: pega o microfone, atrasa um pouco (150ms) e toca de
@@ -1144,8 +1162,8 @@ function AudioTab() {
     audio.noiseSuppression,
     audio.autoGainControl,
     audio.micId,
-    audio.micSensitivity,
-    audio.micSensitivityMode,
+    // Sensibilidade NÃO reinicia o teste: é aplicada ao vivo
+    // (handleSensitivityChange / handleSensitivityModeChange).
   ])
 
 
@@ -1350,26 +1368,20 @@ function AudioTab() {
                   { value: 'manual', label: 'Manual' },
                 ]}
               />
-              {audio.micSensitivityMode === 'auto' ? (
+              {audio.micSensitivityMode === 'auto' && (
                 <p className="text-[12.5px] text-mv-muted leading-relaxed">
                   O app mede o ruído do seu ambiente sozinho e ajusta o corte automaticamente enquanto você está numa
                   chamada — não precisa mexer em nada.
                 </p>
-              ) : (
-                <div className="pt-1">
-                  <RangeSlider
-                    label="Sensibilidade do microfone"
-                    min={MIN_MIC_SENSITIVITY}
-                    max={MAX_MIC_SENSITIVITY}
-                    value={audio.micSensitivity}
-                    onChange={handleSensitivityChange}
-                  />
-                  <div className="flex justify-between text-[11px] text-mv-muted mt-2">
-                    <span>Menos sensível</span>
-                    <span>Mais sensível</span>
-                  </div>
-                </div>
               )}
+              <SensitivityMeter
+                manual={audio.micSensitivityMode === 'manual'}
+                sensitivity={audio.micSensitivity}
+                onChange={handleSensitivityChange}
+                inputDb={testing ? inputDb : null}
+                testing={testing}
+                onStartTest={startTest}
+              />
             </div>
           </SettingRow>
         </RowList>
@@ -1383,9 +1395,10 @@ function AudioTab() {
               title="Sobreposição em jogos"
               description={
                 <>
-                  Aperte <Kbd>Ctrl+Shift+O</Kbd> a qualquer momento (mesmo com o jogo em foco) pra mostrar/esconder quem
-                  está falando na call, por cima do jogo. Funciona com o jogo em janela sem borda — não aparece por cima
-                  de jogos em tela cheia exclusiva.
+                  Mostra quem está falando na call por cima do jogo. Ligue pelo menu da sala de voz ou crie um atalho em
+                  Atalhos → "Mostrar/esconder sobreposição no jogo" (ele começa vazio pra não brigar com a AMD, NVIDIA,
+                  Xbox etc.). No jogo, use o modo "tela cheia em janela"/"janela sem borda": em tela cheia exclusiva
+                  nenhum app aparece por cima sem injetar código no jogo, o que dá ban — o Mamacos Voip não faz isso.
                 </>
               }
             />
@@ -1740,6 +1753,92 @@ function CameraTest({ cameraId }: { cameraId: string | null }) {
       >
         {opening ? 'Abrindo câmera...' : stream ? 'Parar teste' : 'Testar câmera'}
       </button>
+    </div>
+  )
+}
+
+// Medidor + controle de sensibilidade (estilo "a barra mostra sua voz e
+// a alça marca o corte"). Escala em dB: esquerda = -80 dB (capta tudo),
+// direita = -20 dB (só som bem alto). O valor salvo continua sendo a
+// sensibilidade 0-100 (100 = mais sensível), só a tela é que mostra na
+// ordem intuitiva.
+function SensitivityMeter({
+  manual,
+  sensitivity,
+  onChange,
+  inputDb,
+  testing,
+  onStartTest,
+}: {
+  manual: boolean
+  sensitivity: number
+  onChange: (value: number) => void
+  inputDb: number | null
+  testing: boolean
+  onStartTest: () => void
+}) {
+  const cutPos = MAX_MIC_SENSITIVITY - sensitivity // 0..100, mesma escala do dB abaixo
+  const levelPos = inputDb === null ? 0 : Math.max(0, Math.min(100, ((inputDb + 80) / 60) * 100))
+  const passing = inputDb !== null && (!manual || levelPos >= cutPos)
+  return (
+    <div className="pt-1">
+      <div className="relative h-7 flex items-center">
+        <div className="absolute inset-x-0 h-2.5 rounded-full bg-mv-canvas border border-[var(--color-line)] overflow-hidden">
+          <div
+            className={`h-full transition-[width] duration-75 ${passing ? 'bg-mv-speaking' : 'bg-white/25'}`}
+            style={{ width: `${levelPos}%` }}
+          />
+          {manual && (
+            <div
+              className="absolute inset-y-0 left-0 bg-black/35 pointer-events-none"
+              style={{ width: `${cutPos}%` }}
+              aria-hidden
+            />
+          )}
+        </div>
+        {manual && (
+          <input
+            type="range"
+            min={MIN_MIC_SENSITIVITY}
+            max={MAX_MIC_SENSITIVITY}
+            value={cutPos}
+            aria-label="Sensibilidade do microfone (ponto de corte)"
+            onChange={(e) => onChange(MAX_MIC_SENSITIVITY - Number(e.target.value))}
+            className="relative w-full h-7 appearance-none bg-transparent cursor-pointer
+              [&::-webkit-slider-runnable-track]:bg-transparent
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-[6px] [&::-webkit-slider-thumb]:h-[26px]
+              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
+              [&::-webkit-slider-thumb]:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-mv-accent)_45%,transparent),0_2px_6px_rgb(0_0_0/0.5)]
+              [&::-moz-range-thumb]:w-[6px] [&::-moz-range-thumb]:h-[26px] [&::-moz-range-thumb]:rounded-full
+              [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-track]:bg-transparent"
+          />
+        )}
+      </div>
+      {manual && (
+        <div className="flex justify-between text-[11px] text-mv-muted mt-1">
+          <span>Capta tudo</span>
+          <span>Só voz alta</span>
+        </div>
+      )}
+      <p className="text-[12px] text-mv-muted mt-2 leading-relaxed">
+        {testing ? (
+          manual ? (
+            <>
+              Fale normalmente: a barra fica <span className="text-mv-speaking font-medium">colorida</span> quando sua
+              voz passa. Arraste a alça pra direita até o barulho de fundo (teclado, ventilador) ficar cinza.
+            </>
+          ) : (
+            'Fale normalmente pra ver o nível da sua voz.'
+          )
+        ) : (
+          <>
+            <button type="button" onClick={onStartTest} className="text-mv-accent hover:underline font-medium">
+              Testar agora
+            </button>{' '}
+            pra ver sua voz na barra enquanto ajusta.
+          </>
+        )}
+      </p>
     </div>
   )
 }

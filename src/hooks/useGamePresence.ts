@@ -151,6 +151,7 @@ declare global {
       // Sobreposição — opcionais pra continuar compatível com um preload antigo.
       getOverlaySettings?: () => Promise<OverlaySettings>
       setOverlayVisible?: (visible: boolean) => Promise<boolean>
+      toggleOverlay?: () => Promise<boolean>
       setOverlayCorner?: (corner: OverlayCorner) => Promise<{ corner: OverlayCorner }>
       onOverlayVisibilityChanged?: (callback: (visible: boolean) => void) => () => void
       getCurrentGameInfo?: () => Promise<CurrentGameInfo | null>

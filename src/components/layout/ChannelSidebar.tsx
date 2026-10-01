@@ -200,7 +200,7 @@ function SpeakingAvatarRing({ userId, children }: { userId: string; children: Re
   return (
     <div
       className={`relative rounded-full shrink-0 transition-shadow ${
-        isSpeaking ? 'ring-2 ring-mv-green ring-offset-1 ring-offset-mv-side' : ''
+        isSpeaking ? 'ring-2 ring-mv-speaking ring-offset-1 ring-offset-mv-side' : ''
       }`}
     >
       {children}

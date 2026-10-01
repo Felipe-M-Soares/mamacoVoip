@@ -2127,13 +2127,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (oldRaw && oldRaw !== rawTrack) oldRaw.stop()
     rawMicTrackRef.current = rawTrack
 
+    // Mesmo com a redução de ruído DESLIGADA o gráfico de áudio continua
+    // existindo (só sem o RNNoise): é nele que fica o "porteiro" da
+    // sensibilidade. Antes, desligar a redução de ruído fazia o controle
+    // de sensibilidade parar de funcionar sem aviso nenhum.
     const noiseSuppressionEnabled = overrides?.noiseSuppression ?? audioSettingsRef.current.noiseSuppression
-    if (!noiseSuppressionEnabled) {
-      noiseSuppressorRef.current?.destroy()
-      noiseSuppressorRef.current = null
-      resetAutoSensitivity()
-      return rawTrack
-    }
 
     const mode = overrides?.micSensitivityMode ?? audioSettingsRef.current.micSensitivityMode
     // No modo automático começa com o gate totalmente aberto (null) —
@@ -2154,7 +2152,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // auto/manual ou ajustar constraints não deveria jogar fora um
       // aprendizado que já estava bom.
       if (isNewSuppressor) resetAutoSensitivity()
-      const processed = noiseSuppressorRef.current.setInputTrack(rawTrack, sensitivity)
+      const processed = noiseSuppressorRef.current.setInputTrack(rawTrack, sensitivity, { denoise: noiseSuppressionEnabled })
       // BUG: no modo automático o gráfico novo nasce com o gate ABERTO
       // (sensitivity null), mas `lastAppliedThresholdDbRef` continuava
       // com o limiar antigo — o loop automático só reaplica quando o
@@ -2679,11 +2677,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const raw = stream.getAudioTracks()[0]
       let processed = raw
       let suppressor: NoiseSuppressor | null = null
-      if (audioSettingsRef.current.noiseSuppression) {
+      {
         try {
           suppressor = await createNoiseSuppressor()
           const mode = audioSettingsRef.current.micSensitivityMode
-          processed = suppressor.setInputTrack(raw, mode === 'auto' ? null : audioSettingsRef.current.micSensitivity)
+          processed = suppressor.setInputTrack(raw, mode === 'auto' ? null : audioSettingsRef.current.micSensitivity, {
+            denoise: audioSettingsRef.current.noiseSuppression,
+          })
         } catch (err) {
           console.error('[VoiceContext] Redutor de ruído (RNNoise) indisponível, seguindo sem ele:', err)
           suppressor?.destroy()
@@ -3363,7 +3363,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       overrides !== undefined &&
       Object.keys(overrides).length > 0 &&
       Object.keys(overrides).every((k) => k === 'micSensitivity' || k === 'micSensitivityMode')
-    if (onlyGateChanged && noiseSuppressorRef.current && audioSettingsRef.current.noiseSuppression) {
+    if (onlyGateChanged && noiseSuppressorRef.current) {
       const mode = overrides.micSensitivityMode ?? audioSettingsRef.current.micSensitivityMode
       if (mode === 'auto') {
         // Recomeça o auto-ajuste com o gate aberto; o loop de

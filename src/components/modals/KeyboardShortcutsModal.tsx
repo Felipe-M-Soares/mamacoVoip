@@ -3,7 +3,6 @@ import { Kbd } from './settingsUI'
 import { KEYBIND_ACTIONS, useKeybinds } from '../../lib/keybinds'
 
 const FIXED: { keys: string; label: string }[] = [
-  { keys: 'Ctrl + Shift + O', label: 'Mostrar/esconder sobreposição dentro de jogos' },
   { keys: 'Ctrl + V', label: 'Colar imagem/print como anexo' },
   { keys: 'Enter', label: 'Enviar mensagem' },
   { keys: 'Shift + Enter', label: 'Nova linha na mensagem' },

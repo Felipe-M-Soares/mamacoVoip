@@ -10,6 +10,7 @@ export type KeybindAction =
   | 'toggle-camera'
   | 'toggle-screenshare'
   | 'leave-call'
+  | 'toggle-overlay'
   | 'open-soundboard'
   | 'return-to-call'
   | 'toggle-members'
@@ -23,12 +24,22 @@ export const KEYBIND_ACTIONS: {
   defaultCombo: string | null
   /** Pode funcionar fora do app (com o jogo em foco) */
   global: boolean
+  /** Só existe no app de computador */
+  desktopOnly?: boolean
 }[] = [
   { id: 'toggle-mute', label: 'Ligar/desligar microfone', group: 'Chamada', defaultCombo: null, global: true },
   { id: 'toggle-deafen', label: 'Ligar/desligar áudio (fone)', group: 'Chamada', defaultCombo: null, global: true },
   { id: 'toggle-camera', label: 'Ligar/desligar câmera', group: 'Chamada', defaultCombo: null, global: true },
   { id: 'toggle-screenshare', label: 'Compartilhar tela / parar', group: 'Chamada', defaultCombo: null, global: true },
   { id: 'leave-call', label: 'Sair da sala de voz', group: 'Chamada', defaultCombo: null, global: true },
+  {
+    id: 'toggle-overlay',
+    label: 'Mostrar/esconder sobreposição no jogo',
+    group: 'Chamada',
+    defaultCombo: null,
+    global: true,
+    desktopOnly: true,
+  },
   { id: 'open-soundboard', label: 'Abrir o soundboard', group: 'Chamada', defaultCombo: null, global: false },
   { id: 'return-to-call', label: 'Voltar pra tela da sala', group: 'Navegação', defaultCombo: null, global: false },
   { id: 'toggle-members', label: 'Mostrar/esconder lista de membros', group: 'Navegação', defaultCombo: null, global: false },
@@ -114,6 +125,30 @@ export function setGlobalKeybindsEnabled(enabled: boolean) {
 
 export function getKeybinds(): State {
   return state
+}
+
+// Atalhos globais que o Windows recusou (outro programa — AMD, NVIDIA,
+// Xbox Game Bar… — já usa a mesma combinação).
+let globalFailures: KeybindAction[] = []
+const failureListeners = new Set<() => void>()
+export function setGlobalKeybindFailures(ids: string[]) {
+  globalFailures = KEYBIND_ACTIONS.filter((a) => ids.includes(a.id)).map((a) => a.id)
+  failureListeners.forEach((l) => l())
+}
+export function useGlobalKeybindFailures(): KeybindAction[] {
+  return useSyncExternalStore(
+    (l) => {
+      failureListeners.add(l)
+      return () => failureListeners.delete(l)
+    },
+    () => globalFailures,
+    () => globalFailures
+  )
+}
+
+/** Texto do atalho da sobreposição pra mostrar em dicas ("Ctrl+Alt+O" ou "sem atalho"). */
+export function overlayShortcutText(bindings: Record<KeybindAction, string | null>): string {
+  return bindings['toggle-overlay'] ?? 'sem atalho (defina em Configurações → Atalhos)'
 }
 
 // ---------------------------------------------------------------- teclas

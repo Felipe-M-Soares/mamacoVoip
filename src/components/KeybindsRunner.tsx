@@ -4,6 +4,7 @@ import {
   KEYBIND_ACTIONS,
   comboFromEvent,
   isKeybindRecording,
+  setGlobalKeybindFailures,
   toAccelerator,
   useKeybinds,
   type KeybindAction,
@@ -40,6 +41,9 @@ export function KeybindsRunner() {
         break
       case 'leave-call':
         if (inCall) v.leave()
+        break
+      case 'toggle-overlay':
+        void window.electronAPI?.toggleOverlay?.().catch(() => {})
         break
       case 'open-soundboard':
         if (inCall) window.dispatchEvent(new Event('mv:open-soundboard'))
@@ -89,7 +93,10 @@ export function KeybindsRunner() {
           return accelerator ? [{ id: a.id, accelerator }] : []
         })
       : []
-    void api.setGlobalKeybinds(list).catch(() => {})
+    void api
+      .setGlobalKeybinds(list)
+      .then((r) => setGlobalKeybindFailures(r?.failed ?? []))
+      .catch(() => {})
   }, [bindings, global])
 
   useEffect(() => {

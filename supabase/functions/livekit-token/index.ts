@@ -142,6 +142,14 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: 'Você não tem acesso a essa sala de voz.', code: 'not_authorized' }, 403)
       }
     }
+    // DM: além de ser participante, ninguém pode ter bloqueado ninguém
+    // (a conversa continua visível pra ver o histórico, mas a chamada não).
+    if (dmRow && !channelRow && !groupRow) {
+      const { data: canJoin, error: dmErr } = await supabase.rpc('can_access_voice_room', { p_room: room })
+      if (dmErr || canJoin !== true) {
+        return jsonResponse({ error: 'Não dá pra ligar pra essa pessoa.', code: 'not_authorized' }, 403)
+      }
+    }
     // Canal de TEXTO não vira sala de voz — antes qualquer canal que a
     // pessoa enxergasse (inclusive de texto) gerava um token válido.
     if (channelRow && channelRow.type !== 'voice') {

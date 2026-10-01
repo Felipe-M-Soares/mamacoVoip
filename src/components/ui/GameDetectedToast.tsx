@@ -1,8 +1,10 @@
 import { useGameJustDetected } from '../../hooks/useGameJustDetected'
 import { useVoiceCore } from '../../hooks/useVoice'
+import { useKeybinds } from '../../lib/keybinds'
 
 export function GameDetectedToast() {
   const { justDetectedGame, dismiss } = useGameJustDetected()
+  const overlayCombo = useKeybinds().bindings['toggle-overlay']
   const voice = useVoiceCore()
 
   if (!justDetectedGame) return null
@@ -44,7 +46,7 @@ export function GameDetectedToast() {
 
       {inVoiceCall && (
         <p className="text-[11px] leading-snug text-mv-muted mt-2" title="Sobreposição só aparece com o jogo em janela sem borda (sem injeção no jogo, seguro com anti-cheat).">
-          {voice.screenShareQuality.gameAuto ? 'Transmite em 1080p60. ' : ''}Sobreposição: Ctrl+Shift+O (jogo em janela sem borda).
+          {voice.screenShareQuality.gameAuto ? 'Transmite em 1080p60. ' : ''}{overlayCombo ? `Sobreposição: ${overlayCombo} (jogo em janela sem borda).` : 'Sobreposição: ligue no menu da sala ou crie um atalho em Configurações → Atalhos.'}
         </p>
       )}
 

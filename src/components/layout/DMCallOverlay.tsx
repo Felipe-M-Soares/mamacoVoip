@@ -183,7 +183,7 @@ function ParticipantMiniTile({
       {hasVideo && stream ? (
         <VideoTile stream={stream} sinkId={sinkId} mirror={mirror} />
       ) : (
-        <div className={`rounded-full transition-shadow ${speaking ? 'ring-2 ring-mv-green ring-offset-2 ring-offset-mv-canvas' : ''}`}>
+        <div className={`rounded-full transition-shadow ${speaking ? 'ring-2 ring-mv-speaking ring-offset-2 ring-offset-mv-canvas' : ''}`}>
           <Avatar name={name} avatarUrl={avatarUrl ?? null} size={34} />
         </div>
       )}

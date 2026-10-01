@@ -1092,9 +1092,11 @@ function createOverlayWindow() {
       nodeIntegration: false,
       sandbox: true,
       preload: path.join(__dirname, 'overlay-preload.cjs'),
-      // Sobreposição escondida não precisa gastar CPU; visível ela só
-      // redesenha quando o estado muda (ver overlay.html).
-      backgroundThrottling: true,
+      // Sem throttling: uma janela que nunca recebe foco (focusable:false)
+      // por cima de um jogo pode ser tratada como "em segundo plano" pelo
+      // Chromium, e aí ela parava de redesenhar. Ela só redesenha quando
+      // o estado muda (ver overlay.html), então o custo é mínimo.
+      backgroundThrottling: false,
       spellcheck: false,
     },
   })
@@ -1168,6 +1170,11 @@ function setOverlayVisible(visible) {
     }
     overlay.showInactive()
     overlay.setAlwaysOnTop(true, 'screen-saver')
+    overlay.moveTop()
+    // Aviso rápido "Sobreposição ligada" — sem ele, fora de uma call a
+    // janela ficava vazia e parecia que o atalho não tinha funcionado.
+    if (!overlay.webContents.isLoading()) overlay.webContents.send('overlay:shown')
+    else overlay.webContents.once('did-finish-load', () => overlay.isDestroyed() || overlay.webContents.send('overlay:shown'))
     startOverlayTopmostKeeper()
   } else {
     stopOverlayTopmostKeeper()
@@ -1178,7 +1185,7 @@ function setOverlayVisible(visible) {
 }
 
 // AUDITORIA — desempenho: antes a janela da sobreposição era criada
-// SEMPRE ao abrir o app, mesmo pra quem nunca aperta Ctrl+Shift+O — uma
+// SEMPRE ao abrir o app, mesmo pra quem nunca liga a sobreposição — uma
 // janela transparente a mais = um processo de renderização a mais do
 // Chromium (dezenas de MB de RAM + tempo de inicialização) só pra ficar
 // escondida. Agora ela só nasce na primeira vez que for mostrada, e o
@@ -2107,13 +2114,11 @@ app.whenReady().then(() => {
     }
   })
 
-  // Atalho global (funciona mesmo com o jogo em foco) pra ligar/desligar
-  // a sobreposição — usa o mecanismo embutido do próprio Electron
-  // (não depende do módulo nativo do push-to-talk), já que só precisa
-  // reagir a "tecla apertada", não "segurando ou não".
-  const registered = globalShortcut.register('Control+Shift+O', () => {
-    setOverlayVisible(!overlayVisible)
-  })
+  // A sobreposição NÃO tem mais atalho fixo: Ctrl+Shift+O é o atalho
+  // do painel de desempenho da AMD (Adrenalin) e de outros programas —
+  // quando eles já tinham pego a tecla, o nosso nem registrava e apertar
+  // abria a sobreposição da AMD. Agora é uma ação em Configurações →
+  // Atalhos ("Mostrar/esconder sobreposição no jogo"), vazia por padrão.
   // Atalhos de teclado GLOBAIS (Configurações → Atalhos): funcionam com o
   // jogo em primeiro plano. O renderer manda a lista { id, accelerator };
   // cada um que dispara avisa o renderer com o id da ação. Só registra
@@ -2133,7 +2138,7 @@ app.whenReady().then(() => {
     for (const item of list.slice(0, 32)) {
       const id = typeof item?.id === 'string' ? item.id.slice(0, 40) : ''
       const acc = typeof item?.accelerator === 'string' ? item.accelerator.slice(0, 60) : ''
-      if (!id || !acc || acc === 'Control+Shift+O') continue
+      if (!id || !acc) continue
       try {
         const ok = globalShortcut.register(acc, () => sendToMain('keybind', id))
         if (ok) registeredKeybinds.push(acc)
@@ -2150,8 +2155,11 @@ app.whenReady().then(() => {
   handleTrusted('overlay:get-settings', () => ({
     ...loadOverlaySettings(),
     visible: overlayVisible,
-    shortcutRegistered: registered,
   }))
+  handleTrusted('overlay:toggle', () => {
+    setOverlayVisible(!overlayVisible)
+    return overlayVisible
+  })
   handleTrusted('overlay:set-visible', (_event, visible) => {
     setOverlayVisible(Boolean(visible))
     return overlayVisible
@@ -2162,9 +2170,6 @@ app.whenReady().then(() => {
     if (overlayWindow && !overlayWindow.isDestroyed()) applyOverlayPlacement(overlayWindow)
     return loadOverlaySettings()
   })
-  if (!registered) {
-    console.error('Não foi possível registrar o atalho da sobreposição (Ctrl+Shift+O) — pode já estar em uso por outro programa.')
-  }
 
   // Ctrl+Shift+I (DevTools) NÃO é mais atalho GLOBAL do sistema: antes
   // ele era registrado com globalShortcut, ou seja, sequestrava essa

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useVoiceCore } from '../../hooks/useVoice'
+import { overlayShortcutText, useKeybinds } from '../../lib/keybinds'
 import {
   computeScreenShareStats,
   describeLimitation,
@@ -73,6 +74,7 @@ const OVERLAY_HELP =
 
 export function GameStreamMenuSection() {
   const voice = useVoiceCore()
+  const { bindings } = useKeybinds()
   const api = typeof window !== 'undefined' ? window.electronAPI : undefined
   const hasOverlay = Boolean(api?.getOverlaySettings)
   const [overlayVisible, setOverlayVisible] = useState(false)
@@ -132,7 +134,7 @@ export function GameStreamMenuSection() {
             />
             <span>
               Sobreposição no jogo
-              <span className="block text-[11px] text-mv-muted">Atalho: Ctrl+Shift+O</span>
+              <span className="block text-[11px] text-mv-muted">Atalho: {overlayShortcutText(bindings)}</span>
             </span>
           </label>
           <div className="px-2.5 pb-1.5">

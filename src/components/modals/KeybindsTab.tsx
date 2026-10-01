@@ -9,6 +9,7 @@ import {
   setGlobalKeybindsEnabled,
   setKeybind,
   setKeybindRecording,
+  useGlobalKeybindFailures,
   useKeybinds,
   type KeybindAction,
 } from '../../lib/keybinds'
@@ -29,6 +30,7 @@ function ComboKeys({ combo }: { combo: string }) {
 
 export function KeybindsTab() {
   const { bindings, global } = useKeybinds()
+  const failures = useGlobalKeybindFailures()
   const [recordingId, setRecordingId] = useState<KeybindAction | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const isDesktop = Boolean(window.electronAPI?.isElectron)
@@ -93,15 +95,21 @@ export function KeybindsTab() {
       {groups.map((group) => (
         <SettingsCard key={group} title={group}>
           <div className="divide-y divide-[var(--color-line)]">
-            {KEYBIND_ACTIONS.filter((a) => a.group === group).map((a) => {
+            {KEYBIND_ACTIONS.filter((a) => a.group === group && (isDesktop || !a.desktopOnly)).map((a) => {
               const combo = bindings[a.id]
               const rec = recordingId === a.id
               return (
                 <div key={a.id} className="flex items-center justify-between gap-3 py-2.5">
                   <div className="min-w-0">
                     <p className="text-[14px] text-mv-text">{a.label}</p>
-                    {a.global && isDesktop && global && (
-                      <p className="text-[11.5px] text-mv-muted">Funciona também dentro de jogos</p>
+                    {a.global && isDesktop && global && combo && failures.includes(a.id) ? (
+                      <p className="text-[11.5px] text-amber-300">
+                        Outro programa (AMD, NVIDIA, Xbox Game Bar…) já usa essa tecla fora do app. Escolha outra.
+                      </p>
+                    ) : (
+                      a.global &&
+                      isDesktop &&
+                      global && <p className="text-[11.5px] text-mv-muted">Funciona também dentro de jogos</p>
                     )}
                   </div>
                   <button

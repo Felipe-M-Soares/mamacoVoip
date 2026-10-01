@@ -4694,4 +4694,109 @@ $$;
 revoke execute on function public.move_role(uuid, boolean) from public, anon;
 grant execute on function public.move_role(uuid, boolean) to authenticated;
 
+-- ============================================================
+-- PARTE 21 — revisão de segurança (out/2026)
+-- ============================================================
+
+-- (a) Quem está BLOQUEADO não consegue mais entrar na chamada da DM
+-- (antes só o "digitando..." respeitava o bloqueio).
+create or replace function public.can_access_voice_room(p_room uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+      select 1 from public.channels c
+      where c.id = p_room and c.type = 'voice' and public.can_view_channel(c.id)
+    )
+    or public.is_group_member(p_room, auth.uid())
+    or exists (
+      select 1 from public.dm_conversations d
+      where d.id = p_room
+        and auth.uid() in (d.user_a, d.user_b)
+        and not exists (
+          select 1 from public.blocked_users b
+          where (b.blocker_id = d.user_a and b.blocked_id = d.user_b)
+             or (b.blocker_id = d.user_b and b.blocked_id = d.user_a)
+        )
+    );
+$$;
+revoke execute on function public.can_access_voice_room(uuid) from public, anon;
+grant execute on function public.can_access_voice_room(uuid) to authenticated;
+
+-- (b) Membro de castigo (timeout) não cria convite.
+create or replace function public.create_server_invite(
+  p_server_id uuid,
+  p_max_uses int default null,
+  p_expires_hours int default null
+)
+returns public.server_invites
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_code text;
+  v_invite public.server_invites;
+  v_attempt int := 0;
+begin
+  if auth.uid() is null then
+    raise exception 'Não autenticado';
+  end if;
+  if not public.mfa_requirement_met() then
+    raise exception 'Confirme a verificação em duas etapas primeiro';
+  end if;
+  if not public.is_server_member(p_server_id, auth.uid()) then
+    raise exception 'Você não é membro deste servidor';
+  end if;
+  if public.is_timed_out(p_server_id, auth.uid()) then
+    raise exception 'Você está de castigo neste servidor e não pode criar convites agora';
+  end if;
+  if p_max_uses is not null and (p_max_uses < 1 or p_max_uses > 1000) then
+    raise exception 'Número máximo de usos inválido (1 a 1000)';
+  end if;
+  if p_expires_hours is not null and (p_expires_hours < 1 or p_expires_hours > 8760) then
+    raise exception 'Validade inválida (1 hora a 1 ano)';
+  end if;
+  if (
+    select count(*) from public.server_invites
+    where server_id = p_server_id
+      and (expires_at is null or expires_at > now())
+      and (max_uses is null or uses < max_uses)
+  ) >= 50 then
+    raise exception 'Este servidor já tem convites ativos demais. Revogue alguns antes de criar outro.';
+  end if;
+
+  loop
+    v_attempt := v_attempt + 1;
+    v_code := public.generate_invite_code();
+    begin
+      insert into public.server_invites (server_id, code, created_by, max_uses, expires_at)
+      values (
+        p_server_id,
+        v_code,
+        auth.uid(),
+        p_max_uses,
+        case when p_expires_hours is null then null else now() + make_interval(hours => p_expires_hours) end
+      )
+      returning * into v_invite;
+      exit;
+    exception when unique_violation then
+      if v_attempt >= 5 then
+        raise;
+      end if;
+    end;
+  end loop;
+
+  return v_invite;
+end;
+$$;
+
+-- (c) Convites do formato ANTIGO (8 letras/números hexadecimais, fáceis
+-- de adivinhar por tentativa) deixam de valer. Os novos têm 10
+-- caracteres aleatórios. Quem tinha link antigo gera um novo.
+delete from public.server_invites where code ~ '^[0-9a-f]{8}$';
+
 notify pgrst, 'reload schema';

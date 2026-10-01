@@ -58,9 +58,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   sendVoiceStateToOverlay: (state) => ipcRenderer.send('overlay:update-state', state),
   // Sobreposição (overlay) — ligar/desligar e canto da tela pela UI,
-  // além do atalho global Ctrl+Shift+O. Ver setOverlayVisible em main.cjs.
+  // além do atalho configurável (Configurações → Atalhos). Ver setOverlayVisible em main.cjs.
   getOverlaySettings: () => ipcRenderer.invoke('overlay:get-settings'),
   setOverlayVisible: (visible) => ipcRenderer.invoke('overlay:set-visible', visible),
+  toggleOverlay: () => ipcRenderer.invoke('overlay:toggle'),
   setOverlayCorner: (corner) => ipcRenderer.invoke('overlay:set-corner', corner),
   onOverlayVisibilityChanged: (callback) => {
     const handler = (_event, visible) => callback(visible)

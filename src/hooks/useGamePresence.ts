@@ -97,6 +97,8 @@ export type OverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-r
 
 export interface OverlaySettings {
   corner: OverlayCorner
+  /** Transparência 20-100 (%) */
+  opacity?: number
   visible: boolean
   shortcutRegistered?: boolean
 }
@@ -153,6 +155,7 @@ declare global {
       setOverlayVisible?: (visible: boolean) => Promise<boolean>
       toggleOverlay?: () => Promise<boolean>
       setOverlayCorner?: (corner: OverlayCorner) => Promise<{ corner: OverlayCorner }>
+      setOverlayOpacity?: (opacity: number) => Promise<{ corner: OverlayCorner; opacity: number }>
       onOverlayVisibilityChanged?: (callback: (visible: boolean) => void) => () => void
       getCurrentGameInfo?: () => Promise<CurrentGameInfo | null>
       checkForUpdatesNow: () => void

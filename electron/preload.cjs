@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setOverlayVisible: (visible) => ipcRenderer.invoke('overlay:set-visible', visible),
   toggleOverlay: () => ipcRenderer.invoke('overlay:toggle'),
   setOverlayCorner: (corner) => ipcRenderer.invoke('overlay:set-corner', corner),
+  setOverlayOpacity: (opacity) => ipcRenderer.invoke('overlay:set-opacity', opacity),
   onOverlayVisibilityChanged: (callback) => {
     const handler = (_event, visible) => callback(visible)
     ipcRenderer.on('overlay:visibility-changed', handler)

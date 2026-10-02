@@ -79,6 +79,7 @@ export function GameStreamMenuSection() {
   const hasOverlay = Boolean(api?.getOverlaySettings)
   const [overlayVisible, setOverlayVisible] = useState(false)
   const [corner, setCorner] = useState<OverlayCorner>('top-left')
+  const [opacity, setOpacity] = useState(60)
 
   useEffect(() => {
     if (!api?.getOverlaySettings) return
@@ -89,6 +90,7 @@ export function GameStreamMenuSection() {
         if (cancelled || !s) return
         setOverlayVisible(Boolean(s.visible))
         setCorner(s.corner)
+        if (typeof s.opacity === 'number') setOpacity(s.opacity)
       })
       .catch(() => {})
     const unsub = api.onOverlayVisibilityChanged?.((visible) => setOverlayVisible(visible))
@@ -155,9 +157,28 @@ export function GameStreamMenuSection() {
                 </option>
               ))}
             </select>
+            <label className="flex items-center gap-2 pt-2 text-[11px] text-mv-muted">
+              <span className="shrink-0">Transparência</span>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                step={5}
+                value={opacity}
+                onChange={(e) => {
+                  const next = Number(e.target.value)
+                  setOpacity(next)
+                  api?.setOverlayOpacity?.(next).catch(() => {})
+                }}
+                aria-label="Opacidade da sobreposição"
+                className="flex-1 accent-mv-accent"
+              />
+              <span className="tabular-nums w-8 text-right text-mv-text">{opacity}%</span>
+            </label>
             <p className="text-[11px] leading-snug text-mv-muted pt-1.5">
               Use o jogo em <strong className="text-mv-text font-medium">janela sem borda</strong> — em tela cheia exclusiva a
-              sobreposição não aparece (evitamos injetar no jogo por causa dos anti-cheats).
+              sobreposição não aparece (evitamos injetar no jogo por causa dos anti-cheats). Ela só aparece durante a chamada
+              e desliga sozinha quando o jogo fecha.
             </p>
           </div>
         </>

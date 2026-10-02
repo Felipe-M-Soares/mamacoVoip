@@ -655,8 +655,15 @@ async function runGameCheckTick() {
     }
 
     if (game !== currentGame) {
+      const gameClosed = currentGame !== null && game === null
       currentGame = game
       sendToMain('game-status-changed', game)
+      // O jogo fechou: a sobreposição era pra ele, então desliga sozinha
+      // (senão ficava flutuando por cima da área de trabalho).
+      if (gameClosed && overlayVisible) {
+        appendDebugLog('main', 'overlay: jogo fechou — desligando a sobreposição')
+        setOverlayVisible(false)
+      }
     }
 
     // Se tem um processo sendo vigiado (compartilhamento de tela cheia
@@ -1017,13 +1024,16 @@ function overlaySettingsPath() {
 function loadOverlaySettings() {
   if (overlaySettingsCache) return overlaySettingsCache
   let corner = 'top-left'
+  // Transparência (20-100%). 60% fica translúcido sem sumir em cenas claras.
+  let opacity = 60
   try {
     const raw = JSON.parse(fs.readFileSync(overlaySettingsPath(), 'utf8'))
     if (raw && OVERLAY_CORNERS.has(raw.corner)) corner = raw.corner
+    if (raw && Number.isFinite(raw.opacity)) opacity = Math.max(20, Math.min(100, Math.round(raw.opacity)))
   } catch {
     // sem arquivo ainda / corrompido — usa o padrão
   }
-  overlaySettingsCache = { corner }
+  overlaySettingsCache = { corner, opacity }
   return overlaySettingsCache
 }
 
@@ -1067,7 +1077,7 @@ function applyOverlayPlacement(overlay) {
   if (!overlay || overlay.isDestroyed()) return
   const { corner } = loadOverlaySettings()
   overlay.setBounds(overlayBoundsFor(corner))
-  if (!overlay.webContents.isLoading()) overlay.webContents.send('overlay:settings', { corner })
+  if (!overlay.webContents.isLoading()) overlay.webContents.send('overlay:settings', loadOverlaySettings())
 }
 
 function createOverlayWindow() {
@@ -1157,9 +1167,19 @@ function stopOverlayTopmostKeeper() {
   overlayTopmostTimer = null
 }
 
-function setOverlayVisible(visible) {
-  overlayVisible = Boolean(visible)
-  if (overlayVisible) {
+// `overlayVisible` = a pessoa LIGOU a sobreposição. A janela em si só
+// fica na tela enquanto ela está numa call (ou nos poucos segundos do
+// aviso "sobreposição ligada"). Antes a janela ficava aberta por cima de
+// tudo mesmo depois de sair da call / fechar o jogo.
+let overlayNoticeUntil = 0
+let overlayNoticeTimer = null
+
+function overlayShouldBeOnScreen() {
+  return overlayVisible && (Boolean(lastOverlayState?.connected) || Date.now() < overlayNoticeUntil)
+}
+
+function syncOverlayWindow() {
+  if (overlayShouldBeOnScreen()) {
     const overlay = ensureOverlayWindow()
     applyOverlayPlacement(overlay)
     // Se a página já carregou, manda o estado mais recente agora (ele
@@ -1168,17 +1188,38 @@ function setOverlayVisible(visible) {
     if (!overlay.webContents.isLoading() && lastOverlayState !== null) {
       overlay.webContents.send('overlay:voice-state', lastOverlayState)
     }
-    overlay.showInactive()
+    if (!overlay.isVisible()) overlay.showInactive()
     overlay.setAlwaysOnTop(true, 'screen-saver')
     overlay.moveTop()
-    // Aviso rápido "Sobreposição ligada" — sem ele, fora de uma call a
-    // janela ficava vazia e parecia que o atalho não tinha funcionado.
-    if (!overlay.webContents.isLoading()) overlay.webContents.send('overlay:shown')
-    else overlay.webContents.once('did-finish-load', () => overlay.isDestroyed() || overlay.webContents.send('overlay:shown'))
-    startOverlayTopmostKeeper()
+    if (!overlayTopmostTimer) startOverlayTopmostKeeper()
   } else {
     stopOverlayTopmostKeeper()
-    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
+    if (overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()) overlayWindow.hide()
+  }
+}
+
+function setOverlayVisible(visible) {
+  overlayVisible = Boolean(visible)
+  if (overlayNoticeTimer) clearTimeout(overlayNoticeTimer)
+  overlayNoticeTimer = null
+  if (overlayVisible) {
+    // Aviso rápido "Sobreposição ligada" — sem ele, fora de uma call a
+    // janela ficava vazia e parecia que o atalho não tinha funcionado.
+    overlayNoticeUntil = Date.now() + 5000
+    syncOverlayWindow()
+    const overlay = overlayWindow
+    if (overlay && !overlay.isDestroyed()) {
+      if (!overlay.webContents.isLoading()) overlay.webContents.send('overlay:shown')
+      else overlay.webContents.once('did-finish-load', () => overlay.isDestroyed() || overlay.webContents.send('overlay:shown'))
+    }
+    overlayNoticeTimer = setTimeout(() => {
+      overlayNoticeTimer = null
+      overlayNoticeUntil = 0
+      syncOverlayWindow()
+    }, 5100)
+  } else {
+    overlayNoticeUntil = 0
+    syncOverlayWindow()
   }
   appendDebugLog('main', `overlay: ${overlayVisible ? 'ligada' : 'desligada'} (canto=${loadOverlaySettings().corner})`)
   sendToMain('overlay:visibility-changed', overlayVisible)
@@ -2108,10 +2149,14 @@ app.whenReady().then(() => {
   // por segundo numa call, e repassar isso pra uma janela escondida era
   // trabalho jogado fora.
   onTrusted('overlay:update-state', (_event, state) => {
+    const wasConnected = Boolean(lastOverlayState?.connected)
     lastOverlayState = state ?? null
+    const isConnected = Boolean(lastOverlayState?.connected)
     if (overlayVisible && overlayWindow && !overlayWindow.isDestroyed()) {
       overlayWindow.webContents.send('overlay:voice-state', lastOverlayState)
     }
+    // Entrou/saiu da call: mostra/esconde a janela (sem desligar a opção).
+    if (wasConnected !== isConnected) syncOverlayWindow()
   })
 
   // A sobreposição NÃO tem mais atalho fixo: Ctrl+Shift+O é o atalho
@@ -2163,6 +2208,15 @@ app.whenReady().then(() => {
   handleTrusted('overlay:set-visible', (_event, visible) => {
     setOverlayVisible(Boolean(visible))
     return overlayVisible
+  })
+  handleTrusted('overlay:set-opacity', (_event, opacity) => {
+    const n = Number(opacity)
+    if (!Number.isFinite(n)) return loadOverlaySettings()
+    saveOverlaySettings({ ...loadOverlaySettings(), opacity: Math.max(20, Math.min(100, Math.round(n))) })
+    if (overlayWindow && !overlayWindow.isDestroyed() && !overlayWindow.webContents.isLoading()) {
+      overlayWindow.webContents.send('overlay:settings', loadOverlaySettings())
+    }
+    return loadOverlaySettings()
   })
   handleTrusted('overlay:set-corner', (_event, corner) => {
     if (!OVERLAY_CORNERS.has(corner)) return loadOverlaySettings()

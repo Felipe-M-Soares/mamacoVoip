@@ -85,7 +85,13 @@ function loadPreferGpuEncode() {
 const preferGpuEncodeAtStartup = loadPreferGpuEncode()
 if (preferGpuEncodeAtStartup && process.platform === 'win32') {
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
-  app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcWindowCapturer,MediaFoundationVideoEncodeAccelerator')
+  // WebRtcAV1HWEncode: libera AV1 pela placa na transmissão (AMD RX 7000/
+  // 9000, NVIDIA RTX 40/50, Intel Arc). Em placa AMD o H.264 pela GPU
+  // costuma não ser usado pelo WebRTC — o AV1 é o caminho pela placa.
+  app.commandLine.appendSwitch(
+    'enable-features',
+    'WebRtcAllowWgcWindowCapturer,MediaFoundationVideoEncodeAccelerator,WebRtcAV1HWEncode'
+  )
 } else {
   app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcWindowCapturer')
 }

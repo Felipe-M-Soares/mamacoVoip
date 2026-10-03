@@ -37,7 +37,8 @@ import {
   AUTO_SENSITIVITY_TICK_MS,
   DEFAULT_MIC_SENSITIVITY,
 } from '../lib/noiseSuppression'
-import { chooseScreenCodec, probeHardwareEncoders, type ScreenCodec } from '../lib/hwEncode'
+import { chooseScreenCodec, markCodecSoftwareOnly, probeHardwareEncoders, resetHardwareProbe, type ScreenCodec } from '../lib/hwEncode'
+import { computeScreenShareStats, pickOutboundVideo, type OutboundVideoSample } from '../lib/screenShareStats'
 import { peekPendingGameShareHint, takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
@@ -3703,6 +3704,53 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Rede de segurança da transmissão pela GPU: a placa pode DIZER que
+  // codifica um formato e o WebRTC mesmo assim usar o processador. Com
+  // vídeo saindo de verdade, confere o codificador real (getStats); se
+  // for software, guarda esse formato como "ruim neste computador" e
+  // republica no próximo que a placa codifica (VP9/AV1). Uma piscada de
+  // ~1s pra quem assiste, uma vez só — da próxima já começa no certo.
+  async function watchForSoftwareEncoder(
+    videoTrack: MediaStreamTrack,
+    codec: ScreenCodec,
+    buildOpts: (codec: ScreenCodec) => Parameters<NonNullable<Room['localParticipant']>['publishTrack']>[1]
+  ) {
+    let current = codec
+    let prev: OutboundVideoSample | null = null
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      if (screenStreamRef.current?.getVideoTracks()[0] !== videoTrack || videoTrack.readyState !== 'live') return
+      const report = await getScreenShareStatsReport()
+      const sample = pickOutboundVideo(report ? (Array.from(report.values()) as Record<string, unknown>[]) : null)
+      if (!sample) continue
+      const stats = prev ? computeScreenShareStats(prev, sample) : null
+      prev = sample
+      // Só decide com vídeo saindo (sem ninguém assistindo o envio pausa).
+      if (!stats || !stats.bitrateKbps || stats.hardwareEncoder === null) continue
+      if (stats.hardwareEncoder) {
+        logDebug(`transmissão: codificando pela placa de vídeo (${current}, ${sample.encoderImplementation ?? '?'})`)
+        return
+      }
+      if (current !== 'h264' && current !== 'vp9' && current !== 'av1') return
+      markCodecSoftwareOnly(current)
+      resetHardwareProbe()
+      const next = chooseScreenCodec(await probeHardwareEncoders(), true)
+      logDebug(`transmissão: ${current} caiu no processador (${sample.encoderImplementation ?? '?'}) — próximo pela placa: ${next}`)
+      const room = roomRef.current
+      if (next === current || next === 'h264' || !room) return
+      try {
+        await room.localParticipant.unpublishTrack(videoTrack, false)
+        if (screenStreamRef.current?.getVideoTracks()[0] !== videoTrack) return
+        screenVideoPublicationRef.current = await room.localParticipant.publishTrack(videoTrack, buildOpts(next))
+        current = next
+        prev = null
+      } catch (err) {
+        logDebug(`transmissão: troca de formato falhou — ${err instanceof Error ? err.message : String(err)}`)
+        return
+      }
+    }
+  }
+
   async function toggleScreenShare(opts?: { auto?: boolean }) {
     if (screenShareOpRef.current) return
     if (screenSharing) {
@@ -3777,6 +3825,26 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           `toggleScreenShare: codificador de hardware — H264=${hw.h264} VP9=${hw.vp9} AV1=${hw.av1} (preferir GPU=${preferGpu}) → ${screenVideoCodec}`
         )
       }
+      // Codec: H.264/VP9/AV1 conforme a placa (acima); VP8 só quando o
+      // quadro passa do limite do H.264. `priority: 'high'` = mesmo nível
+      // do microfone na fila de envio. Sem simulcast/backupCodec (não
+      // codifica duas vezes).
+      const buildScreenVideoOpts = (codec: ScreenCodec) => ({
+        name: 'screen',
+        source: Track.Source.ScreenShare,
+        videoCodec: codec,
+        backupCodec: false,
+        // VP9/AV1 no LiveKit pedem um modo de camadas; L1T3 = uma
+        // resolução só (sem codificar duas vezes), igual o H.264.
+        ...(codec === 'vp9' || codec === 'av1' ? { scalabilityMode: 'L1T3' as const } : {}),
+        screenShareEncoding: {
+          maxBitrate: preset.maxBitrate,
+          maxFramerate: preset.frameRate,
+          priority: 'high' as const,
+        },
+        degradationPreference: preset.degradationPreference,
+        simulcast: false,
+      })
       // QUINTA RODADA: vídeo e áudio agora são COMPLETAMENTE
       // independentes — `stream` (acima) só tem vídeo. Tenta primeiro a
       // captura por processo (isola só o som do jogo, quando o PID foi
@@ -3919,22 +3987,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // na fila de envio (mesmo nível do microfone, ver
           // applyMicSenderPriority) — a voz continua minúscula (64kbps) e
           // não perde pro vídeo.
-          roomRef.current.localParticipant.publishTrack(videoTrack, {
-            name: 'screen',
-            source: Track.Source.ScreenShare,
-            videoCodec: screenVideoCodec,
-            backupCodec: false,
-            // VP9/AV1 no LiveKit pedem um modo de camadas; L1T3 = uma
-            // resolução só (sem codificar duas vezes), igual o H.264.
-            ...(screenVideoCodec === 'vp9' || screenVideoCodec === 'av1' ? { scalabilityMode: 'L1T3' as const } : {}),
-            screenShareEncoding: {
-              maxBitrate: preset.maxBitrate,
-              maxFramerate: preset.frameRate,
-              priority: 'high',
-            },
-            degradationPreference: preset.degradationPreference,
-            simulcast: false,
-          }),
+          roomRef.current.localParticipant.publishTrack(videoTrack, buildScreenVideoOpts(screenVideoCodec)),
           // Mesmo ajuste de antes — o áudio da transmissão precisa do
           // PRÓPRIO teto de bitrate (pensado pra som de jogo/música,
           // bem maior que o do microfone) e estéreo de verdade
@@ -3950,6 +4003,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
       started = true
       setScreenSharing(true)
+      if (window.electronAPI?.isElectron) void watchForSoftwareEncoder(videoTrack, screenVideoCodec, buildScreenVideoOpts)
       playStreamStartSound()
       setScreenSharePresetLabel(preset.label)
 

@@ -19,6 +19,52 @@ const PROBES: Record<keyof HwEncodeSupport, string> = {
 
 let cached: Promise<HwEncodeSupport> | null = null
 
+// Formatos que JÁ caíram no processador durante uma transmissão neste
+// computador (a placa diz que codifica, mas o WebRTC não usou) — não
+// adianta tentar de novo nesses.
+const BAD_KEY = 'mv-hw-encode-bad'
+function loadBad(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(BAD_KEY) ?? '[]') as string[])
+  } catch {
+    return new Set()
+  }
+}
+export function markCodecSoftwareOnly(codec: keyof HwEncodeSupport) {
+  const bad = loadBad()
+  bad.add(codec)
+  try {
+    localStorage.setItem(BAD_KEY, JSON.stringify([...bad]))
+  } catch {
+    // sem armazenamento
+  }
+}
+
+const WEBRTC_TYPES: Record<keyof HwEncodeSupport, string> = {
+  h264: 'video/H264;profile-level-id=42e01f;packetization-mode=1',
+  vp9: 'video/VP9',
+  av1: 'video/AV1',
+}
+
+// Pergunta específica do WebRTC (MediaCapabilities type 'webrtc'):
+// `powerEfficient` = vai usar codificador de hardware NA TRANSMISSÃO.
+// É mais fiel que o WebCodecs, que usa outro caminho dentro do Chromium.
+async function probeWebRtc(codec: keyof HwEncodeSupport): Promise<boolean | null> {
+  const mc = (navigator as Navigator & { mediaCapabilities?: MediaCapabilities }).mediaCapabilities
+  if (!mc?.encodingInfo) return null
+  try {
+    const info = await mc.encodingInfo({
+      type: 'webrtc',
+      video: { contentType: WEBRTC_TYPES[codec], width: 1920, height: 1080, bitrate: 6_000_000, framerate: 60 },
+    } as MediaEncodingConfiguration)
+    if (!info.supported) return false
+    return info.powerEfficient === true
+  } catch {
+    return null
+  }
+}
+
+// Reserva (Chromium sem MediaCapabilities 'webrtc'): WebCodecs.
 async function probeOne(codec: string, width: number, height: number): Promise<boolean> {
   const VE = (globalThis as { VideoEncoder?: { isConfigSupported?: (c: unknown) => Promise<{ supported?: boolean }> } })
     .VideoEncoder
@@ -46,15 +92,24 @@ async function probeOne(codec: string, width: number, height: number): Promise<b
 export function probeHardwareEncoders(): Promise<HwEncodeSupport> {
   if (!cached) {
     cached = (async () => {
-      const [h264, vp9, av1] = await Promise.all([
-        probeOne(PROBES.h264, 1920, 1080),
-        probeOne(PROBES.vp9, 1920, 1080),
-        probeOne(PROBES.av1, 1920, 1080),
-      ])
-      return { h264, vp9, av1 }
+      const bad = loadBad()
+      const out = { h264: false, vp9: false, av1: false } as HwEncodeSupport
+      await Promise.all(
+        (Object.keys(PROBES) as (keyof HwEncodeSupport)[]).map(async (c) => {
+          const webrtc = await probeWebRtc(c)
+          const hw = webrtc ?? (await probeOne(PROBES[c], 1920, 1080))
+          out[c] = hw && !bad.has(c)
+        })
+      )
+      return out
     })()
   }
   return cached
+}
+
+/** Esquece o resultado guardado (depois de marcar um formato como ruim). */
+export function resetHardwareProbe() {
+  cached = null
 }
 
 export type ScreenCodec = 'h264' | 'vp8' | 'vp9' | 'av1'

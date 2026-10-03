@@ -58,7 +58,7 @@ import {
   createAutoSensitivity,
   AUTO_SENSITIVITY_TICK_MS,
 } from '../../lib/noiseSuppression'
-import { probeHardwareEncoders, type HwEncodeSupport } from '../../lib/hwEncode'
+import { probeHardwareDetails, type HwEncodeDetails } from '../../lib/hwEncode'
 
 type Tab =
   | 'account'
@@ -1856,11 +1856,18 @@ function SensitivityMeter({
 // reabrir o app — o motor do Chromium só lê isso na inicialização.
 function GpuEncodeRow() {
   const [state, setState] = useState<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean } | null>(null)
-  const [hw, setHw] = useState<HwEncodeSupport | null>(null)
+  const [hw, setHw] = useState<HwEncodeDetails | null>(null)
+  const [testing, setTesting] = useState(false)
   const [gpuStatus, setGpuStatus] = useState<string | null>(null)
+  function runTest(force: boolean) {
+    setTesting(true)
+    void probeHardwareDetails(force, force)
+      .then(setHw)
+      .finally(() => setTesting(false))
+  }
   useEffect(() => {
     window.electronAPI?.getVideoEncodeSettings?.().then(setState).catch(() => {})
-    void probeHardwareEncoders().then(setHw)
+    runTest(false)
     window.electronAPI?.getGpuStatus?.().then((r) => setGpuStatus(r.videoEncode)).catch(() => {})
   }, [])
   if (!state) return null
@@ -1879,23 +1886,46 @@ function GpuEncodeRow() {
         />
       }
     >
-      {hw && (
-        <p className="mt-2 text-[12px] text-mv-muted">
-          Sua placa comprime:{' '}
-          {(['h264', 'vp9', 'av1'] as const).map((c, i) => (
-            <span key={c}>
-              {i > 0 && ' · '}
-              <span className={hw[c] ? 'text-mv-green' : 'text-mv-muted/70 line-through'}>{c === 'h264' ? 'H.264' : c.toUpperCase()}</span>
-            </span>
-          ))}
-          {!hw.h264 && !hw.vp9 && !hw.av1
-            ? ' — nenhum liberado, então a transmissão usa o processador. Atualizar o driver da placa costuma resolver.'
-            : ' — a transmissão usa o primeiro disponível.'}
-          {gpuStatus && gpuStatus !== 'enabled' && (
-            <span className="block text-[11px] mt-0.5">Status do codificador de vídeo no app: {gpuStatus}</span>
-          )}
-        </p>
-      )}
+      <div className="mt-2 text-[12px] text-mv-muted">
+        {testing ? (
+          <p>Testando sua placa de vídeo… (leva uns 10 segundos)</p>
+        ) : !hw || !Object.values(hw).some((r) => r.impl) ? (
+          <p>
+            Ainda não testamos sua placa.{' '}
+            <button type="button" onClick={() => runTest(true)} className="text-mv-accent hover:underline">
+              Testar agora
+            </button>{' '}
+            (usa o microfone por alguns segundos só pra liberar o teste — nada é gravado).
+          </p>
+        ) : (
+          <>
+            <p className="mb-1">Teste da sua placa (o que o app usa de verdade pra transmitir):</p>
+            <ul className="space-y-0.5">
+              {(['h264', 'av1', 'vp9'] as const).map((c) => (
+                <li key={c} className="flex items-center gap-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full ${hw[c].hw ? 'bg-mv-green' : 'bg-white/25'}`} aria-hidden />
+                  <span className="text-mv-text">{c === 'h264' ? 'H.264' : c.toUpperCase()}:</span>
+                  <span className={hw[c].hw ? 'text-mv-green' : ''}>
+                    {hw[c].hw ? 'placa de vídeo' : hw[c].impl ? 'processador' : 'não disponível'}
+                  </span>
+                  {hw[c].impl && <span className="text-[11px] opacity-70">({hw[c].impl})</span>}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1">
+              {hw.h264.hw || hw.av1.hw || hw.vp9.hw
+                ? 'A transmissão usa o primeiro formato que roda na placa.'
+                : 'Nenhum formato rodou na placa — a transmissão usa o processador. Atualizar o driver da placa costuma resolver.'}
+              <button type="button" onClick={() => runTest(true)} className="ml-2 text-mv-accent hover:underline">
+                Testar de novo
+              </button>
+            </p>
+          </>
+        )}
+        {gpuStatus && gpuStatus !== 'enabled' && (
+          <p className="text-[11px] mt-0.5">Status do codificador de vídeo no app: {gpuStatus}</p>
+        )}
+      </div>
       {state.autoDisabled && !state.preferGpu && (
         <p className="mt-2 text-[12.5px] text-amber-300">
           Desligado automaticamente: a placa de vídeo travou durante o uso. Atualize o driver e ligue de novo se quiser tentar.

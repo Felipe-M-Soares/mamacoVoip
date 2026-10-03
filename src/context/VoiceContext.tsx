@@ -1591,9 +1591,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const autoSensitivityRef = useRef(createAutoSensitivity())
   // Já descobre o que a placa de vídeo codifica (leva alguns ms) pra não
   // atrasar o início da transmissão.
+  // Roda dentro da call (com o microfone já aberto o Chromium revela qual
+  // codificador usa — ver hwEncode.ts), alguns segundos depois de entrar.
   useEffect(() => {
-    if (window.electronAPI?.isElectron) void probeHardwareEncoders()
-  }, [])
+    if (!window.electronAPI?.isElectron || !connectedChannelId) return
+    const t = window.setTimeout(() => void probeHardwareEncoders(), 4000)
+    return () => window.clearTimeout(t)
+  }, [connectedChannelId])
   function resetAutoSensitivity() {
     autoSensitivityRef.current.reset()
   }
@@ -3816,7 +3820,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       let screenVideoCodec: ScreenCodec = pickScreenShareCodec(finalVideoSettings, 'toggleScreenShare')
       if (screenVideoCodec === 'h264') {
         const [hw, encodeSettings] = await Promise.all([
-          probeHardwareEncoders(),
+          // O teste da placa roda ao abrir o app; se ainda não terminou,
+          // não segura o início da transmissão — começa em H.264 e o
+          // watchForSoftwareEncoder troca depois, se precisar.
+          Promise.race([
+            probeHardwareEncoders(),
+            new Promise<{ h264: boolean; vp9: boolean; av1: boolean }>((r) =>
+              setTimeout(() => r({ h264: true, vp9: false, av1: false }), 1500)
+            ),
+          ]),
           window.electronAPI?.getVideoEncodeSettings?.().catch(() => null) ?? Promise.resolve(null),
         ])
         const preferGpu = encodeSettings ? encodeSettings.preferGpu : true

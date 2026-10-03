@@ -156,6 +156,9 @@ declare global {
       toggleOverlay?: () => Promise<boolean>
       setOverlayCorner?: (corner: OverlayCorner) => Promise<{ corner: OverlayCorner }>
       setOverlayOpacity?: (opacity: number) => Promise<{ corner: OverlayCorner; opacity: number }>
+      getVideoEncodeSettings?: () => Promise<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean }>
+      setPreferGpuEncode?: (preferGpu: boolean) => Promise<{ preferGpu: boolean; activeNow: boolean }>
+      relaunchApp?: () => Promise<void>
       onOverlayVisibilityChanged?: (callback: (visible: boolean) => void) => () => void
       getCurrentGameInfo?: () => Promise<CurrentGameInfo | null>
       checkForUpdatesNow: () => void

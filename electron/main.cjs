@@ -63,7 +63,32 @@ if (!gotSingleInstanceLock) {
 // pelo fallback nativo próprio (screen-capture-wgc.exe, ver
 // createNativeFrameCaptureChannel mais abaixo), que entra sozinho quando a
 // captura normal falha. WGC pra JANELA continua ligado (nunca deu problema).
-app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcWindowCapturer')
+// Transmissão pela PLACA DE VÍDEO (codificador de hardware: NVENC/AMF/
+// QuickSync via Media Foundation) em vez do processador. O Chromium só usa
+// a GPU pra codificar se ela/o driver não estiverem na "lista de
+// bloqueio" interna dele — com isso, muita placa AMD/Intel caía no
+// codificador por software (OpenH264, "H264 (CPU)"), pesando no jogo.
+// Opção em Configurações → Voz e Vídeo (padrão: ligada); vale ao reabrir
+// o app. Se algum driver der problema, a pessoa desliga ali.
+function videoEncodeSettingsPath() {
+  return path.join(app.getPath('userData'), 'video-encode-settings.json')
+}
+function loadPreferGpuEncode() {
+  try {
+    // require local: este trecho roda ANTES do `const fs` lá embaixo.
+    const raw = JSON.parse(require('node:fs').readFileSync(videoEncodeSettingsPath(), 'utf8'))
+    return raw?.preferGpu !== false
+  } catch {
+    return true
+  }
+}
+const preferGpuEncodeAtStartup = loadPreferGpuEncode()
+if (preferGpuEncodeAtStartup && process.platform === 'win32') {
+  app.commandLine.appendSwitch('ignore-gpu-blocklist')
+  app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcWindowCapturer,MediaFoundationVideoEncodeAccelerator')
+} else {
+  app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcWindowCapturer')
+}
 
 // Login com Google — o navegador do sistema não tem como abrir uma
 // janela do Electron diretamente, então o "endereço de volta" pro app
@@ -276,7 +301,28 @@ app.on('child-process-gone', (_event, details) => {
     `child-process-gone: type=${details?.type} reason=${details?.reason} exitCode=${details?.exitCode}` +
       `${details?.serviceName ? ` service=${details.serviceName}` : ''}${details?.name ? ` name=${details.name}` : ''}`
   )
+  // Rede de segurança da "transmissão pela placa de vídeo": cada pessoa
+  // tem uma placa/driver diferente. Se o processo da GPU cair 2 vezes
+  // nesta sessão com o modo GPU forçado, volta sozinho pro modo seguro
+  // (o padrão do Chromium) na próxima abertura e avisa a pessoa — ninguém
+  // fica preso num app instável por causa de um driver ruim.
+  if (details?.type === 'GPU' && details?.reason !== 'clean-exit' && preferGpuEncodeAtStartup) {
+    gpuCrashCount++
+    if (gpuCrashCount >= 2 && !gpuFallbackSaved) {
+      gpuFallbackSaved = true
+      try {
+        fs.writeFileSync(videoEncodeSettingsPath(), JSON.stringify({ preferGpu: false, autoDisabled: true }))
+      } catch {
+        // sem disco — tenta de novo na próxima queda
+        gpuFallbackSaved = false
+      }
+      appendDebugLog('main', 'video: placa de vídeo instável — modo GPU desligado automaticamente pra próxima abertura')
+      sendToMain('video:gpu-auto-disabled')
+    }
+  }
 })
+let gpuCrashCount = 0
+let gpuFallbackSaved = false
 
 // Rede de segurança geral: se algum erro escapar de todos os try/catch
 // (de qualquer parte do app, não só do push-to-talk), isso evita que
@@ -2208,6 +2254,27 @@ app.whenReady().then(() => {
   handleTrusted('overlay:set-visible', (_event, visible) => {
     setOverlayVisible(Boolean(visible))
     return overlayVisible
+  })
+  handleTrusted('video:get-encode-settings', () => {
+    let autoDisabled = false
+    try {
+      autoDisabled = JSON.parse(fs.readFileSync(videoEncodeSettingsPath(), 'utf8'))?.autoDisabled === true
+    } catch {
+      // sem arquivo
+    }
+    return { preferGpu: loadPreferGpuEncode(), activeNow: preferGpuEncodeAtStartup, autoDisabled }
+  })
+  handleTrusted('video:set-prefer-gpu', (_event, preferGpu) => {
+    try {
+      fs.writeFileSync(videoEncodeSettingsPath(), JSON.stringify({ preferGpu: Boolean(preferGpu) }))
+    } catch (err) {
+      appendDebugLog('main', `video: falha ao salvar — ${err?.message ?? err}`)
+    }
+    return { preferGpu: loadPreferGpuEncode(), activeNow: preferGpuEncodeAtStartup }
+  })
+  handleTrusted('app:relaunch', () => {
+    app.relaunch()
+    app.quit()
   })
   handleTrusted('overlay:set-opacity', (_event, opacity) => {
     const n = Number(opacity)

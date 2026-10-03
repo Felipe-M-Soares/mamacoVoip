@@ -58,6 +58,14 @@ export function LocalScreenShareStats() {
       {voice.screenSharePresetLabel && <span className="chip">{voice.screenSharePresetLabel}</span>}
       {text && <span>{text}</span>}
       {limitation && <span className="text-amber-400">· {limitation}</span>}
+      {/* Só vale com vídeo saindo de verdade (sem ninguém assistindo, o
+          envio pausa e o codificador nem chega a ser escolhido). */}
+      {stats?.hardwareEncoder === false && (stats.bitrateKbps ?? 0) > 0 && window.electronAPI?.getVideoEncodeSettings && (
+        <span className="text-amber-400 basis-full text-center">
+          Usando o processador. Ligue "Usar a placa de vídeo na transmissão" em Configurações → Voz e Vídeo e atualize o driver
+          da placa.
+        </span>
+      )}
     </div>
   )
 }

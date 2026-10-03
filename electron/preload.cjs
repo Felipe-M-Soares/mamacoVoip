@@ -64,6 +64,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   toggleOverlay: () => ipcRenderer.invoke('overlay:toggle'),
   setOverlayCorner: (corner) => ipcRenderer.invoke('overlay:set-corner', corner),
   setOverlayOpacity: (opacity) => ipcRenderer.invoke('overlay:set-opacity', opacity),
+  getVideoEncodeSettings: () => ipcRenderer.invoke('video:get-encode-settings'),
+  setPreferGpuEncode: (preferGpu) => ipcRenderer.invoke('video:set-prefer-gpu', preferGpu),
+  relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
   onOverlayVisibilityChanged: (callback) => {
     const handler = (_event, visible) => callback(visible)
     ipcRenderer.on('overlay:visibility-changed', handler)

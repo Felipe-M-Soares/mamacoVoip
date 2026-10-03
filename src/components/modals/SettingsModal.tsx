@@ -1416,6 +1416,7 @@ function AudioTab() {
       <SoundEffectsCard />
 
       <SettingsCard title="Transmissão de tela">
+        {window.electronAPI?.getVideoEncodeSettings && <GpuEncodeRow />}
         <SettingRow
           title="Redução de ruído da transmissão"
           description="Ajuda com chiado/estática constante no áudio da tela/jogo compartilhado — mas como é uma tecnologia feita pra isolar VOZ, ela pode cortar ou abafar sons não-vocais do jogo (tiros, explosões, música). Deixe desligado se quiser o áudio do jogo completo; ligue só se estiver incomodado com chiado."
@@ -1847,5 +1848,45 @@ function SensitivityMeter({
         )}
       </p>
     </div>
+  )
+}
+
+// "Usar a placa de vídeo na transmissão" (app de computador). Vale ao
+// reabrir o app — o motor do Chromium só lê isso na inicialização.
+function GpuEncodeRow() {
+  const [state, setState] = useState<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean } | null>(null)
+  useEffect(() => {
+    window.electronAPI?.getVideoEncodeSettings?.().then(setState).catch(() => {})
+  }, [])
+  if (!state) return null
+  const needsRestart = state.preferGpu !== state.activeNow
+  return (
+    <SettingRow
+      title="Usar a placa de vídeo na transmissão"
+      description="Recomendado pra quem transmite jogo: a placa de vídeo comprime o vídeo num chip próprio e quase não pesa no FPS. Desligue só se a transmissão travar ou ficar com imagem estranha (alguns drivers antigos)."
+      control={
+        <Toggle
+          label="Usar a placa de vídeo na transmissão"
+          checked={state.preferGpu}
+          onChange={(checked) => {
+            window.electronAPI?.setPreferGpuEncode?.(checked).then(setState).catch(() => {})
+          }}
+        />
+      }
+    >
+      {state.autoDisabled && !state.preferGpu && (
+        <p className="mt-2 text-[12.5px] text-amber-300">
+          Desligado automaticamente: a placa de vídeo travou durante o uso. Atualize o driver e ligue de novo se quiser tentar.
+        </p>
+      )}
+      {needsRestart && (
+        <div className="mt-2 flex items-center gap-2 text-[12.5px] text-amber-300">
+          <span>Vale depois de reabrir o app.</span>
+          <button type="button" onClick={() => void window.electronAPI?.relaunchApp?.()} className="btn-secondary h-8 px-3 text-[12.5px]">
+            Reabrir agora
+          </button>
+        </div>
+      )}
+    </SettingRow>
   )
 }

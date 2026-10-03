@@ -18,7 +18,9 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
   const { friends, incoming, outgoing, blocked, sendRequest, acceptRequest, declineRequest, removeFriend, unblockUser } =
     useFriends()
   const { openConversationWith } = useConversations()
-  const [tab, setTab] = useState<Tab>('online')
+  // Abre em "Todos": antes abria em "Online" e parecia que os amigos
+  // offline tinham sumido.
+  const [tab, setTab] = useState<Tab>('all')
   const [addUsername, setAddUsername] = useState('')
   const [addError, setAddError] = useState<string | null>(null)
   const [addSuccess, setAddSuccess] = useState<string | null>(null)
@@ -28,7 +30,16 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
   // escolheu ficar invisível E está de fato conectado agora (ver
   // usePresence.ts) — evita amigo desconectado ficando preso na aba
   // "Online" pra sempre.
-  const onlineFriends = friends.filter((f) => f.profile.status !== 'offline' && onlineIds.has(f.profile.id))
+  const isOnline = (f: (typeof friends)[number]) => f.profile.status !== 'offline' && onlineIds.has(f.profile.id)
+  // Sem repetidos (amizade gravada nos dois sentidos aparecia duas vezes)
+  // e com quem está online primeiro, depois em ordem alfabética.
+  const uniqueFriends = [...new Map(friends.map((f) => [f.profile.id, f])).values()]
+  const sortedFriends = [...uniqueFriends].sort((a, b) => {
+    const diff = Number(isOnline(b)) - Number(isOnline(a))
+    if (diff) return diff
+    return (a.profile.display_name || a.profile.username).localeCompare(b.profile.display_name || b.profile.username, 'pt-BR')
+  })
+  const onlineFriends = sortedFriends.filter(isOnline)
   const pendingCount = incoming.length + outgoing.length
 
   async function handleSendRequest() {
@@ -59,7 +70,7 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
   return (
     <section className="flex-1 flex flex-col min-w-0 bg-mv-main border-t border-l border-[var(--color-line)]">
       <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-4 border-b border-[var(--color-line)] shrink-0 min-w-0">
-        <div className="flex items-center gap-2.5 text-white shrink-0">
+        <div className="max-sm:hidden flex items-center gap-2.5 text-white shrink-0">
           <span className="w-8 h-8 rounded-lg bg-white/[0.05] border border-[var(--color-line)] flex items-center justify-center" aria-hidden="true">
             <MembersIcon className="w-[18px] h-[18px] text-mv-muted" aria-hidden />
           </span>
@@ -77,7 +88,7 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
               role="tab"
               aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
-              className={`h-7 px-3 rounded-lg text-[13px] font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`h-7 px-3 max-sm:px-2.5 rounded-lg text-[13px] max-sm:text-[12.5px] font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
                 tab === t.id
                   ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
                   : 'text-mv-muted hover:text-mv-text hover:bg-white/[0.04]'
@@ -138,6 +149,7 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
         {tab === 'online' && (
           <FriendGrid
             friends={onlineFriends}
+            onlineIds={onlineIds}
             label="Online"
             empty={<EmptyState kind="online" title="Ninguém online agora" hint="Quando seus amigos entrarem, eles aparecem aqui." />}
             onMessage={handleMessage}
@@ -146,7 +158,8 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
         )}
         {tab === 'all' && (
           <FriendGrid
-            friends={friends}
+            friends={sortedFriends}
+            onlineIds={onlineIds}
             label="Todos os amigos"
             empty={<EmptyState kind="friends" title="Você ainda não tem amigos" hint="Adicione alguém pelo nome de usuário aqui em cima." />}
             onMessage={handleMessage}
@@ -321,6 +334,7 @@ function EmptyState({ kind, title, hint }: { kind: 'online' | 'friends' | 'pendi
 function FriendGrid({
   friends,
   label,
+  onlineIds,
   empty,
   onMessage,
   onRemove,
@@ -337,6 +351,8 @@ function FriendGrid({
     }
   }[]
   label: string
+  /** Quem está conectado agora (status salvo no perfil pode estar velho). */
+  onlineIds: Set<string>
   empty: React.ReactNode
   onMessage: (userId: string) => void
   onRemove: (userId: string) => void
@@ -425,8 +441,11 @@ function FriendGrid({
         {label} — {friends.length}
       </p>
       <div className="space-y-0.5">
-      {friends.map((f) => (
-        <div key={f.profile.id}>
+      {friends.map((f) => {
+        const online = f.profile.status !== 'offline' && onlineIds.has(f.profile.id)
+        const shownStatus: ProfileStatus = online ? f.profile.status : 'offline'
+        return (
+        <div key={f.profile.id} className={online ? '' : 'opacity-60 hover:opacity-100 transition-opacity'}>
         <div
           className="flex items-center gap-3 px-2.5 py-2 rounded-xl hover:bg-white/[0.04] transition-colors group border-t border-[var(--color-line)] hover:border-transparent"
           onContextMenu={(e) => {
@@ -438,7 +457,7 @@ function FriendGrid({
             name={f.profile.username}
             avatarUrl={f.profile.avatar_url}
             decorationUrl={f.profile.avatar_decoration_url}
-            status={f.profile.status}
+            status={shownStatus}
             userId={f.profile.id}
             size={40}
           />
@@ -448,7 +467,7 @@ function FriendGrid({
               <span className="ml-1.5 text-xs font-normal text-mv-muted opacity-0 group-hover:opacity-100 transition-opacity">@{f.profile.username}</span>
             </p>
             <p className="text-xs text-mv-muted truncate mt-0.5">
-              {f.profile.custom_status || STATUS_LABEL[f.profile.status] || f.profile.status}
+              {online ? f.profile.custom_status || STATUS_LABEL[shownStatus] : 'Offline'}
             </p>
           </div>
           <button
@@ -489,7 +508,8 @@ function FriendGrid({
           </div>
         )}
         </div>
-      ))}
+        )
+      })}
       </div>
 
       {menuState && contextTarget && <ContextMenu x={menuState.x} y={menuState.y} items={menuItems} onClose={closeMenu} />}

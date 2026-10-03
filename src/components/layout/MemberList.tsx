@@ -154,7 +154,7 @@ export function MemberList({
   return (
     <>
       {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/60 z-40" onClick={onCloseMobile} />
+        <div data-overlay-open className="lg:hidden fixed inset-0 bg-black/60 z-40" onClick={onCloseMobile} />
       )}
       <aside
         aria-label="Membros"

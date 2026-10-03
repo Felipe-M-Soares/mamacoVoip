@@ -8,7 +8,7 @@ import { Avatar } from '../ui/Avatar'
 import { PERMISSIONS, type Permission, type Role } from '../../types/database'
 
 const PERMISSION_LABELS: Record<Permission, string> = {
-  administrator: 'Administrador (ignora todas as outras permissões)',
+  administrator: 'Administrador (pode tudo, inclusive criar cargos e definir quem fica em cada um)',
   manage_server: 'Gerenciar servidor',
   manage_roles: 'Gerenciar cargos',
   manage_channels: 'Gerenciar canais',
@@ -359,7 +359,8 @@ function RoleEditor({
             <span className="chip mb-[0.45rem]">{permissions.size} ativas</span>
           </div>
           <div className="rounded-xl border border-[var(--color-line)] divide-y divide-[var(--color-line)] max-h-64 overflow-y-auto">
-            {PERMISSIONS.map((p) => (
+            {/* "Gerenciar cargos" não aparece: só dono e Administrador mexem em cargos. */}
+            {PERMISSIONS.filter((p) => p !== 'manage_roles').map((p) => (
               <div key={p} className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-white/[0.015]">
                 <span className={`text-[13.5px] ${p === 'administrator' ? 'text-amber-300' : 'text-mv-text'}`}>
                   {PERMISSION_LABELS[p]}

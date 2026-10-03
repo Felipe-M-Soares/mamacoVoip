@@ -1,3 +1,4 @@
+import { useOverlayOpen } from '../../hooks/useOverlayOpen'
 import { Avatar } from './Avatar'
 import { useVoiceMoveRequests } from '../../hooks/useVoiceMoveRequests'
 
@@ -7,7 +8,9 @@ import { useVoiceMoveRequests } from '../../hooks/useVoiceMoveRequests'
 export function VoiceMovedToast() {
   const { notices, dismiss } = useVoiceMoveRequests()
 
+  const overlayOpen = useOverlayOpen()
   if (notices.length === 0) return null
+  if (overlayOpen) return null
 
   return (
     <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[270] flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)]" aria-live="polite">

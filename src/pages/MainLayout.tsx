@@ -297,6 +297,13 @@ function MainLayoutInner() {
   }, [])
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  // O tour guiado abre/fecha o menu lateral no celular pra mostrar o que
+  // fica lá dentro (servidores, canais, seu painel).
+  useEffect(() => {
+    const onDrawer = (e: Event) => setMobileSidebarOpen(Boolean((e as CustomEvent<{ open: boolean }>).detail?.open))
+    window.addEventListener('mv:mobile-drawer', onDrawer)
+    return () => window.removeEventListener('mv:mobile-drawer', onDrawer)
+  }, [])
   // O drawer "mobile" (ServerBar virando um overlay fixed por cima de
   // tudo, escondido/mostrado com um botão de hambúrguer) usa o
   // breakpoint `lg:` do Tailwind (1024px) pra saber quando NÃO é mais
@@ -588,7 +595,7 @@ function MainLayoutInner() {
 
       {/* Overlay escuro atrás do drawer, só em mobile */}
       {!isElectronApp && mobileSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/70 z-30 animate-fade-in" onClick={() => setMobileSidebarOpen(false)} />
+        <div data-overlay-open className="lg:hidden fixed inset-0 bg-black/70 z-30 animate-fade-in" onClick={() => setMobileSidebarOpen(false)} />
       )}
 
       {activeServer ? (

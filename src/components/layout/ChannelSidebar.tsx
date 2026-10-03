@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { useChannels } from '../../hooks/useChannels'
 import { useModeration } from '../../hooks/useModeration'
 import { useVoiceCore, useVoiceSpeaking } from '../../hooks/useVoice'
+import { requestWatchStream } from '../../lib/streamView'
 import { useVoicePresence } from '../../hooks/useVoicePresence'
 import { useChannelMutes } from '../../hooks/useChannelMutes'
 import { useServerEvents } from '../../hooks/useServerEvents'
@@ -180,10 +181,21 @@ function VoiceChannelPresence({
             </SpeakingAvatarRing>
             <span className="text-[13px] text-mv-muted truncate">{name}</span>
             {isSharingScreen && (
-              <span title="Compartilhando tela" className="shrink-0 ml-auto text-[9px] font-bold tracking-wide uppercase px-1.5 py-px rounded bg-rose-500 text-white flex items-center gap-1">
+              // Clique no "Ao vivo" = abre a sala já assistindo essa
+              // transmissão em destaque (não abre o cartão da pessoa).
+              <button
+                type="button"
+                title={id === user?.id ? 'Ver sua transmissão' : `Assistir a transmissão de ${name}`}
+                aria-label={id === user?.id ? 'Ver sua transmissão' : `Assistir a transmissão de ${name}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (serverId) requestWatchStream(serverId, channelId, id === user?.id ? 'local' : id)
+                }}
+                className="shrink-0 ml-auto text-[9px] font-bold tracking-wide uppercase px-1.5 py-px rounded bg-rose-500 hover:bg-rose-400 text-white flex items-center gap-1 transition-colors"
+              >
                 <ScreenShareIcon className="w-2.5 h-2.5" aria-hidden />
                 Ao vivo
-              </span>
+              </button>
             )}
           </div>
         )

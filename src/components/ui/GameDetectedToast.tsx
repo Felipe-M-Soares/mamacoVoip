@@ -1,3 +1,4 @@
+import { useOverlayOpen } from '../../hooks/useOverlayOpen'
 import { useGameJustDetected } from '../../hooks/useGameJustDetected'
 import { useVoiceCore } from '../../hooks/useVoice'
 import { useKeybinds } from '../../lib/keybinds'
@@ -7,7 +8,9 @@ export function GameDetectedToast() {
   const overlayCombo = useKeybinds().bindings['toggle-overlay']
   const voice = useVoiceCore()
 
+  const overlayOpen = useOverlayOpen()
   if (!justDetectedGame) return null
+  if (overlayOpen) return null
 
   const inVoiceCall = Boolean(voice.connectedChannelId)
 

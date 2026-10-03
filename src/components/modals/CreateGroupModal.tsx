@@ -69,7 +69,7 @@ export function CreateGroupModal({
             id="create-group-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Ex: Squad de sexta"
+            placeholder="Ex.: Squad de sexta"
             maxLength={60}
             className="w-full px-3 py-2.5 text-sm bg-mv-canvas text-mv-text outline-none"
           />

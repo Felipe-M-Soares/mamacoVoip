@@ -1,5 +1,7 @@
 import { useVoiceCore } from '../../hooks/useVoice'
+import { useEffect } from 'react'
 import { RemoteAudio } from './CallMediaTiles'
+import { focusStream, getStreamView, resetStreamView, showStream, useStreamView } from '../../lib/streamView'
 
 // TRIGÉSIMA NONA RODADA — bug relatado: navegar pra OUTRO canal (só
 // pra olhar, sem sair da call) parava o áudio da chamada inteiro — voz
@@ -42,25 +44,51 @@ import { RemoteAudio } from './CallMediaTiles'
 // a câmera. E o áudio da tela agora respeita o alto-falante escolhido
 // (antes só a voz usava `sinkId`; o som da transmissão ia sempre pro
 // dispositivo padrão do sistema).
+//
+// Transmissões FECHADAS por você (lib/streamView) não tocam som — antes o
+// áudio de uma transmissão fechada continuava por cima da que você estava
+// assistindo. "Desativar áudio" (ensurdecer) zera tudo aqui, sem mexer no
+// volume geral salvo.
 export function VoiceCallAudio() {
   const voice = useVoiceCore()
+  const { hidden } = useStreamView()
+  const connected = Boolean(voice.connectedChannelId)
 
-  if (!voice.connectedChannelId) return null
+  // Saiu da call: esquece quais transmissões estavam fechadas/em destaque.
+  useEffect(() => {
+    if (!connected) resetStreamView()
+  }, [connected])
+
+  // Quem parou de transmitir sai da lista de "fechadas": se voltar a
+  // transmitir depois, aparece de novo normalmente.
+  const sharingKeys = Object.entries(voice.participants)
+    .filter(([, d]) => d.screenStream)
+    .map(([id]) => id)
+    .sort()
+    .join(',')
+  useEffect(() => {
+    const active = new Set(sharingKeys ? sharingKeys.split(',') : [])
+    if (voice.screenSharing) active.add('local')
+    for (const key of getStreamView().hidden) if (!active.has(key)) showStream(key)
+    const focused = getStreamView().focused
+    if (focused && !active.has(focused)) focusStream(null)
+  }, [sharingKeys, voice.screenSharing])
+
+  if (!connected) return null
 
   const sinkId = voice.audioSettings.speakerId
+  const master = voice.deafened ? 0 : voice.masterVolume / 100
 
   return (
     <>
       {Object.entries(voice.participants).map(([userId, data]) => {
         if (!data.micAudioStream) return null
-        const participantVolume = voice.getParticipantVolume(userId)
-        const effectiveVolume = (voice.masterVolume / 100) * (participantVolume / 100)
+        const effectiveVolume = master * (voice.getParticipantVolume(userId) / 100)
         return <RemoteAudio key={`mic-${userId}`} stream={data.micAudioStream} sinkId={sinkId} volume={effectiveVolume} />
       })}
       {Object.entries(voice.participants).map(([userId, data]) => {
-        if (!data.screenAudioStream) return null
-        const shareVolume = voice.getScreenShareVolume(userId)
-        const effectiveVolume = (voice.masterVolume / 100) * (shareVolume / 100)
+        if (!data.screenAudioStream || hidden.has(userId)) return null
+        const effectiveVolume = master * (voice.getScreenShareVolume(userId) / 100)
         return <RemoteAudio key={`screen-${userId}`} stream={data.screenAudioStream} sinkId={sinkId} volume={effectiveVolume} />
       })}
     </>

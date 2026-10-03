@@ -42,6 +42,7 @@ import {
   UserIcon,
   InfoIcon,
   AdminIcon,
+  MembersIcon,
   type AppIcon,
   KeyboardIcon,
 } from '../ui/icons'
@@ -53,14 +54,28 @@ import {
   type NoiseSuppressor,
   MIN_MIC_SENSITIVITY,
   MAX_MIC_SENSITIVITY,
+  DEFAULT_MIC_SENSITIVITY,
+  createAutoSensitivity,
+  AUTO_SENSITIVITY_TICK_MS,
 } from '../../lib/noiseSuppression'
 
-type Tab = 'account' | 'security' | 'appearance' | 'audio' | 'keybinds' | 'notifications' | 'privacy' | 'licenses' | 'admin'
+type Tab =
+  | 'account'
+  | 'security'
+  | 'appearance'
+  | 'audio'
+  | 'keybinds'
+  | 'notifications'
+  | 'privacy'
+  | 'licenses'
+  | 'admin'
+  | 'admin-users'
 
 // Abas pesadas/raras, carregadas só quando abertas (a de licenças traz o
 // texto inteiro do THIRD_PARTY_NOTICES.md).
 const LicensesTab = lazy(() => import('./LicensesTab').then((m) => ({ default: m.LicensesTab })))
 const AdminReportsTab = lazy(() => import('./AdminReportsTab').then((m) => ({ default: m.AdminReportsTab })))
+const AdminUsersTab = lazy(() => import('./AdminUsersTab').then((m) => ({ default: m.AdminUsersTab })))
 
 // Ícones do menu lateral (Lucide, via ui/icons) — herdam a cor.
 const TAB_ICONS: Record<Tab, AppIcon> = {
@@ -73,6 +88,7 @@ const TAB_ICONS: Record<Tab, AppIcon> = {
   notifications: BellIcon,
   licenses: InfoIcon,
   admin: AdminIcon,
+  'admin-users': MembersIcon,
 }
 
 const TAB_GROUPS: { label: string; tabs: { id: Tab; label: string }[] }[] = [
@@ -102,7 +118,10 @@ const TAB_GROUPS: { label: string; tabs: { id: Tab; label: string }[] }[] = [
 // Só pra equipe do Mamacos Voip (is_app_admin()).
 const ADMIN_GROUP: (typeof TAB_GROUPS)[number] = {
   label: 'Administração',
-  tabs: [{ id: 'admin', label: 'Denúncias da plataforma' }],
+  tabs: [
+    { id: 'admin-users', label: 'Usuários' },
+    { id: 'admin', label: 'Denúncias da plataforma' },
+  ],
 }
 
 function NavIcon({ tab, className = 'w-[18px] h-[18px]' }: { tab: Tab; className?: string }) {
@@ -235,9 +254,9 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
             {tab === 'keybinds' && <KeybindsTab />}
             {tab === 'notifications' && <NotificationsTab />}
             {tab === 'privacy' && <PrivacyTab />}
-            {(tab === 'licenses' || (tab === 'admin' && isAppAdmin)) && (
+            {(tab === 'licenses' || ((tab === 'admin' || tab === 'admin-users') && isAppAdmin)) && (
               <Suspense fallback={<p className="text-[13px] text-mv-muted">Carregando...</p>}>
-                {tab === 'licenses' ? <LicensesTab /> : <AdminReportsTab />}
+                {tab === 'licenses' ? <LicensesTab /> : tab === 'admin-users' ? <AdminUsersTab /> : <AdminReportsTab />}
               </Suspense>
             )}
           </div>
@@ -969,7 +988,7 @@ function AudioTab() {
     const testSuppressor = noiseSuppressorTestRef.current
     if (testSuppressor) {
       if (mode === 'auto') {
-        testSuppressor.setSensitivity(null)
+        testSuppressor.setSensitivity(DEFAULT_MIC_SENSITIVITY)
         startTestAutoSensitivity(testSuppressor)
       } else {
         stopTestAutoSensitivity()
@@ -985,8 +1004,7 @@ function AudioTab() {
   // microfone" lá pra entender a lógica da média móvel assimétrica.
   // Mantido em sincronia de propósito: assim o que a pessoa vê/ouve
   // testando aqui bate com o que acontece numa call de verdade.
-  const testNoiseFloorDbRef = useRef<number | null>(null)
-  const testLastAppliedThresholdDbRef = useRef<number | null>(null)
+  const testAutoRef = useRef(createAutoSensitivity())
   const testAutoIntervalRef = useRef<number | null>(null)
 
   function stopTestAutoSensitivity() {
@@ -994,8 +1012,7 @@ function AudioTab() {
       window.clearInterval(testAutoIntervalRef.current)
       testAutoIntervalRef.current = null
     }
-    testNoiseFloorDbRef.current = null
-    testLastAppliedThresholdDbRef.current = null
+    testAutoRef.current.reset()
   }
 
   function startTestAutoSensitivity(suppressor: NoiseSuppressor) {
@@ -1003,19 +1020,9 @@ function AudioTab() {
     testAutoIntervalRef.current = window.setInterval(() => {
       const level = suppressor.sampleLevelDb()
       if (level === null) return
-      const floor = testNoiseFloorDbRef.current
-      if (floor === null) {
-        testNoiseFloorDbRef.current = level
-        return
-      }
-      testNoiseFloorDbRef.current = level < floor ? floor * 0.7 + level * 0.3 : floor * 0.98 + level * 0.02
-      const threshold = Math.max(-80, Math.min(-20, testNoiseFloorDbRef.current + 12))
-      const last = testLastAppliedThresholdDbRef.current
-      if (last === null || Math.abs(threshold - last) >= 1.5) {
-        testLastAppliedThresholdDbRef.current = threshold
-        suppressor.setSensitivityDb(threshold)
-      }
-    }, 1000)
+      const threshold = testAutoRef.current.push(level)
+      if (threshold !== null) suppressor.setSensitivityDb(threshold)
+    }, AUTO_SENSITIVITY_TICK_MS)
   }
 
   // Aplica o RNNoise na track crua, se a redução de ruído estiver ligada
@@ -1027,7 +1034,7 @@ function AudioTab() {
       const suppressor = await createNoiseSuppressor()
       noiseSuppressorTestRef.current = suppressor
       const isAuto = audio.micSensitivityMode === 'auto'
-      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0], isAuto ? null : audio.micSensitivity, {
+      const processedTrack = suppressor.setInputTrack(rawStream.getAudioTracks()[0], isAuto ? DEFAULT_MIC_SENSITIVITY : audio.micSensitivity, {
         denoise: audio.noiseSuppression,
       })
       if (isAuto) startTestAutoSensitivity(suppressor)

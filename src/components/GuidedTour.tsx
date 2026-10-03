@@ -7,7 +7,9 @@ import { createPortal } from 'react-dom'
 // Passos cujo alvo não está na tela agora (ex.: sem servidor aberto) são
 // pulados sozinhos.
 
-type Step = { target?: string; title: string; text: string }
+// `drawer`: no celular o alvo fica dentro do menu lateral — o tour abre
+// o menu antes de mostrar o passo.
+type Step = { target?: string; title: string; text: string; drawer?: boolean }
 
 const STEPS: Step[] = [
   {
@@ -16,26 +18,31 @@ const STEPS: Step[] = [
   },
   {
     target: '[data-tour="servers"]',
+    drawer: true,
     title: 'Seus servidores',
     text: 'Cada ícone aqui é um servidor: um espaço da sua galera, com canais de texto e de voz.',
   },
   {
     target: '[aria-label="Adicionar um servidor"]',
+    drawer: true,
     title: 'Criar ou entrar num servidor',
     text: 'Clique no + pra criar o seu servidor ou entrar num usando um link de convite.',
   },
   {
     target: '[aria-label="Início"]',
+    drawer: true,
     title: 'Início: amigos e conversas',
     text: 'Aqui ficam seus amigos, pedidos de amizade, conversas privadas e grupos.',
   },
   {
     target: '[data-tour="channels"]',
+    drawer: true,
     title: 'Canais do servidor',
     text: 'Canais com # são de texto. Clique pra conversar. Os com alto-falante são salas de voz.',
   },
   {
     target: '[data-tour="voice-channel"]',
+    drawer: true,
     title: 'Salas de voz',
     text: 'Clique numa sala de voz pra entrar. Lá dá pra falar, ligar a câmera, transmitir a tela do jogo e usar o soundboard. Clicando em alguém da sala você ajusta o volume, manda mensagem e mais.',
   },
@@ -51,11 +58,13 @@ const STEPS: Step[] = [
   },
   {
     target: '[data-tour="user-panel"]',
+    drawer: true,
     title: 'Seu painel',
     text: 'Seu perfil e status, desligar microfone ou fone, e o ping. Durante uma chamada, os controles dela aparecem aqui também.',
   },
   {
     target: '[aria-label="Configurações"]',
+    drawer: true,
     title: 'Configurações',
     text: 'Perfil, temas, microfone e câmera, atalhos de teclado e notificações. Dá pra refazer este tour por lá.',
   },
@@ -65,17 +74,34 @@ const STEPS: Step[] = [
   },
 ]
 
+const isMobileWidth = () => window.innerWidth < 1024
+
+// Só conta alvo VISÍVEL na tela (no celular, o que está no menu lateral
+// fechado fica fora da tela e antes o cartão ia parar fora da tela junto).
 function findTarget(step: Step): HTMLElement | null {
   if (!step.target) return null
-  const el = document.querySelector<HTMLElement>(step.target)
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  return r.width > 0 && r.height > 0 ? el : null
+  const els = Array.from(document.querySelectorAll<HTMLElement>(step.target))
+  for (const el of els) {
+    const r = el.getBoundingClientRect()
+    if (r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < window.innerWidth && r.top < window.innerHeight) return el
+  }
+  return null
+}
+
+function stepAvailable(step: Step): boolean {
+  if (!step.target) return true
+  if (findTarget(step)) return true
+  // No celular, o que mora no menu lateral existe mas está escondido.
+  return Boolean(step.drawer && isMobileWidth() && document.querySelector(step.target))
+}
+
+function setMobileDrawer(open: boolean) {
+  window.dispatchEvent(new CustomEvent('mv:mobile-drawer', { detail: { open } }))
 }
 
 export function GuidedTour({ onClose }: { onClose: () => void }) {
   // Só os passos que dá pra mostrar agora (sem alvo = cartão no centro).
-  const [steps] = useState(() => STEPS.filter((s) => !s.target || findTarget(s)))
+  const [steps] = useState(() => STEPS.filter(stepAvailable))
   const [index, setIndex] = useState(0)
   const [rect, setRect] = useState<DOMRect | null>(null)
   const step = steps[index]
@@ -87,8 +113,21 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
   }, [step])
 
   useLayoutEffect(() => {
+    // Celular: abre o menu lateral nos passos que precisam dele (e fecha
+    // nos outros), e mede depois da animação de abrir.
+    if (isMobileWidth()) {
+      setMobileDrawer(Boolean(step?.drawer))
+      setRect(null)
+      const t = window.setTimeout(measure, 320)
+      return () => window.clearTimeout(t)
+    }
     measure()
-  }, [measure])
+  }, [measure, step])
+
+  // Ao terminar o tour no celular, fecha o menu que ele abriu.
+  useEffect(() => () => {
+    if (isMobileWidth()) setMobileDrawer(false)
+  }, [])
 
   useEffect(() => {
     window.addEventListener('resize', measure)
@@ -118,7 +157,13 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
 
   // Cartão ao lado do destaque (direita, senão esquerda, senão acima/abaixo).
   let cardStyle: React.CSSProperties = { left: (vw - cardW) / 2, top: vh / 2 - 110, width: cardW }
-  if (rect) {
+  if (vw < 640) {
+    // Celular: cartão largo embaixo (ou em cima, se o destaque estiver
+    // na metade de baixo da tela), sem nunca sair da tela.
+    const w = vw - 24
+    cardStyle = rect && rect.top + rect.height / 2 > vh / 2 ? { left: 12, top: 12, width: w } : { left: 12, bottom: 16, width: w }
+    if (!rect) cardStyle = { left: 12, top: vh / 2 - 110, width: w }
+  } else if (rect) {
     const spaceRight = vw - rect.right
     const spaceLeft = rect.left
     if (spaceRight > cardW + 24) cardStyle = { left: rect.right + 16, top: Math.min(Math.max(12, rect.top), vh - 240), width: cardW }
@@ -127,6 +172,10 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
       cardStyle = { left: Math.min(Math.max(12, rect.left), vw - cardW - 12), top: rect.top - 16 - 210, width: cardW }
     else cardStyle = { left: Math.min(Math.max(12, rect.left), vw - cardW - 12), top: Math.min(rect.bottom + 16, vh - 230), width: cardW }
   }
+
+  // Nunca deixa o cartão sair da tela.
+  if (typeof cardStyle.left === 'number') cardStyle.left = Math.min(Math.max(12, cardStyle.left), vw - cardW - 12)
+  if (typeof cardStyle.top === 'number') cardStyle.top = Math.min(Math.max(12, cardStyle.top), vh - 240)
 
   return createPortal(
     <div className="fixed inset-0 z-[2000]" role="dialog" aria-modal="true" aria-label="Tour guiado">

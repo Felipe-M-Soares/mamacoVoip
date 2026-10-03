@@ -28,7 +28,15 @@ import {
   SAFE_MAX_CAPTURE_WIDTH,
   type QualityPreset,
 } from '../hooks/useScreenShareQuality'
-import { createNoiseSuppressor, type NoiseSuppressor, createScreenAudioDenoiser, type ScreenAudioDenoiser } from '../lib/noiseSuppression'
+import {
+  createNoiseSuppressor,
+  type NoiseSuppressor,
+  createScreenAudioDenoiser,
+  type ScreenAudioDenoiser,
+  createAutoSensitivity,
+  AUTO_SENSITIVITY_TICK_MS,
+  DEFAULT_MIC_SENSITIVITY,
+} from '../lib/noiseSuppression'
 import { peekPendingGameShareHint, takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
@@ -1366,7 +1374,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [masterVolume, setMasterVolumeState] = useState<number>(() => {
     try {
       const raw = localStorage.getItem('mamacos-master-volume')
-      return raw ? Number(raw) : 100
+      // "0" salvo era quase sempre resto do bug antigo do ensurdecer.
+      const n = raw ? Number(raw) : 100
+      return Number.isFinite(n) && n > 0 ? n : 100
     } catch {
       return 100
     }
@@ -1420,19 +1430,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     deafenedRef.current = value
     setDeafenedState(value)
   }
-  const preDeafenVolumeRef = useRef(100)
+  // Ensurdecer NÃO mexe mais no volume geral (antes zerava ele: se o app
+  // fechasse ensurdecido, o volume ficava salvo em 0 e tudo parecia
+  // quebrado). Quem toca o áudio (VoiceCallAudio) olha `deafened` direto.
   const preDeafenWasMutedRef = useRef(false)
   function toggleDeafen() {
     if (deafenedRef.current) {
-      setMasterVolume(preDeafenVolumeRef.current)
-      if (!preDeafenWasMutedRef.current && mutedRef.current) toggleMute()
       setDeafened(false)
+      if (!preDeafenWasMutedRef.current && mutedRef.current) toggleMute()
     } else {
-      preDeafenVolumeRef.current = masterVolume
       preDeafenWasMutedRef.current = mutedRef.current
-      setMasterVolume(0)
-      if (!mutedRef.current) toggleMute()
       setDeafened(true)
+      if (!mutedRef.current) toggleMute()
     }
   }
 
@@ -1577,11 +1586,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // `lastAppliedThresholdDbRef` guarda o último limiar já mandado pro
   // worklet, só pra não ficar recriando o gate a cada leitura por causa
   // de variações de menos de 1.5dB (isso geraria um "crepitar" audível).
-  const noiseFloorDbRef = useRef<number | null>(null)
-  const lastAppliedThresholdDbRef = useRef<number | null>(null)
+  const autoSensitivityRef = useRef(createAutoSensitivity())
   function resetAutoSensitivity() {
-    noiseFloorDbRef.current = null
-    lastAppliedThresholdDbRef.current = null
+    autoSensitivityRef.current.reset()
   }
   // TRIGÉSIMA OITAVA RODADA — detecção de fala LOCAL, só pro próprio
   // usuário (ver o comentário grande em cima de
@@ -2140,7 +2147,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // (ver esse useEffect mais abaixo). Usar o valor manual como palpite
     // inicial não faria sentido, já que o objetivo do modo automático é
     // exatamente não depender desse número.
-    const sensitivity = mode === 'auto' ? null : overrides?.micSensitivity ?? audioSettingsRef.current.micSensitivity
+    const sensitivity = mode === 'auto' ? DEFAULT_MIC_SENSITIVITY : overrides?.micSensitivity ?? audioSettingsRef.current.micSensitivity
 
     try {
       const isNewSuppressor = !noiseSuppressorRef.current
@@ -2159,8 +2166,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // limiar calculado muda ≥1.5dB, então depois de qualquer toggle
       // (eco/ganho) ou troca de mic o gate ficava aberto indefinidamente.
       // Reaplica o último limiar aprendido na hora.
-      if (mode === 'auto' && lastAppliedThresholdDbRef.current !== null) {
-        noiseSuppressorRef.current.setSensitivityDb(lastAppliedThresholdDbRef.current)
+      if (mode === 'auto' && autoSensitivityRef.current.current !== null) {
+        noiseSuppressorRef.current.setSensitivityDb(autoSensitivityRef.current.current)
       }
       return processed
     } catch (err) {
@@ -2235,7 +2242,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Ref, não o estado: esta função é chamada pelo handler do Realtime
       // registrado dentro de join() — com o estado, os sons vindos dos
       // OUTROS tocavam sempre com o volume de quando você entrou na call.
-      audio.volume = soundboardVolumeRef.current / 100
+      audio.volume = deafenedRef.current ? 0 : soundboardVolumeRef.current / 100
       // Respeita o alto-falante escolhido nas configurações (antes os
       // efeitos iam sempre pro dispositivo padrão do sistema).
       const sinkId = audioSettingsRef.current.speakerId
@@ -2265,9 +2272,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // já está tocando, não só pro próximo.
   useEffect(() => {
     activeSoundboardAudiosRef.current.forEach((audio) => {
-      audio.volume = soundboardVolume / 100
+      audio.volume = deafened ? 0 : soundboardVolume / 100
     })
-  }, [soundboardVolume])
+  }, [soundboardVolume, deafened])
 
   // Toca o som pra MIM e avisa todo mundo mais no canal de voz pra
   // tocarem o mesmo som aí também — cada um busca e reproduz localmente,
@@ -2681,7 +2688,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         try {
           suppressor = await createNoiseSuppressor()
           const mode = audioSettingsRef.current.micSensitivityMode
-          processed = suppressor.setInputTrack(raw, mode === 'auto' ? null : audioSettingsRef.current.micSensitivity, {
+          processed = suppressor.setInputTrack(raw, mode === 'auto' ? DEFAULT_MIC_SENSITIVITY : audioSettingsRef.current.micSensitivity, {
             denoise: audioSettingsRef.current.noiseSuppression,
           })
         } catch (err) {
@@ -2892,8 +2899,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       noiseSuppressorRef.current = mic.suppressor
       resetAutoSensitivity()
       watchRawMicTrack(mic.raw)
-      mutedRef.current = false
-      setMuted(false)
+      // O mudo escolhido ANTES de entrar (ou na call anterior) continua
+      // valendo — antes entrar na sala sempre desmutava sozinho.
       // A presença pode ainda estar se inscrevendo: o canal é criado de
       // forma síncrona depois do ensureRealtimeAuth(), então registra
       // quando ficar pronto (e descarta se esta entrada já foi cancelada).
@@ -2933,6 +2940,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // estado real (mute + push-to-talk) DEPOIS, senão com
         // push-to-talk ligado o mic começava ABERTO até a 1ª tecla.
         applyMicEnabledState(pushToTalkActiveRef.current)
+        if (mutedRef.current) {
+          ;(micPublicationRef.current?.track as LocalAudioTrack | undefined)?.mute().catch(() => {})
+        }
         applyMicSenderPriority()
       } else {
         // Ouvinte (canal Palco sem permissão de falar): não precisa do
@@ -3099,13 +3109,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setRoomStartedAt(null)
     setConnecting(false)
     setJoiningChannelId(null)
-    mutedRef.current = false
-    setMuted(false)
-    // Se a pessoa saiu da call já "desativada" (deafened), o volume geral
-    // ficou em 0 — sem isso aqui, a próxima call começaria sem áudio
-    // nenhum sem nenhuma pista visual do porquê.
-    if (deafenedRef.current) setMasterVolume(preDeafenVolumeRef.current)
-    setDeafened(false)
+    // Mudo e "áudio desativado" continuam como a pessoa deixou (igual
+    // apps de chat populares) — valem pra próxima call também.
     setVideoEnabled(false)
     setLocalCameraStream(null)
     setScreenSharing(false)
@@ -3157,26 +3162,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const level = suppressor.sampleLevelDb()
       if (level === null) return
 
-      const floor = noiseFloorDbRef.current
-      if (floor === null) {
-        noiseFloorDbRef.current = level
-        return
-      }
-      noiseFloorDbRef.current = level < floor ? floor * 0.7 + level * 0.3 : floor * 0.98 + level * 0.02
-
-      const AUTO_SENSITIVITY_MARGIN_DB = 12
-      const threshold = Math.max(-80, Math.min(-20, noiseFloorDbRef.current + AUTO_SENSITIVITY_MARGIN_DB))
-
-      // Só reaplica se mudou de verdade (>=1.5dB) — o gate é recriado a
-      // cada chamada de setSensitivityDb, então reaplicar a cada segundo
-      // por causa de flutuações mínimas geraria um "clique" audível toda
-      // hora à toa.
-      const last = lastAppliedThresholdDbRef.current
-      if (last === null || Math.abs(threshold - last) >= 1.5) {
-        lastAppliedThresholdDbRef.current = threshold
-        suppressor.setSensitivityDb(threshold)
-      }
-    }, 1000)
+      const threshold = autoSensitivityRef.current.push(level)
+      if (threshold !== null) suppressor.setSensitivityDb(threshold)
+    }, AUTO_SENSITIVITY_TICK_MS)
     return () => clearInterval(interval)
   }, [])
 
@@ -3368,8 +3356,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       if (mode === 'auto') {
         // Recomeça o auto-ajuste com o gate aberto; o loop de
         // sensibilidade automática recalcula o limiar em ~1s.
-        lastAppliedThresholdDbRef.current = null
-        noiseSuppressorRef.current.setSensitivity(null)
+        autoSensitivityRef.current.reset()
+        noiseSuppressorRef.current.setSensitivity(DEFAULT_MIC_SENSITIVITY)
       } else {
         noiseSuppressorRef.current.setSensitivity(overrides.micSensitivity ?? audioSettingsRef.current.micSensitivity)
       }
@@ -3391,8 +3379,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }
 
   function toggleMute() {
-    const track = localStreamRef.current?.getAudioTracks()[0]
-    if (!track) return
+    // Funciona também fora da call (fica valendo quando entrar) e no meio
+    // de uma troca de microfone — antes, sem track no momento, o clique
+    // não fazia nada.
     // Lê dos REFS, não do estado capturado no render: quem chama logo
     // depois de um await (ex.: VoiceChannelView faz `await join(); if
     // (!isSpeaker) toggleMute()`) tinha nas mãos uma versão velha desta

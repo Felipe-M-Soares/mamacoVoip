@@ -39,8 +39,10 @@ export function useModeration(serverId: string | null) {
     if (!grantedError && Array.isArray(granted)) {
       const set = new Set(granted as string[])
       const isAdmin = set.has('administrator')
+      // Cargos (criar, editar e dar/tirar cargo de alguém) são só do dono
+      // e de quem é Administrador — o banco garante o mesmo.
       perms.forEach((p) => {
-        map[p] = isAdmin || set.has(p)
+        map[p] = isAdmin || (p !== 'manage_roles' && set.has(p))
       })
       return map
     }

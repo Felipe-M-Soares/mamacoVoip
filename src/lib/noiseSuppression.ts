@@ -92,6 +92,8 @@ export function sensitivityToOpenThresholdDb(sensitivity: number): number {
   return SENSITIVITY_MAX_DB + t * (SENSITIVITY_MIN_DB - SENSITIVITY_MAX_DB)
 }
 
+export { createAutoSensitivity, AUTO_SENSITIVITY_TICK_MS } from './autoSensitivity'
+
 export interface NoiseSuppressor {
   // Troca qual track BRUTA (do microfone, sem processamento) está sendo
   // filtrada agora — chame de novo sempre que o microfone mudar (troca

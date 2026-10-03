@@ -4799,4 +4799,276 @@ $$;
 -- caracteres aleatórios. Quem tinha link antigo gera um novo.
 delete from public.server_invites where code ~ '^[0-9a-f]{8}$';
 
+-- ============================================================
+-- PARTE 22 — painel de usuários (só administradores da plataforma)
+-- ============================================================
+-- Lista de contas pra quem está em app_admins (com 2FA em dia), base
+-- pras futuras funções pagas. Privacidade:
+--   * NUNCA expõe mensagens, DMs, senhas, IP ou dados de pagamento;
+--   * o e-mail aparece MASCARADO (f***@gmail.com); ver o e-mail completo
+--     é uma ação separada e fica registrada em admin_audit_log;
+--   * toda mudança de plano também fica registrada.
+
+-- Plano de cada conta (quem não tem linha é 'free').
+create table if not exists public.user_plans (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  plan text not null default 'free' check (plan ~ '^[a-z0-9_-]{1,32}$'),
+  expires_at timestamptz,
+  note text check (note is null or char_length(note) <= 500),
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id) on delete set null
+);
+alter table public.user_plans enable row level security;
+drop policy if exists "Usuário vê o próprio plano" on public.user_plans;
+create policy "Usuário vê o próprio plano"
+  on public.user_plans for select to authenticated
+  using (user_id = auth.uid());
+revoke all on table public.user_plans from public, anon, authenticated;
+grant select on table public.user_plans to authenticated;
+
+-- Registro do que os administradores fizeram (quem, o quê, em quem).
+create table if not exists public.admin_audit_log (
+  id bigint generated always as identity primary key,
+  admin_id uuid references auth.users(id) on delete set null,
+  action text not null,
+  target_user_id uuid references auth.users(id) on delete set null,
+  details jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists admin_audit_log_created_idx on public.admin_audit_log (created_at desc);
+alter table public.admin_audit_log enable row level security;
+drop policy if exists "Admins leem o registro" on public.admin_audit_log;
+create policy "Admins leem o registro"
+  on public.admin_audit_log for select to authenticated
+  using (public.is_app_admin());
+revoke all on table public.admin_audit_log from public, anon, authenticated;
+grant select on table public.admin_audit_log to authenticated;
+
+create or replace function public.mask_email(p_email text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case
+    when p_email is null or position('@' in p_email) < 2 then null
+    else left(p_email, 1) || '***' || substr(p_email, position('@' in p_email))
+  end;
+$$;
+revoke execute on function public.mask_email(text) from public, anon;
+
+-- Números gerais.
+create or replace function public.admin_user_stats()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_app_admin() then
+    raise exception 'Acesso negado' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'total', (select count(*) from auth.users where deleted_at is null),
+    'new_7d', (select count(*) from auth.users where deleted_at is null and created_at > now() - interval '7 days'),
+    'new_30d', (select count(*) from auth.users where deleted_at is null and created_at > now() - interval '30 days'),
+    'active_7d', (select count(*) from auth.users where deleted_at is null and last_sign_in_at > now() - interval '7 days'),
+    'paid', (select count(*) from public.user_plans where plan <> 'free' and (expires_at is null or expires_at > now()))
+  );
+end;
+$$;
+revoke execute on function public.admin_user_stats() from public, anon;
+grant execute on function public.admin_user_stats() to authenticated;
+
+-- Lista paginada. p_search procura em nome/@usuário; um e-mail COMPLETO
+-- também acha a conta (sem mostrar o e-mail de volta).
+drop function if exists public.admin_list_users(text, text, int, int);
+create or replace function public.admin_list_users(
+  p_search text default null,
+  p_plan text default null,
+  p_limit int default 50,
+  p_offset int default 0
+)
+returns table (
+  id uuid,
+  username text,
+  display_name text,
+  avatar_url text,
+  email_masked text,
+  provider text,
+  created_at timestamptz,
+  last_sign_in_at timestamptz,
+  email_confirmed boolean,
+  plan text,
+  plan_expires_at timestamptz,
+  plan_note text,
+  server_count bigint,
+  total_count bigint
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_search text := nullif(trim(coalesce(p_search, '')), '');
+  v_like text;
+begin
+  if not public.is_app_admin() then
+    raise exception 'Acesso negado' using errcode = '42501';
+  end if;
+  if v_search is not null then
+    v_search := left(v_search, 100);
+    v_like := '%' || replace(replace(replace(lower(v_search), '\', '\\'), '%', '\%'), '_', '\_') || '%';
+  end if;
+  return query
+  with base as (
+    select
+      u.id,
+      p.username,
+      p.display_name,
+      p.avatar_url,
+      public.mask_email(u.email::text) as email_masked,
+      coalesce(u.raw_app_meta_data->>'provider', 'email') as provider,
+      u.created_at,
+      u.last_sign_in_at,
+      (u.email_confirmed_at is not null) as email_confirmed,
+      case when up.expires_at is not null and up.expires_at <= now() then 'free' else coalesce(up.plan, 'free') end as plan,
+      up.expires_at as plan_expires_at,
+      up.note as plan_note
+    from auth.users u
+    left join public.profiles p on p.id = u.id
+    left join public.user_plans up on up.user_id = u.id
+    where u.deleted_at is null
+      and (
+        v_search is null
+        or lower(coalesce(p.username, '')) like v_like
+        or lower(coalesce(p.display_name, '')) like v_like
+        or lower(u.email::text) = lower(v_search)
+        or u.id::text = v_search
+      )
+  ),
+  filtered as (
+    select * from base b where p_plan is null or p_plan = '' or b.plan = p_plan
+  )
+  select
+    f.id, f.username, f.display_name, f.avatar_url, f.email_masked, f.provider,
+    f.created_at, f.last_sign_in_at, f.email_confirmed, f.plan, f.plan_expires_at, f.plan_note,
+    (select count(*) from public.server_members sm where sm.user_id = f.id) as server_count,
+    count(*) over () as total_count
+  from filtered f
+  order by f.created_at desc
+  limit greatest(1, least(coalesce(p_limit, 50), 200))
+  offset greatest(0, coalesce(p_offset, 0));
+end;
+$$;
+revoke execute on function public.admin_list_users(text, text, int, int) from public, anon;
+grant execute on function public.admin_list_users(text, text, int, int) to authenticated;
+
+-- Ver o e-mail completo de UMA conta (suporte/cobrança). Fica registrado.
+create or replace function public.admin_reveal_email(p_user_id uuid)
+returns text
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_email text;
+begin
+  if not public.is_app_admin() then
+    raise exception 'Acesso negado' using errcode = '42501';
+  end if;
+  select u.email::text into v_email from auth.users u where u.id = p_user_id;
+  insert into public.admin_audit_log (admin_id, action, target_user_id)
+  values (auth.uid(), 'reveal_email', p_user_id);
+  return v_email;
+end;
+$$;
+revoke execute on function public.admin_reveal_email(uuid) from public, anon;
+grant execute on function public.admin_reveal_email(uuid) to authenticated;
+
+-- Define o plano de uma conta ('free' remove). Fica registrado.
+create or replace function public.admin_set_user_plan(
+  p_user_id uuid,
+  p_plan text,
+  p_expires_at timestamptz default null,
+  p_note text default null
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_plan text := lower(trim(coalesce(p_plan, 'free')));
+begin
+  if not public.is_app_admin() then
+    raise exception 'Acesso negado' using errcode = '42501';
+  end if;
+  if v_plan !~ '^[a-z0-9_-]{1,32}$' then
+    raise exception 'Plano inválido';
+  end if;
+  if not exists (select 1 from auth.users where id = p_user_id) then
+    raise exception 'Conta não encontrada';
+  end if;
+  if v_plan = 'free' then
+    delete from public.user_plans where user_id = p_user_id;
+  else
+    insert into public.user_plans (user_id, plan, expires_at, note, updated_at, updated_by)
+    values (p_user_id, v_plan, p_expires_at, nullif(left(trim(coalesce(p_note, '')), 500), ''), now(), auth.uid())
+    on conflict (user_id) do update
+      set plan = excluded.plan,
+          expires_at = excluded.expires_at,
+          note = excluded.note,
+          updated_at = now(),
+          updated_by = auth.uid();
+  end if;
+  insert into public.admin_audit_log (admin_id, action, target_user_id, details)
+  values (auth.uid(), 'set_plan', p_user_id, jsonb_build_object('plan', v_plan, 'expires_at', p_expires_at));
+end;
+$$;
+revoke execute on function public.admin_set_user_plan(uuid, text, timestamptz, text) from public, anon;
+grant execute on function public.admin_set_user_plan(uuid, text, timestamptz, text) to authenticated;
+
+-- ============================================================
+-- PARTE 23 — cargos só com o dono ou um Administrador
+-- ============================================================
+-- Criar/editar/excluir/reordenar cargos e decidir quem fica em cada um
+-- deixa de valer pela permissão "Gerenciar cargos" sozinha: agora exige
+-- ser o DONO do servidor ou ter um cargo com "Administrador". Todas as
+-- funções de cargo checam has_permission(..., 'manage_roles'), então a
+-- regra vale pra todas de uma vez. As demais permissões não mudam.
+create or replace function public.has_permission(p_server_id uuid, p_user_id uuid, p_permission text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    (p_user_id = auth.uid() or exists (
+      select 1 from public.server_members where server_id = p_server_id and user_id = auth.uid()
+    ))
+    and (
+      exists (select 1 from public.servers where id = p_server_id and owner_id = p_user_id)
+      or (
+        exists (select 1 from public.server_members where server_id = p_server_id and user_id = p_user_id)
+        and exists (
+          select 1
+          from public.server_member_roles smr
+          join public.roles r on r.id = smr.role_id
+          where smr.server_id = p_server_id
+            and smr.user_id = p_user_id
+            and (
+              r.permissions @> array['administrator']
+              or (p_permission <> 'manage_roles' and r.permissions @> array[p_permission])
+            )
+        )
+      )
+    );
+$$;
+
 notify pgrst, 'reload schema';

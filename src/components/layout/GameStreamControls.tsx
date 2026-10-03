@@ -62,8 +62,8 @@ export function LocalScreenShareStats() {
           envio pausa e o codificador nem chega a ser escolhido). */}
       {stats?.hardwareEncoder === false && (stats.bitrateKbps ?? 0) > 0 && window.electronAPI?.getVideoEncodeSettings && (
         <span className="text-amber-400 basis-full text-center">
-          Usando o processador. Ligue "Usar a placa de vídeo na transmissão" em Configurações → Voz e Vídeo e atualize o driver
-          da placa.
+          Usando o processador: a placa de vídeo não liberou a codificação. Veja o que ela suporta em Configurações → Voz e
+          Vídeo — atualizar o driver costuma resolver.
         </span>
       )}
     </div>

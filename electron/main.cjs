@@ -2272,6 +2272,14 @@ app.whenReady().then(() => {
     }
     return { preferGpu: loadPreferGpuEncode(), activeNow: preferGpuEncodeAtStartup }
   })
+  // Diagnóstico: o Chromium liberou codificação de vídeo pela GPU aqui?
+  handleTrusted('video:gpu-status', () => {
+    try {
+      return { videoEncode: String(app.getGPUFeatureStatus()?.video_encode ?? 'desconhecido') }
+    } catch {
+      return { videoEncode: 'desconhecido' }
+    }
+  })
   handleTrusted('app:relaunch', () => {
     app.relaunch()
     app.quit()

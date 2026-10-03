@@ -58,6 +58,7 @@ import {
   createAutoSensitivity,
   AUTO_SENSITIVITY_TICK_MS,
 } from '../../lib/noiseSuppression'
+import { probeHardwareEncoders, type HwEncodeSupport } from '../../lib/hwEncode'
 
 type Tab =
   | 'account'
@@ -1855,8 +1856,12 @@ function SensitivityMeter({
 // reabrir o app — o motor do Chromium só lê isso na inicialização.
 function GpuEncodeRow() {
   const [state, setState] = useState<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean } | null>(null)
+  const [hw, setHw] = useState<HwEncodeSupport | null>(null)
+  const [gpuStatus, setGpuStatus] = useState<string | null>(null)
   useEffect(() => {
     window.electronAPI?.getVideoEncodeSettings?.().then(setState).catch(() => {})
+    void probeHardwareEncoders().then(setHw)
+    window.electronAPI?.getGpuStatus?.().then((r) => setGpuStatus(r.videoEncode)).catch(() => {})
   }, [])
   if (!state) return null
   const needsRestart = state.preferGpu !== state.activeNow
@@ -1874,6 +1879,23 @@ function GpuEncodeRow() {
         />
       }
     >
+      {hw && (
+        <p className="mt-2 text-[12px] text-mv-muted">
+          Sua placa comprime:{' '}
+          {(['h264', 'vp9', 'av1'] as const).map((c, i) => (
+            <span key={c}>
+              {i > 0 && ' · '}
+              <span className={hw[c] ? 'text-mv-green' : 'text-mv-muted/70 line-through'}>{c === 'h264' ? 'H.264' : c.toUpperCase()}</span>
+            </span>
+          ))}
+          {!hw.h264 && !hw.vp9 && !hw.av1
+            ? ' — nenhum liberado, então a transmissão usa o processador. Atualizar o driver da placa costuma resolver.'
+            : ' — a transmissão usa o primeiro disponível.'}
+          {gpuStatus && gpuStatus !== 'enabled' && (
+            <span className="block text-[11px] mt-0.5">Status do codificador de vídeo no app: {gpuStatus}</span>
+          )}
+        </p>
+      )}
       {state.autoDisabled && !state.preferGpu && (
         <p className="mt-2 text-[12.5px] text-amber-300">
           Desligado automaticamente: a placa de vídeo travou durante o uso. Atualize o driver e ligue de novo se quiser tentar.

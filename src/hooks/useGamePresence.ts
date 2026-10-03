@@ -159,6 +159,7 @@ declare global {
       getVideoEncodeSettings?: () => Promise<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean }>
       setPreferGpuEncode?: (preferGpu: boolean) => Promise<{ preferGpu: boolean; activeNow: boolean }>
       relaunchApp?: () => Promise<void>
+      getGpuStatus?: () => Promise<{ videoEncode: string }>
       onOverlayVisibilityChanged?: (callback: (visible: boolean) => void) => () => void
       getCurrentGameInfo?: () => Promise<CurrentGameInfo | null>
       checkForUpdatesNow: () => void

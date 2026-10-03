@@ -37,6 +37,7 @@ import {
   AUTO_SENSITIVITY_TICK_MS,
   DEFAULT_MIC_SENSITIVITY,
 } from '../lib/noiseSuppression'
+import { chooseScreenCodec, probeHardwareEncoders, type ScreenCodec } from '../lib/hwEncode'
 import { peekPendingGameShareHint, takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
@@ -362,7 +363,7 @@ async function applyVideoQualityConstraints(
 // suspeitamos derrubar o processo. Se, mesmo depois do teto acima, o quadro
 // continuar grande demais (a redução não pegou), usa VP8, que não tem esse
 // limite, em vez de arriscar o H.264.
-function pickScreenShareCodec(settings: { width: number; height: number }, context: string): 'h264' | 'vp8' {
+function pickScreenShareCodec(settings: { width: number; height: number }, context: string): ScreenCodec {
   if (exceedsH264FrameLimits(settings.width, settings.height)) {
     logDebug(`${context}: quadro ${settings.width}x${settings.height} acima do limite do H.264 — publicando em VP8`)
     return 'vp8'
@@ -1587,6 +1588,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // worklet, só pra não ficar recriando o gate a cada leitura por causa
   // de variações de menos de 1.5dB (isso geraria um "crepitar" audível).
   const autoSensitivityRef = useRef(createAutoSensitivity())
+  // Já descobre o que a placa de vídeo codifica (leva alguns ms) pra não
+  // atrasar o início da transmissão.
+  useEffect(() => {
+    if (window.electronAPI?.isElectron) void probeHardwareEncoders()
+  }, [])
   function resetAutoSensitivity() {
     autoSensitivityRef.current.reset()
   }
@@ -3756,7 +3762,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // esperar — o encoder começava com o quadro do monitor inteiro). Ver
       // applyVideoQualityConstraints acima. Nunca lança: se falhar, segue.
       const finalVideoSettings = await applyVideoQualityConstraints(videoTrack, preset, 'toggleScreenShare')
-      const screenVideoCodec = pickScreenShareCodec(finalVideoSettings, 'toggleScreenShare')
+      // Formato pela PLACA DE VÍDEO de quem transmite: se ela não codifica
+      // H.264 por hardware (comum em AMD/Intel no Chromium do Windows),
+      // usa VP9/AV1 por hardware em vez de cair no processador.
+      let screenVideoCodec: ScreenCodec = pickScreenShareCodec(finalVideoSettings, 'toggleScreenShare')
+      if (screenVideoCodec === 'h264') {
+        const [hw, encodeSettings] = await Promise.all([
+          probeHardwareEncoders(),
+          window.electronAPI?.getVideoEncodeSettings?.().catch(() => null) ?? Promise.resolve(null),
+        ])
+        const preferGpu = encodeSettings ? encodeSettings.preferGpu : true
+        screenVideoCodec = chooseScreenCodec(hw, preferGpu)
+        logDebug(
+          `toggleScreenShare: codificador de hardware — H264=${hw.h264} VP9=${hw.vp9} AV1=${hw.av1} (preferir GPU=${preferGpu}) → ${screenVideoCodec}`
+        )
+      }
       // QUINTA RODADA: vídeo e áudio agora são COMPLETAMENTE
       // independentes — `stream` (acima) só tem vídeo. Tenta primeiro a
       // captura por processo (isola só o som do jogo, quando o PID foi
@@ -3904,6 +3924,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             source: Track.Source.ScreenShare,
             videoCodec: screenVideoCodec,
             backupCodec: false,
+            // VP9/AV1 no LiveKit pedem um modo de camadas; L1T3 = uma
+            // resolução só (sem codificar duas vezes), igual o H.264.
+            ...(screenVideoCodec === 'vp9' || screenVideoCodec === 'av1' ? { scalabilityMode: 'L1T3' as const } : {}),
             screenShareEncoding: {
               maxBitrate: preset.maxBitrate,
               maxFramerate: preset.frameRate,

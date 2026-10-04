@@ -23,7 +23,7 @@ interface ChannelsContextValue {
   deleteChannel: (channelId: string) => Promise<{ error: string | null }>
   createCategory: (name: string) => Promise<{ error: string | null }>
   updateCategory: (categoryId: string, name: string) => Promise<{ error: string | null }>
-  deleteCategory: (categoryId: string) => Promise<{ error: string | null }>
+  deleteCategory: (categoryId: string, alsoChannels?: boolean) => Promise<{ error: string | null }>
   moveChannel: (channelId: string, categoryId: string | null, direction: 'up' | 'down') => Promise<{ error: string | null }>
   moveChannelToCategory: (
     channelId: string,
@@ -185,8 +185,17 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
-  async function deleteCategory(categoryId: string) {
+  // alsoChannels: exclui junto os canais que estão nela. Sem isso, os
+  // canais continuam no servidor, só que sem categoria.
+  async function deleteCategory(categoryId: string, alsoChannels = false) {
     try {
+      if (alsoChannels) {
+        const ids = channels.filter((c) => c.category_id === categoryId).map((c) => c.id)
+        if (ids.length) {
+          const { error: chErr } = await supabase.from('channels').delete().in('id', ids)
+          if (chErr) return { error: describeError(chErr, 'Não foi possível excluir os canais da categoria.') }
+        }
+      }
       const { error } = await supabase.from('categories').delete().eq('id', categoryId)
       if (error) return { error: describeError(error, 'Não foi possível excluir a categoria.') }
       await refresh()

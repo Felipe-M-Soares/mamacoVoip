@@ -14,7 +14,7 @@ import { usePinnedItems } from '../../hooks/usePinnedItems'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
 import { Avatar } from '../ui/Avatar'
-import type { Channel, ChannelType, Profile, Server } from '../../types/database'
+import type { Category, Channel, ChannelType, Profile, Server } from '../../types/database'
 import { channelNameFor, orderChannels } from '../../lib/channelName'
 import { lazyModal } from '../modals/lazyModal'
 import { supabase } from '../../lib/supabase'
@@ -40,6 +40,7 @@ const ServerSettingsModal = lazyModal(() => import('../modals/ServerSettingsModa
 const LeaveServerModal = lazyModal(() => import('../modals/LeaveServerModal').then((m) => m.LeaveServerModal))
 const CreateChannelModal = lazyModal(() => import('../modals/CreateChannelModal').then((m) => m.CreateChannelModal))
 const CreateCategoryModal = lazyModal(() => import('../modals/CreateCategoryModal').then((m) => m.CreateCategoryModal))
+const EditCategoryModal = lazyModal(() => import('../modals/EditCategoryModal').then((m) => m.EditCategoryModal))
 const EditChannelModal = lazyModal(() => import('../modals/EditChannelModal').then((m) => m.EditChannelModal))
 const EventsModal = lazyModal(() => import('../modals/EventsModal').then((m) => m.EventsModal))
 const RolesManagerModal = lazyModal(() => import('../modals/RolesManagerModal').then((m) => m.RolesManagerModal))
@@ -513,6 +514,9 @@ export function ChannelSidebar({
   const [draggedChannelId, setDraggedChannelId] = useState<string | null>(null)
   const [contextChannel, setContextChannel] = useState<Channel | null>(null)
   const { menuState, openMenu, closeMenu } = useContextMenuState()
+  const [editingCategory, setEditingCategory] = useState<{ category: Category; deleting?: boolean } | null>(null)
+  const [contextCategory, setContextCategory] = useState<Category | null>(null)
+  const categoryMenu = useContextMenuState()
 
   function handleChannelContextMenu(e: React.MouseEvent, channel: Channel) {
     setContextChannel(channel)
@@ -616,7 +620,10 @@ export function ChannelSidebar({
   const canManageRoles = isOwner || permissions.manage_roles
   const canViewAuditLog = isOwner || permissions.view_audit_log
 
-  const uncategorizedGroups = orderChannels(channels.filter((c) => c.category_id === null))
+  // Sala AFK: sempre a última da lista, fora das categorias.
+  const afkChannel = server.afk_channel_id ? channels.find((c) => c.id === server.afk_channel_id) : undefined
+  const listed = afkChannel ? channels.filter((c) => c.id !== afkChannel.id) : channels
+  const uncategorizedGroups = orderChannels(listed.filter((c) => c.category_id === null))
   // Chat de texto "par" de uma sala de voz: mesmo nome, mesma categoria.
   function pairedTextChannel(voiceChannel: Channel): Channel | undefined {
     const slug = channelNameFor('text', voiceChannel.name)
@@ -839,7 +846,7 @@ export function ChannelSidebar({
         )}
 
         {sortedCategories.map((category) => {
-          const groups = orderChannels(channels.filter((c) => c.category_id === category.id))
+          const groups = orderChannels(listed.filter((c) => c.category_id === category.id))
           const collapsed = collapsedCategories.has(category.id)
 
           return (
@@ -855,12 +862,17 @@ export function ChannelSidebar({
               <div
                 className="px-1 mb-1 flex items-center justify-between rounded cursor-pointer select-none"
                 onClick={() => toggleCategoryCollapse(category.id)}
+                onContextMenu={(e) => {
+                  if (!canManageChannels) return
+                  setContextCategory(category)
+                  categoryMenu.openMenu(e)
+                }}
               >
                 <div className="flex items-center gap-1 min-w-0">
                   <InlineEditableLabel
                     value={category.name}
-                    editable={isOwner}
-                    onSave={(name) => updateCategory(category.id, name)}
+                    editable={canManageChannels}
+                    onSave={(name) => updateCategory(category.id, name.trim())}
                     className="text-[12px] font-semibold text-mv-muted truncate group-hover/category:text-mv-text transition-colors"
                   />
                   <svg
@@ -873,7 +885,7 @@ export function ChannelSidebar({
                   </svg>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  {isOwner && (
+                  {canManageChannels && (
                     <>
                       <button
                         title="Mover categoria para cima"
@@ -898,6 +910,19 @@ export function ChannelSidebar({
                         <ChevronDownIcon className="w-3 h-3" aria-hidden />
                       </button>
                     </>
+                  )}
+                  {canManageChannels && (
+                    <button
+                      title="Editar ou excluir categoria"
+                      aria-label={`Editar ou excluir a categoria ${category.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditingCategory({ category })
+                      }}
+                      className="hidden group-hover/category:block text-mv-muted hover:text-white"
+                    >
+                      <SettingsIcon className="w-3.5 h-3.5" aria-hidden />
+                    </button>
                   )}
                   {canManageChannels && (
                     <button
@@ -926,6 +951,12 @@ export function ChannelSidebar({
             </div>
           )
         })}
+        {afkChannel && (
+          <div>
+            <SectionHeader label="Ausentes (AFK)" createLabel="" />
+            <div className="space-y-0.5">{renderChannel(afkChannel)}</div>
+          </div>
+        )}
         </>
         )}
       </div>
@@ -995,6 +1026,27 @@ export function ChannelSidebar({
       {showRoles && <RolesManagerModal serverId={server.id} onClose={() => setShowRoles(false)} />}
       {showModeration && <ModerationLogModal serverId={server.id} onClose={() => setShowModeration(false)} />}
 
+      {editingCategory && (
+        <EditCategoryModal
+          category={editingCategory.category}
+          startDeleting={editingCategory.deleting}
+          onClose={() => setEditingCategory(null)}
+        />
+      )}
+      {categoryMenu.menuState && contextCategory && (
+        <ContextMenu
+          x={categoryMenu.menuState.x}
+          y={categoryMenu.menuState.y}
+          onClose={categoryMenu.closeMenu}
+          items={[
+            { label: 'Criar canal aqui', onClick: () => setShowCreateChannel({ categoryId: contextCategory.id }) },
+            { label: 'Editar categoria', divider: true, onClick: () => setEditingCategory({ category: contextCategory }) },
+            { label: 'Mover para cima', onClick: () => moveCategory(contextCategory.id, 'up') },
+            { label: 'Mover para baixo', onClick: () => moveCategory(contextCategory.id, 'down') },
+            { label: 'Excluir categoria', danger: true, divider: true, onClick: () => setEditingCategory({ category: contextCategory, deleting: true }) },
+          ]}
+        />
+      )}
       {menuState && contextChannel && (
         <ContextMenu
           x={menuState.x}

@@ -3193,9 +3193,27 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const afkConfigRef = useRef<{ channelId: string | null; timeoutMinutes: number } | null>(null)
   const lastActivityRef = useRef(Date.now())
 
+  // Quem entra na sala AFK (sozinho ou mandado pelo app) fica mudo. Ao
+  // sair dela pra outra sala, o microfone volta como estava antes.
+  const afkForcedMuteRef = useRef<{ wasMuted: boolean } | null>(null)
+  const enforceAfkMute = useCallback(() => {
+    const afkId = afkConfigRef.current?.channelId
+    const inAfk = Boolean(afkId && connectedChannelIdRef.current === afkId)
+    if (inAfk) {
+      if (!afkForcedMuteRef.current) afkForcedMuteRef.current = { wasMuted: mutedRef.current }
+      if (!mutedRef.current) toggleMuteRef.current?.({ silent: true })
+    } else if (afkForcedMuteRef.current && connectedChannelIdRef.current) {
+      const { wasMuted } = afkForcedMuteRef.current
+      afkForcedMuteRef.current = null
+      if (!wasMuted && mutedRef.current) toggleMuteRef.current?.({ silent: true })
+    }
+  }, [])
+  const toggleMuteRef = useRef<((opts?: { silent?: boolean }) => void) | null>(null)
+
   useEffect(() => {
     if (!connectedServerId) {
       afkConfigRef.current = null
+      afkForcedMuteRef.current = null
       return
     }
     supabase
@@ -3207,8 +3225,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         afkConfigRef.current = data
           ? { channelId: data.afk_channel_id, timeoutMinutes: data.afk_timeout_minutes }
           : null
+        enforceAfkMute()
       })
-  }, [connectedServerId])
+  }, [connectedServerId, enforceAfkMute])
 
   useEffect(() => {
     function markActive() {
@@ -3230,12 +3249,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (speaking) lastActivityRef.current = Date.now()
   }, [speaking])
 
+  useEffect(() => {
+    enforceAfkMute()
+  }, [connectedChannelId, enforceAfkMute])
+
   // De onde a pessoa foi tirada pelo AFK — volta pra lá quando ela voltar.
   const afkReturnRef = useRef<{ channelId: string; serverId: string; wasMuted: boolean } | null>(null)
 
   useEffect(() => {
     let busy = false
     const interval = setInterval(async () => {
+      enforceAfkMute()
       const config = afkConfigRef.current
       if (busy || !connectedRef.current || !config?.channelId || !connectedChannelId || !connectedServerId) return
       // Inatividade = sem mexer no app, sem falar E (no app de computador)
@@ -3281,7 +3305,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
     }, 15_000)
     return () => clearInterval(interval)
-  }, [connectedChannelId, connectedServerId, leave, join])
+  }, [connectedChannelId, connectedServerId, leave, join, enforceAfkMute])
 
   // Operações que trocam o microfone (trocar dispositivo, reaplicar
   // constraints, recuperar de um mic desplugado) rodam em FILA, uma por
@@ -3483,6 +3507,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     })
   }
 
+  toggleMuteRef.current = toggleMute
   function toggleMute(opts?: { silent?: boolean }) {
     // Clicar no MICROFONE com o áudio desativado: reativa o áudio e o
     // microfone juntos (antes ligava o mic e a tela continuava mostrando
@@ -3501,6 +3526,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // função, com `muted` de ANTES do join — e o "mutar ouvinte do palco"
     // podia acabar DESmutando.
     const newMuted = !mutedRef.current
+    // Na sala AFK o microfone fica sempre desligado.
+    const afkId = afkConfigRef.current?.channelId
+    if (!newMuted && afkId && connectedChannelIdRef.current === afkId) {
+      setError('Na sala AFK o microfone fica desligado. Entre em outra sala para falar.')
+      return
+    }
     // Ouvinte (sem permissão de publicar) não tem o que desmutar.
     if (!newMuted && !canPublishRef.current) {
       setError(NO_PUBLISH_PERMISSION_MESSAGE)

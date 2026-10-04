@@ -1,6 +1,7 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { describeError } from '../lib/errors'
+import { channelNameFor, orderChannels } from '../lib/channelName'
 import { useAuth } from '../hooks/useAuth'
 import type { Category, Channel, ChannelType } from '../types/database'
 
@@ -107,12 +108,30 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   // criar canal virava "sem erro, mas o canal nunca aparece".
   async function createChannel(name: string, type: ChannelType, categoryId: string | null, isStage = false, userLimit = 0, isNsfw = false) {
     try {
-      const position = channels.filter((c) => c.category_id === categoryId).length
-      const { error } = await supabase
-        .from('channels')
-        // is_nsfw só vai no insert quando ligado: assim criar canal comum
-        // continua funcionando mesmo num banco que ainda não rodou a 015.
-        .insert({ server_id: serverId, name, type, category_id: categoryId, position, is_stage: isStage, user_limit: userLimit, ...(isNsfw ? { is_nsfw: true } : {}) })
+      const siblings = channels.filter((c) => c.category_id === categoryId)
+      const position = siblings.reduce((m, c) => Math.max(m, c.position + 1), 0)
+      const rows: Array<{
+        server_id: string
+        name: string
+        type: ChannelType
+        category_id: string | null
+        position: number
+        is_stage: boolean
+        user_limit: number
+        is_nsfw?: boolean
+      }> = []
+      // Sala de voz (que não é palco) nasce junto com um chat de texto de
+      // mesmo nome na mesma categoria — se ainda não existir um.
+      if (type === 'voice' && !isStage) {
+        const textName = channelNameFor('text', name)
+        if (!siblings.some((c) => c.type === 'text' && c.name === textName)) {
+          rows.push({ server_id: serverId, name: textName, type: 'text', category_id: categoryId, position, is_stage: false, user_limit: 0 })
+        }
+      }
+      // is_nsfw só vai no insert quando ligado: assim criar canal comum
+      // continua funcionando mesmo num banco que ainda não rodou a 015.
+      rows.push({ server_id: serverId, name, type, category_id: categoryId, position: position + rows.length, is_stage: isStage, user_limit: userLimit, ...(isNsfw ? { is_nsfw: true } : {}) })
+      const { error } = await supabase.from('channels').insert(rows)
       if (error) return { error: describeError(error, 'Não foi possível criar o canal.') }
       await refresh()
       return { error: null }
@@ -179,12 +198,16 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
 
   async function moveChannel(channelId: string, categoryId: string | null, direction: 'up' | 'down') {
     try {
-      const siblings = channels.filter((c) => c.category_id === categoryId).sort((a, b) => a.position - b.position)
+      // Na lista os canais de texto vêm antes das salas de voz: só troca de
+      // lugar com um vizinho do MESMO tipo.
+      const groups = orderChannels(channels.filter((c) => c.category_id === categoryId))
+      const siblings = [...groups.text, ...groups.voice]
       const index = siblings.findIndex((c) => c.id === channelId)
       if (index === -1) return { error: null }
 
       const targetIndex = direction === 'up' ? index - 1 : index + 1
       if (targetIndex < 0 || targetIndex >= siblings.length) return { error: null }
+      if (siblings[targetIndex].type !== siblings[index].type) return { error: null }
 
       const reordered = [...siblings]
       ;[reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]]
@@ -206,9 +229,8 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   // específico dentro dela. Se não passar beforeChannelId, vai pro fim.
   async function moveChannelToCategory(channelId: string, categoryId: string | null, beforeChannelId?: string | null) {
     try {
-      const targetSiblings = channels
-        .filter((c) => c.category_id === categoryId && c.id !== channelId)
-        .sort((a, b) => a.position - b.position)
+      const targetGroups = orderChannels(channels.filter((c) => c.category_id === categoryId && c.id !== channelId))
+      const targetSiblings = [...targetGroups.text, ...targetGroups.voice]
 
       let orderedIds: string[]
       const insertIndex = beforeChannelId ? targetSiblings.findIndex((c) => c.id === beforeChannelId) : -1

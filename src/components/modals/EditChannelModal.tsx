@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { channelNameFor } from '../../lib/channelName'
 import { Modal } from './Modal'
 import { Toggle } from '../ui/Toggle'
 import { CheckMark, ToggleRow } from './settingsUI'
@@ -38,7 +39,7 @@ export function EditChannelModal({
 
   async function handleSave() {
     setError(null)
-    const cleanName = name.trim().toLowerCase().replace(/\s+/g, '-')
+    const cleanName = channelNameFor(channel.type, name)
     if (cleanName.length < 1) {
       setError('O nome não pode ficar vazio.')
       return

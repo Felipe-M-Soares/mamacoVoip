@@ -5102,7 +5102,7 @@ declare
 begin
   insert into public.channels (server_id, name, type, position) values
     (new.id, 'geral', 'text', 0),
-    (new.id, 'Sala Geral', 'voice', 1);
+    (new.id, 'Geral', 'voice', 1);
   insert into public.channels (server_id, name, type, position)
   values (new.id, 'AFK', 'voice', 999)
   returning id into v_afk;
@@ -5126,5 +5126,40 @@ begin
 end $$;
 -- Quem estava no padrão antigo (10 min) passa pros 20 min.
 update public.servers set afk_timeout_minutes = 20 where afk_timeout_minutes = 10;
+
+-- PARTE 25 — Cada sala de voz tem o seu chat de texto (mesmo nome, mesma
+-- categoria). O app cria os dois juntos; aqui completa as salas que já
+-- existiam. Roda UMA vez só (marcador abaixo): se o admin excluir algum
+-- chat depois, rodar este arquivo de novo não recria.
+create table if not exists public.app_once_flags (
+  key text primary key,
+  done_at timestamptz not null default now()
+);
+alter table public.app_once_flags enable row level security;
+revoke all on public.app_once_flags from anon, authenticated;
+
+do $$
+begin
+  if not exists (select 1 from public.app_once_flags where key = 'voice_text_pairs_2026_10') then
+    insert into public.channels (server_id, category_id, name, type, position)
+    select distinct on (v.server_id, v.category_id, v.slug)
+      v.server_id, v.category_id, left(v.slug, 100), 'text', v.position
+    from (
+      select c.*, lower(regexp_replace(btrim(c.name), '\s+', '-', 'g')) as slug
+      from public.channels c
+      where c.type = 'voice' and not c.is_stage
+        and not exists (select 1 from public.servers s where s.afk_channel_id = c.id)
+    ) v
+    where char_length(v.slug) >= 1
+      and not exists (
+        select 1 from public.channels t
+        where t.server_id = v.server_id and t.type = 'text'
+          and t.category_id is not distinct from v.category_id
+          and t.name = v.slug
+      )
+    order by v.server_id, v.category_id, v.slug, v.position;
+    insert into public.app_once_flags (key) values ('voice_text_pairs_2026_10');
+  end if;
+end $$;
 
 notify pgrst, 'reload schema';

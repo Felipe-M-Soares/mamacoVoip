@@ -14,7 +14,8 @@ import { usePinnedItems } from '../../hooks/usePinnedItems'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
 import { Avatar } from '../ui/Avatar'
-import type { Channel, Profile, Server } from '../../types/database'
+import type { Channel, ChannelType, Profile, Server } from '../../types/database'
+import { channelNameFor, orderChannels } from '../../lib/channelName'
 import { lazyModal } from '../modals/lazyModal'
 import { supabase } from '../../lib/supabase'
 import {
@@ -26,7 +27,7 @@ import {
   isVoiceMemberDrag,
   type VoiceMemberDragPayload,
 } from '../../lib/voiceMove'
-import { AnnouncementIcon, BellOffIcon, CalendarIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, LockIcon, PinIcon, PlusIcon, ScreenShareIcon, SettingsIcon, TextChannelIcon, VoiceChannelIcon, WarningIcon } from '../ui/icons'
+import { AddFriendIcon, AnnouncementIcon, BellOffIcon, MessageIcon, CalendarIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, LockIcon, PinIcon, PlusIcon, ScreenShareIcon, SettingsIcon, TextChannelIcon, VoiceChannelIcon, WarningIcon } from '../ui/icons'
 import { copyText } from '../../lib/copyText'
 import { prefetchLiveKitToken } from '../../lib/livekit'
 import { clearVoiceRoster, setVoiceRoster } from '../../lib/voiceRoster'
@@ -287,6 +288,20 @@ function InlineEditableLabel({
   )
 }
 
+// Separador de seção ("Canais de texto", "Salas de voz") com o "+" de criar.
+function SectionHeader({ label, onCreate, createLabel }: { label: string; onCreate?: () => void; createLabel: string }) {
+  return (
+    <div className="px-1 mb-1 flex items-center justify-between select-none">
+      <span className="text-[12px] font-semibold text-mv-muted truncate">{label}</span>
+      {onCreate && (
+        <button title={createLabel} aria-label={createLabel} onClick={onCreate} className="text-mv-muted hover:text-white shrink-0">
+          <PlusIcon className="w-4 h-4" aria-hidden />
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ChannelRow({
   channel,
   active,
@@ -297,14 +312,15 @@ function ChannelRow({
   isDragOver,
   onSelect,
   onEdit,
-  onMoveUp,
-  onMoveDown,
   onDragStart,
   onDragOver,
   onDragLeave,
   onDrop,
   onRename,
   onContextMenu,
+  canManage,
+  onOpenChat,
+  onInvite,
 }: {
   channel: Channel
   active: boolean
@@ -313,10 +329,11 @@ function ChannelRow({
   pinned: boolean
   isOwner: boolean
   isDragOver: boolean
+  canManage: boolean
+  onOpenChat?: () => void
+  onInvite: () => void
   onSelect: () => void
   onEdit: () => void
-  onMoveUp: () => void
-  onMoveDown: () => void
   onDragStart: (e: React.DragEvent) => void
   onDragOver: (e: React.DragEvent) => void
   onDragLeave: () => void
@@ -400,30 +417,33 @@ function ChannelRow({
         <BellOffIcon className="w-3.5 h-3.5 text-mv-muted shrink-0" aria-hidden />
       )}
 
-      {isOwner && (
-        <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+      {/* Atalhos ao passar o mouse: chat da sala, convidar e configurar. */}
+      <div className={`${active ? 'flex' : 'hidden group-hover:flex'} items-center gap-1 shrink-0`}>
+        {onOpenChat && (
           <button
-            title="Mover para cima"
-            aria-label="Mover canal para cima"
+            title="Abrir o chat desta sala"
+            aria-label={`Abrir o chat de ${channel.name}`}
             onClick={(e) => {
               e.stopPropagation()
-              onMoveUp()
+              onOpenChat()
             }}
-            className="w-5 h-5 flex items-center justify-center hover:text-white"
+            className="w-5 h-5 flex items-center justify-center text-mv-muted hover:text-white"
           >
-            <ChevronUpIcon className="w-3.5 h-3.5" aria-hidden />
+            <MessageIcon className="w-3.5 h-3.5" aria-hidden />
           </button>
-          <button
-            title="Mover para baixo"
-            aria-label="Mover canal para baixo"
-            onClick={(e) => {
-              e.stopPropagation()
-              onMoveDown()
-            }}
-            className="w-5 h-5 flex items-center justify-center hover:text-white"
-          >
-            <ChevronDownIcon className="w-3.5 h-3.5" aria-hidden />
-          </button>
+        )}
+        <button
+          title="Convidar pessoas"
+          aria-label="Convidar pessoas"
+          onClick={(e) => {
+            e.stopPropagation()
+            onInvite()
+          }}
+          className="w-5 h-5 flex items-center justify-center text-mv-muted hover:text-white"
+        >
+          <AddFriendIcon className="w-3.5 h-3.5" aria-hidden />
+        </button>
+        {canManage && (
           <button
             title="Editar canal"
             aria-label="Editar canal"
@@ -431,12 +451,12 @@ function ChannelRow({
               e.stopPropagation()
               onEdit()
             }}
-            className="w-5 h-5 flex items-center justify-center hover:text-white"
+            className="w-5 h-5 flex items-center justify-center text-mv-muted hover:text-white"
           >
             <SettingsIcon className="w-3.5 h-3.5" aria-hidden />
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -487,7 +507,7 @@ export function ChannelSidebar({
   const [showInviteFriends, setShowInviteFriends] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showLeave, setShowLeave] = useState(false)
-  const [showCreateChannel, setShowCreateChannel] = useState<{ categoryId: string | null } | null>(null)
+  const [showCreateChannel, setShowCreateChannel] = useState<{ categoryId: string | null; type?: ChannelType } | null>(null)
   const [showCreateCategory, setShowCreateCategory] = useState(false)
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
   const [draggedChannelId, setDraggedChannelId] = useState<string | null>(null)
@@ -596,7 +616,61 @@ export function ChannelSidebar({
   const canManageRoles = isOwner || permissions.manage_roles
   const canViewAuditLog = isOwner || permissions.view_audit_log
 
-  const uncategorized = channels.filter((c) => c.category_id === null).sort((a, b) => a.position - b.position)
+  const uncategorizedGroups = orderChannels(channels.filter((c) => c.category_id === null))
+  // Chat de texto "par" de uma sala de voz: mesmo nome, mesma categoria.
+  function pairedTextChannel(voiceChannel: Channel): Channel | undefined {
+    const slug = channelNameFor('text', voiceChannel.name)
+    return channels.find((c) => c.type === 'text' && c.category_id === voiceChannel.category_id && c.name === slug)
+  }
+  function renderChannel(channel: Channel) {
+    const paired = channel.type === 'voice' ? pairedTextChannel(channel) : undefined
+    return (
+      <Fragment key={channel.id}>
+        <ChannelRow
+          channel={channel}
+          active={activeChannelId === channel.id}
+          unread={unreadChannelIds.has(channel.id)}
+          muted={mutedChannelIds.has(channel.id)}
+          pinned={pinnedIds.has(channel.id)}
+          isOwner={isOwner}
+          canManage={canManageChannels}
+          isDragOver={(dragOverTarget === channel.id && draggedChannelId !== channel.id) || memberDropTarget === channel.id}
+          onSelect={() => onSelectChannel(channel)}
+          onOpenChat={paired ? () => onSelectChannel(paired) : undefined}
+          onInvite={() => setShowInvite(true)}
+          onEdit={() => setEditingChannel(channel)}
+          onDragStart={(e) => handleDragStart(e, channel.id)}
+          onDragOver={(e) => handleDragOverChannel(e, channel)}
+          onDragLeave={() => {
+            setDragOverTarget(null)
+            setMemberDropTarget(null)
+          }}
+          onDrop={(e) => handleDropOnChannel(e, channel)}
+          onRename={(name) => updateChannel(channel.id, { name: channelNameFor(channel.type, name) })}
+          onContextMenu={(e) => handleChannelContextMenu(e, channel)}
+        />
+        {channel.type === 'voice' && (
+          <VoiceChannelPresence
+            channelId={channel.id}
+            profileById={profileById}
+            userLimit={channel.user_limit}
+            serverId={server.id}
+            ownerId={server.owner_id}
+            isOwner={isOwner}
+            canMoveMembers={canMoveMembers}
+            onMemberDragStart={setMemberDrag}
+            onMemberDragEnd={() => {
+              setMemberDrag(null)
+              setMemberDropTarget(null)
+            }}
+            onDragOver={(e) => handleMemberDragOver(e, channel)}
+            onDragLeave={() => setMemberDropTarget(null)}
+            onDrop={(e) => handleMemberDrop(e, channel)}
+          />
+        )}
+      </Fragment>
+    )
+  }
   const sortedCategories = [...categories].sort((a, b) => a.position - b.position)
   return (
     <aside data-tour="channels" className="w-64 bg-mv-side flex flex-col shrink-0 rounded-tl-[var(--radius-panel)] border-l border-t border-[var(--color-line)] overflow-hidden">
@@ -735,68 +809,38 @@ export function ChannelSidebar({
           )}
         </button>
 
-        {uncategorized.length > 0 && (
+        {(uncategorizedGroups.text.length > 0 || uncategorizedGroups.voice.length > 0) && (
           <div
-            className={`space-y-0.5 rounded ${dragOverTarget === 'uncategorized' ? 'bg-white/5' : ''}`}
+            className={`space-y-4 rounded ${dragOverTarget === 'uncategorized' ? 'bg-white/5' : ''}`}
             onDragOver={(e) => handleDragOverCategory(e, 'uncategorized')}
             onDrop={(e) => handleDropOnCategory(e, null)}
           >
-            {uncategorized.map((channel) => (
-              <Fragment key={channel.id}>
-                <ChannelRow
-                  channel={channel}
-                  active={activeChannelId === channel.id}
-                  unread={unreadChannelIds.has(channel.id)}
-                  muted={mutedChannelIds.has(channel.id)}
-                  pinned={pinnedIds.has(channel.id)}
-                  isOwner={isOwner}
-                  isDragOver={(dragOverTarget === channel.id && draggedChannelId !== channel.id) || memberDropTarget === channel.id}
-                  onSelect={() => onSelectChannel(channel)}
-                  onEdit={() => setEditingChannel(channel)}
-                  onMoveUp={() => moveChannel(channel.id, null, 'up')}
-                  onMoveDown={() => moveChannel(channel.id, null, 'down')}
-                  onDragStart={(e) => handleDragStart(e, channel.id)}
-                  onDragOver={(e) => handleDragOverChannel(e, channel)}
-                  onDragLeave={() => {
-                    setDragOverTarget(null)
-                    setMemberDropTarget(null)
-                  }}
-                  onDrop={(e) => handleDropOnChannel(e, channel)}
-                  onRename={(name) => updateChannel(channel.id, { name: name.toLowerCase().replace(/\s+/g, "-") })}
-                  onContextMenu={(e) => handleChannelContextMenu(e, channel)}
+            {uncategorizedGroups.text.length > 0 && (
+              <div>
+                <SectionHeader
+                  label="Canais de texto"
+                  onCreate={canManageChannels ? () => setShowCreateChannel({ categoryId: null, type: 'text' }) : undefined}
+                  createLabel="Criar canal de texto"
                 />
-                {channel.type === 'voice' && (
-                  <VoiceChannelPresence
-                    channelId={channel.id}
-                    profileById={profileById}
-                    userLimit={channel.user_limit}
-                    serverId={server.id}
-                    ownerId={server.owner_id}
-                    isOwner={isOwner}
-                    canMoveMembers={canMoveMembers}
-                    onMemberDragStart={setMemberDrag}
-                    onMemberDragEnd={() => {
-                      setMemberDrag(null)
-                      setMemberDropTarget(null)
-                    }}
-                    onDragOver={(e) => handleMemberDragOver(e, channel)}
-                    onDragLeave={() => setMemberDropTarget(null)}
-                    onDrop={(e) => handleMemberDrop(e, channel)}
-                  />
-                )}
-              </Fragment>
-            ))}
+                <div className="space-y-0.5">{uncategorizedGroups.text.map((c) => renderChannel(c))}</div>
+              </div>
+            )}
+            {uncategorizedGroups.voice.length > 0 && (
+              <div>
+                <SectionHeader
+                  label="Salas de voz"
+                  onCreate={canManageChannels ? () => setShowCreateChannel({ categoryId: null, type: 'voice' }) : undefined}
+                  createLabel="Criar sala de voz"
+                />
+                <div className="space-y-0.5">{uncategorizedGroups.voice.map((c) => renderChannel(c))}</div>
+              </div>
+            )}
           </div>
         )}
 
-        {uncategorized.length > 0 && sortedCategories.length > 0 && (
-          <div className="h-px bg-white/10 mx-1" />
-        )}
-
         {sortedCategories.map((category) => {
-          const categoryChannels = channels
-            .filter((c) => c.category_id === category.id)
-            .sort((a, b) => a.position - b.position)
+          const groups = orderChannels(channels.filter((c) => c.category_id === category.id))
+          const collapsed = collapsedCategories.has(category.id)
 
           return (
             <div
@@ -813,46 +857,49 @@ export function ChannelSidebar({
                 onClick={() => toggleCategoryCollapse(category.id)}
               >
                 <div className="flex items-center gap-1 min-w-0">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    className={`w-3 h-3 shrink-0 text-mv-muted transition-transform ${
-                      collapsedCategories.has(category.id) ? '-rotate-90' : ''
-                    }`}
-                  >
-                    <path d="M12 16a1 1 0 0 1-.7-.3l-6-6a1 1 0 1 1 1.4-1.4L12 13.6l5.3-5.3a1 1 0 0 1 1.4 1.4l-6 6a1 1 0 0 1-.7.3z" />
-                  </svg>
                   <InlineEditableLabel
                     value={category.name}
                     editable={isOwner}
-                    onSave={(name) => updateCategory(category.id, name.toUpperCase())}
-                    className="text-[11px] font-semibold uppercase text-mv-muted tracking-[0.08em] truncate group-hover/category:text-mv-text transition-colors"
+                    onSave={(name) => updateCategory(category.id, name)}
+                    className="text-[12px] font-semibold text-mv-muted truncate group-hover/category:text-mv-text transition-colors"
                   />
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className={`w-3 h-3 shrink-0 text-mv-muted transition-transform ${collapsed ? '-rotate-90' : ''}`}
+                    aria-hidden
+                  >
+                    <path d="M12 16a1 1 0 0 1-.7-.3l-6-6a1 1 0 1 1 1.4-1.4L12 13.6l5.3-5.3a1 1 0 0 1 1.4 1.4l-6 6a1 1 0 0 1-.7.3z" />
+                  </svg>
                 </div>
-                {isOwner && (
-                  <div className="hidden group-hover/category:flex items-center gap-1 shrink-0">
-                    <button
-                      title="Mover categoria para cima"
-                      aria-label="Mover categoria para cima"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        moveCategory(category.id, 'up')
-                      }}
-                      className="text-mv-muted hover:text-white"
-                    >
-                      <ChevronUpIcon className="w-3 h-3" aria-hidden />
-                    </button>
-                    <button
-                      title="Mover categoria para baixo"
-                      aria-label="Mover categoria para baixo"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        moveCategory(category.id, 'down')
-                      }}
-                      className="text-mv-muted hover:text-white"
-                    >
-                      <ChevronDownIcon className="w-3 h-3" aria-hidden />
-                    </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {isOwner && (
+                    <>
+                      <button
+                        title="Mover categoria para cima"
+                        aria-label="Mover categoria para cima"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          moveCategory(category.id, 'up')
+                        }}
+                        className="hidden group-hover/category:block text-mv-muted hover:text-white"
+                      >
+                        <ChevronUpIcon className="w-3 h-3" aria-hidden />
+                      </button>
+                      <button
+                        title="Mover categoria para baixo"
+                        aria-label="Mover categoria para baixo"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          moveCategory(category.id, 'down')
+                        }}
+                        className="hidden group-hover/category:block text-mv-muted hover:text-white"
+                      >
+                        <ChevronDownIcon className="w-3 h-3" aria-hidden />
+                      </button>
+                    </>
+                  )}
+                  {canManageChannels && (
                     <button
                       title="Criar canal nesta categoria"
                       aria-label="Criar canal nesta categoria"
@@ -862,58 +909,18 @@ export function ChannelSidebar({
                       }}
                       className="text-mv-muted hover:text-white"
                     >
-                      <PlusIcon className="w-3.5 h-3.5" aria-hidden />
+                      <PlusIcon className="w-4 h-4" aria-hidden />
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-              {!collapsedCategories.has(category.id) && (
+              {!collapsed && (
                 <div className="space-y-0.5">
-                  {categoryChannels.map((channel) => (
-                    <Fragment key={channel.id}>
-                      <ChannelRow
-                        channel={channel}
-                        active={activeChannelId === channel.id}
-                        unread={unreadChannelIds.has(channel.id)}
-                        muted={mutedChannelIds.has(channel.id)}
-                        pinned={pinnedIds.has(channel.id)}
-                        isOwner={isOwner}
-                        isDragOver={(dragOverTarget === channel.id && draggedChannelId !== channel.id) || memberDropTarget === channel.id}
-                        onSelect={() => onSelectChannel(channel)}
-                        onEdit={() => setEditingChannel(channel)}
-                        onMoveUp={() => moveChannel(channel.id, category.id, 'up')}
-                        onMoveDown={() => moveChannel(channel.id, category.id, 'down')}
-                        onDragStart={(e) => handleDragStart(e, channel.id)}
-                        onDragOver={(e) => handleDragOverChannel(e, channel)}
-                        onDragLeave={() => {
-                          setDragOverTarget(null)
-                          setMemberDropTarget(null)
-                        }}
-                        onDrop={(e) => handleDropOnChannel(e, channel)}
-                        onRename={(name) => updateChannel(channel.id, { name: name.toLowerCase().replace(/\s+/g, '-') })}
-                        onContextMenu={(e) => handleChannelContextMenu(e, channel)}
-                      />
-                      {channel.type === 'voice' && (
-                        <VoiceChannelPresence
-                    channelId={channel.id}
-                    profileById={profileById}
-                    userLimit={channel.user_limit}
-                    serverId={server.id}
-                    ownerId={server.owner_id}
-                    isOwner={isOwner}
-                    canMoveMembers={canMoveMembers}
-                    onMemberDragStart={setMemberDrag}
-                    onMemberDragEnd={() => {
-                      setMemberDrag(null)
-                      setMemberDropTarget(null)
-                    }}
-                    onDragOver={(e) => handleMemberDragOver(e, channel)}
-                    onDragLeave={() => setMemberDropTarget(null)}
-                    onDrop={(e) => handleMemberDrop(e, channel)}
-                  />
-                      )}
-                    </Fragment>
-                  ))}
+                  {groups.text.map((c) => renderChannel(c))}
+                  {groups.text.length > 0 && groups.voice.length > 0 && (
+                    <div className="h-px bg-[var(--color-line)] mx-2 !my-1.5" aria-hidden />
+                  )}
+                  {groups.voice.map((c) => renderChannel(c))}
                 </div>
               )}
             </div>
@@ -971,6 +978,7 @@ export function ChannelSidebar({
         <CreateChannelModal
           categories={sortedCategories}
           defaultCategoryId={showCreateChannel.categoryId}
+          defaultType={showCreateChannel.type}
           onClose={() => setShowCreateChannel(null)}
         />
       )}

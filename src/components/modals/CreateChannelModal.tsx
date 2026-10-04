@@ -5,19 +5,22 @@ import { OptionCard, ToggleRow } from './settingsUI'
 import { useChannels } from '../../hooks/useChannels'
 import type { Category, ChannelType } from '../../types/database'
 import { TextChannelIcon, VoiceChannelIcon } from '../ui/icons'
+import { channelNameFor } from '../../lib/channelName'
 
 export function CreateChannelModal({
   categories,
   defaultCategoryId,
+  defaultType = 'text',
   onClose,
 }: {
   categories: Category[]
   defaultCategoryId?: string | null
+  defaultType?: ChannelType
   onClose: () => void
 }) {
   const { createChannel } = useChannels()
   const [name, setName] = useState('')
-  const [type, setType] = useState<ChannelType>('text')
+  const [type, setType] = useState<ChannelType>(defaultType)
   const [isStage, setIsStage] = useState(false)
   const [userLimit, setUserLimit] = useState(0)
   const [isNsfw, setIsNsfw] = useState(false)
@@ -27,7 +30,7 @@ export function CreateChannelModal({
 
   async function handleSubmit() {
     setError(null)
-    const cleanName = name.trim().toLowerCase().replace(/\s+/g, '-')
+    const cleanName = channelNameFor(type, name)
     if (cleanName.length < 1) {
       setError('Dê um nome ao canal.')
       return
@@ -45,6 +48,9 @@ export function CreateChannelModal({
   return (
     <Modal
       title="Criar canal"
+      description={
+        categoryId ? `em ${categories.find((c) => c.id === categoryId)?.name ?? ''}` : undefined
+      }
       onClose={onClose}
       footer={
         <>
@@ -85,18 +91,34 @@ export function CreateChannelModal({
             Nome do canal
           </label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-mv-muted pointer-events-none" aria-hidden="true">
-              {type === 'text' ? '#' : '🔊'}
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-mv-muted pointer-events-none flex" aria-hidden="true">
+              {type === 'text' ? (
+                <TextChannelIcon className="w-4 h-4" aria-hidden />
+              ) : (
+                <VoiceChannelIcon className="w-4 h-4" aria-hidden />
+              )}
             </span>
             <input
               id="create-channel-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="novo-canal"
-              className="w-full pl-8 pr-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
+              placeholder={type === 'text' ? 'novo-canal' : 'Nova sala'}
+              className="w-full pl-9 pr-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
             />
           </div>
+          {type === 'voice' && !isStage && (
+            <p className="text-[12px] text-mv-muted mt-1.5">
+              Junto com a sala de voz é criado um chat de texto com o mesmo nome
+              {name.trim() ? (
+                <>
+                  {' '}
+                  (<span className="text-mv-text">#{channelNameFor('text', name)}</span>)
+                </>
+              ) : null}
+              . Dá pra editar ou excluir cada um separado depois.
+            </p>
+          )}
         </div>
 
         {type === 'text' && (

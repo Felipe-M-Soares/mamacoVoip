@@ -15,7 +15,7 @@ export function CreateCategoryModal({ onClose }: { onClose: () => void }) {
       return
     }
     setLoading(true)
-    const { error } = await createCategory(name.trim().toUpperCase())
+    const { error } = await createCategory(name.trim())
     setLoading(false)
     if (error) {
       setError(error)

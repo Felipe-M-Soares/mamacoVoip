@@ -162,6 +162,7 @@ declare global {
       getVideoEncodeSettings?: () => Promise<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean }>
       setPreferGpuEncode?: (preferGpu: boolean) => Promise<{ preferGpu: boolean; activeNow: boolean }>
       relaunchApp?: () => Promise<void>
+      setTitleBarColors?: (colors: { color: string; symbolColor: string }) => Promise<boolean>
       getAutoStart?: () => Promise<{ enabled: boolean; supported: boolean }>
       setAutoStart?: (enabled: boolean) => Promise<{ enabled: boolean; supported: boolean }>
       getSystemIdleSeconds?: () => Promise<number | null>

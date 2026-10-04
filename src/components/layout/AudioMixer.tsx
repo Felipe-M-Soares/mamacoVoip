@@ -1,6 +1,7 @@
 import { Avatar } from '../ui/Avatar'
 import { useVoiceCore } from '../../hooks/useVoice'
 import { focusStream, hideStream, showStream, useStreamView } from '../../lib/streamView'
+import { rememberVolume, toggleVolumeMute } from '../../lib/muteMemory'
 import type { Profile } from '../../types/database'
 
 // Mixer de áudio da chamada: UM lugar só pra todos os volumes, separado
@@ -61,7 +62,7 @@ function VolumeRow({
           type="range"
           min={0}
           max={max}
-          step={5}
+          step={1}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
           aria-label={`Volume de ${label}`}
@@ -115,9 +116,12 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
           sublabel="Soundboard"
           value={voice.soundboardVolume}
           max={100}
-          onChange={voice.setSoundboardVolume}
+          onChange={(v) => {
+            rememberVolume('soundboard', v)
+            voice.setSoundboardVolume(v)
+          }}
           muted={voice.soundboardVolume === 0}
-          onToggleMute={() => voice.setSoundboardVolume(voice.soundboardVolume === 0 ? 70 : 0)}
+          onToggleMute={() => toggleVolumeMute('soundboard', voice.soundboardVolume, voice.setSoundboardVolume, 70)}
         />
       </div>
 
@@ -134,10 +138,13 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
                 label={nameOf(id)}
                 avatar={avatarOf(id)}
                 value={v}
-                max={200}
-                onChange={(nv) => voice.setParticipantVolume(id, nv)}
+                max={100}
+                onChange={(nv) => {
+                  rememberVolume(`voice:${id}`, nv)
+                  voice.setParticipantVolume(id, nv)
+                }}
                 muted={v === 0}
-                onToggleMute={() => voice.setParticipantVolume(id, v === 0 ? 100 : 0)}
+                onToggleMute={() => toggleVolumeMute(`voice:${id}`, v, (nv) => voice.setParticipantVolume(id, nv), 100)}
               />
             )
           })}
@@ -160,12 +167,15 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
                 sublabel={isHidden ? 'Fechada (sem som)' : hasAudio ? 'Som da transmissão' : 'Sem áudio'}
                 avatar={avatarOf(id)}
                 value={v}
-                max={200}
-                onChange={(nv) => voice.setScreenShareVolume(id, nv)}
+                max={100}
+                onChange={(nv) => {
+                  rememberVolume(`screen:${id}`, nv)
+                  voice.setScreenShareVolume(id, nv)
+                }}
                 muted={v === 0 || isHidden}
                 onToggleMute={() => {
                   if (isHidden) showStream(id)
-                  else voice.setScreenShareVolume(id, v === 0 ? 60 : 0)
+                  else toggleVolumeMute(`screen:${id}`, v, (nv) => voice.setScreenShareVolume(id, nv), 60)
                 }}
                 extra={
                   <button
@@ -182,7 +192,7 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
         </div>
       )}
       <p className="text-[10.5px] text-mv-muted px-1 mt-2 leading-snug">
-        Tudo aqui vale só pra você. Acima de 100% reforça quem está baixo.
+        Tudo aqui vale só pra você.
       </p>
     </div>
   )

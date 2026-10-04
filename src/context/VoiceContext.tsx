@@ -1466,7 +1466,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }
 
   function getParticipantVolume(userId: string): number {
-    return participantVolumes[userId] ?? 100
+    return Math.min(100, participantVolumes[userId] ?? 100)
   }
 
   function setParticipantVolume(userId: string, volume: number) {
@@ -1476,7 +1476,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // exatamente como chegou, sem reforço nenhum possível. Ver o GainNode
     // novo em RemoteAudio (CallMediaTiles.tsx), que agora sabe amplificar
     // de verdade acima de 100%, não só atenuar.
-    const clamped = Math.max(0, Math.min(200, volume))
+    // Teto em 100% (pedido): o controle vai de 0 a 100, livre de 1 em 1.
+    const clamped = Math.round(Math.max(0, Math.min(100, volume)))
     setParticipantVolumes((prev) => {
       const next = { ...prev, [userId]: clamped }
       try {
@@ -1503,7 +1504,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // Som do jogo de uma transmissão costuma ser bem mais alto que voz —
   // começa em 60% (dá pra subir no mixer).
   function getScreenShareVolume(userId: string): number {
-    return screenShareVolumes[userId] ?? 60
+    return Math.min(100, screenShareVolumes[userId] ?? 60)
   }
 
   function setScreenShareVolume(userId: string, volume: number) {
@@ -1511,7 +1512,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // valia pro volume de cada PARTICIPANTE (ver setParticipantVolume
     // acima) — sem isso, uma transmissão com o som do jogo/app baixo
     // não tinha jeito nenhum de ser reforçada, só atenuada.
-    const clamped = Math.max(0, Math.min(200, volume))
+    // Teto em 100% (pedido): o controle vai de 0 a 100, livre de 1 em 1.
+    const clamped = Math.round(Math.max(0, Math.min(100, volume)))
     setScreenShareVolumesState((prev) => {
       const next = { ...prev, [userId]: clamped }
       try {

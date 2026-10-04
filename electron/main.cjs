@@ -1135,6 +1135,25 @@ const OVERLAY_MARGIN = 24
 const OVERLAY_CORNERS = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right'])
 let overlaySettingsCache = null
 
+// Cores dos botões nativos da janela = cores do tema escolhido. Ficam
+// salvas pra janela já abrir com a cor certa (sem piscar outra cor).
+const TITLEBAR_HEX = /^#[0-9a-f]{6}$/i
+function titleBarColorsPath() {
+  return path.join(app.getPath('userData'), 'titlebar-colors.json')
+}
+function loadTitleBarColors() {
+  const fallback = { color: '#0d0d12', symbolColor: '#f3efee' }
+  try {
+    const raw = JSON.parse(fs.readFileSync(titleBarColorsPath(), 'utf8'))
+    return {
+      color: TITLEBAR_HEX.test(raw?.color) ? raw.color : fallback.color,
+      symbolColor: TITLEBAR_HEX.test(raw?.symbolColor) ? raw.symbolColor : fallback.symbolColor,
+    }
+  } catch {
+    return fallback
+  }
+}
+
 function overlaySettingsPath() {
   return path.join(app.getPath('userData'), 'overlay-settings.json')
 }
@@ -1437,8 +1456,7 @@ function createWindow() {
     // corrige o "barra tem que ser maior e ficar em cima" do pedido.
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#171516',
-      symbolColor: '#f3efee',
+      ...loadTitleBarColors(),
       height: 40,
     },
     webPreferences: {
@@ -2448,6 +2466,21 @@ app.whenReady().then(() => {
   })
   handleTrusted('app:get-autostart', () => ({ enabled: getAutoStart(), supported: app.isPackaged }))
   handleTrusted('app:set-autostart', (_event, enabled) => ({ enabled: setAutoStart(Boolean(enabled)), supported: app.isPackaged }))
+  // Botões nativos (minimizar/maximizar/fechar) com a MESMA cor da barra
+  // do app — o React manda as cores do tema atual sempre que ele muda.
+  handleTrusted('window:set-titlebar-colors', (_event, colors) => {
+    const color = typeof colors?.color === 'string' && TITLEBAR_HEX.test(colors.color) ? colors.color : null
+    const symbolColor =
+      typeof colors?.symbolColor === 'string' && TITLEBAR_HEX.test(colors.symbolColor) ? colors.symbolColor : '#f3efee'
+    if (!color || !mainWindow || mainWindow.isDestroyed() || process.platform === 'darwin') return false
+    try {
+      mainWindow.setTitleBarOverlay({ color, symbolColor, height: 40 })
+      fs.writeFileSync(titleBarColorsPath(), JSON.stringify({ color, symbolColor }))
+      return true
+    } catch {
+      return false
+    }
+  })
   handleTrusted('app:relaunch', () => {
     app.relaunch()
     app.quit()

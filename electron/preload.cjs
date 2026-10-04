@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVideoEncodeSettings: () => ipcRenderer.invoke('video:get-encode-settings'),
   setPreferGpuEncode: (preferGpu) => ipcRenderer.invoke('video:set-prefer-gpu', preferGpu),
   relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
+  setTitleBarColors: (colors) => ipcRenderer.invoke('window:set-titlebar-colors', colors),
   getAutoStart: () => ipcRenderer.invoke('app:get-autostart'),
   setAutoStart: (enabled) => ipcRenderer.invoke('app:set-autostart', enabled),
   getSystemIdleSeconds: () => ipcRenderer.invoke('app:system-idle-seconds'),

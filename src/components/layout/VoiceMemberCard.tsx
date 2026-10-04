@@ -9,6 +9,7 @@ import { useServers } from '../../hooks/useServers'
 import { useVoiceCore } from '../../hooks/useVoice'
 import { supabase } from '../../lib/supabase'
 import { describeVoiceMoveError } from '../../lib/voiceMove'
+import { rememberVolume, toggleVolumeMute } from '../../lib/muteMemory'
 import type { Profile } from '../../types/database'
 
 // Cartão que abre ao CLICAR em alguém numa sala de voz (lista lateral ou
@@ -149,15 +150,21 @@ export function VoiceMemberCard({ target, onClose }: { target: VoiceMemberCardTa
               <input
                 type="range"
                 min={0}
-                max={200}
+                max={100}
                 value={volume}
-                onChange={(e) => voice.setParticipantVolume(target.userId, Number(e.target.value))}
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  rememberVolume(`voice:${target.userId}`, v)
+                  voice.setParticipantVolume(target.userId, v)
+                }}
                 aria-label={`Volume de ${name}`}
                 className="w-full accent-mv-accent"
               />
               <button
                 type="button"
-                onClick={() => voice.setParticipantVolume(target.userId, volume === 0 ? 100 : 0)}
+                onClick={() =>
+                  toggleVolumeMute(`voice:${target.userId}`, volume, (v) => voice.setParticipantVolume(target.userId, v), 100)
+                }
                 className="mt-1 text-[12px] text-mv-muted hover:text-white"
               >
                 {volume === 0 ? 'Reativar áudio dessa pessoa' : 'Silenciar só pra mim'}

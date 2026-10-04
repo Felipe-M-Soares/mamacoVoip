@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { DeviceSelect } from '../ui/DeviceSelect'
 import { Avatar } from '../ui/Avatar'
 import { VideoTile } from './CallMediaTiles'
 import { GameStreamMenuSection } from './GameStreamControls'
+import { rememberVolume, toggleVolumeMute } from '../../lib/muteMemory'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { isNativeMobileApp } from '../../lib/platform'
@@ -109,15 +110,25 @@ function ShareTile({
   const voice = useVoiceCore()
   const [showVolume, setShowVolume] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const tileRef = useRef<HTMLDivElement | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const hasAudio = share.stream.getAudioTracks().length > 0
   const shareVolume = voice.getScreenShareVolume(share.key)
   const isMuted = shareVolume === 0
 
-  // Tela cheia / janela flutuante usam as APIs nativas (o sistema mostra
-  // e controla, nunca dessincroniza).
-  async function goFullscreen() {
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === tileRef.current && tileRef.current !== null)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
+  // Tela cheia do QUADRO inteiro (não do <video>): assim continuam os
+  // MESMOS controles do app (mudo, volume) — sem os controles nativos do
+  // vídeo, que brigavam com o volume do app.
+  async function toggleFullscreen() {
     try {
-      await videoRef.current?.requestFullscreen()
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await tileRef.current?.requestFullscreen()
     } catch {
       // recusado — sem problema
     }
@@ -137,10 +148,16 @@ function ShareTile({
 
   return (
     <div
-      className={`relative aspect-video rounded-2xl overflow-hidden border bg-black group/share w-full shadow-[0_18px_40px_-20px_rgb(0_0_0/0.8)] ${
-        isFocused ? 'border-mv-accent/50' : 'border-[var(--color-line)]'
+      ref={tileRef}
+      className={`relative overflow-hidden bg-black group/share w-full ${
+        isFullscreen
+          ? 'rounded-none border-0'
+          : `aspect-video rounded-2xl border shadow-[0_18px_40px_-20px_rgb(0_0_0/0.8)] ${
+              isFocused ? 'border-mv-accent/50' : 'border-[var(--color-line)]'
+            }`
       } ${small ? 'cursor-pointer hover:border-[var(--color-line-strong)]' : ''}`}
       onClick={small && onFocus ? () => onFocus(share.key) : undefined}
+      onDoubleClick={!small && !share.isLocal ? () => void toggleFullscreen() : undefined}
       onMouseLeave={() => setShowVolume(false)}
       title={small ? `Destacar a transmissão de ${share.name}` : undefined}
     >
@@ -184,7 +201,9 @@ function ShareTile({
         {!small && !share.isLocal && hasAudio && (
           <>
             <button
-              onClick={() => voice.setScreenShareVolume(share.key, isMuted ? 60 : 0)}
+              onClick={() =>
+                toggleVolumeMute(`screen:${share.key}`, shareVolume, (v) => voice.setScreenShareVolume(share.key, v), 60)
+              }
               title={isMuted ? 'Reativar som da transmissão' : 'Silenciar som da transmissão'}
               aria-label={isMuted ? 'Reativar som da transmissão' : 'Silenciar som da transmissão'}
               className={isMuted ? 'w-8 h-8 flex items-center justify-center rounded-full bg-rose-500/20 text-rose-400' : btn}
@@ -215,10 +234,14 @@ function ShareTile({
                   <input
                     type="range"
                     min={0}
-                    max={200}
-                    step={5}
+                    max={100}
+                    step={1}
                     value={shareVolume}
-                    onChange={(e) => voice.setScreenShareVolume(share.key, Number(e.target.value))}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      rememberVolume(`screen:${share.key}`, v)
+                      voice.setScreenShareVolume(share.key, v)
+                    }}
                     className="w-full accent-mv-accent"
                   />
                 </div>
@@ -226,7 +249,7 @@ function ShareTile({
             </div>
           </>
         )}
-        {!small && onFocus && (
+        {!small && onFocus && !isFullscreen && (
           <button
             onClick={() => onFocus(isFocused ? null : share.key)}
             title={isFocused ? 'Sair do destaque (mostrar todas lado a lado)' : 'Destacar esta transmissão'}
@@ -244,9 +267,18 @@ function ShareTile({
         )}
         {!small && !share.isLocal && (
           <>
-            <button onClick={goFullscreen} title="Tela cheia" aria-label="Tela cheia" className={btn}>
+            <button
+              onClick={() => void toggleFullscreen()}
+              title={isFullscreen ? 'Sair da tela cheia (Esc)' : 'Tela cheia'}
+              aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+              className={btn}
+            >
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                <path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm16 0h-2v4h-4v2h6v-6z" />
+                {isFullscreen ? (
+                  <path d="M8 4h2v6H4V8h4V4zm6 0h2v4h4v2h-6V4zM4 14h6v6H8v-4H4v-2zm10 0h6v2h-4v4h-2v-6z" />
+                ) : (
+                  <path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm16 0h-2v4h-4v2h6v-6z" />
+                )}
               </svg>
             </button>
             <button

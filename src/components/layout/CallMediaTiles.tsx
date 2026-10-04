@@ -34,7 +34,33 @@ export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sin
   function VideoTile({ stream, sinkId, fit = 'cover', mirror = false }, forwardedRef) {
     const localRef = useRef<HTMLVideoElement>(null)
     useEffect(() => {
-      if (localRef.current) localRef.current.srcObject = stream
+      const el = localRef.current
+      if (!el) return
+      // Só o VÍDEO vai pro elemento: o som toca sempre pelo <RemoteAudio>
+      // (com o volume do app). Se a stream chegasse com áudio, os controles
+      // nativos da tela cheia podiam "desmutar" o elemento e tocar o som
+      // por fora — aí o mudo/volume do app paravam de funcionar.
+      const videoOnly = new MediaStream(stream.getVideoTracks())
+      const sync = () => {
+        const tracks = stream.getVideoTracks()
+        if (tracks.length !== videoOnly.getVideoTracks().length || tracks.some((t) => !videoOnly.getTrackById(t.id))) {
+          for (const t of videoOnly.getVideoTracks()) videoOnly.removeTrack(t)
+          for (const t of tracks) videoOnly.addTrack(t)
+        }
+      }
+      stream.addEventListener('addtrack', sync)
+      stream.addEventListener('removetrack', sync)
+      el.srcObject = videoOnly
+      el.muted = true
+      const keepMuted = () => {
+        if (!el.muted) el.muted = true
+      }
+      el.addEventListener('volumechange', keepMuted)
+      return () => {
+        stream.removeEventListener('addtrack', sync)
+        stream.removeEventListener('removetrack', sync)
+        el.removeEventListener('volumechange', keepMuted)
+      }
     }, [stream])
     useSinkId(localRef, sinkId)
     // Sempre mudo — o áudio de participantes remotos toca via <RemoteAudio>,

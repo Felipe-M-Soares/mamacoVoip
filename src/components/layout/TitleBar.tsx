@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useWindowPlace } from '../../lib/windowTitle'
 // Barra de título CUSTOM do app desktop — substitui a barra nativa fina
 // e cinza do Windows (que não tinha nada a ver com a cara do app e não
@@ -21,12 +22,58 @@ import { useWindowPlace } from '../../lib/windowTitle'
 // z-index bem baixo — só o suficiente pra garantir que fica por cima do
 // conteúdo normal da página (que não usa z-index nenhum), nunca de um
 // modal/overlay de verdade.
+// Converte qualquer cor CSS calculada (rgb, color-mix, oklab…) em #rrggbb.
+function toHex(css: string): string | null {
+  try {
+    const c = document.createElement('canvas')
+    c.width = c.height = 1
+    const ctx = c.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return null
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, 1, 1)
+    ctx.fillStyle = css
+    ctx.fillRect(0, 0, 1, 1)
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+    return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return null
+  }
+}
+
 export function TitleBar() {
   const place = useWindowPlace()
-  if (!window.electronAPI?.isElectron) return null
+  const barRef = useRef<HTMLDivElement>(null)
+  const isElectron = Boolean(window.electronAPI?.isElectron)
+
+  // Pinta os botões nativos de minimizar/maximizar/fechar com a cor desta
+  // barra (e reaplica ao trocar de tema), pra não ficar um bloco de outra cor.
+  useEffect(() => {
+    if (!isElectron) return
+    let last = ''
+    const apply = () => {
+      const el = barRef.current
+      if (!el) return
+      const cs = getComputedStyle(el)
+      const color = toHex(cs.backgroundColor)
+      const symbolColor = toHex(getComputedStyle(document.body).color) ?? '#f3efee'
+      if (!color) return
+      const key = color + symbolColor
+      if (key === last) return
+      last = key
+      void window.electronAPI?.setTitleBarColors?.({ color, symbolColor }).catch(() => {})
+    }
+    apply()
+    const obs = new MutationObserver(() => requestAnimationFrame(apply))
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] })
+    obs.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] })
+    return () => obs.disconnect()
+  }, [isElectron])
+
+  if (!isElectron) return null
 
   return (
     <div
+      ref={barRef}
       className="h-10 shrink-0 flex items-center gap-2.5 px-3.5 bg-mv-side border-b border-[var(--color-line)] relative z-10 select-none"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >

@@ -73,18 +73,27 @@ if (!gotSingleInstanceLock) {
 function videoEncodeSettingsPath() {
   return path.join(app.getPath('userData'), 'video-encode-settings.json')
 }
-function loadPreferGpuEncode() {
+function loadVideoEncodeSettings() {
   try {
     // require local: este trecho roda ANTES do `const fs` lá embaixo.
-    const raw = JSON.parse(require('node:fs').readFileSync(videoEncodeSettingsPath(), 'utf8'))
-    return raw?.preferGpu !== false
+    return JSON.parse(require('node:fs').readFileSync(videoEncodeSettingsPath(), 'utf8')) ?? {}
   } catch {
-    return true
+    return {}
   }
 }
+function loadPreferGpuEncode() {
+  return loadVideoEncodeSettings().preferGpu !== false
+}
 const preferGpuEncodeAtStartup = loadPreferGpuEncode()
+// "Forçar codificador da placa": desliga as correções que o Chromium aplica
+// por modelo/driver de placa (gpu_driver_bug_list). Algumas delas DESLIGAM
+// o codificador de vídeo por hardware em certas AMD/Intel. Experimental,
+// desligado por padrão; a rede de segurança de travamento abaixo também
+// desliga isto se a GPU cair.
+const forceGpuEncodeAtStartup = preferGpuEncodeAtStartup && loadVideoEncodeSettings().forceGpu === true
 if (preferGpuEncodeAtStartup && process.platform === 'win32') {
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
+  if (forceGpuEncodeAtStartup) app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds')
   // WebRtcAV1HWEncode: libera AV1 pela placa na transmissão (AMD RX 7000/
   // 9000, NVIDIA RTX 40/50, Intel Arc). Em placa AMD o H.264 pela GPU
   // costuma não ser usado pelo WebRTC — o AV1 é o caminho pela placa.
@@ -317,7 +326,7 @@ app.on('child-process-gone', (_event, details) => {
     if (gpuCrashCount >= 2 && !gpuFallbackSaved) {
       gpuFallbackSaved = true
       try {
-        fs.writeFileSync(videoEncodeSettingsPath(), JSON.stringify({ preferGpu: false, autoDisabled: true }))
+        fs.writeFileSync(videoEncodeSettingsPath(), JSON.stringify({ preferGpu: false, forceGpu: false, autoDisabled: true }))
       } catch {
         // sem disco — tenta de novo na próxima queda
         gpuFallbackSaved = false
@@ -759,7 +768,15 @@ async function runForegroundCheckTick() {
             if (!genericDetectedGame || genericDetectedGame.label !== generic.label) {
               appendDebugLog('main', `detecção genérica: "${generic.label}" (${generic.store}, ${generic.processName}.exe)`)
             }
-            genericDetectedGame = { label: generic.label, processNames: [generic.processName], antiCheat: generic.antiCheat }
+            const steam = generic.store === 'Steam' ? steamInfoForExePath(fg.exePath) : null
+            genericDetectedGame = {
+              // Nome oficial da Steam (do appmanifest) em vez do nome da pasta.
+              label: steam?.name || generic.label,
+              processNames: [generic.processName],
+              antiCheat: generic.antiCheat,
+              store: generic.store,
+              steamAppId: steam?.appId ?? null,
+            }
           }
         }
       } finally {
@@ -829,6 +846,51 @@ function processNamesForGameLabel(label) {
     return genericDetectedGame.processNames.slice()
   }
   return names
+}
+
+// ============================================================
+// Steam: id do jogo (pra capa e botão "Ver na Steam" no cartão de
+// atividade). Jogos do catálogo: tabela fixa. Jogos detectados pela pasta
+// da Steam: lê o appmanifest_<id>.acf da própria biblioteca (arquivo de
+// texto da Steam no disco — nada é lido do processo do jogo).
+const STEAM_APP_IDS = {
+  'Counter-Strike 2': 730, 'Rainbow Six Siege X': 359550, 'Apex Legends': 1172470, 'Marvel Rivals': 2767030,
+  'Battlefield 2042': 1517290, 'PUBG: Battlegrounds': 578080, 'The Finals': 2073850, 'Destiny 2': 1085660,
+  'Team Fortress 2': 440, 'Halo Infinite': 1240440, 'Among Us': 945360, 'Fall Guys': 1097150,
+  'Lethal Company': 1966720, 'Phasmophobia': 739630, 'Dota 2': 570, 'Deadlock': 1422450, 'GTA V': 271590,
+  'Red Dead Redemption 2': 1174180, 'Elden Ring': 1245620, 'Cyberpunk 2077': 1091500, 'The Witcher 3': 292030,
+  'Skyrim': 489830, 'Starfield': 1716740, 'Hogwarts Legacy': 990080, 'Black Myth: Wukong': 2358720,
+  'Kingdom Come: Deliverance II': 1771300, 'Warframe': 230410, 'Terraria': 105600, 'Rust': 252490, 'DayZ': 221100,
+  'ARK: Survival Evolved': 346110, 'Valheim': 892970, 'Palworld': 1623730, '7 Days to Die': 251570,
+  'Stardew Valley': 413150, 'Assetto Corsa': 244210, 'Forza Horizon 5': 1551360, 'Sea of Thieves': 1172620,
+  'Lost Ark': 1599340, 'Albion Online': 761890, 'Helldivers 2': 553850, 'Monster Hunter Wilds': 2246340,
+  'Path of Exile 2': 2694490, 'R.E.P.O.': 3241660, 'Hollow Knight: Silksong': 1030300,
+}
+const steamManifestCache = new Map()
+function steamInfoForExePath(exePath) {
+  if (!exePath) return null
+  const m = /^(.*[\\/]steamapps)[\\/]common[\\/]([^\\/]+)[\\/]/i.exec(exePath)
+  if (!m) return null
+  const [, steamapps, folder] = m
+  const key = `${steamapps}|${folder}`.toLowerCase()
+  if (steamManifestCache.has(key)) return steamManifestCache.get(key)
+  let found = null
+  try {
+    for (const file of fs.readdirSync(steamapps)) {
+      if (!/^appmanifest_\d+\.acf$/i.test(file)) continue
+      const txt = fs.readFileSync(path.join(steamapps, file), 'utf8').slice(0, 20000)
+      const dir = /"installdir"\s+"([^"]+)"/i.exec(txt)?.[1]
+      if (!dir || dir.toLowerCase() !== folder.toLowerCase()) continue
+      const appId = Number(/"appid"\s+"(\d+)"/i.exec(txt)?.[1])
+      const name = /"name"\s+"([^"]+)"/i.exec(txt)?.[1] ?? null
+      if (appId > 0) found = { appId, name: name ? name.slice(0, 120) : null }
+      break
+    }
+  } catch {
+    // biblioteca ilegível — segue sem
+  }
+  steamManifestCache.set(key, found)
+  return found
 }
 
 // Nome legível do anti-cheat do jogo atual (ou null) — só informativo,
@@ -1304,6 +1366,37 @@ function ensureOverlayWindow() {
 // "sempre visível", o que o Windows permite mesmo em segundo plano) e
 // depois desliga de novo pra não travar a janela por cima de tudo pro
 // resto da sessão.
+// ============================================================
+// Abrir junto com o Windows. Ligado por padrão na PRIMEIRA vez que o app
+// abre (depois vale o que a pessoa escolher em Configurações). Abre
+// minimizado na bandeja (argumento --mv-autostart).
+function autoStartSettingsPath() {
+  return path.join(app.getPath('userData'), 'autostart-settings.json')
+}
+function setAutoStart(enabled) {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return false
+  if (!app.isPackaged) return false
+  try {
+    app.setLoginItemSettings({ openAtLogin: Boolean(enabled), args: ['--mv-autostart'] })
+    fs.writeFileSync(autoStartSettingsPath(), JSON.stringify({ enabled: Boolean(enabled) }))
+  } catch (err) {
+    appendDebugLog('main', `autostart: falha — ${err?.message ?? err}`)
+  }
+  return getAutoStart()
+}
+function getAutoStart() {
+  try {
+    return app.getLoginItemSettings({ args: ['--mv-autostart'] }).openAtLogin === true
+  } catch {
+    return false
+  }
+}
+function applyAutoStartDefault() {
+  if (!app.isPackaged) return
+  if (fs.existsSync(autoStartSettingsPath())) return
+  setAutoStart(true)
+}
+
 function forceFocusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.show()
@@ -2162,20 +2255,24 @@ app.whenReady().then(() => {
 
   Menu.setApplicationMenu(null)
 
-  const splash = createSplashWindow()
+  // Aberto pelo Windows ao ligar o PC ("Abrir com o Windows"): começa
+  // quietinho na bandeja, sem tela de abertura nem janela na cara.
+  const startedHidden = process.argv.includes('--mv-autostart')
+  applyAutoStartDefault()
+  const splash = startedHidden ? null : createSplashWindow()
   const win = createWindow()
   createTray(win)
 
   win.once('ready-to-show', () => {
-    if (!splash.isDestroyed()) splash.close()
-    win.show()
+    if (splash && !splash.isDestroyed()) splash.close()
+    if (!startedHidden) win.show()
   })
 
   win.webContents.once('did-fail-load', () => {
-    if (!splash.isDestroyed()) splash.close()
+    if (splash && !splash.isDestroyed()) splash.close()
   })
   win.webContents.once('render-process-gone', () => {
-    if (!splash.isDestroyed()) splash.close()
+    if (splash && !splash.isDestroyed()) splash.close()
   })
 
   // Se o app foi aberto DIRETO por um link de volta do login do Google
@@ -2272,20 +2369,66 @@ app.whenReady().then(() => {
   })
   handleTrusted('video:set-prefer-gpu', (_event, preferGpu) => {
     try {
-      fs.writeFileSync(videoEncodeSettingsPath(), JSON.stringify({ preferGpu: Boolean(preferGpu) }))
+      fs.writeFileSync(videoEncodeSettingsPath(), JSON.stringify({ ...loadVideoEncodeSettings(), preferGpu: Boolean(preferGpu), autoDisabled: false }))
     } catch (err) {
       appendDebugLog('main', `video: falha ao salvar — ${err?.message ?? err}`)
     }
     return { preferGpu: loadPreferGpuEncode(), activeNow: preferGpuEncodeAtStartup }
   })
   // Diagnóstico: o Chromium liberou codificação de vídeo pela GPU aqui?
-  handleTrusted('video:gpu-status', () => {
+  // Diagnóstico completo: o que o processo da GPU do Chromium enxerga —
+  // placa, driver e quais formatos ele sabe codificar por hardware.
+  handleTrusted('video:gpu-status', async () => {
+    let videoEncode = 'desconhecido'
     try {
-      return { videoEncode: String(app.getGPUFeatureStatus()?.video_encode ?? 'desconhecido') }
+      videoEncode = String(app.getGPUFeatureStatus()?.video_encode ?? 'desconhecido')
     } catch {
-      return { videoEncode: 'desconhecido' }
+      // segue
+    }
+    let gpu = null
+    let encodeProfiles = []
+    try {
+      const info = await app.getGPUInfo('complete')
+      const devices = Array.isArray(info?.gpuDevice) ? info.gpuDevice : []
+      const active = devices.find((d) => d?.active) ?? devices[0]
+      if (active) {
+        gpu = {
+          vendorId: Number(active.vendorId) || 0,
+          deviceId: Number(active.deviceId) || 0,
+          name: typeof active.deviceString === 'string' ? active.deviceString.slice(0, 120) : null,
+          driver: typeof active.driverVersion === 'string' ? active.driverVersion.slice(0, 60) : null,
+        }
+      }
+      const profiles = Array.isArray(info?.videoEncodeAcceleratorSupportedProfile) ? info.videoEncodeAcceleratorSupportedProfile : []
+      encodeProfiles = profiles
+        .map((p) => (typeof p?.profile === 'string' ? p.profile : String(p?.profile ?? '')))
+        .filter(Boolean)
+        .slice(0, 30)
+    } catch {
+      // segue sem
+    }
+    return { videoEncode, gpu, encodeProfiles, forceActive: forceGpuEncodeAtStartup }
+  })
+  handleTrusted('video:set-force-gpu', (_event, force) => {
+    try {
+      const cur = loadVideoEncodeSettings()
+      fs.writeFileSync(videoEncodeSettingsPath(), JSON.stringify({ ...cur, forceGpu: Boolean(force) }))
+    } catch (err) {
+      appendDebugLog('main', `video: falha ao salvar — ${err?.message ?? err}`)
+    }
+    return { forceGpu: loadVideoEncodeSettings().forceGpu === true, forceActive: forceGpuEncodeAtStartup }
+  })
+  // Segundos desde o último uso de mouse/teclado em QUALQUER programa
+  // (pro AFK não pegar quem está jogando com o app em segundo plano).
+  handleTrusted('app:system-idle-seconds', () => {
+    try {
+      return powerMonitor.getSystemIdleTime()
+    } catch {
+      return null
     }
   })
+  handleTrusted('app:get-autostart', () => ({ enabled: getAutoStart(), supported: app.isPackaged }))
+  handleTrusted('app:set-autostart', (_event, enabled) => ({ enabled: setAutoStart(Boolean(enabled)), supported: app.isPackaged }))
   handleTrusted('app:relaunch', () => {
     app.relaunch()
     app.quit()
@@ -2324,15 +2467,18 @@ app.whenReady().then(() => {
   })
   handleTrusted('app:getVersion', () => app.getVersion())
   handleTrusted('app:getCurrentGame', () => currentGame)
-  handleTrusted('app:getCurrentGameInfo', () =>
-    currentGame
-      ? {
-          label: currentGame,
-          antiCheat: antiCheatForGameLabel(currentGame),
-          generic: !gameCatalog.findGameByName(currentGame),
-        }
-      : null
-  )
+  handleTrusted('app:getCurrentGameInfo', () => {
+    if (!currentGame) return null
+    const generic = genericDetectedGame && genericDetectedGame.label === currentGame ? genericDetectedGame : null
+    const steamAppId = generic?.steamAppId ?? STEAM_APP_IDS[currentGame] ?? null
+    return {
+      label: currentGame,
+      antiCheat: antiCheatForGameLabel(currentGame),
+      generic: !gameCatalog.findGameByName(currentGame),
+      store: steamAppId ? 'Steam' : (generic?.store ?? null),
+      steamAppId,
+    }
+  })
 
   // B7 — armazenamento cifrado da sessão do Supabase (ver
   // src/lib/authStorage.ts). Antes o access/refresh token ficavam em

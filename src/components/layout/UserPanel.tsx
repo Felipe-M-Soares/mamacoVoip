@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { DeviceSelect } from '../ui/DeviceSelect'
 import { useAuth } from '../../hooks/useAuth'
 import { useLocalVoiceConnectionQuality, useVoiceCore } from '../../hooks/useVoice'
 import { useConnectionPing } from '../../hooks/useConnectionPing'
@@ -8,7 +9,6 @@ import { useClickOutside } from '../../hooks/useClickOutside'
 import { Avatar } from '../ui/Avatar'
 import type { ProfileStatus } from '../../types/database'
 import { lazyModal } from '../modals/lazyModal'
-import { playDeafenSound, playUndeafenSound } from '../../lib/sounds'
 import {
   CameraOffIcon,
   CameraIcon as VideoIcon,
@@ -29,6 +29,7 @@ import {
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const EditProfileModal = lazyModal(() => import('../modals/EditProfileModal').then((m) => m.EditProfileModal))
 const SettingsModal = lazyModal(() => import('../modals/SettingsModal').then((m) => m.SettingsModal))
+import type { SettingsTab } from '../modals/SettingsModal'
 const SoundboardPanel = lazyModal(() => import('../ui/SoundboardPanel').then((m) => m.SoundboardPanel))
 
 const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
@@ -241,9 +242,12 @@ function VoiceHud() {
         >
           <ScreenShareIcon className="w-4 h-4" />
         </HudSquareButton>
-        <HudSquareButton title="Soundboard" onClick={() => setShowSoundboard(true)}>
-          <GridIcon className="w-4 h-4" />
-        </HudSquareButton>
+        {/* Soundboard é do servidor — não existe em chamada de DM/grupo. */}
+        {voice.connectedServerId && (
+          <HudSquareButton title="Soundboard" onClick={() => setShowSoundboard(true)}>
+            <GridIcon className="w-4 h-4" />
+          </HudSquareButton>
+        )}
         <HudSquareButton
           active={voice.audioSettings.noiseSuppression}
           title={voice.audioSettings.noiseSuppression ? 'Desativar redução de ruído' : 'Ativar redução de ruído'}
@@ -309,7 +313,7 @@ export function UserPanel() {
         : `${pingMs}ms até o servidor`
   const [menuOpen, setMenuOpen] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
+  const [showSettings, setShowSettings] = useState<SettingsTab | null>(null)
   const [micMenuOpen, setMicMenuOpen] = useState(false)
   const [headphoneMenuOpen, setHeadphoneMenuOpen] = useState(false)
 
@@ -386,7 +390,7 @@ export function UserPanel() {
         <button
           title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
           aria-label={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
-          onClick={voice.toggleMute}
+          onClick={() => voice.toggleMute()}
           className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
             voice.deafened || voice.muted ? 'text-rose-400 bg-rose-500/10 hover:bg-rose-500/20' : 'text-mv-muted hover:bg-white/[0.08] hover:text-white'
           }`}
@@ -409,23 +413,19 @@ export function UserPanel() {
             {voice.audioSettings.microphones.length > 0 && (
               <div className="mb-1.5">
                 <p className="text-[10px] font-bold uppercase text-mv-muted px-1 mb-1">Microfone</p>
-                <select
-                  value={voice.audioSettings.micId ?? ''}
-                  onChange={(e) => voice.changeMicrophone(e.target.value)}
+                <DeviceSelect
+                  value={voice.audioSettings.micId}
+                  options={voice.audioSettings.microphones}
+                  onChange={(id) => void voice.changeMicrophone(id ?? '')}
                   className="w-full bg-mv-raised text-mv-text text-xs rounded px-2 py-1.5 outline-none"
-                >
-                  {voice.audioSettings.microphones.map((m) => (
-                    <option key={m.deviceId} value={m.deviceId}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
+                  ariaLabel="Microfone"
+                />
               </div>
             )}
             <button
               onClick={() => {
                 setMicMenuOpen(false)
-                setShowSettings(true)
+                setShowSettings('audio')
               }}
               className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-mv-raised text-mv-muted"
             >
@@ -442,13 +442,7 @@ export function UserPanel() {
         <button
           title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
           aria-label={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
-          onClick={() => {
-            // O som de ensurdecer toca ANTES: toggleDeafen também muta o
-            // microfone, e sounds.ts engole o som de mute nessa janela.
-            if (voice.deafened) playUndeafenSound()
-            else playDeafenSound()
-            voice.toggleDeafen()
-          }}
+          onClick={() => voice.toggleDeafen()}
           className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
             voice.deafened ? 'text-rose-400 bg-rose-500/10 hover:bg-rose-500/20' : 'text-mv-muted hover:bg-white/[0.08] hover:text-white'
           }`}
@@ -471,17 +465,13 @@ export function UserPanel() {
             {voice.audioSettings.supportsOutputSelection && voice.audioSettings.speakers.length > 0 && (
               <div className="mb-1.5">
                 <p className="text-[10px] font-bold uppercase text-mv-muted px-1 mb-1">Saída de áudio</p>
-                <select
-                  value={voice.audioSettings.speakerId ?? ''}
-                  onChange={(e) => voice.audioSettings.setSpeakerId(e.target.value || null)}
+                <DeviceSelect
+                  value={voice.audioSettings.speakerId}
+                  options={voice.audioSettings.speakers}
+                  onChange={(id) => voice.audioSettings.setSpeakerId(id)}
                   className="w-full bg-mv-raised text-mv-text text-xs rounded px-2 py-1.5 outline-none"
-                >
-                  {voice.audioSettings.speakers.map((s) => (
-                    <option key={s.deviceId} value={s.deviceId}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
+                  ariaLabel="Saída de áudio"
+                />
               </div>
             )}
             <div className="mb-1">
@@ -498,7 +488,7 @@ export function UserPanel() {
             <button
               onClick={() => {
                 setHeadphoneMenuOpen(false)
-                setShowSettings(true)
+                setShowSettings('audio')
               }}
               className="w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-mv-raised text-mv-muted"
             >
@@ -512,7 +502,7 @@ export function UserPanel() {
       <button
         title="Configurações"
         aria-label="Configurações"
-        onClick={() => setShowSettings(true)}
+        onClick={() => setShowSettings('account')}
         className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/[0.08] text-mv-muted hover:text-white hover:rotate-45 transition-all duration-300 shrink-0"
       >
         <GearIcon className="w-5 h-5" />
@@ -557,7 +547,7 @@ export function UserPanel() {
       )}
 
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsModal initialTab={showSettings} onClose={() => setShowSettings(null)} />}
       </div>
       </div>
     </div>

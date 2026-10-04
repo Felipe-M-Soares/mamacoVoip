@@ -67,7 +67,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVideoEncodeSettings: () => ipcRenderer.invoke('video:get-encode-settings'),
   setPreferGpuEncode: (preferGpu) => ipcRenderer.invoke('video:set-prefer-gpu', preferGpu),
   relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
+  getAutoStart: () => ipcRenderer.invoke('app:get-autostart'),
+  setAutoStart: (enabled) => ipcRenderer.invoke('app:set-autostart', enabled),
+  getSystemIdleSeconds: () => ipcRenderer.invoke('app:system-idle-seconds'),
   getGpuStatus: () => ipcRenderer.invoke('video:gpu-status'),
+  setForceGpuEncode: (force) => ipcRenderer.invoke('video:set-force-gpu', force),
   onOverlayVisibilityChanged: (callback) => {
     const handler = (_event, visible) => callback(visible)
     ipcRenderer.on('overlay:visibility-changed', handler)

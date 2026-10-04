@@ -52,6 +52,8 @@ import {
   playDisconnectSound,
   playMuteSound,
   playUnmuteSound,
+  playDeafenSound,
+  playUndeafenSound,
   playUserJoinSound,
   playUserLeaveSound,
   playStreamStartSound,
@@ -1436,14 +1438,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // fechasse ensurdecido, o volume ficava salvo em 0 e tudo parecia
   // quebrado). Quem toca o áudio (VoiceCallAudio) olha `deafened` direto.
   const preDeafenWasMutedRef = useRef(false)
+  // O som de ensurdecer/reativar toca AQUI (antes só o botão do painel
+  // tocava; os outros lugares tocavam o som de "mutar" no lugar).
   function toggleDeafen() {
     if (deafenedRef.current) {
+      playUndeafenSound()
       setDeafened(false)
-      if (!preDeafenWasMutedRef.current && mutedRef.current) toggleMute()
+      if (!preDeafenWasMutedRef.current && mutedRef.current) toggleMute({ silent: true })
     } else {
+      playDeafenSound()
       preDeafenWasMutedRef.current = mutedRef.current
       setDeafened(true)
-      if (!mutedRef.current) toggleMute()
+      if (!mutedRef.current) toggleMute({ silent: true })
     }
   }
 
@@ -1494,8 +1500,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   })
 
+  // Som do jogo de uma transmissão costuma ser bem mais alto que voz —
+  // começa em 60% (dá pra subir no mixer).
   function getScreenShareVolume(userId: string): number {
-    return screenShareVolumes[userId] ?? 100
+    return screenShareVolumes[userId] ?? 60
   }
 
   function setScreenShareVolume(userId: string, volume: number) {
@@ -3214,19 +3222,62 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Falar também conta como atividade (quem está jogando e conversando
+  // não mexe no app, e antes ia parar no AFK mesmo falando).
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (speaking) lastActivityRef.current = Date.now()
+  }, [speaking])
+
+  // De onde a pessoa foi tirada pelo AFK — volta pra lá quando ela voltar.
+  const afkReturnRef = useRef<{ channelId: string; serverId: string; wasMuted: boolean } | null>(null)
+
+  useEffect(() => {
+    let busy = false
+    const interval = setInterval(async () => {
       const config = afkConfigRef.current
-      if (!connectedRef.current || !config?.channelId || !connectedChannelId || !connectedServerId) return
-      if (connectedChannelId === config.channelId) return // já está no canal AFK
-      const idleMs = Date.now() - lastActivityRef.current
+      if (busy || !connectedRef.current || !config?.channelId || !connectedChannelId || !connectedServerId) return
+      // Inatividade = sem mexer no app, sem falar E (no app de computador)
+      // sem usar o computador — mouse/teclado em QUALQUER programa, jogo
+      // incluso (tempo ocioso do sistema).
+      let idleMs = Date.now() - lastActivityRef.current
+      const systemIdleSec = await window.electronAPI?.getSystemIdleSeconds?.().catch(() => null)
+      if (typeof systemIdleSec === 'number') idleMs = Math.min(idleMs, systemIdleSec * 1000)
+
+      if (connectedChannelId === config.channelId) {
+        // Está no AFK: voltou a usar o computador → volta pra sala de antes.
+        const back = afkReturnRef.current
+        if (back && back.serverId === connectedServerId && idleMs < 20_000) {
+          busy = true
+          afkReturnRef.current = null
+          leave()
+          setTimeout(() => {
+            void join(back.channelId, back.serverId).then(() => {
+              if (!back.wasMuted && mutedRef.current) toggleMute()
+              busy = false
+            }, () => {
+              busy = false
+            })
+          }, 300)
+        }
+        return
+      }
       if (idleMs >= config.timeoutMinutes * 60_000) {
+        busy = true
+        afkReturnRef.current = { channelId: connectedChannelId, serverId: connectedServerId, wasMuted: mutedRef.current }
         const afkChannelId = config.channelId
         const serverId = connectedServerId
         leave()
-        setTimeout(() => join(afkChannelId, serverId), 300)
+        setTimeout(() => {
+          // No AFK fica mudo (ninguém ouve barulho de quem saiu de perto).
+          void join(afkChannelId, serverId).then(() => {
+            if (!mutedRef.current) toggleMute()
+            busy = false
+          }, () => {
+            busy = false
+          })
+        }, 300)
       }
-    }, 30_000)
+    }, 15_000)
     return () => clearInterval(interval)
   }, [connectedChannelId, connectedServerId, leave, join])
 
@@ -3296,6 +3347,47 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // Microfone físico desplugado/desativado no meio da call: a track
   // bruta dispara 'ended' (o que NÃO acontece num .stop() nosso) — antes
   // a call seguia muda sem aviso nenhum. Tenta o microfone padrão.
+  // Fone/microfone conectado ou desconectado no meio da call:
+  //  - escolheu um microfone específico e ele VOLTOU → passa a usar ele;
+  //  - está no "Padrão do sistema" e o padrão do Windows mudou (ex.: plugou
+  //    um headset) → troca pro novo padrão.
+  // (Se o microfone em uso SUMIR, watchRawMicTrack abaixo já cai pro padrão.)
+  useEffect(() => {
+    let timer: number | null = null
+    const check = async () => {
+      if (!connectedRef.current || !canPublishRef.current) return
+      const raw = rawMicTrackRef.current
+      if (!raw || raw.readyState !== 'live') return
+      const devices = await navigator.mediaDevices?.enumerateDevices?.().catch(() => [])
+      if (!devices?.length) return
+      const inputs = devices.filter((d) => d.kind === 'audioinput')
+      const current = raw.getSettings()
+      const wanted = audioSettingsRef.current.micId
+      let shouldSwap = false
+      if (wanted && wanted !== 'default') {
+        shouldSwap = inputs.some((d) => d.deviceId === wanted) && current.deviceId !== wanted
+      } else {
+        const def = inputs.find((d) => d.deviceId === 'default')
+        shouldSwap = Boolean(def?.groupId && current.groupId && def.groupId !== current.groupId)
+      }
+      if (shouldSwap) {
+        logDebug('microfone: dispositivo mudou (conectado/desconectado) — trocando')
+        void refreshAudioConstraints()
+      }
+    }
+    const onChange = () => {
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(() => void check(), 800)
+    }
+    navigator.mediaDevices?.addEventListener?.('devicechange', onChange)
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      navigator.mediaDevices?.removeEventListener?.('devicechange', onChange)
+    }
+    // refreshAudioConstraints/refs: sempre a versão atual via refs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function watchRawMicTrack(track: MediaStreamTrack) {
     track.addEventListener(
       'ended',
@@ -3389,7 +3481,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     })
   }
 
-  function toggleMute() {
+  function toggleMute(opts?: { silent?: boolean }) {
+    // Clicar no MICROFONE com o áudio desativado: reativa o áudio e o
+    // microfone juntos (antes ligava o mic e a tela continuava mostrando
+    // mudo — a pessoa falava sem saber).
+    if (deafenedRef.current && !opts?.silent) {
+      playUndeafenSound()
+      setDeafened(false)
+      if (!mutedRef.current) return
+    }
     // Funciona também fora da call (fica valendo quando entrar) e no meio
     // de uma troca de microfone — antes, sem track no momento, o clique
     // não fazia nada.
@@ -3430,8 +3530,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           .then(() => applyMicEnabledState(pushToTalkActiveRef.current))
           .catch(() => {})
     }
-    if (newMuted) playMuteSound()
-    else playUnmuteSound()
+    if (!opts?.silent) {
+      if (newMuted) playMuteSound()
+      else playUnmuteSound()
+    }
   }
 
   // Trava contra duplo clique na câmera: antes, dois cliques rápidos

@@ -1,3 +1,4 @@
+import { applySoundsSink } from '../lib/sounds'
 import { useCallback, useEffect, useState } from 'react'
 import { DEFAULT_MIC_SENSITIVITY } from '../lib/noiseSuppression'
 
@@ -160,6 +161,7 @@ export function useAudioSettings() {
   }
   function setSpeakerId(id: string | null) {
     update({ speakerId: id })
+    applySoundsSink(id)
   }
   function setCameraId(id: string | null) {
     update({ cameraId: id })

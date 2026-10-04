@@ -18,6 +18,9 @@ export type Profile = {
   status: ProfileStatus
   custom_status: string | null
   playing: string | null
+  // De onde é o jogo ('steam:<id>' ou nome da loja) e desde quando — cartão de atividade.
+  playing_app?: string | null
+  playing_since?: string | null
   profile_visibility: ProfileVisibility
   // (A confirmação de idade +18 saiu daqui na migration 016 — agora fica
   // em user_private_settings, que só a própria pessoa lê.)
@@ -428,6 +431,8 @@ export type Database = {
             | 'status'
             | 'custom_status'
             | 'playing'
+            | 'playing_app'
+            | 'playing_since'
             | 'profile_visibility'
           >
         >

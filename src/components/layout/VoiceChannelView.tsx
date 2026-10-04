@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { DeviceSelect } from '../ui/DeviceSelect'
 import { Avatar } from '../ui/Avatar'
 import { VideoTile } from './CallMediaTiles'
 import { GameStreamMenuSection, LocalScreenShareStats } from './GameStreamControls'
@@ -193,7 +194,7 @@ function ShareTile({
         {!small && !share.isLocal && hasAudio && (
           <>
             <button
-              onClick={() => voice.setScreenShareVolume(share.key, isMuted ? 100 : 0)}
+              onClick={() => voice.setScreenShareVolume(share.key, isMuted ? 60 : 0)}
               title={isMuted ? 'Reativar som da transmissão' : 'Silenciar som da transmissão'}
               aria-label={isMuted ? 'Reativar som da transmissão' : 'Silenciar som da transmissão'}
               className={isMuted ? 'w-8 h-8 flex items-center justify-center rounded-full bg-rose-500/20 text-rose-400' : btn}
@@ -1058,7 +1059,7 @@ export function VoiceChannelView({
                   </div>
                 ) : (
                   <button
-                    onClick={voice.toggleMute}
+                    onClick={() => voice.toggleMute()}
                     disabled={!isSpeaker}
                     title={
                       !isSpeaker
@@ -1112,48 +1113,30 @@ export function VoiceChannelView({
                   {voice.audioSettings.microphones.length > 0 && (
                     <div className="mb-2">
                       <p className="field-label px-1 !mb-1.5">Microfone</p>
-                      <select
-                        value={voice.audioSettings.micId ?? ''}
-                        onChange={(e) => voice.changeMicrophone(e.target.value)}
+                      <DeviceSelect
+                        value={voice.audioSettings.micId}
+                        options={voice.audioSettings.microphones}
+                        onChange={(id) => void voice.changeMicrophone(id ?? '')}
                         className="w-full bg-mv-canvas text-mv-text text-[13px] px-2.5 py-2 outline-none"
-                      >
-                        {voice.audioSettings.microphones.map((m) => (
-                          <option key={m.deviceId} value={m.deviceId}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
+                        ariaLabel="Microfone"
+                      />
                     </div>
                   )}
 
                   {voice.audioSettings.supportsOutputSelection && voice.audioSettings.speakers.length > 0 && (
                     <div className="mb-2">
                       <p className="field-label px-1 !mb-1.5">Saída de áudio</p>
-                      <select
-                        value={voice.audioSettings.speakerId ?? ''}
-                        onChange={(e) => voice.audioSettings.setSpeakerId(e.target.value || null)}
+                      <DeviceSelect
+                        value={voice.audioSettings.speakerId}
+                        options={voice.audioSettings.speakers}
+                        onChange={(id) => voice.audioSettings.setSpeakerId(id)}
                         className="w-full bg-mv-canvas text-mv-text text-[13px] px-2.5 py-2 outline-none"
-                      >
-                        {voice.audioSettings.speakers.map((s) => (
-                          <option key={s.deviceId} value={s.deviceId}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
+                        ariaLabel="Saída de áudio"
+                      />
                     </div>
                   )}
 
-                  <button
-                    onClick={toggleDeafen}
-                    className={`w-full flex items-center gap-2.5 text-left text-[13px] font-medium px-2.5 py-2 rounded-lg hover:bg-white/[0.06] transition-colors ${
-                      deafened ? 'text-rose-400' : 'text-mv-text'
-                    }`}
-                  >
-                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 shrink-0">
-                      <path d="M12 3a9 9 0 0 0-9 9v6a2 2 0 0 0 2 2h2v-8H5v-1a7 7 0 0 1 14 0v1h-2v8h2a2 2 0 0 0 2-2v-6a9 9 0 0 0-9-9z" />
-                    </svg>
-                    {deafened ? 'Reativar áudio' : 'Desativar áudio'}
-                  </button>
+                  {/* "Desativar áudio" fica no botão do fone, ao lado — sem repetir aqui. */}
 
                   <div className="h-px bg-[var(--color-line)] my-1.5" />
 

@@ -35,11 +35,32 @@ function getContext(): AudioContext | null {
       audioCtx = new Ctor({ latencyHint: 'interactive' })
       busGain = null
       reverbIn = null
+      applySoundsSink()
     } catch {
       return null
     }
   }
   return audioCtx
+}
+
+// Sons do app (entrar/sair, mutar, toque de chamada) saem no MESMO
+// alto-falante escolhido nas configurações — antes iam sempre pro padrão
+// do sistema. Lê a preferência salva (useAudioSettings) direto.
+function savedSpeakerId(): string {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mamacos-audio-settings') ?? '{}') as { speakerId?: string | null }
+    return typeof raw.speakerId === 'string' ? raw.speakerId : ''
+  } catch {
+    return ''
+  }
+}
+export function applySoundsSink(sinkId: string | null = savedSpeakerId()) {
+  const ctx = audioCtx as (AudioContext & { setSinkId?: (id: string) => Promise<void> }) | null
+  if (!ctx?.setSinkId) return
+  ctx.setSinkId(sinkId ?? '').catch(() => {
+    // dispositivo sumiu — volta pro padrão
+    ctx.setSinkId?.('').catch(() => {})
+  })
 }
 
 // Resposta ao impulso sintética: ruído estéreo com decaimento

@@ -1,3 +1,4 @@
+import { ActivityHoverCard } from '../ui/ActivityHoverCard'
 import { Avatar } from '../ui/Avatar'
 import { useIsPresent } from '../../hooks/usePresence'
 import type { Profile, ProfileStatus } from '../../types/database'
@@ -93,6 +94,7 @@ export function ProfileSidePanel({
         {profile.playing && isEffectivelyOnline && (
           <div className="mt-2.5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mv-muted mb-1.5">Atividade</p>
+            <ActivityHoverCard profile={profile}>
             <div className="flex items-center gap-2.5">
               <span className="w-9 h-9 rounded-lg bg-mv-green/15 text-mv-green flex items-center justify-center shrink-0" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -104,6 +106,7 @@ export function ProfileSidePanel({
                 <span className="block text-sm font-semibold text-white truncate">{profile.playing}</span>
               </span>
             </div>
+            </ActivityHoverCard>
           </div>
         )}
         </div>

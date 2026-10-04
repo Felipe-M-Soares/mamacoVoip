@@ -73,6 +73,9 @@ function VolumeRow({
   )
 }
 
+// Volume geral antes de silenciar pelo mixer (pra voltar no mesmo ponto).
+let lastMaster = 100
+
 export function AudioMixer({ profileById }: { profileById: Record<string, Profile | undefined> }) {
   const voice = useVoiceCore()
   const { hidden } = useStreamView()
@@ -89,12 +92,23 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
       <div className="px-1 divide-y divide-[var(--color-line)]">
         <VolumeRow
           label="Tudo da chamada"
-          sublabel={voice.deafened ? 'Áudio desativado' : undefined}
+          sublabel={voice.deafened ? 'Áudio desativado (botão do fone)' : undefined}
           value={voice.masterVolume}
           max={100}
-          onChange={voice.setMasterVolume}
-          muted={voice.deafened}
-          onToggleMute={voice.toggleDeafen}
+          onChange={(v) => {
+            if (v > 0) lastMaster = v
+            voice.setMasterVolume(v)
+          }}
+          // Silencia só o que você OUVE (não mexe no seu microfone).
+          muted={voice.masterVolume === 0 || voice.deafened}
+          onToggleMute={() => {
+            if (voice.deafened) voice.toggleDeafen()
+            else if (voice.masterVolume === 0) voice.setMasterVolume(lastMaster || 100)
+            else {
+              lastMaster = voice.masterVolume
+              voice.setMasterVolume(0)
+            }
+          }}
         />
         <VolumeRow
           label="Efeitos sonoros"
@@ -151,7 +165,7 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
                 muted={v === 0 || isHidden}
                 onToggleMute={() => {
                   if (isHidden) showStream(id)
-                  else voice.setScreenShareVolume(id, v === 0 ? 100 : 0)
+                  else voice.setScreenShareVolume(id, v === 0 ? 60 : 0)
                 }}
                 extra={
                   <button

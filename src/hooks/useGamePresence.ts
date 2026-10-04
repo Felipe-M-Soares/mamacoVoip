@@ -1,3 +1,4 @@
+import { supabase } from '../lib/supabase'
 import { useEffect, useSyncExternalStore } from 'react'
 import { useAuth } from './useAuth'
 import { getShowPlaying, subscribeShowPlaying } from '../lib/gamePrivacy'
@@ -91,6 +92,8 @@ export interface CurrentGameInfo {
   antiCheat: string | null
   // true = reconhecido pela pasta da loja (Steam/Epic/...), fora do catálogo
   generic: boolean
+  store?: string | null
+  steamAppId?: number | null
 }
 
 export type OverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
@@ -159,7 +162,16 @@ declare global {
       getVideoEncodeSettings?: () => Promise<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean }>
       setPreferGpuEncode?: (preferGpu: boolean) => Promise<{ preferGpu: boolean; activeNow: boolean }>
       relaunchApp?: () => Promise<void>
-      getGpuStatus?: () => Promise<{ videoEncode: string }>
+      getAutoStart?: () => Promise<{ enabled: boolean; supported: boolean }>
+      setAutoStart?: (enabled: boolean) => Promise<{ enabled: boolean; supported: boolean }>
+      getSystemIdleSeconds?: () => Promise<number | null>
+      getGpuStatus?: () => Promise<{
+        videoEncode: string
+        gpu: { vendorId: number; deviceId: number; name: string | null; driver: string | null } | null
+        encodeProfiles: string[]
+        forceActive: boolean
+      }>
+      setForceGpuEncode?: (force: boolean) => Promise<{ forceGpu: boolean; forceActive: boolean }>
       onOverlayVisibilityChanged?: (callback: (visible: boolean) => void) => () => void
       getCurrentGameInfo?: () => Promise<CurrentGameInfo | null>
       checkForUpdatesNow: () => void
@@ -271,14 +283,37 @@ export function useGamePresence() {
     // senão o "Jogando X" da sessão anterior podia ser gravado no perfil
     // errado/depois do logout.
     let cancelled = false
+    // Além do nome, grava a loja (capa/botão "Ver na Steam") e desde quando
+    // — numa atualização separada: se o banco ainda não tem essas colunas
+    // (migration não aplicada), o "Jogando X" continua funcionando.
+    const publish = async (game: string | null) => {
+      if (cancelled || !getShowPlaying()) return
+      await updateProfile({ playing: game })
+      if (cancelled || !user) return
+      let app: string | null = null
+      if (game) {
+        const info = await window.electronAPI?.getCurrentGameInfo?.().catch(() => null)
+        if (info && info.label === game) {
+          app = info.steamAppId ? `steam:${info.steamAppId}` : info.store ? info.store.toLowerCase().replace(/[^a-z0-9 ._-]/g, '').slice(0, 40) || null : null
+        }
+      }
+      await supabase
+        .from('profiles')
+        .update({ playing_app: app, playing_since: game ? new Date().toISOString() : null })
+        .eq('id', user.id)
+        .then(
+          () => {},
+          () => {}
+        )
+    }
     const unsubscribe = window.electronAPI.onGameStatusChanged((game) => {
-      if (!cancelled && getShowPlaying()) updateProfile({ playing: game })
+      void publish(game)
     })
 
     window.electronAPI
       .getCurrentGame()
       .then((game) => {
-        if (game && !cancelled && getShowPlaying()) updateProfile({ playing: game })
+        if (game) void publish(game)
       })
       .catch(() => {
         // IPC indisponível — sem problema, o evento acima cobre as mudanças

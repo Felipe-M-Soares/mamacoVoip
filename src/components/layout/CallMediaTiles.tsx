@@ -1,5 +1,24 @@
 import { forwardRef, useEffect, useRef } from 'react'
 
+// Aplica o alto-falante escolhido. Sem escolha (null) = padrão do sistema
+// ('' — antes não chamava nada, então voltar pro "Padrão" no meio da
+// call não fazia efeito). Reaplica quando um fone é conectado/desconectado
+// (se o escolhido sumiu, toca no padrão; se voltou, volta pra ele).
+function useSinkId(ref: { current: HTMLMediaElement | null }, sinkId: string | null | undefined) {
+  useEffect(() => {
+    const apply = () => {
+      const el = ref.current as (HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> }) | null
+      if (!el?.setSinkId) return
+      el.setSinkId(sinkId ?? '').catch(() => {
+        el.setSinkId?.('').catch(() => {})
+      })
+    }
+    apply()
+    navigator.mediaDevices?.addEventListener?.('devicechange', apply)
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', apply)
+  }, [ref, sinkId])
+}
+
 // VideoTile/RemoteAudio moram nesse arquivo próprio (em vez de dentro
 // de VoiceChannelView.tsx, onde viveram originalmente) porque
 // VoiceChannelView.tsx é carregado sob demanda (lazy, só quando
@@ -17,10 +36,7 @@ export const VideoTile = forwardRef<HTMLVideoElement, { stream: MediaStream; sin
     useEffect(() => {
       if (localRef.current) localRef.current.srcObject = stream
     }, [stream])
-    useEffect(() => {
-      const el = localRef.current as (HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }) | null
-      if (el && sinkId && el.setSinkId) el.setSinkId(sinkId).catch(() => {})
-    }, [sinkId])
+    useSinkId(localRef, sinkId)
     // Sempre mudo — o áudio de participantes remotos toca via <RemoteAudio>,
     // que aplica o volume individual. Tocar os dois ao mesmo tempo dava
     // áudio duplicado sempre que alguém ligava a câmera.
@@ -143,9 +159,19 @@ export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; s
       retained = true
       const source = ctx.createMediaStreamSource(stream)
       const gain = ctx.createGain()
+      // Nivelador: segura quem fala muito alto (ou um jogo estourado na
+      // transmissão) e evita distorção quando o volume passa de 100%.
+      // Quem fala baixo passa intacto.
+      const leveler = ctx.createDynamicsCompressor()
+      leveler.threshold.value = -20
+      leveler.knee.value = 12
+      leveler.ratio.value = 4
+      leveler.attack.value = 0.004
+      leveler.release.value = 0.25
       const destination = ctx.createMediaStreamDestination()
       source.connect(gain)
-      gain.connect(destination)
+      gain.connect(leveler)
+      leveler.connect(destination)
       // Política de autoplay do Chromium pode nascer o contexto
       // "suspended" em algum caso de borda — sem isso, ficaria mudo até
       // algum outro gesto acordar ele sozinho.
@@ -198,10 +224,7 @@ export function RemoteAudio({ stream, sinkId, volume }: { stream: MediaStream; s
       sourceNodeRef.current = null
     }
   }, [stream])
-  useEffect(() => {
-    const el = ref.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null
-    if (el && sinkId && el.setSinkId) el.setSinkId(sinkId).catch(() => {})
-  }, [sinkId])
+  useSinkId(ref, sinkId)
   useEffect(() => {
     // Até 200% (2.0) via GainNode; se o Web Audio falhou ao montar (ver
     // acima), só sobra o fallback do próprio elemento — que continua

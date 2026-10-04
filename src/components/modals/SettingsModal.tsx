@@ -60,7 +60,7 @@ import {
 } from '../../lib/noiseSuppression'
 import { probeHardwareDetails, type HwEncodeDetails } from '../../lib/hwEncode'
 
-type Tab =
+export type SettingsTab =
   | 'account'
   | 'security'
   | 'appearance'
@@ -71,6 +71,7 @@ type Tab =
   | 'licenses'
   | 'admin'
   | 'admin-users'
+type Tab = SettingsTab
 
 // Abas pesadas/raras, carregadas só quando abertas (a de licenças traz o
 // texto inteiro do THIRD_PARTY_NOTICES.md).
@@ -897,6 +898,7 @@ function AppearanceTab() {
   return (
     <div className="space-y-5">
       <TabHeader title="Aparência" description="Escolha a paleta de cores do app. A troca é na hora e vale só pra este aparelho." />
+      {window.electronAPI?.getAutoStart && <AutoStartCard />}
       <SettingsCard title="Tema">
         <div role="radiogroup" aria-label="Tema" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {THEMES.map((t) => {
@@ -1046,13 +1048,25 @@ function AudioTab() {
     }
   }
 
+  // Microfone escolhido desconectado → testa no padrão do sistema (antes o
+  // botão simplesmente não fazia nada).
+  async function getTestMicStream(): Promise<MediaStream> {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: audio.getAudioConstraints() })
+    } catch {
+      const { deviceId: _ignored, ...rest } = audio.getAudioConstraints() as MediaTrackConstraints
+      void _ignored
+      return navigator.mediaDevices.getUserMedia({ audio: rest })
+    }
+  }
+
   async function handleRequestPermission() {
     await audio.requestPermission()
   }
 
   async function startTest() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: audio.getAudioConstraints() })
+      const stream = await getTestMicStream()
       streamRef.current = stream
       const testStream = await applyTestNoiseSuppression(stream)
       const ctx = new AudioContext()
@@ -1098,7 +1112,7 @@ function AudioTab() {
   // microfonia (efeito Larsen) que aconteceria com um loopback instantâneo.
   async function startEcho() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: audio.getAudioConstraints() })
+      const stream = await getTestMicStream()
       streamRef.current = stream
       const echoStream = await applyTestNoiseSuppression(stream)
       const ctx = new AudioContext()
@@ -1432,8 +1446,8 @@ function AudioTab() {
       </SettingsCard>
 
       <InlineMessage tone="info">
-        As mudanças aqui valem pra próxima vez que você entrar em um canal de voz. Trocar o microfone durante uma
-        chamada já em andamento também dá — use o seletor que aparece na barra de controles da chamada.
+        As mudanças aqui valem na hora, inclusive numa chamada em andamento. Fone ou microfone novo conectado é
+        detectado sozinho.
       </InlineMessage>
 
       <div className="h-px bg-[var(--color-line)]" />
@@ -1858,7 +1872,13 @@ function GpuEncodeRow() {
   const [state, setState] = useState<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean } | null>(null)
   const [hw, setHw] = useState<HwEncodeDetails | null>(null)
   const [testing, setTesting] = useState(false)
-  const [gpuStatus, setGpuStatus] = useState<string | null>(null)
+  const [gpuStatus, setGpuStatus] = useState<{
+    videoEncode: string
+    gpu: { vendorId: number; deviceId: number; name: string | null; driver: string | null } | null
+    encodeProfiles: string[]
+    forceActive: boolean
+  } | null>(null)
+  const [forceGpu, setForceGpu] = useState<boolean | null>(null)
   function runTest(force: boolean) {
     setTesting(true)
     void probeHardwareDetails(force, force)
@@ -1868,7 +1888,13 @@ function GpuEncodeRow() {
   useEffect(() => {
     window.electronAPI?.getVideoEncodeSettings?.().then(setState).catch(() => {})
     runTest(false)
-    window.electronAPI?.getGpuStatus?.().then((r) => setGpuStatus(r.videoEncode)).catch(() => {})
+    window.electronAPI
+      ?.getGpuStatus?.()
+      .then((r) => {
+        setGpuStatus(r)
+        setForceGpu(r.forceActive)
+      })
+      .catch(() => {})
   }, [])
   if (!state) return null
   const needsRestart = state.preferGpu !== state.activeNow
@@ -1922,8 +1948,48 @@ function GpuEncodeRow() {
             </p>
           </>
         )}
-        {gpuStatus && gpuStatus !== 'enabled' && (
-          <p className="text-[11px] mt-0.5">Status do codificador de vídeo no app: {gpuStatus}</p>
+        {gpuStatus && (
+          <div className="mt-2 rounded-lg border border-[var(--color-line)] bg-white/[0.02] px-2.5 py-2 text-[11px] leading-relaxed">
+            <p>
+              Placa: <span className="text-mv-text">{gpuStatus.gpu?.name ?? 'não identificada'}</span>
+              {gpuStatus.gpu?.driver && <> · driver {gpuStatus.gpu.driver}</>}
+            </p>
+            <p>
+              Codificador de vídeo do app: <span className="text-mv-text">{gpuStatus.videoEncode}</span> · formatos pela placa
+              que o app enxerga:{' '}
+              <span className="text-mv-text">
+                {gpuStatus.encodeProfiles.length ? gpuStatus.encodeProfiles.join(', ') : 'nenhum'}
+              </span>
+            </p>
+          </div>
+        )}
+        {state.preferGpu && forceGpu !== null && (
+          <label className="mt-2 flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-mv-accent"
+              checked={forceGpu}
+              onChange={(e) => {
+                const next = e.target.checked
+                setForceGpu(next)
+                window.electronAPI?.setForceGpuEncode?.(next).catch(() => {})
+              }}
+            />
+            <span>
+              <span className="text-mv-text">Forçar o codificador da placa (experimental)</span> — desliga as travas de
+              segurança que o motor do app aplica por modelo de placa. Use se o teste acima mostrar tudo no processador.
+              Vale ao reabrir o app; se a placa travar, o app desliga sozinho.
+              {gpuStatus && forceGpu !== gpuStatus.forceActive && (
+                <button
+                  type="button"
+                  onClick={() => void window.electronAPI?.relaunchApp?.()}
+                  className="ml-1 text-mv-accent hover:underline"
+                >
+                  Reabrir agora
+                </button>
+              )}
+            </span>
+          </label>
         )}
       </div>
       {state.autoDisabled && !state.preferGpu && (
@@ -1940,5 +2006,31 @@ function GpuEncodeRow() {
         </div>
       )}
     </SettingRow>
+  )
+}
+
+// "Abrir com o Windows" (app de computador): abre minimizado na bandeja.
+function AutoStartCard() {
+  const [state, setState] = useState<{ enabled: boolean; supported: boolean } | null>(null)
+  useEffect(() => {
+    window.electronAPI?.getAutoStart?.().then(setState).catch(() => {})
+  }, [])
+  if (!state?.supported) return null
+  return (
+    <SettingsCard title="Inicialização">
+      <SettingRow
+        title="Abrir junto com o Windows"
+        description="O Mamacos Voip já abre minimizado na bandeja quando você liga o computador — pronto pra receber chamadas e mensagens."
+        control={
+          <Toggle
+            label="Abrir junto com o Windows"
+            checked={state.enabled}
+            onChange={(checked) => {
+              window.electronAPI?.setAutoStart?.(checked).then(setState).catch(() => {})
+            }}
+          />
+        }
+      />
+    </SettingsCard>
   )
 }

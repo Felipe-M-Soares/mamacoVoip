@@ -5071,4 +5071,60 @@ as $$
     );
 $$;
 
+-- ============================================================
+-- PARTE 24 — cartão de atividade (loja/tempo jogando) e sala AFK padrão
+-- ============================================================
+
+-- "Jogando X": de onde é o jogo (ex.: 'steam:730') e desde quando — pro
+-- cartão que abre ao passar o mouse (capa, tempo e botão da loja).
+alter table public.profiles add column if not exists playing_app text;
+alter table public.profiles add column if not exists playing_since timestamptz;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_playing_app_format') then
+    alter table public.profiles add constraint profiles_playing_app_format
+      check (playing_app is null or playing_app ~ '^(steam:[0-9]{1,10}|[a-z0-9 ._-]{1,40})$');
+  end if;
+end $$;
+
+-- Sala AFK em TODO servidor, por padrão: quem fica 20 min sem usar o
+-- computador nem falar vai pra lá (mudo) e volta sozinho quando voltar.
+alter table public.servers alter column afk_timeout_minutes set default 20;
+
+create or replace function public.handle_new_server_channels()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_afk uuid;
+begin
+  insert into public.channels (server_id, name, type, position) values
+    (new.id, 'geral', 'text', 0),
+    (new.id, 'Sala Geral', 'voice', 1);
+  insert into public.channels (server_id, name, type, position)
+  values (new.id, 'AFK', 'voice', 999)
+  returning id into v_afk;
+  update public.servers set afk_channel_id = v_afk, afk_timeout_minutes = 20 where id = new.id;
+  return new;
+end;
+$$;
+
+-- Servidores que já existem e não têm sala AFK: cria uma.
+do $$
+declare
+  r record;
+  v_afk uuid;
+begin
+  for r in select id from public.servers where afk_channel_id is null loop
+    insert into public.channels (server_id, name, type, position)
+    values (r.id, 'AFK', 'voice', 999)
+    returning id into v_afk;
+    update public.servers set afk_channel_id = v_afk where id = r.id;
+  end loop;
+end $$;
+-- Quem estava no padrão antigo (10 min) passa pros 20 min.
+update public.servers set afk_timeout_minutes = 20 where afk_timeout_minutes = 10;
+
 notify pgrst, 'reload schema';

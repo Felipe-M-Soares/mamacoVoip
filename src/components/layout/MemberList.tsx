@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ActivityHoverCard } from '../ui/ActivityHoverCard'
 import { Avatar } from '../ui/Avatar'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { useAuth } from '../../hooks/useAuth'
@@ -126,12 +127,14 @@ export function MemberList({
                 <span className="truncate">Em voz · {inVoice}</span>
               </span>
             ) : p.playing && online ? (
-              <span className="text-[11px] text-mv-muted truncate flex items-center gap-1 mt-0.5">
-                <GamepadIcon className="w-3 h-3 shrink-0 text-mv-green" aria-hidden />
-                <span className="truncate">
-                  Jogando <strong className="font-semibold text-mv-text/90">{p.playing}</strong>
+              <ActivityHoverCard profile={p}>
+                <span className="text-[11px] text-mv-muted truncate flex items-center gap-1 mt-0.5">
+                  <GamepadIcon className="w-3 h-3 shrink-0 text-mv-green" aria-hidden />
+                  <span className="truncate">
+                    Jogando <strong className="font-semibold text-mv-text/90">{p.playing}</strong>
+                  </span>
                 </span>
-              </span>
+              </ActivityHoverCard>
             ) : p.custom_status && online ? (
               <span className="text-[11px] text-mv-muted truncate block mt-0.5">{p.custom_status}</span>
             ) : null}
@@ -189,8 +192,8 @@ export function MemberList({
                 {activity.slice(0, 6).map((m) => {
                   const topRole = rolesForUser(m.profile.id)[0]
                   return (
+                    <ActivityHoverCard key={m.user_id} profile={m.profile}>
                     <button
-                      key={m.user_id}
                       onClick={() => onViewProfile(m.profile)}
                       className="w-full text-left rounded-xl bg-white/[0.035] border border-[var(--color-line)] hover:bg-white/[0.06] px-2.5 py-2 flex items-center gap-2.5 transition-colors"
                     >
@@ -210,6 +213,7 @@ export function MemberList({
                         <GamepadIcon className="w-5 h-5" aria-hidden />
                       </span>
                     </button>
+                    </ActivityHoverCard>
                   )
                 })}
               </div>

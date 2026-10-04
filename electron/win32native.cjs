@@ -76,6 +76,7 @@ function load() {
       GetWindowPlacement: user32.func(
         'bool __stdcall GetWindowPlacement(intptr_t hWnd, _Inout_ MV_WINDOWPLACEMENT *lpwndpl)'
       ),
+      GetWindowRect: user32.func('bool __stdcall GetWindowRect(intptr_t hWnd, _Out_ MV_RECT *lpRect)'),
       MonitorFromWindow: user32.func('intptr_t __stdcall MonitorFromWindow(intptr_t hWnd, uint32_t dwFlags)'),
       GetMonitorInfoW: user32.func('bool __stdcall GetMonitorInfoW(intptr_t hMonitor, _Inout_ MV_MONITORINFO *lpmi)'),
       ShowWindowAsync: user32.func('bool __stdcall ShowWindowAsync(intptr_t hWnd, int nCmdShow)'),
@@ -167,6 +168,17 @@ function monitorRect(w, hwnd) {
   return { x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top }
 }
 
+function windowRect(w, hwnd) {
+  if (!w.GetWindowRect) return null
+  const r = {}
+  try {
+    if (!w.GetWindowRect(hwnd, r)) return null
+  } catch {
+    return null
+  }
+  return typeof r.left === 'number' ? r : null
+}
+
 function placement(w, hwnd) {
   const wp = {
     length: 44,
@@ -211,9 +223,14 @@ function findLargestWindowForProcessNames(names) {
     if (!pids.has(pid)) return
     const wp = placement(w, hwnd)
     if (!wp) return
-    const r = wp.rcNormalPosition
-    const width = r.right - r.left
-    const height = r.bottom - r.top
+    // Tamanho REAL da janela agora (GetWindowRect) e o "normal"
+    // (rcNormalPosition, o de quando não está maximizada). Jogo em TELA
+    // CHEIA costuma ter o "normal" minúsculo/zerado — só olhando ele, o jogo
+    // era descartado como "janela pequena demais" e não era reconhecido.
+    const n = wp.rcNormalPosition
+    const live = windowRect(w, hwnd)
+    const width = Math.max(n.right - n.left, live ? live.right - live.left : 0)
+    const height = Math.max(n.bottom - n.top, live ? live.bottom - live.top : 0)
     if (width < 200 || height < 200) return
     const area = width * height
     if (!best || area > best.area) best = { hwnd, pid, area, showCmd: wp.showCmd }

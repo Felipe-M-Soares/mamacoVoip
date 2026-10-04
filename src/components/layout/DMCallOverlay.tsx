@@ -91,9 +91,9 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
 
       <div role="toolbar" aria-label="Controles da chamada" className="flex items-center justify-center gap-2 px-3 py-2.5 border-t border-[var(--color-line)] bg-white/[0.02]">
         <button
-          onClick={voice.toggleMute}
-          title={voice.muted ? 'Ativar microfone' : 'Silenciar'}
-          aria-label={voice.muted ? 'Ativar microfone' : 'Silenciar'}
+          onClick={() => voice.toggleMute()}
+          title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
+          aria-label={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
           aria-pressed={voice.muted}
           className={`w-10 h-10 flex items-center justify-center rounded-full transition-all active:scale-95 ${
             voice.muted ? 'bg-rose-500/15 text-rose-400 ring-1 ring-inset ring-rose-500/35 hover:bg-rose-500/25' : 'bg-white/[0.07] text-mv-text hover:bg-white/[0.13] hover:text-white'
@@ -110,8 +110,8 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
 
         <button
           onClick={voice.toggleDeafen}
-          title={voice.deafened ? 'Reativar áudio' : 'Ensurdecer'}
-          aria-label={voice.deafened ? 'Reativar áudio' : 'Ensurdecer'}
+          title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
+          aria-label={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}
           aria-pressed={voice.deafened}
           className={`w-10 h-10 flex items-center justify-center rounded-full transition-all active:scale-95 ${
             voice.deafened ? 'bg-rose-500/15 text-rose-400 ring-1 ring-inset ring-rose-500/35 hover:bg-rose-500/25' : 'bg-white/[0.07] text-mv-text hover:bg-white/[0.13] hover:text-white'

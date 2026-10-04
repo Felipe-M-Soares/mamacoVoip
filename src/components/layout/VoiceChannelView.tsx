@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { DeviceSelect } from '../ui/DeviceSelect'
 import { Avatar } from '../ui/Avatar'
 import { VideoTile } from './CallMediaTiles'
-import { GameStreamMenuSection, LocalScreenShareStats } from './GameStreamControls'
+import { GameStreamMenuSection } from './GameStreamControls'
 import { useAuth } from '../../hooks/useAuth'
 import { useServerMembers } from '../../hooks/useServerMembers'
 import { isNativeMobileApp } from '../../lib/platform'
@@ -157,16 +157,6 @@ function ShareTile({
           <p className={`${small ? 'text-[12px]' : 'text-[14px]'} font-semibold text-white text-center px-4`}>
             Você está compartilhando sua tela
           </p>
-          {!small && (
-            <>
-              <p className="text-[12px] text-center px-6 max-w-sm">
-                Sem prévia aqui de propósito — evita o efeito de espelho infinito se a captura pegar esta janela
-              </p>
-              <div className="mt-1 px-4">
-                <LocalScreenShareStats />
-              </div>
-            </>
-          )}
         </div>
       ) : (
         <VideoTile stream={share.stream} fit="contain" ref={videoRef} />

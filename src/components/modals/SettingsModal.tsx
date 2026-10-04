@@ -26,7 +26,6 @@ import { useIsAppAdmin } from '../../hooks/useAppAdmin'
 import { getShowPlaying, setShowPlaying, subscribeShowPlaying } from '../../lib/gamePrivacy'
 import { validatePassword } from '../../lib/authValidation'
 import { traduzErro } from '../../context/AuthContext'
-import { NetworkDiagnosticsPanel } from './NetworkDiagnosticsPanel'
 import { Avatar } from '../ui/Avatar'
 import { Toggle } from '../ui/Toggle'
 import {
@@ -58,7 +57,6 @@ import {
   createAutoSensitivity,
   AUTO_SENSITIVITY_TICK_MS,
 } from '../../lib/noiseSuppression'
-import { probeHardwareDetails, type HwEncodeDetails } from '../../lib/hwEncode'
 
 export type SettingsTab =
   | 'account'
@@ -1450,9 +1448,6 @@ function AudioTab() {
         detectado sozinho.
       </InlineMessage>
 
-      <div className="h-px bg-[var(--color-line)]" />
-
-      <NetworkDiagnosticsPanel />
     </div>
   )
 }
@@ -1870,38 +1865,15 @@ function SensitivityMeter({
 // reabrir o app — o motor do Chromium só lê isso na inicialização.
 function GpuEncodeRow() {
   const [state, setState] = useState<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean } | null>(null)
-  const [hw, setHw] = useState<HwEncodeDetails | null>(null)
-  const [testing, setTesting] = useState(false)
-  const [gpuStatus, setGpuStatus] = useState<{
-    videoEncode: string
-    gpu: { vendorId: number; deviceId: number; name: string | null; driver: string | null } | null
-    encodeProfiles: string[]
-    forceActive: boolean
-  } | null>(null)
-  const [forceGpu, setForceGpu] = useState<boolean | null>(null)
-  function runTest(force: boolean) {
-    setTesting(true)
-    void probeHardwareDetails(force, force)
-      .then(setHw)
-      .finally(() => setTesting(false))
-  }
   useEffect(() => {
     window.electronAPI?.getVideoEncodeSettings?.().then(setState).catch(() => {})
-    runTest(false)
-    window.electronAPI
-      ?.getGpuStatus?.()
-      .then((r) => {
-        setGpuStatus(r)
-        setForceGpu(r.forceActive)
-      })
-      .catch(() => {})
   }, [])
   if (!state) return null
   const needsRestart = state.preferGpu !== state.activeNow
   return (
     <SettingRow
       title="Usar a placa de vídeo na transmissão"
-      description="Recomendado pra quem transmite jogo: a placa de vídeo comprime o vídeo num chip próprio e quase não pesa no FPS. Desligue só se a transmissão travar ou ficar com imagem estranha (alguns drivers antigos)."
+      description="Recomendado pra quem transmite jogo: a placa de vídeo comprime o vídeo num chip próprio e quase não pesa no FPS. Desligue só se a transmissão travar ou ficar com imagem estranha."
       control={
         <Toggle
           label="Usar a placa de vídeo na transmissão"
@@ -1912,89 +1884,9 @@ function GpuEncodeRow() {
         />
       }
     >
-      <div className="mt-2 text-[12px] text-mv-muted">
-        {testing ? (
-          <p>Testando sua placa de vídeo… (leva uns 10 segundos)</p>
-        ) : !hw || !Object.values(hw).some((r) => r.impl) ? (
-          <p>
-            Ainda não testamos sua placa.{' '}
-            <button type="button" onClick={() => runTest(true)} className="text-mv-accent hover:underline">
-              Testar agora
-            </button>{' '}
-            (usa o microfone por alguns segundos só pra liberar o teste — nada é gravado).
-          </p>
-        ) : (
-          <>
-            <p className="mb-1">Teste da sua placa (o que o app usa de verdade pra transmitir):</p>
-            <ul className="space-y-0.5">
-              {(['h264', 'av1', 'vp9'] as const).map((c) => (
-                <li key={c} className="flex items-center gap-1.5">
-                  <span className={`w-1.5 h-1.5 rounded-full ${hw[c].hw ? 'bg-mv-green' : 'bg-white/25'}`} aria-hidden />
-                  <span className="text-mv-text">{c === 'h264' ? 'H.264' : c.toUpperCase()}:</span>
-                  <span className={hw[c].hw ? 'text-mv-green' : ''}>
-                    {hw[c].hw ? 'placa de vídeo' : hw[c].impl ? 'processador' : 'não disponível'}
-                  </span>
-                  {hw[c].impl && <span className="text-[11px] opacity-70">({hw[c].impl})</span>}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-1">
-              {hw.h264.hw || hw.av1.hw || hw.vp9.hw
-                ? 'A transmissão usa o primeiro formato que roda na placa.'
-                : 'Nenhum formato rodou na placa — a transmissão usa o processador. Atualizar o driver da placa costuma resolver.'}
-              <button type="button" onClick={() => runTest(true)} className="ml-2 text-mv-accent hover:underline">
-                Testar de novo
-              </button>
-            </p>
-          </>
-        )}
-        {gpuStatus && (
-          <div className="mt-2 rounded-lg border border-[var(--color-line)] bg-white/[0.02] px-2.5 py-2 text-[11px] leading-relaxed">
-            <p>
-              Placa: <span className="text-mv-text">{gpuStatus.gpu?.name ?? 'não identificada'}</span>
-              {gpuStatus.gpu?.driver && <> · driver {gpuStatus.gpu.driver}</>}
-            </p>
-            <p>
-              Codificador de vídeo do app: <span className="text-mv-text">{gpuStatus.videoEncode}</span> · formatos pela placa
-              que o app enxerga:{' '}
-              <span className="text-mv-text">
-                {gpuStatus.encodeProfiles.length ? gpuStatus.encodeProfiles.join(', ') : 'nenhum'}
-              </span>
-            </p>
-          </div>
-        )}
-        {state.preferGpu && forceGpu !== null && (
-          <label className="mt-2 flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              className="mt-0.5 accent-mv-accent"
-              checked={forceGpu}
-              onChange={(e) => {
-                const next = e.target.checked
-                setForceGpu(next)
-                window.electronAPI?.setForceGpuEncode?.(next).catch(() => {})
-              }}
-            />
-            <span>
-              <span className="text-mv-text">Forçar o codificador da placa (experimental)</span> — desliga as travas de
-              segurança que o motor do app aplica por modelo de placa. Use se o teste acima mostrar tudo no processador.
-              Vale ao reabrir o app; se a placa travar, o app desliga sozinho.
-              {gpuStatus && forceGpu !== gpuStatus.forceActive && (
-                <button
-                  type="button"
-                  onClick={() => void window.electronAPI?.relaunchApp?.()}
-                  className="ml-1 text-mv-accent hover:underline"
-                >
-                  Reabrir agora
-                </button>
-              )}
-            </span>
-          </label>
-        )}
-      </div>
       {state.autoDisabled && !state.preferGpu && (
         <p className="mt-2 text-[12.5px] text-amber-300">
-          Desligado automaticamente: a placa de vídeo travou durante o uso. Atualize o driver e ligue de novo se quiser tentar.
+          Desligado automaticamente porque a placa de vídeo travou. Atualize o driver e ligue de novo se quiser.
         </p>
       )}
       {needsRestart && (

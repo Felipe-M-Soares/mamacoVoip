@@ -9,7 +9,11 @@ export type HwEncodeDetails = Record<EncodeCodecKey, EncodeTestResult>
 
 const CACHE_KEY = 'mv-hw-encode-test'
 const CACHE_MS = 7 * 24 * 3600 * 1000
-const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
+// Versão do app + do motor (Chromium): trocar o motor refaz o teste.
+const APP_VERSION =
+  (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev') +
+  '|' +
+  (typeof navigator !== 'undefined' ? (/Chrome\/(\d+)/.exec(navigator.userAgent)?.[1] ?? '') : '')
 
 let cached: Promise<HwEncodeDetails> | null = null
 

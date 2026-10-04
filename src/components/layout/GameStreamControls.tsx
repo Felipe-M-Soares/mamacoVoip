@@ -1,74 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useVoiceCore } from '../../hooks/useVoice'
 import { overlayShortcutText, useKeybinds } from '../../lib/keybinds'
-import {
-  computeScreenShareStats,
-  describeLimitation,
-  formatScreenShareStats,
-  pickOutboundVideo,
-  type OutboundVideoSample,
-  type ScreenShareStats,
-} from '../../lib/screenShareStats'
 import type { OverlayCorner } from '../../hooks/useGamePresence'
 
 // Controles de "transmissão para jogos" da tela da call:
-//  - LocalScreenShareStats: indicador discreto (só pra quem transmite) com
-//    o que o encoder está REALMENTE mandando — resolução, fps, bitrate,
-//    codec e se é GPU/CPU — lido via getStats() a cada 2s.
 //  - GameStreamMenuSection: no menu "..." da call — qualidade automática
 //    para jogos e a sobreposição (ligar/desligar, canto da tela).
-
-const STATS_INTERVAL_MS = 2000
-
-export function LocalScreenShareStats() {
-  const voice = useVoiceCore()
-  const [stats, setStats] = useState<ScreenShareStats | null>(null)
-  const prevRef = useRef<OutboundVideoSample | null>(null)
-  const getReport = voice.getScreenShareStatsReport
-
-  useEffect(() => {
-    let cancelled = false
-    prevRef.current = null
-    async function tick() {
-      const report = await getReport()
-      if (cancelled) return
-      // RTCStatsReport é um Map (id → estatística): usa só os valores.
-      const sample = pickOutboundVideo(report ? (Array.from(report.values()) as Record<string, unknown>[]) : null)
-      if (!sample) return
-      setStats(computeScreenShareStats(prevRef.current, sample))
-      prevRef.current = sample
-    }
-    void tick()
-    const timer = setInterval(() => void tick(), STATS_INTERVAL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [getReport])
-
-  const text = stats ? formatScreenShareStats(stats) : ''
-  const limitation = stats ? describeLimitation(stats) : null
-  if (!text && !voice.screenSharePresetLabel) return null
-
-  return (
-    <div
-      className="flex flex-wrap items-center justify-center gap-1.5 text-[11px] text-mv-muted tabular-nums"
-      title="O que está saindo de verdade na sua transmissão (atualiza a cada 2s)"
-    >
-      {voice.screenSharePresetLabel && <span className="chip">{voice.screenSharePresetLabel}</span>}
-      {text && <span>{text}</span>}
-      {limitation && <span className="text-amber-400">· {limitation}</span>}
-      {/* Só vale com vídeo saindo de verdade (sem ninguém assistindo, o
-          envio pausa e o codificador nem chega a ser escolhido). */}
-      {stats?.hardwareEncoder === false && (stats.bitrateKbps ?? 0) > 0 && window.electronAPI?.getVideoEncodeSettings && (
-        <span className="text-amber-400 basis-full text-center">
-          Usando o processador: a placa de vídeo não liberou a codificação. Veja o que ela suporta em Configurações → Voz e
-          Vídeo — atualizar o driver costuma resolver.
-        </span>
-      )}
-    </div>
-  )
-}
 
 const CORNER_OPTIONS: { value: OverlayCorner; label: string }[] = [
   { value: 'top-left', label: 'Superior esquerdo' },

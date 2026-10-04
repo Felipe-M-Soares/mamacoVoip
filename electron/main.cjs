@@ -90,17 +90,21 @@ const preferGpuEncodeAtStartup = loadPreferGpuEncode()
 // o codificador de vídeo por hardware em certas AMD/Intel. Experimental,
 // desligado por padrão; a rede de segurança de travamento abaixo também
 // desliga isto se a GPU cair.
-const forceGpuEncodeAtStartup = preferGpuEncodeAtStartup && loadVideoEncodeSettings().forceGpu === true
+// Opção removida da tela; fica sempre desligada (ignora o que ficou salvo).
+const forceGpuEncodeAtStartup = false
 if (preferGpuEncodeAtStartup && process.platform === 'win32') {
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
   if (forceGpuEncodeAtStartup) app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds')
-  // WebRtcAV1HWEncode: libera AV1 pela placa na transmissão (AMD RX 7000/
-  // 9000, NVIDIA RTX 40/50, Intel Arc). Em placa AMD o H.264 pela GPU
-  // costuma não ser usado pelo WebRTC — o AV1 é o caminho pela placa.
+  // Codificador da placa no Windows = Media Foundation (o que o Chrome/Edge
+  // usam e que funciona em AMD, NVIDIA e Intel, H.264 e AV1 quando a placa
+  // tem). O codificador D3D12 do Chromium ainda é instável em várias placas
+  // (o próprio Edge desliga ele na RX 9060 XT) — fica sempre desligado, pra
+  // não "roubar" a vez do Media Foundation, mesmo com o modo forçado.
   app.commandLine.appendSwitch(
     'enable-features',
     'WebRtcAllowWgcWindowCapturer,MediaFoundationVideoEncodeAccelerator,WebRtcAV1HWEncode'
   )
+  app.commandLine.appendSwitch('disable-features', 'D3D12VideoEncodeAccelerator')
 } else {
   app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcWindowCapturer')
 }
@@ -2100,10 +2104,15 @@ app.whenReady().then(() => {
   // pedido da pessoa) e espera o Windows redesenhar antes da nova lista.
   // Copiar texto pela área de transferência do sistema (não depende de
   // permissão/foco do navegador).
-  handleTrusted('clipboard:write-text', (_event, text) => {
+  handleTrusted('clipboard:write-text', async (_event, text) => {
     if (typeof text !== 'string' || text.length > 100_000) return false
-    clipboard.writeText(text)
-    return true
+    try {
+      // Electron 44+: writeText virou Promise (padrão W3C).
+      await clipboard.writeText(text)
+      return true
+    } catch {
+      return false
+    }
   })
 
   handleTrusted('screen-share:restore-window', async (_event, hwnd) => {
@@ -2378,6 +2387,16 @@ app.whenReady().then(() => {
   // Diagnóstico: o Chromium liberou codificação de vídeo pela GPU aqui?
   // Diagnóstico completo: o que o processo da GPU do Chromium enxerga —
   // placa, driver e quais formatos ele sabe codificar por hardware.
+  // media::VideoCodecProfile (número) → nome legível no diagnóstico.
+  function codecProfileName(n) {
+    if (!Number.isFinite(n)) return ''
+    if (n >= 0 && n <= 10) return 'H264'
+    if (n === 11) return 'VP8'
+    if (n >= 12 && n <= 15) return 'VP9'
+    if (n >= 16 && n <= 18) return 'HEVC'
+    if (n >= 24 && n <= 26) return 'AV1'
+    return `perfil ${n}`
+  }
   handleTrusted('video:gpu-status', async () => {
     let videoEncode = 'desconhecido'
     try {
@@ -2401,9 +2420,9 @@ app.whenReady().then(() => {
       }
       const profiles = Array.isArray(info?.videoEncodeAcceleratorSupportedProfile) ? info.videoEncodeAcceleratorSupportedProfile : []
       encodeProfiles = profiles
-        .map((p) => (typeof p?.profile === 'string' ? p.profile : String(p?.profile ?? '')))
+        .map((p) => (typeof p?.profile === 'string' ? p.profile : codecProfileName(Number(p?.profile))))
         .filter(Boolean)
-        .slice(0, 30)
+      encodeProfiles = [...new Set(encodeProfiles)].slice(0, 30)
     } catch {
       // segue sem
     }

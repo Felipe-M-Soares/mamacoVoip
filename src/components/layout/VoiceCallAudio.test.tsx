@@ -45,6 +45,15 @@ describe('VoiceCallAudio', () => {
     rerender(<VoiceCallAudio />)
     expect(ids(container)).toEqual(['mic-a', 'mic-b', 'sa-a', 'sa-b'])
   })
+  it('em sala de servidor, transmissão nova começa fechada até clicar em Assistir', () => {
+    voiceState.connectedServerId = 'srv'
+    const { container, rerender } = render(<VoiceCallAudio />)
+    rerender(<VoiceCallAudio />)
+    expect(ids(container)).toEqual(['mic-a', 'mic-b'])
+    act(() => showStream('a'))
+    rerender(<VoiceCallAudio />)
+    expect(ids(container)).toEqual(['mic-a', 'mic-b', 'sa-a'])
+  })
   it('ensurdecido zera tudo sem mexer no volume geral', () => {
     voiceState.deafened = true
     const { container } = render(<VoiceCallAudio />)

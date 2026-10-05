@@ -39,6 +39,7 @@ import {
 } from '../lib/noiseSuppression'
 import { chooseScreenCodec, markCodecSoftwareOnly, probeHardwareEncoders, resetHardwareProbe, type ScreenCodec } from '../lib/hwEncode'
 import { computeScreenShareStats, pickOutboundVideo, type OutboundVideoSample } from '../lib/screenShareStats'
+import { getStreamView, subscribeStreamView } from '../lib/streamView'
 import { peekPendingGameShareHint, takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
@@ -2377,6 +2378,26 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // publicação, então não existe mais ambiguidade nenhuma pra resolver
   // aqui, só montar as duas MediaStreams combinadas que o resto do app
   // (CallMediaTiles.tsx) já espera.
+  // Transmissão fechada por você = o servidor PARA de mandar o vídeo e o
+  // som dela pra você (setEnabled(false)). Sem isso, todo mundo na sala
+  // baixava toda transmissão em alta qualidade o tempo todo — era o que
+  // estourava a cota de dados do servidor de voz. A transmissão continua
+  // listada (a publicação fica assinada), só não trafega nada.
+  function applyStreamWatchingTo(publication: RemoteTrackPublication, participantId: string) {
+    if (publication.source !== Track.Source.ScreenShare && publication.source !== Track.Source.ScreenShareAudio) return
+    if (!publication.isSubscribed) return
+    const watching = !getStreamView().hidden.has(participantId)
+    if (publication.isEnabled !== watching) publication.setEnabled(watching)
+  }
+  function applyStreamWatching() {
+    const room = roomRef.current
+    if (!room) return
+    for (const p of room.remoteParticipants.values()) {
+      for (const pub of p.trackPublications.values()) applyStreamWatchingTo(pub, p.identity)
+    }
+  }
+  useEffect(() => subscribeStreamView(applyStreamWatching), [])
+
   function recomputeParticipant(participantId: string) {
     const tracks = remoteTracksRef.current.get(participantId)
     if (!tracks) return
@@ -2535,6 +2556,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // console.error + IPC síncrono de escrita em disco a cada track).
         console.debug(`[VoiceContext] TrackSubscribed de ${participant.identity}: source=${track.source}, kind=${track.kind}`)
         setRemoteTrack(participant.identity, track.source, track.mediaStreamTrack)
+        if (track.source === Track.Source.ScreenShare || track.source === Track.Source.ScreenShareAudio) {
+          applyStreamWatchingTo(_publication, participant.identity)
+        }
       }
     )
 

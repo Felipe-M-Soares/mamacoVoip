@@ -1,7 +1,7 @@
 import { useVoiceCore } from '../../hooks/useVoice'
 import { useEffect } from 'react'
 import { RemoteAudio } from './CallMediaTiles'
-import { focusStream, getStreamView, resetStreamView, showStream, useStreamView } from '../../lib/streamView'
+import { resetStreamView, syncActiveStreams, useStreamView } from '../../lib/streamView'
 
 // TRIGÉSIMA NONA RODADA — bug relatado: navegar pra OUTRO canal (só
 // pra olhar, sem sair da call) parava o áudio da chamada inteiro — voz
@@ -59,20 +59,21 @@ export function VoiceCallAudio() {
     if (!connected) resetStreamView()
   }, [connected])
 
-  // Quem parou de transmitir sai da lista de "fechadas": se voltar a
-  // transmitir depois, aparece de novo normalmente.
+  // Transmissões novas de outras pessoas começam fechadas (só baixa quem
+  // clicar em "Assistir"); quem parou de transmitir sai da lista.
   const sharingKeys = Object.entries(voice.participants)
     .filter(([, d]) => d.screenStream)
     .map(([id]) => id)
     .sort()
     .join(',')
   useEffect(() => {
+    if (!connected) return
     const active = new Set(sharingKeys ? sharingKeys.split(',') : [])
     if (voice.screenSharing) active.add('local')
-    for (const key of getStreamView().hidden) if (!active.has(key)) showStream(key)
-    const focused = getStreamView().focused
-    if (focused && !active.has(focused)) focusStream(null)
-  }, [sharingKeys, voice.screenSharing])
+    // Só em sala de servidor (que tem a tela pra assistir/fechar). Em
+    // chamada privada continua tocando como antes.
+    syncActiveStreams(active, Boolean(voice.connectedServerId))
+  }, [connected, sharingKeys, voice.screenSharing, voice.connectedServerId])
 
   if (!connected) return null
 

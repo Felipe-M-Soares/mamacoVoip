@@ -401,7 +401,7 @@ const APP_CONTENT_SECURITY_POLICY = [
   "font-src 'self' data:",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob: https:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.livekit.cloud wss://*.livekit.cloud https://api.giphy.com",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.livekit.cloud wss://*.livekit.cloud https://*.sslip.io wss://*.sslip.io https://api.giphy.com",
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   "frame-src 'none'",

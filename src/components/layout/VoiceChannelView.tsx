@@ -369,6 +369,7 @@ function StreamManagerBar({
                 {s.name}
                 {s.isLocal && ' (você)'}
               </span>
+              {isHidden && !s.isLocal && <span className="text-mv-accent font-semibold">· Assistir</span>}
             </button>
             <button
               type="button"
@@ -893,6 +894,27 @@ export function VoiceChannelView({
           <div className="flex-1 overflow-y-auto p-4 flex flex-col">
             {(screenShares.length > 1 || hiddenCount > 0) && (
               <StreamManagerBar shares={screenShares} hidden={hiddenShareKeys} focused={focusedShareKey} />
+            )}
+            {!hasScreenShares && hiddenCount > 0 && (
+              // Transmissões fechadas: nada é baixado até clicar em Assistir.
+              <div className="flex flex-wrap gap-3 justify-center mb-4">
+                {screenShares
+                  .filter((s) => hiddenShareKeys.has(s.key))
+                  .map((s) => (
+                    <div
+                      key={s.key}
+                      className="w-full max-w-sm aspect-video rounded-2xl border border-[var(--color-line)] bg-mv-canvas flex flex-col items-center justify-center gap-3 px-4 text-center"
+                    >
+                      <p className="text-[14px] font-semibold text-white flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" aria-hidden />
+                        {s.name} está ao vivo
+                      </p>
+                      <button type="button" onClick={() => focusStream(s.key)} className="btn-primary h-9 px-4 text-[13px]">
+                        Assistir transmissão
+                      </button>
+                    </div>
+                  ))}
+              </div>
             )}
             {hasScreenShares && (
               <ScreenShareStage

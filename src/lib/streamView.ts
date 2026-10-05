@@ -11,6 +11,8 @@ type State = { hidden: ReadonlySet<string>; focused: string | null }
 
 let state: State = { hidden: new Set(), focused: null }
 const listeners = new Set<() => void>()
+// Transmissões que já apareceram nesta call (pra saber quais são novas).
+const seen = new Set<string>()
 
 function set(next: State) {
   state = next
@@ -30,6 +32,44 @@ export function useStreamView(): State {
 
 export function getStreamView(): State {
   return state
+}
+
+export function subscribeStreamView(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/**
+ * Atualiza com as transmissões ativas agora. Transmissão NOVA de outra
+ * pessoa começa FECHADA (só baixa o vídeo quem clicar em "Assistir") —
+ * é o que mais gasta internet/servidor: antes todo mundo da sala recebia
+ * toda transmissão em 1080p o tempo todo, mesmo sem olhar.
+ * Quem parou de transmitir sai da lista.
+ */
+export function syncActiveStreams(active: ReadonlySet<string>, startClosed = true) {
+  const hidden = new Set(state.hidden)
+  let focused = state.focused
+  let changed = false
+  for (const key of [...seen]) {
+    if (active.has(key)) continue
+    seen.delete(key)
+    if (hidden.delete(key)) changed = true
+    if (focused === key) {
+      focused = null
+      changed = true
+    }
+  }
+  for (const key of active) {
+    if (seen.has(key)) continue
+    seen.add(key)
+    if (startClosed && key !== 'local' && focused !== key && !hidden.has(key)) {
+      hidden.add(key)
+      changed = true
+    }
+  }
+  if (changed) set({ hidden, focused })
 }
 
 /** Fecha (para de assistir) uma transmissão: some o vídeo e o som. */
@@ -60,6 +100,7 @@ export function focusStream(key: string | null) {
 
 /** Ao sair da call: esquece tudo. */
 export function resetStreamView() {
+  seen.clear()
   if (state.hidden.size === 0 && state.focused === null) return
   set({ hidden: new Set(), focused: null })
 }

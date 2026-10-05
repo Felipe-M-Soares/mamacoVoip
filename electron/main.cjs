@@ -1,7 +1,7 @@
 const { app, BrowserWindow, session, Menu, Tray, nativeImage, Notification, shell, ipcMain, dialog, protocol, net, desktopCapturer, globalShortcut, screen, powerMonitor, safeStorage, clipboard } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { exec, spawn } = require('node:child_process')
+const { execFile, spawn } = require('node:child_process')
 const { autoUpdater } = require('electron-updater')
 
 // Só pode existir UMA instância do app rodando ao mesmo tempo. Sem isso,
@@ -615,9 +615,14 @@ function getRunningProcessSnapshot() {
   }
   return new Promise((resolve) => {
     const isWin = process.platform === 'win32'
-    const cmd = isWin ? 'tasklist /fo csv /nh' : process.platform === 'darwin' ? 'ps -Ao comm' : 'ps -eo comm'
+    // execFile (e não exec): roda o programa DIRETO, sem abrir um cmd.exe
+    // por trás — cmd escondido rodando a cada 15s é o tipo de coisa que
+    // antivírus marca como suspeito.
+    const [file, args] = isWin
+      ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tasklist.exe'), ['/fo', 'csv', '/nh']]
+      : ['ps', process.platform === 'darwin' ? ['-Ao', 'comm'] : ['-eo', 'comm']]
 
-    exec(cmd, { windowsHide: true, timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+    execFile(file, args, { windowsHide: true, timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
       if (err || !stdout) {
         resolve(null)
         return

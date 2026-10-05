@@ -12,7 +12,6 @@ import { useServerWelcomeScreen, ServerWelcomeModal } from '../modals/ServerWelc
 import { ChannelSidebarSkeleton } from './ChannelSidebarSkeleton'
 import { usePinnedItems } from '../../hooks/usePinnedItems'
 import { useServerMembers } from '../../hooks/useServerMembers'
-import { useCollapsedCategories } from '../../hooks/useLocalOrganization'
 import { Avatar } from '../ui/Avatar'
 import type { Category, Channel, ChannelType, Profile, Server } from '../../types/database'
 import { channelNameFor, orderChannels } from '../../lib/channelName'
@@ -30,7 +29,7 @@ import {
 import { AddFriendIcon, AnnouncementIcon, BellOffIcon, MessageIcon, CalendarIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, LockIcon, PinIcon, PlusIcon, ScreenShareIcon, SettingsIcon, TextChannelIcon, VoiceChannelIcon, WarningIcon } from '../ui/icons'
 import { copyText } from '../../lib/copyText'
 import { prefetchLiveKitToken } from '../../lib/livekit'
-import { clearVoiceRoster, setVoiceRoster } from '../../lib/voiceRoster'
+import { clearVoiceRoster, setVoiceRoster, useVoiceRosterByChannel, useVoiceRosterChannel } from '../../lib/voiceRoster'
 import { VoiceMemberCard, type VoiceMemberCardTarget } from './VoiceMemberCard'
 
 // Modais/painéis carregados só quando abertos (fora do pacote inicial).
@@ -61,6 +60,29 @@ function CallDurationTimer({ startedAt }: { startedAt: number }) {
   const label = h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`
 
   return <span className="text-[11px] text-mv-green font-mono tabular-nums shrink-0">{label}</span>
+}
+
+// Observa quem está numa sala de voz e publica no voiceRoster. Fica
+// montado pra TODAS as salas (mesmo em categoria recolhida): é isso que
+// deixa abrir sozinha a categoria que tem gente.
+function VoicePresenceWatcher({ channelId }: { channelId: string }) {
+  const { user } = useAuth()
+  const voice = useVoiceCore()
+  const isConnectedHere = voice.connectedChannelId === channelId || voice.joiningChannelId === channelId
+  // Pro canal que você já está conectado de verdade, usa a lista de
+  // participantes que já vem da própria conexão — evita se inscrever
+  // de novo no mesmo canal Realtime (o que quebrava ao voltar pra uma
+  // sala em que você já estava).
+  const observedIds = useVoicePresence(channelId, isConnectedHere)
+  const userIds = isConnectedHere
+    ? [user?.id, ...Object.keys(voice.participants)].filter((id): id is string => Boolean(id))
+    : observedIds
+  const rosterKey = userIds.join(',')
+  useEffect(() => {
+    setVoiceRoster(channelId, rosterKey ? rosterKey.split(',') : [])
+  }, [channelId, rosterKey])
+  useEffect(() => () => clearVoiceRoster(channelId), [channelId])
+  return null
 }
 
 function VoiceChannelPresence({
@@ -94,23 +116,10 @@ function VoiceChannelPresence({
 }) {
   const { user, profile: ownProfile } = useAuth()
   const voice = useVoiceCore()
-  const isConnectedHere = voice.connectedChannelId === channelId || voice.joiningChannelId === channelId
-
-  // Pro canal que você já está conectado de verdade, usa a lista de
-  // participantes que já vem da própria conexão — evita se inscrever
-  // de novo no mesmo canal Realtime (o que quebrava ao voltar pra uma
-  // sala em que você já estava).
-  const observedIds = useVoicePresence(channelId, isConnectedHere)
+  // Quem está na sala vem do VoicePresenceWatcher (sempre montado, mesmo
+  // com a categoria recolhida).
+  const userIds = useVoiceRosterChannel(channelId)
   const [memberCard, setMemberCard] = useState<VoiceMemberCardTarget | null>(null)
-  const userIds = isConnectedHere
-    ? [user?.id, ...Object.keys(voice.participants)].filter((id): id is string => Boolean(id))
-    : observedIds
-
-  const rosterKey = userIds.join(',')
-  useEffect(() => {
-    setVoiceRoster(channelId, rosterKey ? rosterKey.split(',') : [])
-    return () => clearVoiceRoster(channelId)
-  }, [channelId, rosterKey])
 
   if (userIds.length === 0) return null
   return (
@@ -501,7 +510,12 @@ export function ChannelSidebar({
   const { pinnedIds, toggle: togglePinChannel } = usePinnedItems()
   const upcomingEventsCount = events.filter((e) => new Date(e.starts_at).getTime() >= Date.now()).length
   const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
-  const { collapsed: collapsedCategories, toggle: toggleCategoryCollapse } = useCollapsedCategories()
+  // Categoria aberta/recolhida: por padrão, abre só a que tem gente em
+  // alguma sala de voz (ou o canal aberto agora); as outras ficam
+  // recolhidas. Clicar no nome troca, e vale até fechar o app.
+  const rosterByChannel = useVoiceRosterByChannel()
+  const { connectedChannelId } = useVoiceCore()
+  const [categoryOverrides, setCategoryOverrides] = useState<Map<string, boolean>>(() => new Map())
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
@@ -847,7 +861,11 @@ export function ChannelSidebar({
 
         {sortedCategories.map((category) => {
           const groups = orderChannels(listed.filter((c) => c.category_id === category.id))
-          const collapsed = collapsedCategories.has(category.id)
+          const occupied = groups.voice.some(
+            (c) => (rosterByChannel.get(c.id)?.length ?? 0) > 0 || connectedChannelId === c.id
+          )
+          const holdsActive = [...groups.text, ...groups.voice].some((c) => c.id === activeChannelId)
+          const collapsed = !(categoryOverrides.get(category.id) ?? (occupied || holdsActive))
 
           return (
             <div
@@ -861,7 +879,9 @@ export function ChannelSidebar({
             >
               <div
                 className="px-1 mb-1 flex items-center justify-between rounded cursor-pointer select-none"
-                onClick={() => toggleCategoryCollapse(category.id)}
+                onClick={() =>
+                  setCategoryOverrides((prev) => new Map(prev).set(category.id, collapsed))
+                }
                 onContextMenu={(e) => {
                   if (!canManageChannels) return
                   setContextCategory(category)
@@ -951,6 +971,11 @@ export function ChannelSidebar({
             </div>
           )
         })}
+        {channels
+          .filter((c) => c.type === 'voice')
+          .map((c) => (
+            <VoicePresenceWatcher key={`watch-${c.id}`} channelId={c.id} />
+          ))}
         {afkChannel && (
           <div>
             <SectionHeader label="Ausentes (AFK)" createLabel="" />

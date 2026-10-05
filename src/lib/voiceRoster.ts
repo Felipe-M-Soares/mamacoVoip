@@ -5,12 +5,14 @@ import { useSyncExternalStore } from 'react'
 // lido pela lista de membros pra mostrar "Em voz · Sala".
 const byChannel = new Map<string, string[]>()
 let snapshot = new Map<string, string>() // userId -> channelId
+let channelSnapshot = new Map<string, string[]>() // channelId -> userIds
 const listeners = new Set<() => void>()
 
 function rebuild() {
   const next = new Map<string, string>()
   for (const [channelId, ids] of byChannel) for (const id of ids) next.set(id, channelId)
   snapshot = next
+  channelSnapshot = new Map(byChannel)
   listeners.forEach((l) => l())
 }
 
@@ -38,4 +40,26 @@ export function useVoiceRoster(): Map<string, string> {
     () => snapshot,
     () => snapshot
   )
+}
+
+const EMPTY: string[] = []
+const subscribe = (l: () => void) => {
+  listeners.add(l)
+  return () => {
+    listeners.delete(l)
+  }
+}
+
+/** Quem está numa sala de voz específica. */
+export function useVoiceRosterChannel(channelId: string): string[] {
+  return useSyncExternalStore(
+    subscribe,
+    () => channelSnapshot.get(channelId) ?? EMPTY,
+    () => channelSnapshot.get(channelId) ?? EMPTY
+  )
+}
+
+/** Map channelId → quem está nela (todas as salas observadas). */
+export function useVoiceRosterByChannel(): Map<string, string[]> {
+  return useSyncExternalStore(subscribe, () => channelSnapshot, () => channelSnapshot)
 }

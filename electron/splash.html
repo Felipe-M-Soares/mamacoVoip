@@ -2,7 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file:; script-src 'self' file:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'" />
     <style>
       /* Mamacos Neo — mesma paleta do tema padrão (src/index.css):
          fundo #07070a, marca #ee3a34 → #ff8a3d, texto #f4f4f7 / #9d9dab. */
@@ -112,6 +112,60 @@
         font-size: 12px;
         letter-spacing: 0.02em;
       }
+      /* Modo "Atualizando...": pontinhos girando em volta do mamaco. */
+      .dots {
+        position: absolute;
+        inset: -22px;
+        display: none;
+        animation: spin 1.6s linear infinite;
+      }
+      .dots i {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 7px;
+        height: 7px;
+        margin: -3.5px 0 0 -3.5px;
+        border-radius: 50%;
+        background: linear-gradient(120deg, #ee3a34, #ff8a3d);
+        transform: rotate(var(--a)) translateY(-64px);
+        opacity: var(--o);
+      }
+      body.updating .dots {
+        display: block;
+      }
+      body.updating .ring,
+      body.updating .bar {
+        display: none;
+      }
+      body.updating .logo-wrap img {
+        animation: bob 1.4s ease-in-out infinite;
+      }
+      .pct {
+        margin-top: 6px;
+        color: #f4f4f7;
+        font-size: 13px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        min-height: 18px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes bob {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0deg);
+        }
+        25% {
+          transform: translateY(-3px) rotate(-4deg);
+        }
+        75% {
+          transform: translateY(-3px) rotate(4deg);
+        }
+      }
       @keyframes ping {
         0% {
           transform: scale(1);
@@ -143,7 +197,9 @@
       }
       @media (prefers-reduced-motion: reduce) {
         .ring,
-        .content {
+        .content,
+        .dots,
+        body.updating .logo-wrap img {
           animation: none;
         }
         .bar::after {
@@ -158,11 +214,14 @@
     <div class="content" role="status" aria-live="polite">
       <div class="logo-wrap">
         <div class="ring"></div>
+        <div class="dots" aria-hidden="true"></div>
         <img src="./splash-logo.png" alt="Mamacos Voip" />
       </div>
       <div class="title">Mamacos <span>Voip</span></div>
       <div class="bar" aria-hidden="true"></div>
       <div class="label">Abrindo o Mamacos Voip...</div>
+      <div class="pct"></div>
     </div>
+    <script src="./splash.js"></script>
   </body>
 </html>

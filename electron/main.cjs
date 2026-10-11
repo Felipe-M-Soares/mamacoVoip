@@ -1091,6 +1091,47 @@ function stopForegroundWatch() {
   foregroundWatcherGames = []
 }
 
+// --- Atualização ao abrir ----------------------------------------------
+// Toda vez que o app abre (inclusive junto com o Windows), ele confere se
+// tem versão nova ANTES de mostrar a janela. Tendo, baixa e instala direto
+// — sem perguntar e sem aviso de "atualização disponível", só a tela de
+// "Atualizando..." com o mamaco e os pontinhos girando — e reabre sozinho.
+// Sem internet, sem versão nova ou demorando demais pra responder, abre
+// normal.
+let startupSplash = null
+let startupStartedHidden = false
+let resolveStartupGate = () => {}
+let startupGatePending = false
+let startupUpdating = false
+const startupUpdateGate = new Promise((resolve) => {
+  resolveStartupGate = () => {
+    startupGatePending = false
+    resolve()
+  }
+})
+function releaseStartupGate() {
+  startupUpdating = false
+  resolveStartupGate()
+}
+function closeStartupSplash() {
+  if (startupSplash && !startupSplash.isDestroyed()) startupSplash.close()
+  startupSplash = null
+}
+function showStartupUpdating(percent) {
+  // Aberto junto com o Windows (escondido na bandeja): só agora aparece a
+  // telinha, porque tem atualização de verdade acontecendo.
+  if (!startupSplash || startupSplash.isDestroyed()) startupSplash = createSplashWindow()
+  const pct = Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : -1
+  const run = () => {
+    if (!startupSplash || startupSplash.isDestroyed()) return
+    startupSplash.webContents
+      .executeJavaScript(`window.mvSetUpdating && window.mvSetUpdating(${pct})`, true)
+      .catch(() => {})
+  }
+  if (startupSplash.webContents.isLoading()) startupSplash.webContents.once('did-finish-load', run)
+  else run()
+}
+
 function createSplashWindow() {
   const splash = new BrowserWindow({
     width: 320,
@@ -2314,20 +2355,28 @@ app.whenReady().then(() => {
   // quietinho na bandeja, sem tela de abertura nem janela na cara.
   const startedHidden = process.argv.includes('--mv-autostart')
   applyAutoStartDefault()
-  const splash = startedHidden ? null : createSplashWindow()
+  // Em desenvolvimento não existe atualização automática — abre direto.
+  if (isDev) releaseStartupGate()
+  startupSplash = startedHidden ? null : createSplashWindow()
+  startupStartedHidden = startedHidden
   const win = createWindow()
   createTray(win)
 
+  // Ao abrir, o app primeiro confere se tem versão nova (ver
+  // startupUpdateGate na seção de atualização). Só mostra a janela depois
+  // disso — tendo versão nova, atualiza direto, sem perguntar.
   win.once('ready-to-show', () => {
-    if (splash && !splash.isDestroyed()) splash.close()
-    if (!startedHidden) win.show()
+    void startupUpdateGate.then(() => {
+      closeStartupSplash()
+      if (!startedHidden) win.show()
+    })
   })
 
   win.webContents.once('did-fail-load', () => {
-    if (splash && !splash.isDestroyed()) splash.close()
+    closeStartupSplash()
   })
   win.webContents.once('render-process-gone', () => {
-    if (splash && !splash.isDestroyed()) splash.close()
+    closeStartupSplash()
   })
 
   // Se o app foi aberto DIRETO por um link de volta do login do Google
@@ -3333,22 +3382,57 @@ app.whenReady().then(() => {
       updateDownloadInFlight = true
       lastSentPercent = -1
       availableVersion = info?.version ?? null
+      if (startupGatePending) {
+        // Abertura do app: atualiza direto, com a tela de "Atualizando...".
+        startupUpdating = true
+        appendDebugLog('updater', `abertura: versão ${availableVersion} encontrada — atualizando direto`)
+        showStartupUpdating(0)
+        // Download travado (internet muito lenta): depois de 5 min abre o
+        // app mesmo assim; o download continua por trás.
+        setTimeout(() => {
+          if (startupUpdating && !updateReadyToInstall) {
+            appendDebugLog('updater', 'abertura: download demorando — abrindo o app e continuando por trás')
+            releaseStartupGate()
+          }
+        }, 5 * 60_000)
+        return
+      }
       sendUpdateStatus('downloading', { version: availableVersion })
     })
     autoUpdater.on('update-not-available', () => {
       networkRetryCount = 0
+      if (startupGatePending) releaseStartupGate()
       if (!updateCheckSilent) sendUpdateStatus('up-to-date')
     })
     autoUpdater.on('download-progress', (progress) => {
       const percent = Math.max(0, Math.min(100, Math.floor(progress?.percent ?? 0)))
       if (percent === lastSentPercent) return
       lastSentPercent = percent
+      if (startupUpdating) {
+        showStartupUpdating(percent)
+        return
+      }
       sendUpdateStatus('downloading', { percent, version: availableVersion })
     })
     autoUpdater.on('update-downloaded', (info) => {
       updateDownloadInFlight = false
       updateReadyToInstall = true
       clearUpdateRetryTimer()
+      if (startupUpdating) {
+        // Instala em silêncio e reabre sozinho, sem perguntar nada.
+        showStartupUpdating(100)
+        isQuitting = true
+        setTimeout(() => {
+          try {
+            autoUpdater.quitAndInstall(true, true)
+          } catch (err) {
+            isQuitting = false
+            appendDebugLog('updater:error', `abertura: quitAndInstall falhou — ${err?.message ?? err}`)
+            releaseStartupGate()
+          }
+        }, 600)
+        return
+      }
       sendUpdateStatus('ready', { version: info.version })
       // Como o app pode estar escondido na bandeja (minimizado) quando
       // isso acontece, a pessoa não veria o aviso na tela — o tooltip
@@ -3374,6 +3458,12 @@ app.whenReady().then(() => {
     autoUpdater.on('error', (err) => {
       const wasDownloading = updateDownloadInFlight
       updateDownloadInFlight = false
+      // Na abertura, qualquer falha (sem internet, download interrompido)
+      // não pode travar o app: abre normal e tenta de novo depois.
+      if (startupGatePending || startupUpdating) {
+        appendDebugLog('updater', 'abertura: falha ao atualizar — abrindo o app normalmente')
+        releaseStartupGate()
+      }
 
       // Antes a gente só olhava err.message, que às vezes vem bem curto
       // ("404" sozinho) sem dizer QUAL endpoint falhou. Isso pega todas
@@ -3518,8 +3608,23 @@ app.whenReady().then(() => {
     // "verificando"/"baixando" seriam mandados pro app ANTES dele
     // terminar de montar e começar a escutar essas mensagens, e se
     // perderiam no caminho (por isso nenhum aviso aparecia na tela).
+    // Checagem da ABERTURA: começa já (sem esperar a janela), em silêncio.
+    // Se não houver resposta em 8s (internet lenta/sem internet), o app
+    // abre normal e a checagem continua por trás.
+    if (process.windowsStore || process.platform !== 'win32') {
+      releaseStartupGate()
+    } else {
+      startupGatePending = true
+      setTimeout(() => {
+        if (startupGatePending && !startupUpdating) {
+          appendDebugLog('updater', 'abertura: sem resposta em 8s — abrindo o app normalmente')
+          releaseStartupGate()
+        }
+      }, 8_000)
+      runUpdateCheck({ silent: true })
+    }
+
     win.once('ready-to-show', () => {
-      setTimeout(() => runUpdateCheck({ silent: false }), 1500)
 
       // Checar só quando o app abre não é suficiente — muita gente
       // deixa o app aberto o dia inteiro, e nesse caso uma atualização

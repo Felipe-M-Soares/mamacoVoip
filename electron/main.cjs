@@ -714,6 +714,7 @@ async function runGameCheckTick() {
         if (info) {
           gameWindowMissStreak = 0
         } else {
+          if (justChanged) appendDebugLog('main', `detecção: processo de "${game}" rodando, mas sem janela do jogo ainda`)
           gameWindowMissStreak++
           if (justChanged || gameWindowMissStreak >= 2) {
             game = null
@@ -726,6 +727,7 @@ async function runGameCheckTick() {
 
     if (game !== currentGame) {
       const gameClosed = currentGame !== null && game === null
+      appendDebugLog('main', game ? `detecção: jogando "${game}"` : `detecção: jogo "${currentGame}" fechou`)
       currentGame = game
       sendToMain('game-status-changed', game)
       // O jogo fechou: a sobreposição era pra ele, então desliga sozinha
@@ -1768,6 +1770,10 @@ app.on('second-instance', (_event, argv) => {
 })
 
 app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    const ok = win32native.available()
+    appendDebugLog('main', `win32native: ${ok ? 'ok' : `FALHOU — ${win32native.loadErrorMessage()}`}; detecção de jogos ${isGameDetectionEnabled() ? 'ligada' : 'DESLIGADA (privacidade)'}`)
+  }
   // Serve os arquivos de dist/ através do protocolo "app://" — é isso
   // que substitui o antigo win.loadFile(file://...) e resolve o
   // bloqueio silencioso de módulos JS do Chromium.
@@ -1884,7 +1890,18 @@ app.whenReady().then(() => {
       // DESEMPENHO: as consultas ao Windows (qual é o jogo, PID de cada
       // janela pelo título) não dependem da lista de fontes — começam JÁ,
       // em paralelo com o getSources(), em vez de esperar ele terminar.
-      const gameLabelAtOpen = currentGame
+      // Jogo do catálogo aberto mas ainda não confirmado (ex.: tela cheia
+      // exclusiva, janela ainda não achada): olha a lista de processos na
+      // hora, pra ao menos sugerir o monitor do jogo.
+      let runningCatalogGame = null
+      if (!currentGame && isGameDetectionEnabled()) {
+        try {
+          runningCatalogGame = detectRunningGameFromSnapshot(await getRunningProcessSnapshot())
+        } catch {
+          runningCatalogGame = null
+        }
+      }
+      const gameLabelAtOpen = currentGame ?? runningCatalogGame
       // Teto de espera: o seletor abre mesmo se a consulta ao Windows
       // demorar — só sem a sugestão de jogo / áudio por app nessa vez.
       const capped = (promise, fallback) =>
@@ -1965,12 +1982,12 @@ app.whenReady().then(() => {
       // quando a varredura de janela falha por completo, pro caso mais
       // comum (a maioria de quem joga tem 1 monitor só).
       const screenSources = sources.filter((s) => s.id.startsWith('screen:'))
-      if (!gameDisplayId && currentGame && screenSources.length === 1) {
+      if (!gameDisplayId && gameLabelAtOpen && screenSources.length === 1) {
         gameDisplayId = screenSources[0].display_id
         isKnownGame = true
-        suggestionLabel = currentGame
+        suggestionLabel = gameLabelAtOpen
         if (watchProcessNamesForShare.length === 0) {
-          watchProcessNamesForShare = processNamesForGameLabel(currentGame)
+          watchProcessNamesForShare = processNamesForGameLabel(gameLabelAtOpen)
         }
       }
       // DÉCIMA RODADA: a mesma lacuna acima, generalizada pra quem tem
@@ -1985,12 +2002,12 @@ app.whenReady().then(() => {
       // apostar no monitor PRINCIPAL ainda é bem melhor do que não
       // sugerir nada — a pessoa sempre pode escolher a tela certa na mão
       // pela seção "Tela cheia" se o palpite errar.
-      if (!gameDisplayId && currentGame && primaryDisplayId) {
+      if (!gameDisplayId && gameLabelAtOpen && primaryDisplayId) {
         gameDisplayId = primaryDisplayId
         isKnownGame = true
-        suggestionLabel = currentGame
+        suggestionLabel = gameLabelAtOpen
         if (watchProcessNamesForShare.length === 0) {
-          watchProcessNamesForShare = processNamesForGameLabel(currentGame)
+          watchProcessNamesForShare = processNamesForGameLabel(gameLabelAtOpen)
         }
       }
       const gameWindowTitle = windowInfo?.windowTitle ?? null
@@ -2033,6 +2050,12 @@ app.whenReady().then(() => {
       const hasCapturableGameWindow =
         gameWindowPid !== null &&
         sources.some((s) => s.id.startsWith('window:') && resolvedPidBySourceId.get(s.id) === gameWindowPid)
+      appendDebugLog(
+        'main',
+        `seletor de tela: ${sources.length} fontes (${sources.filter((s) => s.id.startsWith('window:')).length} janelas), ` +
+          `jogo detectado=${gameLabelAtOpen ?? 'nenhum'}, janela do jogo=${windowInfo?.pid ? `pid ${windowInfo.pid}` : 'não achada'}, ` +
+          `sugestão=${suggestionLabel ?? 'nenhuma'}, win32=${win32native.available() ? 'ok' : 'FALHOU'}`
+      )
       const looksMinimized =
         isKnownGame &&
         gameWindowHwnd !== null &&

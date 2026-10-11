@@ -21,6 +21,7 @@
 
 let api = null
 let loadTried = false
+let loadError = null
 
 function load() {
   if (loadTried) return api
@@ -94,6 +95,7 @@ function load() {
     }
   } catch (err) {
     console.error('win32native: não foi possível carregar as funções do Windows —', err?.message ?? err)
+    loadError = String(err?.message ?? err)
     api = null
   }
   return api
@@ -361,6 +363,7 @@ function processImagePath(pid, name, isProtected) {
 
 module.exports = {
   available,
+  loadErrorMessage: () => loadError,
   listProcesses,
   findLargestWindowForProcessNames,
   foregroundWindow,

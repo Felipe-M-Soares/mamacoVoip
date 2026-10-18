@@ -30,6 +30,23 @@ Observações:
 - A Store pede classificação etária: como há canais +18 com confirmação de idade, responda o
   questionário com sinceridade (conteúdo gerado por usuários + interação online).
 
+### Depois de enviar (status "Pending" / "Em certificação")
+
+- A certificação costuma levar de **1 a 3 dias úteis** (às vezes mais na primeira vez). Não precisa
+  fazer nada enquanto isso; o resultado chega por e-mail e aparece em *Partner Center → Apps and games*.
+- **Se for reprovado**, o relatório diz o motivo. Os mais comuns e como resolver:
+  - *runFullTrust / restricted capability*: na ficha, em "Submission options → Restricted capabilities",
+    explique em inglês: `This is a desktop voice chat app built with Electron. It needs full trust to
+    capture microphone/system audio and share the screen, like other desktop communication apps.`
+  - *Privacy policy*: confira se o link `https://mamaco-voip.vercel.app/privacidade` abre.
+  - *Age rating*: refaça o questionário marcando conteúdo gerado por usuários e comunicação online.
+  - *Crash/não abre na máquina de teste*: mande o `mamacos-debug.log` que eu analiso.
+- **Atualizar a versão da Store**: a cada push o workflow gera um `.appx` novo (artefato
+  **mamacos-voip-microsoft-store**). No Partner Center: *Mamacos Voip → Start update → Packages*,
+  remova o pacote antigo, envie o novo e *Submit*. Não precisa atualizar a Store a cada versão —
+  quem instalou pelo `.exe` do GitHub continua recebendo as atualizações automáticas normalmente.
+- Custo: **zero** (conta individual gratuita, sem taxa por app nem por atualização).
+
 ## 2. SignPath Foundation — grátis, só se o projeto for código aberto
 
 Se o repositório for público com licença open source (MIT, GPL etc.), dá para pedir assinatura

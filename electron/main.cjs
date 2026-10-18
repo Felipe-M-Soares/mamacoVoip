@@ -1733,7 +1733,8 @@ function createTray(win) {
 // ---- Armazenamento cifrado da sessão (B7) ----
 // Ver os handlers "secure-storage:*" em app.whenReady().
 const SECURE_STORAGE_FILE = 'secure-session.json'
-const SECURE_STORAGE_KEY_PATTERN = /^sb-[A-Za-z0-9._-]{1,200}$/
+// sb-* = sessão do supabase-js; mv-user-notes = notas privadas sobre usuários.
+const SECURE_STORAGE_KEY_PATTERN = /^(?:sb-[A-Za-z0-9._-]{1,200}|mv-user-notes)$/
 const SECURE_STORAGE_MAX_VALUE = 512 * 1024
 let secureStoreCache = null
 

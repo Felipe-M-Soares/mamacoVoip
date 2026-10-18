@@ -212,13 +212,98 @@ jobs:
           path: release/*.appx
           if-no-files-found: error
 
+  # App Android (APK) — vai pro MESMO release, com o nome fixo
+  # MamacosVoip.apk (o botão "Baixar para Android" do site aponta pra
+  # releases/latest/download/MamacosVoip.apk). Só roda se a chave de
+  # assinatura estiver nos Secrets (ver docs/ANDROID.md); sem ela, pula
+  # com um aviso e o resto do release segue normal.
+  android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # enviar o APK pro release
+    steps:
+      - name: Conferir a chave de assinatura
+        id: cfg
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KS" ] || [ -z "$KP" ]; then
+            echo "::warning::APK Android não gerado: faltam os secrets ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD (ver docs/ANDROID.md)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Baixar o código
+        if: steps.cfg.outputs.ok == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Configurar Node
+        if: steps.cfg.outputs.ok == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Configurar Java 21 (exigido pelo Capacitor 8)
+        if: steps.cfg.outputs.ok == 'true'
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build da interface + copiar pro projeto Android
+        if: steps.cfg.outputs.ok == 'true'
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build:mobile
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_TURN_URL: ${{ secrets.VITE_TURN_URL }}
+          VITE_TURN_USERNAME: ${{ secrets.VITE_TURN_USERNAME }}
+          VITE_TURN_CREDENTIAL: ${{ secrets.VITE_TURN_CREDENTIAL }}
+          VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
+
+      - name: Gerar o APK assinado
+        if: steps.cfg.outputs.ok == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_VERSION_NAME: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          umask 077
+          KS_FILE="$RUNNER_TEMP/mamacos-release.p12"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KS_FILE"
+          export ANDROID_KEYSTORE_FILE="$KS_FILE"
+          # versionCode precisa sempre subir: usa o mesmo número da versão.
+          export ANDROID_VERSION_CODE="${ANDROID_VERSION_NAME##*.}"
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cd ..
+          rm -f "$KS_FILE"
+          cp android/app/build/outputs/apk/release/app-release.apk MamacosVoip.apk
+          ls -l MamacosVoip.apk
+
+      - name: Enviar o APK pro release
+        if: steps.cfg.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "v${{ needs.prepare.outputs.version }}" MamacosVoip.apk --clobber
+
   # AUDITORIA: publica o rascunho criado em "prepare" — só depois que os
   # builds terminaram E o instalador do Windows + latest.yml (o manifesto
   # que o auto-updater lê) já estão anexados. Roda mesmo se o build de
   # macOS/Linux falhar (o Windows não fica refém dos outros), mas nunca
   # publica um release sem o latest.yml.
   publish:
-    needs: [prepare, build]
+    needs: [prepare, build, android]
     if: ${{ !cancelled() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:

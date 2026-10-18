@@ -1,5 +1,5 @@
 import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react'
-import { DESKTOP_DOWNLOAD_URL } from '../lib/config'
+import { ANDROID_DOWNLOAD_URL, DESKTOP_DOWNLOAD_URL } from '../lib/config'
 import { isNativeMobileApp } from '../lib/platform'
 
 // Peças visuais compartilhadas pelas telas de entrada (login, cadastro,
@@ -133,7 +133,7 @@ export function AuthDivider() {
 export function DesktopDownloadChip() {
   if (window.electronAPI?.isElectron || isNativeMobileApp()) return null
   return (
-    <div className="mt-6 flex justify-center">
+    <div className="mt-6 flex justify-center gap-2 flex-wrap">
       <a
         href={DESKTOP_DOWNLOAD_URL}
         target="_blank"
@@ -144,6 +144,17 @@ export function DesktopDownloadChip() {
           <path d="M12 3v12M7 10l5 5 5-5M4 20h16" />
         </svg>
         Baixar o app pra PC
+      </a>
+      <a
+        href={ANDROID_DOWNLOAD_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="chip !px-3 !py-1.5 !text-[12px] transition-colors hover:border-[var(--color-line-strong)] hover:bg-white/[0.08] hover:text-white"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5" aria-hidden>
+          <path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.66-.38l-1.86 3.22a11.4 11.4 0 0 0-9.84 0L5.22 5.92a.38.38 0 0 0-.66.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z" />
+        </svg>
+        Android
       </a>
     </div>
   )

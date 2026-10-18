@@ -9,6 +9,11 @@
 export const DESKTOP_DOWNLOAD_URL =
   'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/MamacosVoip-Setup.exe'
 
+// App Android (APK) — publicado no mesmo release (ver o job "android" em
+// .github/workflows/release-desktop.yml e docs/ANDROID.md).
+export const ANDROID_DOWNLOAD_URL =
+  'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/MamacosVoip.apk'
+
 // Busca de GIFs no chat. Até aqui usava a API do Tenor — mas o Google
 // DESLIGOU o Tenor API de vez pra qualquer desenvolvedor de fora (parou
 // de aceitar cliente novo em janeiro de 2026, e desligou todo mundo que

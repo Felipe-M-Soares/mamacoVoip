@@ -4,12 +4,12 @@ import { LegalPageLayout, LegalSection } from './LegalPageLayout'
 // Controlador e contato (LGPD art. 9º, III): os mesmos de TermsOfService.tsx
 // e DeleteAccountInfo.tsx — se mudar, troque nos três.
 //
-// Este texto descreve o que o código faz em 30/09/2026. Se mudar o que o app
+// Este texto descreve o que o código faz em 11/10/2026. Se mudar o que o app
 // coleta (novo provedor, analytics, gravação, anúncios etc.), atualize aqui.
 
 export function PrivacyPolicy() {
   return (
-    <LegalPageLayout title="Política de Privacidade" updatedAt="30 de setembro de 2026">
+    <LegalPageLayout title="Política de Privacidade" updatedAt="11 de outubro de 2026">
       <p className="text-sm text-mv-muted">
         Este documento explica quais dados pessoais o Mamacos Voip trata, para quê, com quem eles são
         compartilhados e quais são os seus direitos, nos termos da Lei Geral de Proteção de Dados Pessoais
@@ -81,16 +81,19 @@ export function PrivacyPolicy() {
       <LegalSection title="3. Voz, vídeo e compartilhamento de tela">
         <p>
           Chamadas de voz, vídeo e compartilhamentos de tela (inclusive o áudio do jogo ou aplicativo que você
-          escolher compartilhar) passam pelos servidores de mídia do <strong>LiveKit Cloud</strong>, que
-          recebem o fluxo de cada participante e o retransmitem para os outros participantes da sala, com
-          criptografia em trânsito. <strong>O Mamacos Voip não grava nem armazena áudio, vídeo ou tela das
-          chamadas.</strong> Para entrar numa sala, o LiveKit recebe o identificador da sua conta e o seu nome
-          de exibição.
+          escolher compartilhar) passam pelo servidor de mídia do próprio Mamacos Voip (software LiveKit,
+          hospedado na <strong>Oracle Cloud</strong>), que recebe o fluxo de cada participante e o retransmite
+          para os outros participantes da sala, com criptografia em trânsito (DTLS-SRTP). <strong>O Mamacos
+          Voip não grava nem armazena áudio, vídeo ou tela das chamadas.</strong> Para entrar numa sala, o
+          servidor de mídia recebe o identificador da sua conta e o seu nome de exibição.
         </p>
         <p>
           O microfone só é usado quando você entra num canal de voz; câmera e tela, só quando você as ativa.
           A redução de ruído do microfone roda inteiramente no seu dispositivo. Lembre-se de que outros
-          participantes podem gravar a chamada com ferramentas próprias, fora do nosso controle.
+          participantes podem gravar a chamada com ferramentas próprias, fora do nosso controle — inclusive o
+          recurso de <strong>clipe</strong> do app, que guarda os últimos segundos de uma transmissão só na
+          memória do aparelho de quem ligou o replay e salva o arquivo no próprio computador dessa pessoa
+          (nada é enviado para nós).
         </p>
         <p>
           Se você ativar o &quot;apertar para falar&quot; com atalho global no app para computador, o app
@@ -173,7 +176,14 @@ export function PrivacyPolicy() {
             <strong>Supabase</strong> — banco de dados, autenticação, armazenamento de arquivos, mensagens em
             tempo real e funções de servidor (inclusive a que gera a prévia de links colados no chat).
           </li>
-          <li><strong>LiveKit Cloud</strong> — retransmissão de voz, vídeo e compartilhamento de tela.</li>
+          <li>
+            <strong>Oracle Cloud</strong> — hospedagem do servidor de voz, vídeo e compartilhamento de tela (a
+            Oracle fornece a máquina; o software e a configuração são nossos).
+          </li>
+          <li>
+            <strong>GitHub</strong> — guarda as cópias de segurança do banco de dados, sempre criptografadas
+            (AES-256) com uma senha que só o responsável pelo serviço tem.
+          </li>
           <li><strong>Vercel</strong> — hospedagem do site e da versão web.</li>
         </ul>
         <p>E os seguintes serviços de terceiros, que recebem dados quando você usa o recurso correspondente:</p>
@@ -208,7 +218,7 @@ export function PrivacyPolicy() {
 
       <LegalSection title="8. Transferência internacional">
         <p>
-          Supabase, LiveKit, Vercel, GIPHY, Google e GitHub são empresas estrangeiras, e seus dados podem ser
+          Supabase, Oracle, Vercel, GIPHY, Google e GitHub são empresas estrangeiras, e seus dados podem ser
           armazenados ou processados fora do Brasil (principalmente nos Estados Unidos), inclusive pelo roteamento
           global de voz e vídeo. Essas transferências são necessárias para prestar o serviço que você pediu e
           são feitas com base nas garantias contratuais de proteção de dados oferecidas por esses provedores,
@@ -232,9 +242,16 @@ export function PrivacyPolicy() {
             e-mail da seção 1.
           </li>
           <li>
-            Registros técnicos (endereço IP, data e hora de acesso) e cópias de segurança são mantidos pelos
-            provedores de infraestrutura pelos prazos definidos por eles e pela configuração do serviço, e
-            eliminados depois disso.
+            Anexos do chat (fotos, vídeos, arquivos) com mais de 30 dias podem ser apagados automaticamente,
+            começando pelos mais antigos, quando o espaço de armazenamento do serviço fica perto do limite. A
+            mensagem continua, mas o anexo passa a aparecer como indisponível. Fotos grandes são reduzidas no
+            seu aparelho antes do envio.
+          </li>
+          <li>
+            Cópias de segurança do banco de dados são feitas toda semana, criptografadas, e apagadas
+            automaticamente depois de 90 dias. Registros técnicos (endereço IP, data e hora de acesso) são
+            mantidos pelos provedores de infraestrutura pelos prazos definidos por eles e pela configuração do
+            serviço, e eliminados depois disso.
           </li>
           <li>
             Podemos conservar dados por mais tempo quando a lei exigir, quando houver ordem judicial ou para
@@ -295,7 +312,8 @@ export function PrivacyPolicy() {
         <p>
           Usamos controle de acesso no banco de dados (cada pessoa só lê e altera o que tem permissão), conexão
           criptografada (HTTPS/TLS) em toda comunicação, anexos em armazenamento privado acessível só por links
-          temporários, verificação em duas etapas opcional e sessão cifrada no app para computador. Nenhum
+          temporários, dados guardados criptografados pelos provedores (AES-256), cópias de segurança
+          criptografadas, verificação em duas etapas opcional e sessão cifrada no app para computador. Nenhum
           sistema é totalmente imune a falhas. Se ocorrer um incidente de segurança que possa causar risco ou
           dano relevante a você, comunicaremos a ANPD e os titulares afetados nos prazos e na forma da
           regulamentação da ANPD.

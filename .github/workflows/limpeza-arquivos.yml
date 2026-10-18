@@ -1,0 +1,92 @@
+name: Limpeza de arquivos antigos
+
+# O plano grátis do Supabase tem ~1 GB pra TODOS os arquivos (anexos do
+# chat, avatares, sons...). Este workflow roda todo dia e SÓ age se o
+# total passar de 800 MB: aí apaga os anexos de chat mais antigos (com
+# mais de 30 dias) até voltar pra 650 MB. Avatares, ícones, emojis e sons
+# nunca são apagados. No chat, o anexo apagado aparece como "indisponível".
+#
+# Configuração (uma vez só) — Settings > Secrets and variables > Actions:
+#   - SUPABASE_DB_URL (o mesmo do backup)
+#   - SUPABASE_URL (já existe, do "Manter Supabase ativo")
+#   - SUPABASE_SERVICE_ROLE_KEY: Supabase > Project Settings > API Keys >
+#       "service_role" (secret). Essa chave é poderosa — só aqui nos
+#       Secrets, NUNCA no código.
+
+on:
+  schedule:
+    - cron: '41 5 * * *' # todo dia, 05:41 UTC
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: limpeza-arquivos
+  cancel-in-progress: false
+
+jobs:
+  limpar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LIMIT_MB: '800'
+      TARGET_MB: '650'
+      MIN_AGE_DAYS: '30'
+    steps:
+      - name: Limpar se precisar
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_DB_URL:-}" ] || [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::warning::Limpeza não configurada (faltam secrets — ver o topo deste arquivo)."
+            exit 0
+          fi
+          psql_q() {
+            docker run --rm -e PGURL="$SUPABASE_DB_URL" postgres:17 psql "$PGURL" -At -F $'\t' -c "$1"
+          }
+          TOTAL=$(psql_q "select coalesce(sum((metadata->>'size')::bigint),0) from storage.objects")
+          echo "Uso atual: $((TOTAL / 1024 / 1024)) MB"
+          if [ "$TOTAL" -lt $((LIMIT_MB * 1024 * 1024)) ]; then
+            echo "Abaixo de ${LIMIT_MB} MB — nada a fazer."
+            exit 0
+          fi
+          psql_q "select bucket_id, name, coalesce((metadata->>'size')::bigint,0)
+                  from storage.objects
+                  where bucket_id in ('attachments','dm-attachments','group-attachments')
+                    and created_at < now() - interval '${MIN_AGE_DAYS} days'
+                  order by created_at asc
+                  limit 20000" > candidatos.tsv
+          TOTAL="$TOTAL" python3 - <<'PY'
+          import json, os, urllib.request, urllib.parse
+          total = int(os.environ['TOTAL'])
+          target = int(os.environ['TARGET_MB']) * 1024 * 1024
+          base = os.environ['SUPABASE_URL'].rstrip('/')
+          key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
+          by_bucket, freed = {}, 0
+          with open('candidatos.tsv') as f:
+              for line in f:
+                  parts = line.rstrip('\n').split('\t')
+                  if len(parts) != 3:
+                      continue
+                  if total - freed <= target:
+                      break
+                  bucket, name, size = parts[0], parts[1], int(parts[2] or 0)
+                  by_bucket.setdefault(bucket, []).append(name)
+                  freed += size
+          removed = 0
+          for bucket, names in by_bucket.items():
+              for i in range(0, len(names), 100):
+                  batch = names[i:i + 100]
+                  req = urllib.request.Request(
+                      f"{base}/storage/v1/object/{urllib.parse.quote(bucket)}",
+                      data=json.dumps({'prefixes': batch}).encode(),
+                      method='DELETE',
+                      headers={'Authorization': f'Bearer {key}', 'apikey': key, 'Content-Type': 'application/json'},
+                  )
+                  with urllib.request.urlopen(req, timeout=60) as r:
+                      removed += len(json.loads(r.read() or b'[]'))
+          print(f"Apagados {removed} arquivos antigos (~{freed // 1024 // 1024} MB liberados).")
+          PY

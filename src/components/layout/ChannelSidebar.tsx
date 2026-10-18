@@ -519,6 +519,7 @@ export function ChannelSidebar({
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
+  const [inviteChannel, setInviteChannel] = useState<Channel | null>(null)
   const [showInviteFriends, setShowInviteFriends] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showLeave, setShowLeave] = useState(false)
@@ -658,7 +659,10 @@ export function ChannelSidebar({
           isDragOver={(dragOverTarget === channel.id && draggedChannelId !== channel.id) || memberDropTarget === channel.id}
           onSelect={() => onSelectChannel(channel)}
           onOpenChat={paired ? () => onSelectChannel(paired) : undefined}
-          onInvite={() => setShowInvite(true)}
+          onInvite={() => {
+            setInviteChannel(channel)
+            setShowInvite(true)
+          }}
           onEdit={() => setEditingChannel(channel)}
           onDragStart={(e) => handleDragStart(e, channel.id)}
           onDragOver={(e) => handleDragOverChannel(e, channel)}
@@ -1003,7 +1007,16 @@ export function ChannelSidebar({
         </div>
       )}
 
-      {showInvite &&<InviteModal serverId={server.id} onClose={() => setShowInvite(false)} />}
+      {showInvite && (
+        <InviteModal
+          serverId={server.id}
+          channel={inviteChannel ? { id: inviteChannel.id, name: inviteChannel.name, type: inviteChannel.type } : null}
+          onClose={() => {
+            setShowInvite(false)
+            setInviteChannel(null)
+          }}
+        />
+      )}
       {showInviteFriends && (
         <InviteFriendsModal serverId={server.id} onClose={() => setShowInviteFriends(false)} />
       )}

@@ -6,6 +6,8 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoPreset,
+  VideoQuality,
   type LocalAudioTrack,
   type LocalTrackPublication,
   type LocalVideoTrack,
@@ -39,7 +41,7 @@ import {
 } from '../lib/noiseSuppression'
 import { chooseScreenCodec, markCodecSoftwareOnly, probeHardwareEncoders, resetHardwareProbe, type ScreenCodec } from '../lib/hwEncode'
 import { computeScreenShareStats, pickOutboundVideo, type OutboundVideoSample } from '../lib/screenShareStats'
-import { getStreamView, subscribeStreamView } from '../lib/streamView'
+import { getStreamView, subscribeStreamView, type StreamQuality } from '../lib/streamView'
 import { peekPendingGameShareHint, takePendingGameShareHint } from '../lib/screenShareGameHint'
 import { takePendingAppAudioPid } from '../lib/pendingAppAudioCapture'
 import { openScreenSharePicker } from '../lib/screenSharePickerBridge'
@@ -179,6 +181,44 @@ const SCREEN_SHARE_AUDIO_PUBLISH_OPTIONS = {
 // Mensagem pt-BR padrão pra quando o servidor não deixa publicar (ouvinte
 // num canal "Palco" — ver supabase/functions/livekit-token).
 const NO_PUBLISH_PERMISSION_MESSAGE = 'Você está como ouvinte neste canal — só moderadores podem falar ou transmitir aqui.'
+
+// Qualidade da transmissão que o espectador escolhe → camada do simulcast.
+const STREAM_QUALITY_TO_LIVEKIT: Record<StreamQuality, VideoQuality> = {
+  auto: VideoQuality.HIGH,
+  media: VideoQuality.MEDIUM,
+  baixa: VideoQuality.LOW,
+}
+
+// Se o encoder de hardware recusar o simulcast (cai pro processador), o app
+// lembra e não tenta mais — a transmissão volta a ser uma versão só.
+const SIMULCAST_OFF_KEY = 'mv-screen-simulcast-off'
+function screenSimulcastAllowed(): boolean {
+  try {
+    return localStorage.getItem(SIMULCAST_OFF_KEY) !== '1'
+  } catch {
+    return true
+  }
+}
+function disableScreenSimulcast() {
+  try {
+    localStorage.setItem(SIMULCAST_OFF_KEY, '1')
+  } catch {
+    /* sem storage: só vale nesta sessão */
+  }
+}
+
+// Versões menores da transmissão (simulcast) pra quem escolhe "Média" ou
+// "Baixa" ou tem internet fraca. Ordem: menor → maior. Com dynacast ligado
+// o servidor só pede a versão menor quando alguém precisa dela — sem
+// ninguém pedindo, ela nem é codificada.
+function screenSimulcastLayers(preset: QualityPreset): VideoPreset[] {
+  const layers: VideoPreset[] = []
+  if (preset.height > 360) layers.push(new VideoPreset(640, 360, 600_000, Math.min(15, preset.frameRate)))
+  if (preset.height > 720) {
+    layers.push(new VideoPreset(1280, 720, Math.min(2_500_000, Math.round(preset.maxBitrate * 0.4)), Math.min(30, preset.frameRate)))
+  }
+  return layers
+}
 
 // Sala do LiveKit com as opções da call (adaptiveStream desligado de
 // propósito — ver o comentário no join(), perto de `room = preparedRoom`).
@@ -2386,8 +2426,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   function applyStreamWatchingTo(publication: RemoteTrackPublication, participantId: string) {
     if (publication.source !== Track.Source.ScreenShare && publication.source !== Track.Source.ScreenShareAudio) return
     if (!publication.isSubscribed) return
-    const watching = !getStreamView().hidden.has(participantId)
+    const view = getStreamView()
+    const watching = !view.hidden.has(participantId)
     if (publication.isEnabled !== watching) publication.setEnabled(watching)
+    // Qualidade escolhida por você (só tem efeito se quem transmite manda
+    // versões menores — simulcast, ver buildScreenVideoOpts).
+    if (watching && publication.source === Track.Source.ScreenShare) {
+      publication.setVideoQuality(STREAM_QUALITY_TO_LIVEKIT[view.quality.get(participantId) ?? 'auto'])
+    }
   }
   function applyStreamWatching() {
     const room = roomRef.current
@@ -3840,11 +3886,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     try {
       const params = sender.getParameters()
       if (!params.encodings?.length) return
-      const enc = params.encodings[0] as RTCRtpEncodingParameters & { priority?: string; networkPriority?: string }
-      enc.maxBitrate = preset.maxBitrate
-      enc.maxFramerate = preset.frameRate
-      if ('priority' in enc) enc.priority = 'high'
-      if ('networkPriority' in enc) enc.networkPriority = 'high'
+      // Com simulcast há várias versões (menor → maior): o teto do preset
+      // vale só pra maior (a última); as menores mantêm o próprio teto.
+      const top = params.encodings.length - 1
+      params.encodings.forEach((e, i) => {
+        const enc = e as RTCRtpEncodingParameters & { priority?: string; networkPriority?: string }
+        if (i === top) {
+          enc.maxBitrate = preset.maxBitrate
+          enc.maxFramerate = preset.frameRate
+        }
+        if ('priority' in enc) enc.priority = 'high'
+        if ('networkPriority' in enc) enc.networkPriority = 'high'
+      })
       ;(params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = preset.degradationPreference
       sender.setParameters(params).catch((err) => {
         logDebug(`applyScreenSenderEncoding: setParameters falhou — ${err instanceof Error ? err.message : String(err)}`)
@@ -3876,9 +3929,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   async function watchForSoftwareEncoder(
     videoTrack: MediaStreamTrack,
     codec: ScreenCodec,
-    buildOpts: (codec: ScreenCodec) => Parameters<NonNullable<Room['localParticipant']>['publishTrack']>[1]
+    buildOpts: (codec: ScreenCodec, allowSimulcast?: boolean) => Parameters<NonNullable<Room['localParticipant']>['publishTrack']>[1]
   ) {
     let current = codec
+    let simulcastOn = Boolean((buildOpts(codec) as { simulcast?: boolean } | undefined)?.simulcast)
     let prev: OutboundVideoSample | null = null
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 3000))
@@ -3895,6 +3949,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         return
       }
       if (current !== 'h264' && current !== 'vp9' && current !== 'av1') return
+      const room0 = roomRef.current
+      if (simulcastOn && room0) {
+        // Primeiro suspeito: o simulcast (alguns encoders de placa não
+        // aceitam várias versões). Republica com uma versão só e mede de novo.
+        logDebug(`transmissão: ${current} com simulcast caiu no processador (${sample.encoderImplementation ?? '?'}) — tentando sem simulcast`)
+        disableScreenSimulcast()
+        simulcastOn = false
+        try {
+          await room0.localParticipant.unpublishTrack(videoTrack, false)
+          if (screenStreamRef.current?.getVideoTracks()[0] !== videoTrack) return
+          screenVideoPublicationRef.current = await room0.localParticipant.publishTrack(videoTrack, buildOpts(current, false))
+          prev = null
+        } catch (err) {
+          logDebug(`transmissão: republicar sem simulcast falhou — ${err instanceof Error ? err.message : String(err)}`)
+          return
+        }
+        continue
+      }
       markCodecSoftwareOnly(current)
       resetHardwareProbe()
       const next = chooseScreenCodec(await probeHardwareEncoders(), true)
@@ -3998,9 +4070,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
       // Codec: H.264/VP9/AV1 conforme a placa (acima); VP8 só quando o
       // quadro passa do limite do H.264. `priority: 'high'` = mesmo nível
-      // do microfone na fila de envio. Sem simulcast/backupCodec (não
-      // codifica duas vezes).
-      const buildScreenVideoOpts = (codec: ScreenCodec) => ({
+      // do microfone na fila de envio. Sem backupCodec. Simulcast só no
+      // H.264 (versões 360p/720p pra quem escolher qualidade menor); se o
+      // hardware não aceitar, watchForSoftwareEncoder republica sem.
+      const simulcastLayers = screenSimulcastLayers(preset)
+      const buildScreenVideoOpts = (codec: ScreenCodec, allowSimulcast = true) => {
+        const simulcast = allowSimulcast && codec === 'h264' && simulcastLayers.length > 0 && screenSimulcastAllowed()
+        return {
         name: 'screen',
         source: Track.Source.ScreenShare,
         videoCodec: codec,
@@ -4014,8 +4090,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           priority: 'high' as const,
         },
         degradationPreference: preset.degradationPreference,
-        simulcast: false,
-      })
+        simulcast,
+        ...(simulcast ? { screenShareSimulcastLayers: simulcastLayers } : {}),
+        }
+      }
       // QUINTA RODADA: vídeo e áudio agora são COMPLETAMENTE
       // independentes — `stream` (acima) só tem vídeo. Tenta primeiro a
       // captura por processo (isola só o som do jogo, quando o PID foi

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { compressImageForUpload } from '../lib/compressImage'
 import { supabase } from '../lib/supabase'
 import { removeAttachmentObjects } from '../lib/storageUrls'
 import { changesChannel } from '../lib/realtimeChannel'
@@ -419,7 +420,8 @@ export function useMessages(channelId: string | null, serverId: string | null, t
 
         const attachmentErrors: string[] = []
         const inserted: MessageAttachment[] = []
-        for (const file of files) {
+        for (const originalFile of files) {
+          const file = await compressImageForUpload(originalFile)
           const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
           const path = `${serverId}/${channelId}/${message.id}-${safeName}`
           const { error: uploadError } = await supabase.storage

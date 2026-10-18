@@ -19,8 +19,9 @@ import { SettingsModal } from '../modals/SettingsModal'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import type { Channel, Profile, Role } from '../../types/database'
 import { copyText } from '../../lib/copyText'
-import { focusStream, hideStream, showStream, useStreamView } from '../../lib/streamView'
+import { focusStream, hideStream, setStreamQuality, showStream, useStreamView, type StreamQuality } from '../../lib/streamView'
 import { AudioMixer } from './AudioMixer'
+import { REPLAY_SECONDS, replaySupported, saveReplayClip, startReplay, stopAllReplays, stopReplay, syncReplays, useReplayActive } from '../../lib/replayBuffer'
 
 // VideoTile mora em CallMediaTiles.tsx (arquivo pequeno, compartilhado
 // com DMCallOverlay.tsx) — ver o comentário lá pra saber por quê (tem
@@ -109,6 +110,30 @@ function ShareTile({
 }) {
   const voice = useVoiceCore()
   const [showVolume, setShowVolume] = useState(false)
+  const [showQuality, setShowQuality] = useState(false)
+  const quality = useStreamView().quality.get(share.key) ?? 'auto'
+  const replayOn = useReplayActive().has(share.key)
+  const [clipMsg, setClipMsg] = useState<string | null>(null)
+  const [savingClip, setSavingClip] = useState(false)
+  useEffect(() => {
+    if (!clipMsg) return
+    const t = setTimeout(() => setClipMsg(null), 3500)
+    return () => clearTimeout(t)
+  }, [clipMsg])
+  async function onClip() {
+    if (!replayOn) {
+      setClipMsg(
+        startReplay(share.key, share.stream)
+          ? `Replay ligado — clique de novo pra salvar os últimos ${REPLAY_SECONDS}s`
+          : 'Seu sistema não consegue gravar clipes'
+      )
+      return
+    }
+    setSavingClip(true)
+    const ok = await saveReplayClip(share.key, share.name).catch(() => false)
+    setSavingClip(false)
+    setClipMsg(ok ? 'Clipe salvo nos Downloads' : 'Ainda não tem nada gravado')
+  }
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const tileRef = useRef<HTMLDivElement | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -158,7 +183,10 @@ function ShareTile({
       } ${small ? 'cursor-pointer hover:border-[var(--color-line-strong)]' : ''}`}
       onClick={small && onFocus ? () => onFocus(share.key) : undefined}
       onDoubleClick={!small && !share.isLocal ? () => void toggleFullscreen() : undefined}
-      onMouseLeave={() => setShowVolume(false)}
+      onMouseLeave={() => {
+        setShowVolume(false)
+        setShowQuality(false)
+      }}
       title={small ? `Destacar a transmissão de ${share.name}` : undefined}
     >
       {share.isLocal ? (
@@ -188,7 +216,13 @@ function ShareTile({
         {share.name}
         {share.isLocal && ' (você)'}
         {!share.isLocal && hasAudio && isMuted && <span className="text-rose-300">· mudo</span>}
+        {replayOn && !small && <span className="text-amber-300">· replay</span>}
       </span>
+      {clipMsg && !small && (
+        <span className="glass absolute bottom-2 right-2 text-[12px] font-medium text-white rounded-full px-2.5 py-1 animate-fade-in max-w-[60%] truncate">
+          {clipMsg}
+        </span>
+      )}
 
       <div
         className={`absolute top-2 right-2 flex items-center gap-1 p-1 rounded-full glass transition-all duration-150 ${
@@ -249,6 +283,77 @@ function ShareTile({
             </div>
           </>
         )}
+        {!small && replaySupported() && (
+          <>
+            <button
+              onClick={() => void onClip()}
+              disabled={savingClip}
+              title={
+                replayOn
+                  ? `Salvar clipe dos últimos ${REPLAY_SECONDS} segundos`
+                  : `Ligar replay (guarda os últimos ${REPLAY_SECONDS}s pra salvar como clipe)`
+              }
+              aria-label={replayOn ? 'Salvar clipe' : 'Ligar replay'}
+              className={`${btn} w-auto px-2 gap-1 text-[10px] font-bold tracking-wide ${replayOn ? 'text-amber-300' : ''}`}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden>
+                {replayOn ? (
+                  <path d="M12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.76-4.24L14 10h6V4l-2.35 2.35A7.97 7.97 0 0 0 12 4zm-1 4v5l4 2.4.8-1.3-3.3-2V8H11z" />
+                ) : (
+                  <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm0 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" />
+                )}
+              </svg>
+              {replayOn ? (savingClip ? '...' : 'CLIPE') : 'REPLAY'}
+            </button>
+            {replayOn && (
+              <button
+                onClick={() => {
+                  stopReplay(share.key)
+                  setClipMsg('Replay desligado')
+                }}
+                title="Desligar replay"
+                aria-label="Desligar replay"
+                className={btn}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3" aria-hidden>
+                  <path d="M6 6h12v12H6z" />
+                </svg>
+              </button>
+            )}
+          </>
+        )}
+        {!small && !share.isLocal && (
+          <div className="relative">
+            <button
+              onClick={() => setShowQuality((v) => !v)}
+              title="Qualidade da transmissão (só pra você)"
+              aria-label="Qualidade da transmissão"
+              className={`${btn} w-auto px-2 text-[10px] font-bold tracking-wide`}
+            >
+              {QUALITY_BADGE[quality]}
+            </button>
+            {showQuality && (
+              <div className="absolute top-10 right-0 surface-elevated rounded-xl animate-pop-in p-1.5 w-56 z-10">
+                <p className="text-[11px] font-semibold text-mv-text px-2 pt-1 pb-1.5">Qualidade (só pra você)</p>
+                {QUALITY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => {
+                      setStreamQuality(share.key, opt.value)
+                      setShowQuality(false)
+                    }}
+                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[12px] flex flex-col transition-colors ${
+                      quality === opt.value ? 'bg-mv-accent/15 text-mv-text' : 'text-mv-muted hover:bg-white/[0.06] hover:text-mv-text'
+                    }`}
+                  >
+                    <span className="font-semibold">{opt.label}</span>
+                    <span className="text-[10.5px] opacity-80">{opt.hint}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {!small && onFocus && !isFullscreen && (
           <button
             onClick={() => onFocus(isFocused ? null : share.key)}
@@ -308,6 +413,13 @@ function ShareTile({
     </div>
   )
 }
+
+const QUALITY_BADGE: Record<StreamQuality, string> = { auto: 'HD', media: '720p', baixa: '360p' }
+const QUALITY_OPTIONS: { value: StreamQuality; label: string; hint: string }[] = [
+  { value: 'auto', label: 'Automática (melhor)', hint: 'A original; baixa sozinha se a internet apertar' },
+  { value: 'media', label: 'Média (720p)', hint: 'Gasta menos internet' },
+  { value: 'baixa', label: 'Baixa (360p)', hint: 'Pra internet fraca ou celular' },
+]
 
 function ScreenIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
   return (
@@ -741,6 +853,13 @@ export function VoiceChannelView({
     }
   })
   const visibleScreenShares = screenShares.filter((s) => !hiddenShareKeys.has(s.key))
+  // Replay só vale pra transmissão aberta: fechou/acabou → desliga.
+  const replaySig = visibleScreenShares.map((s) => `${s.key}:${s.stream.id}:${s.stream.getTracks().length}`).join(',')
+  useEffect(() => {
+    syncReplays(new Map(visibleScreenShares.map((s) => [s.key, s.stream])))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- replaySig resume a lista
+  }, [replaySig])
+  useEffect(() => () => stopAllReplays(), [])
   const hasScreenShares = visibleScreenShares.length > 0
   const hiddenCount = screenShares.length - visibleScreenShares.length
 

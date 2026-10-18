@@ -1,0 +1,49 @@
+name: Criar chave do Android (uma vez só)
+
+# Gera a chave que assina o APK do Android. Rode UMA VEZ (Actions > este
+# workflow > Run workflow) e siga docs/ANDROID.md. Guarde bem: se a chave
+# mudar, quem já instalou o app precisa desinstalar pra instalar a nova
+# versão.
+#
+# Antes de rodar, crie o secret ANDROID_KEYSTORE_PASSWORD (uma senha forte,
+# 12+ caracteres). A chave sai protegida por essa senha — o arquivo gerado
+# fica disponível pra download só por 1 dia.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  gerar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Gerar a chave
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ ${#ANDROID_KEYSTORE_PASSWORD} -lt 12 ]; then
+            echo "::error::Crie antes o secret ANDROID_KEYSTORE_PASSWORD (12+ caracteres)."
+            exit 1
+          fi
+          mkdir -p out
+          keytool -genkeypair -noprompt \
+            -keystore out/mamacos-release.p12 -storetype PKCS12 \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -keypass:env ANDROID_KEYSTORE_PASSWORD \
+            -alias mamacos -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname "CN=Mamacos Voip, O=Mamacos Voip, C=BR"
+          base64 -w0 out/mamacos-release.p12 > out/ANDROID_KEYSTORE_BASE64.txt
+          rm out/mamacos-release.p12
+          echo "Pronto: baixe o artefato e cole o conteúdo do .txt no secret ANDROID_KEYSTORE_BASE64."
+
+      - name: Guardar (1 dia)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: chave-android
+          path: out/ANDROID_KEYSTORE_BASE64.txt
+          retention-days: 1
+          if-no-files-found: error

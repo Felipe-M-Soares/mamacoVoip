@@ -199,18 +199,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   logDebug: (message) => ipcRenderer.send('debug:log', message),
   // B7 — sessão do Supabase cifrada com o safeStorage do sistema (ver
   // "secure-storage:*" em electron/main.cjs e src/lib/authStorage.ts).
-  // Só chaves com prefixo "sb-"; o processo principal valida de novo.
+  // Só chaves com prefixo "sb-" e as notas privadas (mv-user-notes); o
+  // processo principal valida de novo.
   secureStorage: {
     getItem: (key) =>
-      typeof key === 'string' && key.startsWith('sb-')
+      typeof key === 'string' && (key.startsWith('sb-') || key === 'mv-user-notes')
         ? ipcRenderer.invoke('secure-storage:get', key)
         : Promise.resolve({ ok: false }),
     setItem: (key, value) =>
-      typeof key === 'string' && key.startsWith('sb-') && typeof value === 'string'
+      typeof key === 'string' && (key.startsWith('sb-') || key === 'mv-user-notes') && typeof value === 'string'
         ? ipcRenderer.invoke('secure-storage:set', key, value)
         : Promise.resolve({ ok: false }),
     removeItem: (key) =>
-      typeof key === 'string' && key.startsWith('sb-')
+      typeof key === 'string' && (key.startsWith('sb-') || key === 'mv-user-notes')
         ? ipcRenderer.invoke('secure-storage:remove', key)
         : Promise.resolve({ ok: false }),
   },

@@ -1,0 +1,86 @@
+name: Backup do banco (criptografado)
+
+# Cópia de segurança semanal do banco do Supabase (o plano grátis não
+# guarda backups). A cópia sai CRIPTOGRAFADA (AES-256) com uma senha que
+# só você tem — como o repositório é público, o arquivo do backup pode
+# ser baixado por outras pessoas logadas no GitHub, mas sem a senha ele é
+# só lixo ilegível.
+#
+# O que entra: tabelas do app (public), contas (auth) e os registros dos
+# arquivos (storage). Os ARQUIVOS em si (fotos/vídeos do chat) não entram.
+#
+# Configuração (uma vez só) — Settings > Secrets and variables > Actions:
+#   - SUPABASE_DB_URL: Supabase > Project Settings > Database > Connection
+#       string > "Session pooler" (URI), com a senha do banco no lugar de
+#       [YOUR-PASSWORD]. (O "Direct connection" não funciona aqui.)
+#   - BACKUP_PASSWORD: uma senha forte criada por você. GUARDE ela — sem
+#       ela não tem como abrir o backup.
+# Como restaurar: ver docs/BACKUP.md.
+
+on:
+  schedule:
+    - cron: '17 6 * * 0' # todo domingo, 06:17 UTC (03:17 em Brasília)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-banco
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Conferir configuração
+        id: cfg
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ] || [ -z "$BACKUP_PASSWORD" ]; then
+            echo "::warning::Backup não configurado: crie os secrets SUPABASE_DB_URL e BACKUP_PASSWORD (ver o topo deste arquivo)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          elif [ ${#BACKUP_PASSWORD} -lt 12 ]; then
+            echo "::error::BACKUP_PASSWORD precisa ter pelo menos 12 caracteres."
+            exit 1
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Gerar o backup e criptografar
+        if: steps.cfg.outputs.ok == 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          STAMP="$(date -u +%Y-%m-%d)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          mkdir -p out
+          # pg_dump da mesma versão principal do Postgres do Supabase (17),
+          # rodando em contêiner — sem instalar nada no runner. O arquivo
+          # nunca fica sem criptografia no disco: sai do pg_dump direto
+          # pro openssl.
+          docker run --rm -e PGURL="$SUPABASE_DB_URL" postgres:17 \
+            sh -c 'pg_dump "$PGURL" --format=custom --no-owner --no-privileges --schema=public --schema=auth --schema=storage' \
+            | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASSWORD \
+            > "out/mamacos-backup-$STAMP.dump.enc"
+          SIZE=$(stat -c %s "out/mamacos-backup-$STAMP.dump.enc")
+          if [ "$SIZE" -lt 1024 ]; then
+            echo "::error::Backup saiu vazio — confira o SUPABASE_DB_URL (use o 'Session pooler')."
+            exit 1
+          fi
+          echo "Backup criptografado: $SIZE bytes"
+
+      - name: Guardar o backup (90 dias)
+        if: steps.cfg.outputs.ok == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mamacos-backup-${{ env.STAMP }}
+          path: out/*.dump.enc
+          retention-days: 90
+          if-no-files-found: error

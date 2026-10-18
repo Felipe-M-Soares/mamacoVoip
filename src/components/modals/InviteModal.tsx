@@ -41,7 +41,17 @@ function describeInvite(inv: ServerInvite): string {
   return parts.join(' · ')
 }
 
-export function InviteModal({ serverId, onClose }: { serverId: string; onClose: () => void }) {
+export function InviteModal({
+  serverId,
+  channel,
+  onClose,
+}: {
+  serverId: string
+  /** Convite pra uma sala específica: quem entrar pelo link já cai nela. */
+  channel?: { id: string; name: string; type: 'text' | 'voice' } | null
+  onClose: () => void
+}) {
+  const linkFor = (code: string) => `${inviteBaseUrl()}/convite/${code}${channel ? `?canal=${channel.id}` : ''}`
   const { createInvite, servers } = useServers()
   const { user } = useAuth()
   const isOwner = servers.find((s) => s.id === serverId)?.owner_id === user?.id
@@ -91,7 +101,7 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
       setError(error && /demais|aguarde|espere/i.test(error) ? error : 'Não foi possível gerar o convite.')
       return
     }
-    setLink(`${inviteBaseUrl()}/convite/${invite.code}`)
+    setLink(linkFor(invite.code))
     void loadInvites()
   }
 
@@ -113,7 +123,7 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
     }
     setInvites((list) => list.filter((i) => i.id !== id))
     const revoked = invites.find((i) => i.id === id)
-    if (revoked && link?.endsWith(`/convite/${revoked.code}`)) setLink(null)
+    if (revoked && link?.includes(`/convite/${revoked.code}`)) setLink(null)
   }
 
   const selectClass =
@@ -121,8 +131,14 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
 
   return (
     <Modal
-      title="Convidar amigos"
-      description="Escolha a validade e compartilhe o link para convidar pessoas ao servidor."
+      title={channel ? `Convidar para ${channel.type === 'voice' ? '' : '#'}${channel.name}` : 'Convidar amigos'}
+      description={
+        channel
+          ? channel.type === 'voice'
+            ? 'Quem abrir o link entra no servidor e já cai direto nesta sala de voz.'
+            : 'Quem abrir o link entra no servidor e já abre este canal.'
+          : 'Escolha a validade e compartilhe o link para convidar pessoas ao servidor.'
+      }
       onClose={onClose}
     >
       <div className="grid grid-cols-2 gap-3 mb-3">
@@ -208,7 +224,7 @@ export function InviteModal({ serverId, onClose }: { serverId: string; onClose: 
           <p className="field-label">{isOwner ? 'Convites ativos do servidor' : 'Seus convites ativos'}</p>
           <ul className="space-y-1.5 max-h-48 overflow-y-auto">
             {invites.map((inv) => {
-              const url = `${inviteBaseUrl()}/convite/${inv.code}`
+              const url = linkFor(inv.code)
               return (
                 <li
                   key={inv.id}

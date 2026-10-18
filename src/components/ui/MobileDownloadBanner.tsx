@@ -1,4 +1,4 @@
-import { DESKTOP_DOWNLOAD_URL } from '../../lib/config'
+import { ANDROID_DOWNLOAD_URL, DESKTOP_DOWNLOAD_URL } from '../../lib/config'
 import { isNativeMobileApp } from '../../lib/platform'
 
 // VIGÉSIMA SEXTA RODADA — pedido explícito: "colocar modo de baixar o
@@ -12,17 +12,16 @@ import { isNativeMobileApp } from '../../lib/platform'
 //   - dentro do próprio app desktop (Electron) — ninguém que já está
 //     rodando o app precisa ser convidado a baixar ele de novo.
 //
-// Hoje o app é só desktop (Windows) — não existe versão nativa pra
-// Android/iOS ainda (é um projeto futuro à parte, bem maior). Por isso
-// o texto é claro sobre ser "a versão de computador", em vez de deixar
-// a pessoa achar que está baixando um app pro celular dela.
+// No Android o banner oferece o app de celular (APK); em outros
+// celulares (iPhone) continua oferecendo a versão de computador.
 export function MobileDownloadBanner() {
   // Também some dentro do app Android (já está no app).
   if (window.electronAPI?.isElectron || isNativeMobileApp()) return null
+  const android = /android/i.test(navigator.userAgent)
 
   return (
     <a
-      href={DESKTOP_DOWNLOAD_URL}
+      href={android ? ANDROID_DOWNLOAD_URL : DESKTOP_DOWNLOAD_URL}
       target="_blank"
       rel="noreferrer"
       className="md:hidden relative z-10 mb-4 flex items-center gap-3 rounded-2xl border border-[var(--color-line-strong)] bg-white/[0.03] px-4 py-3 text-left transition-colors hover:bg-white/[0.06]"
@@ -33,8 +32,12 @@ export function MobileDownloadBanner() {
         </svg>
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-white">Baixe o app pra computador</p>
-        <p className="text-xs text-mv-muted">Voz, vídeo e compartilhamento de tela — a experiência completa é no PC</p>
+        <p className="text-sm font-semibold text-white">{android ? 'Baixe o app pra Android' : 'Baixe o app pra computador'}</p>
+        <p className="text-xs text-mv-muted">
+          {android
+            ? 'Instale o APK (permita "fontes desconhecidas" se o celular pedir)'
+            : 'Voz, vídeo e compartilhamento de tela — a experiência completa é no PC'}
+        </p>
       </div>
       <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 shrink-0 text-mv-muted">
         <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12 9.3 6.7a1 1 0 0 1 0-1.4z" />

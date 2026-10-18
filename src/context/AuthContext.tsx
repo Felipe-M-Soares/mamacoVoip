@@ -7,6 +7,7 @@ import { normalizeEmail, normalizeTotpCode } from '../lib/authValidation'
 import { clearLinkPreviewCache } from '../hooks/useLinkPreview'
 import { clearSignedUrlCache } from '../lib/storageUrls'
 import { PUBLIC_WEB_URL } from '../lib/config'
+import { isNativeMobileApp } from '../lib/platform'
 
 // Esquema de URL customizado que o app desktop registra no sistema
 // operacional (ver "protocols" em package.json e o bloco grande no
@@ -16,6 +17,8 @@ import { PUBLIC_WEB_URL } from '../lib/config'
 // diretamente. Só é usado dentro do app desktop; no navegador (site),
 // o próprio window.location.origin já funciona como redirecionamento.
 const GOOGLE_AUTH_REDIRECT_ELECTRON = 'mamacovoip://auth-callback'
+// App Android (Capacitor): o mesmo id do app como esquema de link.
+const GOOGLE_AUTH_REDIRECT_MOBILE = 'com.mamacosvoip.app://auth-callback'
 
 // mamacovoip:// é um esquema de URL REGISTRADO NO SISTEMA OPERACIONAL —
 // isso significa que, tecnicamente, QUALQUER site ou programa no
@@ -75,6 +78,72 @@ interface AuthContextValue {
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined)
+
+// Retorno do login com Google no app desktop e no Android: confere o
+// state (só aceita um login que ESTE app pediu, dentro do prazo) e troca o
+// "?code=" (PKCE) pela sessão. O code sozinho não serve pra nada sem o
+// code_verifier que ficou guardado neste aparelho.
+// No Android o sistema pode fechar o app enquanto a pessoa está no
+// navegador do Google — o state pendente fica guardado no aparelho também
+// (o code_verifier do PKCE já fica, no armazenamento da sessão).
+const GOOGLE_AUTH_STATE_KEY = 'mamacos-google-auth-state'
+function storeGoogleAuthState(v: { value: string; expiresAt: number }) {
+  try {
+    localStorage.setItem(GOOGLE_AUTH_STATE_KEY, JSON.stringify(v))
+  } catch {
+    // sem storage: vale só o da memória
+  }
+}
+function takeStoredGoogleAuthState(): { value: string; expiresAt: number } | null {
+  try {
+    const raw = localStorage.getItem(GOOGLE_AUTH_STATE_KEY)
+    localStorage.removeItem(GOOGLE_AUTH_STATE_KEY)
+    if (!raw) return null
+    const v = JSON.parse(raw) as { value?: unknown; expiresAt?: unknown }
+    return typeof v.value === 'string' && typeof v.expiresAt === 'number' ? { value: v.value, expiresAt: v.expiresAt } : null
+  } catch {
+    return null
+  }
+}
+
+async function handleGoogleAuthCallback(url: string) {
+  try {
+    const hashIndex = url.indexOf('#')
+    const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url
+    const queryIndex = beforeHash.indexOf('?')
+    const stateFromLink =
+      queryIndex >= 0 ? new URLSearchParams(beforeHash.slice(queryIndex + 1)).get('state') : null
+
+    // Uso único — some com o código pendente já na primeira
+    // tentativa, bateu ou não (evita reaproveitar o mesmo código
+    // pra um segundo link forjado).
+    const pending = pendingGoogleAuthState ?? takeStoredGoogleAuthState()
+    pendingGoogleAuthState = null
+    takeStoredGoogleAuthState()
+
+    const isExpectedLogin = Boolean(
+      pending && pending.expiresAt >= Date.now() && stateFromLink && stateFromLink === pending.value
+    )
+    if (!isExpectedLogin) {
+      // Link não corresponde a um login que ESTE app pediu (código
+      // errado, ausente, ou expirado) — ignora silenciosamente em
+      // vez de logar a pessoa numa conta que pode não ser a dela.
+      // Ver o comentário grande acima sobre por que isso é
+      // necessário com um esquema de URL customizado.
+      return
+    }
+
+    const query = new URLSearchParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '')
+    const code = query.get('code')
+    // Fluxo implícito (#access_token=...) NÃO é mais aceito: com
+    // flowType 'pkce' o Supabase sempre devolve ?code=.
+    if (code && /^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
+      await supabase.auth.exchangeCodeForSession(code)
+    }
+  } catch {
+    // best-effort — um link malformado não deve derrubar o app
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -297,6 +366,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // página é redirecionada pro Google e volta sozinha pro mesmo
   // endereço, sem precisar de nada especial aqui.
   async function signInWithGoogle(): Promise<{ error: string | null }> {
+    if (isNativeMobileApp()) {
+      // Android: o Google não deixa logar dentro da WebView do app, então
+      // abre no navegador do sistema (aba segura) e volta pelo link
+      // com.mamacosvoip.app:// (ver o useEffect do appUrlOpen).
+      const state = crypto.randomUUID()
+      pendingGoogleAuthState = { value: state, expiresAt: Date.now() + GOOGLE_AUTH_STATE_TTL_MS }
+      storeGoogleAuthState(pendingGoogleAuthState)
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${GOOGLE_AUTH_REDIRECT_MOBILE}?state=${state}`, skipBrowserRedirect: true },
+      })
+      if (error || !data?.url) {
+        pendingGoogleAuthState = null
+        return { error: error ? traduzErro(error.message) : 'Não foi possível abrir o login do Google.' }
+      }
+      try {
+        const { Browser } = await import('@capacitor/browser')
+        await Browser.open({ url: data.url })
+      } catch {
+        pendingGoogleAuthState = null
+        return { error: 'Não foi possível abrir o navegador para o login do Google.' }
+      }
+      return { error: null }
+    }
     if (isElectron()) {
       const state = crypto.randomUUID()
       pendingGoogleAuthState = { value: state, expiresAt: Date.now() + GOOGLE_AUTH_STATE_TTL_MS }
@@ -330,43 +423,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // perfil, etc.) automaticamente a partir daqui.
   useEffect(() => {
     if (!window.electronAPI?.onGoogleAuthCallback) return
-    return window.electronAPI.onGoogleAuthCallback(async (url) => {
-      try {
-        const hashIndex = url.indexOf('#')
-        const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url
-        const queryIndex = beforeHash.indexOf('?')
-        const stateFromLink =
-          queryIndex >= 0 ? new URLSearchParams(beforeHash.slice(queryIndex + 1)).get('state') : null
+    return window.electronAPI.onGoogleAuthCallback(handleGoogleAuthCallback)
+  }, [])
 
-        // Uso único — some com o código pendente já na primeira
-        // tentativa, bateu ou não (evita reaproveitar o mesmo código
-        // pra um segundo link forjado).
-        const pending = pendingGoogleAuthState
-        pendingGoogleAuthState = null
-
-        const isExpectedLogin = Boolean(
-          pending && pending.expiresAt >= Date.now() && stateFromLink && stateFromLink === pending.value
-        )
-        if (!isExpectedLogin) {
-          // Link não corresponde a um login que ESTE app pediu (código
-          // errado, ausente, ou expirado) — ignora silenciosamente em
-          // vez de logar a pessoa numa conta que pode não ser a dela.
-          // Ver o comentário grande acima sobre por que isso é
-          // necessário com um esquema de URL customizado.
-          return
-        }
-
-        const query = new URLSearchParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '')
-        const code = query.get('code')
-        // Fluxo implícito (#access_token=...) NÃO é mais aceito: com
-        // flowType 'pkce' o Supabase sempre devolve ?code=.
-        if (code && /^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
-          await supabase.auth.exchangeCodeForSession(code)
-        }
-      } catch {
-        // best-effort — um link malformado não deve derrubar o app
-      }
+  // Mesmo retorno no app Android: o Google volta pelo link
+  // com.mamacosvoip.app://auth-callback (ver AndroidManifest.xml), o
+  // Android entrega pro app, e o navegador interno fecha sozinho.
+  useEffect(() => {
+    if (!isNativeMobileApp()) return
+    let remove: (() => void) | null = null
+    let cancelled = false
+    void import('@capacitor/app').then(({ App }) => {
+      // App aberto do zero pelo link (o Android tinha fechado ele).
+      void App.getLaunchUrl()
+        .then((launch) => {
+          if (launch?.url?.startsWith(GOOGLE_AUTH_REDIRECT_MOBILE)) void handleGoogleAuthCallback(launch.url)
+        })
+        .catch(() => {})
+      return App.addListener('appUrlOpen', ({ url }) => {
+        if (!url.startsWith(GOOGLE_AUTH_REDIRECT_MOBILE)) return
+        void import('@capacitor/browser').then(({ Browser }) => Browser.close()).catch(() => {})
+        void handleGoogleAuthCallback(url)
+      }).then((h) => {
+        if (cancelled) void h.remove()
+        else remove = () => void h.remove()
+      })
     })
+    return () => {
+      cancelled = true
+      remove?.()
+    }
   }, [])
 
   // Limpa tudo que é da conta e fica guardado no aparelho — num

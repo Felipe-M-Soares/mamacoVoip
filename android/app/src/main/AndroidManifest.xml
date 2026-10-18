@@ -29,6 +29,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Volta do login com Google (abre no navegador do sistema e
+                 retorna por com.mamacosvoip.app://auth-callback — ver
+                 signInWithGoogle em src/context/AuthContext.tsx). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.mamacosvoip.app" android:host="auth-callback" />
+            </intent-filter>
+
         </activity>
 
         <provider

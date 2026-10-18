@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { compressImageForUpload } from '../lib/compressImage'
 import { supabase } from '../lib/supabase'
 import { applyDmMessageToConversations } from './useConversations'
 import { removeAttachmentObjects } from '../lib/storageUrls'
@@ -232,7 +233,8 @@ export function useDirectMessages(conversationId: string | null) {
 
         const attachmentErrors: string[] = []
         const inserted: DMMessageAttachment[] = []
-        for (const file of files) {
+        for (const originalFile of files) {
+          const file = await compressImageForUpload(originalFile)
           const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
           const path = `${conversationId}/${message.id}-${safeName}`
           const { error: uploadError } = await supabase.storage

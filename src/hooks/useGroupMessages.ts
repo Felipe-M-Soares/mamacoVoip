@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { compressImageForUpload } from '../lib/compressImage'
 import { supabase } from '../lib/supabase'
 import { removeAttachmentObjects } from '../lib/storageUrls'
 import { changesChannel } from '../lib/realtimeChannel'
@@ -229,7 +230,8 @@ export function useGroupMessages(groupId: string | null) {
 
         const attachmentErrors: string[] = []
         const inserted: GroupMessageAttachment[] = []
-        for (const file of files) {
+        for (const originalFile of files) {
+          const file = await compressImageForUpload(originalFile)
           const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_')
           const path = `${groupId}/${message.id}-${safeName}`
           const { error: uploadError } = await supabase.storage

@@ -99,6 +99,9 @@ const OFFICIAL_SITES: Record<string, string> = {
   'EA Sports FC 26': 'ea.com',
   'NBA 2K26': 'nba.2k.com',
   'Aion 2': 'aion2.plaync.com',
+  // Não é jogo, mas é comum ter categoria de anime.
+  Crunchyroll: 'crunchyroll.com',
+  Netflix: 'netflix.com',
 }
 
 /** Todos os jogos com ícone conhecido (lista do seletor na edição da categoria). */
@@ -199,6 +202,14 @@ const ALIASES: [string, string][] = [
   ['forza', 'Forza Horizon 5'],
   ['warframe', 'Warframe'],
   ['palia', 'Palia'],
+  ['crunchyroll', 'Crunchyroll'],
+  ['animes', 'Crunchyroll'],
+  ['anime', 'Crunchyroll'],
+  ['netflix', 'Netflix'],
+  ['filmes', 'Netflix'],
+  ['filme', 'Netflix'],
+  ['series', 'Netflix'],
+  ['serie', 'Netflix'],
 ]
 
 function normalize(text: string): string {

@@ -6,19 +6,22 @@ import { gameIconSource } from '../../lib/gameIcons'
 export function GameIcon({
   game,
   playingApp,
+  imageUrl,
   size = 16,
   className = '',
   title,
 }: {
   game: string
   playingApp?: string | null
+  // Imagem própria (ex.: PNG enviado pro ícone da categoria) — vem primeiro.
+  imageUrl?: string | null
   size?: number
   className?: string
   title?: string
 }) {
   const src = gameIconSource(game, playingApp)
-  const urls = src.kind === 'image' ? src.urls : []
-  const key = `${game}|${playingApp ?? ''}`
+  const urls = [...(imageUrl ? [imageUrl] : []), ...(src.kind === 'image' ? src.urls : [])]
+  const key = `${game}|${playingApp ?? ''}|${imageUrl ?? ''}`
   const [failed, setFailed] = useState<{ key: string; n: number }>({ key, n: 0 })
   const n = failed.key === key ? failed.n : 0
   const label = title ?? `Jogando ${game}`
@@ -34,8 +37,15 @@ export function GameIcon({
         referrerPolicy="no-referrer"
         draggable={false}
         onError={() => setFailed({ key, n: n + 1 })}
+        // Imagem "vazia" (a loja às vezes devolve um quadradinho em branco
+        // em vez de erro) também conta como falha e passa pra próxima.
+        onLoad={(e) => {
+          if (e.currentTarget.naturalWidth < 8) setFailed({ key, n: n + 1 })
+        }}
         style={box}
-        className={`shrink-0 rounded-[4px] object-cover bg-black/30 ring-1 ring-white/10 ${className}`}
+        // Sem fundo: PNG transparente aparece limpo; imagem própria fica
+        // inteira (contain), capa de loja preenche o quadrado (cover).
+        className={`shrink-0 rounded-[4px] ${imageUrl && n === 0 ? 'object-contain' : 'object-cover'} ${className}`}
       />
     )
   }

@@ -5175,3 +5175,76 @@ alter table public.categories drop constraint if exists categories_game_len;
 alter table public.categories add constraint categories_game_len check (game is null or char_length(game) <= 80);
 
 notify pgrst, 'reload schema';
+
+-- ============================================================
+-- PARTE 27 — Imagem própria no ícone da categoria (out/2026)
+-- Quem pode editar canais envia um PNG (de preferência sem fundo) pro
+-- ícone da categoria. Fica no bucket público server-icons, na pasta
+-- <server_id>/categorias/. O endereço gravado só pode apontar pra essa
+-- pasta do PRÓPRIO servidor (nada de link externo).
+alter table public.categories add column if not exists icon_url text;
+
+create or replace function public.guard_category_icon()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if current_user not in ('authenticated', 'anon') then
+    return new;
+  end if;
+  if new.icon_url is not null and (
+       not public.is_trusted_storage_url(new.icon_url, 'server-icons', new.server_id::text)
+       or position('/categorias/' in new.icon_url) = 0
+     ) then
+    raise exception 'Imagem da categoria inválida';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_category_icon_guard on public.categories;
+create trigger on_category_icon_guard
+  before insert or update of icon_url on public.categories
+  for each row execute function public.guard_category_icon();
+
+drop policy if exists "category_icons_insert" on storage.objects;
+create policy "category_icons_insert"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'server-icons'
+    and (storage.foldername(name))[2] = 'categorias'
+    and exists (
+      select 1 from public.servers s
+      where s.id::text = (storage.foldername(name))[1]
+        and public.has_permission(s.id, auth.uid(), 'manage_channels')
+    )
+  );
+
+drop policy if exists "category_icons_select" on storage.objects;
+create policy "category_icons_select"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'server-icons'
+    and (storage.foldername(name))[2] = 'categorias'
+    and exists (
+      select 1 from public.servers s
+      where s.id::text = (storage.foldername(name))[1]
+        and public.has_permission(s.id, auth.uid(), 'manage_channels')
+    )
+  );
+
+drop policy if exists "category_icons_delete" on storage.objects;
+create policy "category_icons_delete"
+  on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'server-icons'
+    and (storage.foldername(name))[2] = 'categorias'
+    and exists (
+      select 1 from public.servers s
+      where s.id::text = (storage.foldername(name))[1]
+        and public.has_permission(s.id, auth.uid(), 'manage_channels')
+    )
+  );
+
+notify pgrst, 'reload schema';

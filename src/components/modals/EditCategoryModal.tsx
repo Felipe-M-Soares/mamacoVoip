@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { useChannels } from '../../hooks/useChannels'
 import type { Category } from '../../types/database'
@@ -25,7 +25,25 @@ export function EditCategoryModal({
   startDeleting?: boolean
   onClose: () => void
 }) {
-  const { updateCategory, setCategoryGame, deleteCategory, channels } = useChannels()
+  const { updateCategory, setCategoryGame, setCategoryIcon, deleteCategory, channels } = useChannels()
+  // Imagem própria: undefined = sem mudança; null = remover; File = nova.
+  const [pendingIcon, setPendingIcon] = useState<File | null | undefined>(undefined)
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const previewRef = useRef<string | null>(null)
+  function choosePendingIcon(f: File | null) {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+    previewRef.current = f ? URL.createObjectURL(f) : null
+    setPendingPreview(previewRef.current)
+    setPendingIcon(f)
+  }
+  useEffect(
+    () => () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+    },
+    []
+  )
+  const currentIcon = pendingIcon === undefined ? (category.icon_url ?? null) : pendingPreview
   const [name, setName] = useState(category.name)
   const [choice, setChoice] = useState(() => initialChoice(category.game).choice)
   const [otherGame, setOtherGame] = useState(() => initialChoice(category.game).other)
@@ -46,8 +64,10 @@ export function EditCategoryModal({
     setLoading(true)
     const { error } = clean !== category.name ? await updateCategory(category.id, clean) : { error: null }
     const gameRes = !error && game !== (category.game ?? null) ? await setCategoryGame(category.id, game) : { error: null }
+    const iconRes =
+      !error && !gameRes.error && pendingIcon !== undefined ? await setCategoryIcon(category.id, pendingIcon) : { error: null }
     setLoading(false)
-    if (error || gameRes.error) setError(error ?? gameRes.error)
+    if (error || gameRes.error || iconRes.error) setError(error ?? gameRes.error ?? iconRes.error)
     else onClose()
   }
 
@@ -148,8 +168,14 @@ export function EditCategoryModal({
             Ícone de jogo
           </label>
           <div className="flex items-center gap-2">
-            <span className="w-9 h-9 shrink-0 flex items-center justify-center rounded-lg bg-mv-canvas">
-              {previewGame ? <GameIcon game={previewGame} size={26} title={previewGame} className="rounded-md" /> : <span className="text-mv-muted text-xs">—</span>}
+            <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-lg bg-mv-canvas">
+              {currentIcon ? (
+                <GameIcon game={previewGame ?? name} imageUrl={currentIcon} size={32} title="Imagem própria" />
+              ) : previewGame ? (
+                <GameIcon game={previewGame} size={32} title={previewGame} className="rounded-md" />
+              ) : (
+                <span className="text-mv-muted text-xs">—</span>
+              )}
             </span>
             <select
               id="edit-category-game"
@@ -178,8 +204,31 @@ export function EditCategoryModal({
             />
           )}
           <p className="mt-1.5 text-[12px] text-mv-muted">
-            O ícone vem da Steam ou do site oficial do jogo. Jogo sem ícone conhecido aparece com a inicial.
+            O ícone automático vem da Steam ou do site oficial do jogo. Pra usar a logo mais nova, envie a sua
+            imagem abaixo.
           </p>
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/webp,image/jpeg,image/gif"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) choosePendingIcon(f)
+                e.target.value = ''
+              }}
+            />
+            <button type="button" onClick={() => fileRef.current?.click()} className="btn-secondary h-8 px-3 text-[12.5px]">
+              {currentIcon ? 'Trocar imagem' : 'Enviar imagem (PNG sem fundo)'}
+            </button>
+            {currentIcon && (
+              <button type="button" onClick={() => choosePendingIcon(null)} className="h-8 px-3 text-[12.5px] text-rose-300 hover:text-rose-200">
+                Remover imagem
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-[11.5px] text-mv-muted">A imagem enviada tem prioridade sobre o ícone automático.</p>
         </div>
         {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>

@@ -266,6 +266,8 @@ export type Category = {
   // Ícone de jogo (migration 007 PARTE 26): null/ausente = automático pelo
   // nome; '' = sem ícone; texto = nome do jogo escolhido.
   game?: string | null
+  // Imagem própria do ícone (migration 007 PARTE 27) — tem prioridade.
+  icon_url?: string | null
 }
 
 export type Channel = {
@@ -463,7 +465,7 @@ export type Database = {
       categories: {
         Row: Category
         Insert: Pick<Category, 'server_id' | 'name'> & Partial<Pick<Category, 'position'>>
-        Update: Partial<Pick<Category, 'name' | 'position' | 'game'>>
+        Update: Partial<Pick<Category, 'name' | 'position' | 'game' | 'icon_url'>>
         Relationships: []
       }
       channels: {

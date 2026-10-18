@@ -1,4 +1,5 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { prepareIconImage } from '../lib/iconImage'
 import { supabase } from '../lib/supabase'
 import { describeError } from '../lib/errors'
 import { channelNameFor, orderChannels } from '../lib/channelName'
@@ -24,6 +25,7 @@ interface ChannelsContextValue {
   createCategory: (name: string) => Promise<{ error: string | null }>
   updateCategory: (categoryId: string, name: string) => Promise<{ error: string | null }>
   setCategoryGame: (categoryId: string, game: string | null) => Promise<{ error: string | null }>
+  setCategoryIcon: (categoryId: string, file: File | null) => Promise<{ error: string | null }>
   deleteCategory: (categoryId: string, alsoChannels?: boolean) => Promise<{ error: string | null }>
   moveChannel: (channelId: string, categoryId: string | null, direction: 'up' | 'down') => Promise<{ error: string | null }>
   moveChannelToCategory: (
@@ -193,6 +195,40 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
+  // Imagem própria do ícone da categoria (PARTE 27). `null` = tira a imagem.
+  async function setCategoryIcon(categoryId: string, file: File | null) {
+    try {
+      let url: string | null = null
+      if (file) {
+        const prepared = await prepareIconImage(file)
+        if (!prepared.file) return { error: prepared.error }
+        const path = `${serverId}/categorias/${categoryId}-${Date.now()}.png`
+        const { error: upErr } = await supabase.storage
+          .from('server-icons')
+          .upload(path, prepared.file, { cacheControl: '31536000', upsert: false, contentType: 'image/png' })
+        if (upErr) {
+          return {
+            error: /row-level|policy|unauthorized|403/i.test(upErr.message)
+              ? 'Sem permissão pra enviar (ou falta rodar o SQL 007, PARTE 27, no Supabase).'
+              : describeError(upErr, 'Não foi possível enviar a imagem.'),
+          }
+        }
+        url = supabase.storage.from('server-icons').getPublicUrl(path).data.publicUrl
+      }
+      const { error } = await supabase.from('categories').update({ icon_url: url }).eq('id', categoryId)
+      if (error) {
+        if (/icon_url/i.test(error.message) && /column|schema/i.test(error.message)) {
+          return { error: 'Falta rodar o SQL atualizado (007, PARTE 27) no Supabase.' }
+        }
+        return { error: describeError(error, 'Não foi possível salvar a imagem da categoria.') }
+      }
+      await refresh()
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Não foi possível salvar a imagem da categoria.') }
+    }
+  }
+
   async function updateCategory(categoryId: string, name: string) {
     try {
       const { error } = await supabase.from('categories').update({ name }).eq('id', categoryId)
@@ -326,6 +362,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
       createCategory,
       updateCategory,
       setCategoryGame,
+      setCategoryIcon,
       deleteCategory,
       moveChannel,
       moveChannelToCategory,

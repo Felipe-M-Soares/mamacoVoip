@@ -197,7 +197,7 @@ function VoiceChannelPresence({
               <GameIcon
                 game={p.playing}
                 playingApp={p.playing_app}
-                size={16}
+                size={20}
                 className="ml-auto mr-0.5"
               />
             )}
@@ -445,7 +445,7 @@ function ChannelRow({
           title={`Jogando: ${games.map((g) => g.game).join(', ')}`}
         >
           {games.slice(0, 3).map((g) => (
-            <GameIcon key={g.game} game={g.game} playingApp={g.app} size={16} title="" className="ring-2 ring-mv-side" />
+            <GameIcon key={g.game} game={g.game} playingApp={g.app} size={20} title="" className="ring-2 ring-mv-side" />
           ))}
           {games.length > 3 && <span className="pl-1.5 text-[10px] text-mv-muted tabular-nums">+{games.length - 3}</span>}
         </span>
@@ -931,7 +931,10 @@ export function ChannelSidebar({
                 <div className="flex items-center gap-1.5 min-w-0">
                   {(() => {
                     const game = categoryGame(category)
-                    return game ? <GameIcon game={game} size={18} title={game} className="rounded-[5px]" /> : null
+                    if (category.icon_url) {
+                      return <GameIcon game={game ?? category.name} imageUrl={category.icon_url} size={24} title={game ?? category.name} />
+                    }
+                    return game ? <GameIcon game={game} size={24} title={game} className="rounded-[6px]" /> : null
                   })()}
                   <InlineEditableLabel
                     value={category.name}

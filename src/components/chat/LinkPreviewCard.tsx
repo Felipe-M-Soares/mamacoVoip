@@ -1,5 +1,7 @@
 import { openMedia } from '../../lib/mediaViewer'
 import { useLinkPreview } from '../../hooks/useLinkPreview'
+import { parseVideoLink } from '../../lib/videoEmbed'
+import { VideoEmbedCard } from './VideoEmbedCard'
 
 const URL_REGEX = /https?:\/\/[^\s<]+/
 const IMAGE_EXTENSION_REGEX = /\.(gif|png|jpe?g|webp|apng)(\?.*)?$/i
@@ -37,6 +39,8 @@ export function LinkPreviewCard({ url }: { url: string }) {
       </button>
     )
   }
+  const video = parseVideoLink(url)
+  if (video) return <VideoEmbedCard video={video} />
   return <LinkPreviewCardInner url={url} />
 }
 

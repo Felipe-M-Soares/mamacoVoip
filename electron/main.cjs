@@ -405,7 +405,7 @@ const APP_CONTENT_SECURITY_POLICY = [
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.livekit.cloud wss://*.livekit.cloud https://*.sslip.io wss://*.sslip.io",
   "worker-src 'self' blob:",
   "manifest-src 'self'",
-  "frame-src 'none'",
+  "frame-src https://www.youtube.com https://clips.twitch.tv",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -425,6 +425,20 @@ const DEV_SERVER_ORIGIN = (() => {
     return 'http://localhost:5173'
   }
 })()
+
+// Endereço público do app (o site na Vercel) — usado como Referer do
+// player do YouTube embutido no chat.
+const PUBLIC_WEB_ORIGIN = 'https://mamaco-voip.vercel.app'
+
+// Players de vídeo que podem aparecer embutidos no chat.
+function isVideoEmbedOrigin(url) {
+  try {
+    const { protocol, hostname } = new URL(url)
+    return protocol === 'https:' && (hostname === 'www.youtube.com' || hostname === 'clips.twitch.tv')
+  } catch {
+    return false
+  }
+}
 
 function isAllowedNavigation(url) {
   try {
@@ -1885,8 +1899,27 @@ app.whenReady().then(() => {
     } catch {
       requestingUrl = ''
     }
+    // Tela cheia do player de vídeo embutido no chat (YouTube/Twitch) —
+    // só "fullscreen", nada de microfone/câmera/tela pra eles.
+    if (permission === 'fullscreen' && isVideoEmbedOrigin(requestingUrl)) {
+      callback(true)
+      return
+    }
     callback(allowed.includes(permission) && isAllowedNavigation(requestingUrl))
   })
+
+  // O player do YouTube embutido exige saber de qual site ele está sendo
+  // tocado (cabeçalho Referer) — sem isso dá "Erro 153". As páginas do app
+  // são app://bundle (sem Referer de site), então informamos o endereço
+  // público do Mamacos SÓ nas chamadas do player do YouTube.
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://www.youtube.com/embed/*', 'https://www.youtube-nocookie.com/embed/*'] },
+    (details, callback) => {
+      const headers = { ...details.requestHeaders }
+      if (!headers.Referer && !headers.referer) headers.Referer = `${PUBLIC_WEB_ORIGIN}/`
+      callback({ requestHeaders: headers })
+    }
+  )
 
   // OITAVA RODADA — mudança de arquitetura importante: esse trecho inteiro
   // ANTES vivia dentro de session.defaultSession.setDisplayMediaRequestHandler

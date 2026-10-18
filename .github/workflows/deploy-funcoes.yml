@@ -1,0 +1,56 @@
+name: Publicar funções do Supabase (GIFs)
+
+# Publica a Edge Function gif-search no Supabase sempre que ela mudar
+# (ou manualmente pela aba Actions). Assim não precisa instalar nada no PC.
+#
+# Configuração (uma vez só) — Settings > Secrets and variables > Actions:
+#   - SUPABASE_ACCESS_TOKEN: supabase.com/dashboard/account/tokens >
+#       "Generate new token" (dá acesso à sua conta do Supabase — só aqui
+#       nos Secrets, nunca no código).
+#   - SUPABASE_PROJECT_REF: o código do projeto (aparece na URL do painel:
+#       supabase.com/dashboard/project/<ESTE-CÓDIGO>).
+# A chave do KLIPY NÃO vai aqui: ela fica nos secrets das Edge Functions
+# do próprio Supabase (KLIPY_API_KEY) — ver docs/GIFS.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/gif-search/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-funcoes
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Conferir configuração
+        id: cfg
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$REF" ]; then
+            echo "::warning::Faltam os secrets SUPABASE_ACCESS_TOKEN / SUPABASE_PROJECT_REF (ver docs/GIFS.md)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Baixar o código
+        if: steps.cfg.outputs.ok == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Publicar gif-search
+        if: steps.cfg.outputs.ok == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: npx --yes supabase@2.118.0 functions deploy gif-search --project-ref "$SUPABASE_PROJECT_REF" --use-api

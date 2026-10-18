@@ -5163,3 +5163,15 @@ begin
 end $$;
 
 notify pgrst, 'reload schema';
+
+-- ============================================================
+-- PARTE 26 — Ícone de jogo na categoria (out/2026)
+-- null = automático (o app reconhece pelo nome: "Valorant", "R6"...);
+-- '' = sem ícone; outro texto = nome do jogo escolhido na edição da
+-- categoria. Só o NOME do jogo é guardado (a imagem vem da loja/site do
+-- jogo). Mesmas regras de edição das categorias (RLS já existente).
+alter table public.categories add column if not exists game text;
+alter table public.categories drop constraint if exists categories_game_len;
+alter table public.categories add constraint categories_game_len check (game is null or char_length(game) <= 80);
+
+notify pgrst, 'reload schema';

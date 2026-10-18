@@ -2,6 +2,18 @@ import { useState } from 'react'
 import { Modal } from './Modal'
 import { useChannels } from '../../hooks/useChannels'
 import type { Category } from '../../types/database'
+import { GameIcon } from '../ui/GameIcon'
+import { KNOWN_GAMES, guessGameFromName } from '../../lib/gameIcons'
+
+const AUTO = '__auto__'
+const NONE = '__none__'
+const OTHER = '__other__'
+
+function initialChoice(game: string | null | undefined): { choice: string; other: string } {
+  if (game === '') return { choice: NONE, other: '' }
+  if (!game) return { choice: AUTO, other: '' }
+  return KNOWN_GAMES.includes(game) ? { choice: game, other: '' } : { choice: OTHER, other: game }
+}
 
 // Editar (renomear) ou excluir uma categoria da barra de canais.
 export function EditCategoryModal({
@@ -13,8 +25,10 @@ export function EditCategoryModal({
   startDeleting?: boolean
   onClose: () => void
 }) {
-  const { updateCategory, deleteCategory, channels } = useChannels()
+  const { updateCategory, setCategoryGame, deleteCategory, channels } = useChannels()
   const [name, setName] = useState(category.name)
+  const [choice, setChoice] = useState(() => initialChoice(category.game).choice)
+  const [otherGame, setOtherGame] = useState(() => initialChoice(category.game).other)
   const [confirmingDelete, setConfirmingDelete] = useState(startDeleting)
   const [alsoChannels, setAlsoChannels] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -28,12 +42,18 @@ export function EditCategoryModal({
       setError('Dê um nome à categoria.')
       return
     }
+    const game = choice === AUTO ? null : choice === NONE ? '' : choice === OTHER ? otherGame.trim().slice(0, 80) || null : choice
     setLoading(true)
-    const { error } = await updateCategory(category.id, clean)
+    const { error } = clean !== category.name ? await updateCategory(category.id, clean) : { error: null }
+    const gameRes = !error && game !== (category.game ?? null) ? await setCategoryGame(category.id, game) : { error: null }
     setLoading(false)
-    if (error) setError(error)
+    if (error || gameRes.error) setError(error ?? gameRes.error)
     else onClose()
   }
+
+  const autoGame = guessGameFromName(name)
+  const previewGame =
+    choice === AUTO ? autoGame : choice === NONE ? null : choice === OTHER ? otherGame.trim() || null : choice
 
   async function handleDelete() {
     setError(null)
@@ -122,6 +142,44 @@ export function EditCategoryModal({
             }}
             className="w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
           />
+        </div>
+        <div>
+          <label htmlFor="edit-category-game" className="field-label">
+            Ícone de jogo
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="w-9 h-9 shrink-0 flex items-center justify-center rounded-lg bg-mv-canvas">
+              {previewGame ? <GameIcon game={previewGame} size={26} title={previewGame} className="rounded-md" /> : <span className="text-mv-muted text-xs">—</span>}
+            </span>
+            <select
+              id="edit-category-game"
+              value={choice}
+              onChange={(e) => setChoice(e.target.value)}
+              className="flex-1 min-w-0 px-3 py-2.5 bg-mv-canvas text-mv-text outline-none rounded-lg"
+            >
+              <option value={AUTO}>Automático pelo nome{autoGame ? ` (${autoGame})` : ' (nenhum reconhecido)'}</option>
+              <option value={NONE}>Sem ícone</option>
+              {KNOWN_GAMES.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+              <option value={OTHER}>Outro jogo (digitar)...</option>
+            </select>
+          </div>
+          {choice === OTHER && (
+            <input
+              type="text"
+              value={otherGame}
+              maxLength={80}
+              placeholder="Nome do jogo"
+              onChange={(e) => setOtherGame(e.target.value)}
+              className="mt-2 w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none"
+            />
+          )}
+          <p className="mt-1.5 text-[12px] text-mv-muted">
+            O ícone vem da Steam ou do site oficial do jogo. Jogo sem ícone conhecido aparece com a inicial.
+          </p>
         </div>
         {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>

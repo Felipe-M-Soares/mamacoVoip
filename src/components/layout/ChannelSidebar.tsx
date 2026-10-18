@@ -29,6 +29,8 @@ import {
 import { AddFriendIcon, AnnouncementIcon, BellOffIcon, MessageIcon, CalendarIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, LockIcon, PinIcon, PlusIcon, ScreenShareIcon, SettingsIcon, TextChannelIcon, VoiceChannelIcon, WarningIcon } from '../ui/icons'
 import { copyText } from '../../lib/copyText'
 import { prefetchLiveKitToken } from '../../lib/livekit'
+import { GameIcon } from '../ui/GameIcon'
+import { categoryGame } from '../../lib/gameIcons'
 import { clearVoiceRoster, setVoiceRoster, useVoiceRosterByChannel, useVoiceRosterChannel } from '../../lib/voiceRoster'
 import { VoiceMemberCard, type VoiceMemberCardTarget } from './VoiceMemberCard'
 
@@ -191,6 +193,14 @@ function VoiceChannelPresence({
               <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={20} />
             </SpeakingAvatarRing>
             <span className="text-[13px] text-mv-muted truncate">{name}</span>
+            {p?.playing && (
+              <GameIcon
+                game={p.playing}
+                playingApp={p.playing_app}
+                size={16}
+                className="ml-auto mr-0.5"
+              />
+            )}
             {isSharingScreen && (
               // Clique no "Ao vivo" = abre a sala já assistindo essa
               // transmissão em destaque (não abre o cartão da pessoa).
@@ -202,7 +212,7 @@ function VoiceChannelPresence({
                   e.stopPropagation()
                   if (serverId) requestWatchStream(serverId, channelId, id === user?.id ? 'local' : id)
                 }}
-                className="shrink-0 ml-auto text-[9px] font-bold tracking-wide uppercase px-1.5 py-px rounded bg-rose-500 hover:bg-rose-400 text-white flex items-center gap-1 transition-colors"
+                className={`shrink-0 ${p?.playing ? 'ml-1' : 'ml-auto'} text-[9px] font-bold tracking-wide uppercase px-1.5 py-px rounded bg-rose-500 hover:bg-rose-400 text-white flex items-center gap-1 transition-colors`}
               >
                 <ScreenShareIcon className="w-2.5 h-2.5" aria-hidden />
                 Ao vivo
@@ -331,7 +341,10 @@ function ChannelRow({
   canManage,
   onOpenChat,
   onInvite,
+  games = [],
 }: {
+  // Jogos de quem está na sala agora (sem repetir) — ícones ao lado do nome.
+  games?: { game: string; app: string | null }[]
   channel: Channel
   active: boolean
   unread: boolean
@@ -426,6 +439,17 @@ function ChannelRow({
       {muted && (
         <BellOffIcon className="w-3.5 h-3.5 text-mv-muted shrink-0" aria-hidden />
       )}
+      {games.length > 0 && (
+        <span
+          className={`${active ? 'hidden' : 'flex group-hover:hidden'} items-center shrink-0 -space-x-1`}
+          title={`Jogando: ${games.map((g) => g.game).join(', ')}`}
+        >
+          {games.slice(0, 3).map((g) => (
+            <GameIcon key={g.game} game={g.game} playingApp={g.app} size={16} title="" className="ring-2 ring-mv-side" />
+          ))}
+          {games.length > 3 && <span className="pl-1.5 text-[10px] text-mv-muted tabular-nums">+{games.length - 3}</span>}
+        </span>
+      )}
 
       {/* Atalhos ao passar o mouse: chat da sala, convidar e configurar. */}
       <div className={`${active ? 'flex' : 'hidden group-hover:flex'} items-center gap-1 shrink-0`}>
@@ -486,7 +510,7 @@ export function ChannelSidebar({
   onServerDeleted: () => void
   onServerLeft: () => void
 }) {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const isOwner = server.owner_id === user?.id
   const {
     categories,
@@ -644,6 +668,17 @@ export function ChannelSidebar({
     const slug = channelNameFor('text', voiceChannel.name)
     return channels.find((c) => c.type === 'text' && c.category_id === voiceChannel.category_id && c.name === slug)
   }
+  // Jogos de quem está numa sala de voz (um ícone por jogo, sem repetir).
+  function gamesInRoom(channelId: string): { game: string; app: string | null }[] {
+    const ids = rosterByChannel.get(channelId)
+    if (!ids?.length) return []
+    const seen = new Map<string, { game: string; app: string | null }>()
+    for (const id of ids) {
+      const p = id === user?.id ? (profile ?? profileById[id]) : profileById[id]
+      if (p?.playing && !seen.has(p.playing)) seen.set(p.playing, { game: p.playing, app: p.playing_app ?? null })
+    }
+    return [...seen.values()]
+  }
   function renderChannel(channel: Channel) {
     const paired = channel.type === 'voice' ? pairedTextChannel(channel) : undefined
     return (
@@ -659,6 +694,7 @@ export function ChannelSidebar({
           isDragOver={(dragOverTarget === channel.id && draggedChannelId !== channel.id) || memberDropTarget === channel.id}
           onSelect={() => onSelectChannel(channel)}
           onOpenChat={paired ? () => onSelectChannel(paired) : undefined}
+          games={channel.type === 'voice' ? gamesInRoom(channel.id) : undefined}
           onInvite={() => {
             setInviteChannel(channel)
             setShowInvite(true)
@@ -892,7 +928,11 @@ export function ChannelSidebar({
                   categoryMenu.openMenu(e)
                 }}
               >
-                <div className="flex items-center gap-1 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {(() => {
+                    const game = categoryGame(category)
+                    return game ? <GameIcon game={game} size={18} title={game} className="rounded-[5px]" /> : null
+                  })()}
                   <InlineEditableLabel
                     value={category.name}
                     editable={canManageChannels}

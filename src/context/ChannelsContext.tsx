@@ -23,6 +23,7 @@ interface ChannelsContextValue {
   deleteChannel: (channelId: string) => Promise<{ error: string | null }>
   createCategory: (name: string) => Promise<{ error: string | null }>
   updateCategory: (categoryId: string, name: string) => Promise<{ error: string | null }>
+  setCategoryGame: (categoryId: string, game: string | null) => Promise<{ error: string | null }>
   deleteCategory: (categoryId: string, alsoChannels?: boolean) => Promise<{ error: string | null }>
   moveChannel: (channelId: string, categoryId: string | null, direction: 'up' | 'down') => Promise<{ error: string | null }>
   moveChannelToCategory: (
@@ -174,6 +175,24 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
+  // Ícone de jogo da categoria. Separado do nome: se o SQL da PARTE 26
+  // ainda não rodou (coluna não existe), o nome continua salvando.
+  async function setCategoryGame(categoryId: string, game: string | null) {
+    try {
+      const { error } = await supabase.from('categories').update({ game }).eq('id', categoryId)
+      if (error) {
+        if (/game/i.test(error.message) && /column|schema/i.test(error.message)) {
+          return { error: 'Falta rodar o SQL atualizado (007, PARTE 26) no Supabase pra salvar o jogo da categoria.' }
+        }
+        return { error: describeError(error, 'Não foi possível salvar o jogo da categoria.') }
+      }
+      await refresh()
+      return { error: null }
+    } catch (err) {
+      return { error: describeError(err, 'Não foi possível salvar o jogo da categoria.') }
+    }
+  }
+
   async function updateCategory(categoryId: string, name: string) {
     try {
       const { error } = await supabase.from('categories').update({ name }).eq('id', categoryId)
@@ -306,6 +325,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
       deleteChannel,
       createCategory,
       updateCategory,
+      setCategoryGame,
       deleteCategory,
       moveChannel,
       moveChannelToCategory,

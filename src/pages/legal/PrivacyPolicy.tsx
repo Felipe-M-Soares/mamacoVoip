@@ -189,8 +189,9 @@ export function PrivacyPolicy() {
         <p>E os seguintes serviços de terceiros, que recebem dados quando você usa o recurso correspondente:</p>
         <ul className="list-disc list-inside space-y-1">
           <li>
-            <strong>GIPHY</strong> — quando você abre o seletor de GIFs, o texto pesquisado e o seu endereço IP
-            vão para a GIPHY, e os GIFs são carregados direto dos servidores dela.
+            <strong>KLIPY</strong> — quando você busca um GIF, o texto pesquisado passa pelo nosso servidor e vai
+            para o KLIPY junto com um identificador anônimo (nunca o seu nome, e-mail ou IP). As imagens dos GIFs
+            são carregadas direto dos servidores do KLIPY, que podem ver o seu endereço IP.
           </li>
           <li><strong>Google</strong> — só se você escolher entrar com uma conta Google.</li>
           <li>
@@ -218,7 +219,7 @@ export function PrivacyPolicy() {
 
       <LegalSection title="8. Transferência internacional">
         <p>
-          Supabase, Oracle, Vercel, GIPHY, Google e GitHub são empresas estrangeiras, e seus dados podem ser
+          Supabase, Oracle, Vercel, KLIPY, Google e GitHub são empresas estrangeiras, e seus dados podem ser
           armazenados ou processados fora do Brasil (principalmente nos Estados Unidos), inclusive pelo roteamento
           global de voz e vídeo. Essas transferências são necessárias para prestar o serviço que você pediu e
           são feitas com base nas garantias contratuais de proteção de dados oferecidas por esses provedores,

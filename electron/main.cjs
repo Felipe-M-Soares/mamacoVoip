@@ -388,8 +388,9 @@ const DIST_DIR = path.join(__dirname, '..', 'dist')
 // Mesma política do site (vercel.json), sem frame-ancestors (a janela
 // não é embutida em lugar nenhum) — se trocar uma, troque a outra:
 //   - connect-src: Supabase (REST/Auth/Storage/Edge Functions em https,
-//     Realtime em wss), LiveKit Cloud (sinalização wss + https) e a API
-//     da GIPHY. Se o Supabase/LiveKit usar domínio próprio, inclua aqui.
+//     Realtime em wss) e LiveKit (sinalização wss + https). A busca de
+//     GIFs passa pela Edge Function (Supabase). Se o Supabase/LiveKit usar
+//     domínio próprio, inclua aqui.
 //   - img/media: https:, data: e blob: (anexos por URL assinada, GIFs,
 //     avatares, prévias de link, gravações locais).
 //   - 'wasm-unsafe-eval' + worker/blob: supressão de ruído (WASM em
@@ -401,7 +402,7 @@ const APP_CONTENT_SECURITY_POLICY = [
   "font-src 'self' data:",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob: https:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.livekit.cloud wss://*.livekit.cloud https://*.sslip.io wss://*.sslip.io https://api.giphy.com",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.livekit.cloud wss://*.livekit.cloud https://*.sslip.io wss://*.sslip.io",
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   "frame-src 'none'",

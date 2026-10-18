@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { GIPHY_API_KEY } from '../../lib/config'
-import { giphyRating } from '../../lib/adultContent'
+import { supabase } from '../../lib/supabase'
 import { CloseIcon, SearchIcon } from '../ui/icons'
 
 interface GifResult {
@@ -18,13 +17,13 @@ export function GifPicker({
   onClose: () => void
   /**
    * Modo adulto: só em canal +18 com o portão de idade já confirmado
-   * (quem decide é o ChatArea). Usa `rating=r`, o nível mais permissivo
-   * que a API da GIPHY oferece — ela não serve pornografia explícita.
-   * Em todo o resto (canais comuns, DMs, grupos) continua `pg-13`.
+   * (quem decide é o ChatArea). Libera a classificação `r` (o máximo do
+   * KLIPY — ele não serve pornografia explícita). Em todo o resto
+   * (canais comuns, DMs, grupos) continua `pg-13`.
    */
   adult?: boolean
 }) {
-  const rating = giphyRating(adult)
+  const [notConfigured, setNotConfigured] = useState(false)
   const [query, setQuery] = useState('')
   const [gifs, setGifs] = useState<GifResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -60,16 +59,9 @@ export function GifPicker({
     const timeout = setTimeout(() => void fetchGifs(query), delay)
     return () => clearTimeout(timeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, rating])
+  }, [query, adult])
 
   async function fetchGifs(q: string) {
-    // Sem chave configurada (VITE_GIPHY_API_KEY) a busca fica desligada
-    // — ver lib/config.ts. Nem tenta a requisição.
-    if (!GIPHY_API_KEY) {
-      setLoading(false)
-      setGifs([])
-      return
-    }
     // Cancela a busca anterior: sem isso, a resposta de "gat" podia chegar
     // DEPOIS da de "gato" e sobrescrever o resultado certo.
     abortRef.current?.abort()
@@ -78,41 +70,31 @@ export function GifPicker({
     setLoading(true)
     setLoadError(false)
     try {
-      // GIPHY (não é mais o Tenor — veja o comentário em lib/config.ts
-      // sobre o Google ter desligado o Tenor API de vez em 2026).
-      // "trending" quando o campo de busca está vazio (equivalente ao
-      // "em alta" que o Tenor tinha), "search" quando a pessoa digitou
-      // algo. `rating=pg-13` (padrão) filtra conteúdo mais pesado, sem ser
-      // excessivamente restritivo; em canal +18 confirmado vira `r`.
-      const endpoint = q.trim()
-        ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(q)}&limit=24&rating=${rating}&lang=pt`
-        : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=24&rating=${rating}`
-      const res = await fetch(endpoint, { signal: controller.signal })
-      const data = await res.json()
+      // KLIPY, pela Edge Function gif-search: a chave fica só no servidor
+      // e o KLIPY não recebe quem você é (ver supabase/functions/gif-search).
+      // Busca vazia = GIFs em alta.
+      const { data, error } = await supabase.functions.invoke('gif-search', {
+        body: { q: q.trim(), adult },
+      })
       if (controller.signal.aborted) return
-      // A GIPHY devolve um corpo com "meta.status"/"meta.msg" mesmo em
-      // erro (chave inválida, cota estourada, etc.) em vez de só um HTTP
-      // não-200 — sem checar isso, um erro de API parecia silenciosamente
-      // "nenhum GIF encontrado" (igual uma busca sem resultado de
-      // verdade), impossível de diferenciar. Agora loga o motivo real no
-      // console (F12 no navegador, ou Ctrl+Shift+I no app desktop) e
-      // mostra uma mensagem diferente pra quem está usando o app.
-      if (!res.ok || data.meta?.status !== 200) {
-        console.error('[GifPicker] GIPHY respondeu com erro:', res.status, data.meta ?? data)
-        setLoadError(true)
+      if (error) {
+        const status = (error as { context?: { status?: number } }).context?.status
+        if (status === 503) {
+          setNotConfigured(true)
+        } else {
+          console.error('[GifPicker] gif-search falhou:', status, error.message)
+          setLoadError(true)
+        }
         setGifs([])
         setLoading(false)
         return
       }
-      const results: GifResult[] = (data.data ?? []).map((r: any) => ({
-        id: r.id,
-        url: r.images?.fixed_height?.url ?? r.images?.downsized?.url ?? r.images?.original?.url,
-        previewUrl: r.images?.fixed_height_small?.url ?? r.images?.fixed_height?.url ?? r.images?.downsized?.url,
-      }))
-      setGifs(results.filter((g) => g.url))
+      setNotConfigured(false)
+      const list = Array.isArray(data?.gifs) ? (data.gifs as GifResult[]) : []
+      setGifs(list.filter((g) => typeof g?.url === 'string' && g.url.startsWith('https://')))
     } catch (err) {
       if (controller.signal.aborted) return
-      console.error('[GifPicker] Falha ao buscar GIFs (rede/CORS/etc):', err)
+      console.error('[GifPicker] Falha ao buscar GIFs:', err)
       setLoadError(true)
       setGifs([])
     }
@@ -141,7 +123,7 @@ export function GifPicker({
         />
         {adult && (
           <span
-            title="Canal +18: resultados com classificação até R (o máximo da GIPHY)"
+            title="Canal +18: resultados com classificação até R (o máximo do KLIPY)"
             className="chip !text-rose-300 !bg-rose-500/10 !border-rose-500/25 shrink-0 font-semibold tabular-nums"
           >
             +18
@@ -152,10 +134,10 @@ export function GifPicker({
         </button>
       </div>
       <div className="p-2 max-h-72 overflow-y-auto grid grid-cols-3 gap-1.5">
-        {!GIPHY_API_KEY ? (
+        {notConfigured ? (
           <div className="col-span-3 flex flex-col items-center text-center gap-2 py-8 px-3">
             <p className="text-sm font-medium text-mv-text">Busca de GIFs desativada</p>
-            <p className="text-xs text-mv-muted">A chave da GIPHY não foi configurada neste app.</p>
+            <p className="text-xs text-mv-muted">A chave do KLIPY ainda não foi configurada no servidor.</p>
           </div>
         ) : loading ? (
           Array.from({ length: 9 }).map((_, i) => (
@@ -188,15 +170,15 @@ export function GifPicker({
           ))
         )}
       </div>
-      {/* Atribuição exigida pelos termos da API da GIPHY ("Powered by
-          GIPHY") — selo em texto, sem baixar logo de fora. */}
+      {/* Atribuição pedida pelos termos do KLIPY ("Powered by KLIPY") —
+          selo em texto, sem baixar logo de fora. */}
       <div className="flex items-center justify-center gap-2 py-1.5 border-t border-[var(--color-line)]">
         <span
-          aria-label="Powered by GIPHY"
+          aria-label="Powered by KLIPY"
           className="inline-flex items-center gap-1 rounded-md bg-black px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-white ring-1 ring-white/10"
         >
           <span className="opacity-80">Powered by</span>
-          <span className="font-black tracking-[0.06em]">GIPHY</span>
+          <span className="font-black tracking-[0.06em]">KLIPY</span>
         </span>
         {adult && <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-mv-muted">classificação R</span>}
       </div>

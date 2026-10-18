@@ -14,30 +14,11 @@ export const DESKTOP_DOWNLOAD_URL =
 export const ANDROID_DOWNLOAD_URL =
   'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/MamacosVoip.apk'
 
-// Busca de GIFs no chat. Até aqui usava a API do Tenor — mas o Google
-// DESLIGOU o Tenor API de vez pra qualquer desenvolvedor de fora (parou
-// de aceitar cliente novo em janeiro de 2026, e desligou todo mundo que
-// já usava, inclusive quem já tinha chave, em 30/06/2026 — foi o mesmo
-// motivo do GIF picker do WhatsApp/X/Bluesky terem quebrado na
-// mesma época). Não existe mais chave de Tenor que funcione, nem nova
-// nem antiga — por isso migrado pra API do GIPHY, que continua aceitando
-// cadastro novo normalmente.
-//
-// Pra usar de verdade, cadastre a SUA chave (gratuito, poucos minutos):
-// https://developers.giphy.com → criar conta → "Create an API Key" no
-// Developer Dashboard. Depois, configure ela como variável de ambiente
-// (não editar este arquivo direto — assim a chave real não fica exposta
-// igual código-fonte, e pode trocar sem precisar mexer em código):
-//   - Vercel (site): Settings > Environment Variables > VITE_GIPHY_API_KEY
-//   - GitHub Actions (app desktop): Settings > Secrets and variables >
-//     Actions > New repository secret > VITE_GIPHY_API_KEY (e adicionar
-//     a mesma linha "VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}"
-//     no .github/workflows/release-desktop.yml, junto das outras)
-// Sem essa variável configurada, a busca de GIF fica desativada (o GIF
-// picker mostra o aviso de "não configurado"). NUNCA coloque uma chave
-// real como valor de reserva aqui: tudo neste arquivo vai pro bundle
-// público e pro repositório.
-export const GIPHY_API_KEY: string = import.meta.env.VITE_GIPHY_API_KEY || ''
+// Busca de GIFs no chat: KLIPY (o Tenor foi desligado em 30/06/2026 e
+// o cadastro de chave nova do GIPHY parou de funcionar). A chave NÃO fica
+// mais no app: a busca passa pela Edge Function gif-search, que lê o
+// secret KLIPY_API_KEY no Supabase — ver supabase/functions/gif-search e
+// docs/GIFS.md.
 
 // URL pública do app na web (o deploy na Vercel). Usada só como base
 // pra montar links de convite/compartilhamento QUANDO quem está gerando

@@ -5248,3 +5248,97 @@ create policy "category_icons_delete"
   );
 
 notify pgrst, 'reload schema';
+
+-- ============================================================
+-- PARTE 28 — O nome de usuário não pode revelar o e-mail (out/2026)
+-- Até aqui, quem entrava com o Google (ou sem escolher um nome) ganhava
+-- como username a parte do e-mail antes do "@" — e qualquer pessoa via
+-- isso no perfil ("joao.silva1990" → joao.silva1990@gmail.com). Agora o
+-- nome automático é aleatório ("mamaco" + 6 números). Quem escolheu o
+-- nome no cadastro continua com ele.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_base text;
+  v_username text;
+  v_suffix int := 0;
+  v_display_name text;
+  v_tries int := 0;
+begin
+  v_base := nullif(trim(new.raw_user_meta_data->>'username'), '');
+  v_base := regexp_replace(coalesce(v_base, ''), '[^a-zA-Z0-9_.]', '', 'g');
+  v_base := left(v_base, 26);
+
+  if char_length(v_base) >= 3 and lower(v_base) not in ('everyone', 'here') then
+    v_username := v_base;
+    while exists (select 1 from public.profiles where lower(username) = lower(v_username)) loop
+      v_suffix := v_suffix + 1;
+      v_username := v_base || v_suffix::text;
+    end loop;
+  else
+    -- Sem nome escolhido (login com Google etc.): aleatório, nunca o e-mail.
+    loop
+      v_username := 'mamaco' || lpad((floor(random() * 1000000))::int::text, 6, '0');
+      exit when not exists (select 1 from public.profiles where lower(username) = lower(v_username));
+      v_tries := v_tries + 1;
+      if v_tries > 20 then
+        v_username := 'mamaco' || replace(left(new.id::text, 13), '-', '');
+        exit;
+      end if;
+    end loop;
+  end if;
+
+  v_display_name := left(coalesce(
+    nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
+    nullif(trim(new.raw_user_meta_data->>'name'), ''),
+    v_username
+  ), 32);
+
+  insert into public.profiles (id, username, display_name)
+  values (new.id, v_username, v_display_name);
+
+  return new;
+end;
+$$;
+
+-- Contas que JÁ ganharam o pedaço do e-mail como nome (só as que não
+-- escolheram: login por Google/outro provedor) recebem um nome
+-- aleatório. Roda UMA vez. Cada um pode trocar depois em Perfil.
+do $$
+declare
+  r record;
+  v_new text;
+begin
+  if exists (select 1 from public.app_once_flags where key = 'username_not_email_2026_10') then
+    return;
+  end if;
+  for r in
+    select p.id, p.username, p.display_name, u.email::text as email
+    from public.profiles p
+    join auth.users u on u.id = p.id
+    where coalesce(u.raw_app_meta_data->>'provider', 'email') <> 'email'
+      and u.email is not null
+      and lower(p.username) like lower(left(regexp_replace(split_part(u.email::text, '@', 1), '[^a-zA-Z0-9_.]', '', 'g'), 26)) || '%'
+      and char_length(regexp_replace(split_part(u.email::text, '@', 1), '[^a-zA-Z0-9_.]', '', 'g')) >= 3
+  loop
+    loop
+      v_new := 'mamaco' || lpad((floor(random() * 1000000))::int::text, 6, '0');
+      exit when not exists (select 1 from public.profiles where lower(username) = lower(v_new));
+    end loop;
+    update public.profiles
+      set username = v_new,
+          display_name = case
+            when lower(display_name) = lower(r.username)
+              or lower(display_name) = lower(split_part(r.email, '@', 1)) then v_new
+            else display_name
+          end
+      where id = r.id;
+  end loop;
+  insert into public.app_once_flags (key) values ('username_not_email_2026_10');
+end $$;
+
+notify pgrst, 'reload schema';

@@ -8,6 +8,7 @@ import { clearLinkPreviewCache } from '../hooks/useLinkPreview'
 import { clearSignedUrlCache } from '../lib/storageUrls'
 import { PUBLIC_WEB_URL } from '../lib/config'
 import { isNativeMobileApp } from '../lib/platform'
+import { unregisterPushToken } from '../lib/pushNotifications'
 
 // Esquema de URL customizado que o app desktop registra no sistema
 // operacional (ver "protocols" em package.json e o bloco grande no
@@ -495,6 +496,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function performSignOut(scope: 'local' | 'global') {
     const userId = session?.user?.id
+    // Celular: para de receber notificações desta conta neste aparelho.
+    await unregisterPushToken()
     if (userId) {
       // Não deixa uma falha de rede aqui impedir o logout.
       try {

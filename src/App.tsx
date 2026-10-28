@@ -3,6 +3,7 @@ import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router
 import { AuthProvider } from './context/AuthContext'
 import { PresenceProvider } from './context/PresenceContext'
 import { FriendsProvider } from './context/FriendsContext'
+import { MobileUpdateGate } from './components/MobileUpdateGate'
 import { GroupConversationsProvider } from './context/GroupConversationsContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -39,8 +40,8 @@ if (typeof window !== 'undefined') {
     })
   }
   const w = window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }
-  if (w.requestIdleCallback) w.requestIdleCallback(preload, { timeout: 1500 })
-  else setTimeout(preload, 200)
+  if (w.requestIdleCallback) w.requestIdleCallback(preload, { timeout: 300 })
+  else setTimeout(preload, 50)
 }
 
 // Dentro do app desktop, o documento é servido por um protocolo próprio
@@ -55,6 +56,7 @@ function App() {
   return (
     <ErrorBoundary>
     <ThemeProvider>
+      <MobileUpdateGate />
       <Router>
         <AuthProvider>
           <PresenceProvider>

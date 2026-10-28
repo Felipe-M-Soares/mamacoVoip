@@ -1,3 +1,4 @@
+import { applyOutput } from '../../lib/audioDevices'
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { createEphemeralAuthClient, supabase } from '../../lib/supabase'
@@ -1131,8 +1132,7 @@ function AudioTab() {
 
       if (echoAudioRef.current) {
         echoAudioRef.current.srcObject = dest.stream
-        const el = echoAudioRef.current as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
-        if (audio.speakerId && el.setSinkId) await el.setSinkId(audio.speakerId).catch(() => {})
+        await applyOutput(echoAudioRef.current as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }, audio.speakerId)
         await echoAudioRef.current.play()
       }
       setEchoing(true)

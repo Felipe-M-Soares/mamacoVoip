@@ -5342,3 +5342,126 @@ begin
 end $$;
 
 notify pgrst, 'reload schema';
+
+-- ============================================================
+-- PARTE 29 — Notificações no celular (out/2026)
+-- O app Android registra o "endereço de notificação" do aparelho
+-- (token do Firebase Cloud Messaging) e, quando chega mensagem nova, o
+-- banco chama a Edge Function push-notify, que avisa:
+--   - DM: a outra pessoa (se ninguém bloqueou ninguém);
+--   - grupo: todo mundo do grupo, menos quem mandou;
+--   - canal de servidor: só quem foi MENCIONADO (@nome), respeitando o
+--     "silenciar canal".
+-- Nada disso roda até a configuração do docs/NOTIFICACOES.md.
+
+-- Tokens dos aparelhos. Ninguém lê/escreve direto: só pelas funções
+-- abaixo (e a Edge Function, com a chave de serviço).
+create table if not exists public.push_tokens (
+  token text primary key check (char_length(token) between 20 and 4096),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  platform text not null default 'android' check (platform in ('android', 'ios', 'web')),
+  updated_at timestamptz not null default now()
+);
+create index if not exists push_tokens_user_idx on public.push_tokens (user_id);
+alter table public.push_tokens enable row level security;
+revoke all on public.push_tokens from anon, authenticated;
+
+create or replace function public.register_push_token(p_token text, p_platform text default 'android')
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Não autenticado';
+  end if;
+  if p_token is null or char_length(p_token) not between 20 and 4096 then
+    raise exception 'Token inválido';
+  end if;
+  -- Mesmo aparelho trocou de conta: o token passa pra conta nova.
+  insert into public.push_tokens (token, user_id, platform, updated_at)
+  values (p_token, auth.uid(), coalesce(nullif(p_platform, ''), 'android'), now())
+  on conflict (token) do update
+    set user_id = excluded.user_id, platform = excluded.platform, updated_at = now();
+  -- Limite por pessoa (aparelhos antigos saem primeiro).
+  delete from public.push_tokens t
+  where t.user_id = auth.uid()
+    and t.token not in (
+      select token from public.push_tokens where user_id = auth.uid() order by updated_at desc limit 10
+    );
+end;
+$$;
+revoke execute on function public.register_push_token(text, text) from public, anon;
+grant execute on function public.register_push_token(text, text) to authenticated;
+
+create or replace function public.unregister_push_token(p_token text)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  delete from public.push_tokens where token = p_token and user_id = auth.uid();
+$$;
+revoke execute on function public.unregister_push_token(text) from public, anon;
+grant execute on function public.unregister_push_token(text) to authenticated;
+
+-- Endereço da Edge Function + segredo que o banco manda junto (a função
+-- só aceita chamadas com ele). Só o banco e a chave de serviço leem.
+create table if not exists public.push_config (
+  id int primary key default 1 check (id = 1),
+  function_url text not null,
+  secret text not null default (replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')),
+  enabled boolean not null default true
+);
+alter table public.push_config enable row level security;
+revoke all on public.push_config from anon, authenticated;
+insert into public.push_config (id, function_url)
+values (1, 'https://wnsfnlmbtpxnlxxrizbv.supabase.co/functions/v1/push-notify')
+on conflict (id) do nothing;
+
+-- pg_net: o banco faz a chamada HTTP sem travar o envio da mensagem.
+create extension if not exists pg_net with schema extensions;
+
+create or replace function public.notify_push_new_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  cfg record;
+begin
+  select function_url, secret, enabled into cfg from public.push_config where id = 1;
+  if cfg is null or not cfg.enabled then
+    return new;
+  end if;
+  -- Só manda se alguém tem aparelho registrado (evita chamada à toa).
+  if not exists (select 1 from public.push_tokens limit 1) then
+    return new;
+  end if;
+  perform net.http_post(
+    url := cfg.function_url,
+    body := jsonb_build_object('table', tg_table_name, 'id', new.id),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-push-secret', cfg.secret),
+    timeout_milliseconds := 5000
+  );
+  return new;
+exception when others then
+  -- Notificação nunca pode impedir a mensagem de ser salva.
+  return new;
+end;
+$$;
+revoke execute on function public.notify_push_new_message() from public, anon, authenticated;
+
+drop trigger if exists on_message_push on public.messages;
+create trigger on_message_push after insert on public.messages
+  for each row execute function public.notify_push_new_message();
+drop trigger if exists on_dm_message_push on public.dm_messages;
+create trigger on_dm_message_push after insert on public.dm_messages
+  for each row execute function public.notify_push_new_message();
+drop trigger if exists on_group_message_push on public.group_messages;
+create trigger on_group_message_push after insert on public.group_messages
+  for each row execute function public.notify_push_new_message();
+
+notify pgrst, 'reload schema';

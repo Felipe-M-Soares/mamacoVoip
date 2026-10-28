@@ -1,5 +1,6 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { prepareIconImage } from '../lib/iconImage'
+import { readStartupCache, writeStartupCache } from '../lib/startupCache'
 import { supabase } from '../lib/supabase'
 import { describeError } from '../lib/errors'
 import { channelNameFor, orderChannels } from '../lib/channelName'
@@ -54,7 +55,12 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   // Chave inclui o usuário: outra conta no mesmo computador nunca vê a
   // lista (com canais restritos) que a anterior tinha em cache.
   const cacheKey = `${useAuth().user?.id ?? ''}|${serverId}`
-  const [initialCache] = useState(() => channelsCache.get(cacheKey))
+  const [initialCache] = useState(
+    () =>
+      channelsCache.get(cacheKey) ??
+      readStartupCache<{ categories: Category[]; channels: Channel[] }>(`channels:${cacheKey}`) ??
+      undefined
+  )
   const [categories, setCategories] = useState<Category[]>(() => initialCache?.categories ?? [])
   const [channels, setChannels] = useState<Channel[]>(() => initialCache?.channels ?? [])
   const [loading, setLoading] = useState(!initialCache)
@@ -90,6 +96,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
       setCategories(catsRes.data ?? [])
       setChannels(chansRes.data ?? [])
       channelsCache.set(cacheKey, { categories: catsRes.data ?? [], channels: chansRes.data ?? [] })
+      writeStartupCache(`channels:${cacheKey}`, { categories: catsRes.data ?? [], channels: chansRes.data ?? [] })
       setLoadError(null)
       hasLoadedRef.current = true
     } catch (err) {

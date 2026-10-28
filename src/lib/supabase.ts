@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '../types/database'
-import { createAuthStorage } from './authStorage'
+import { Capacitor } from '@capacitor/core'
+import { createAuthStorage, createNativeAuthStorage } from './authStorage'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -40,9 +41,9 @@ export const AUTH_REDIRECT_TYPE = readAuthRedirectType()
 // B7 — no app desktop a sessão vai pro armazenamento cifrado do sistema
 // (safeStorage, via IPC); na web continua no localStorage. Ver
 // src/lib/authStorage.ts.
-const authStorage = createAuthStorage(
-  typeof window !== 'undefined' ? (window.electronAPI?.secureStorage ?? null) : null
-)
+const authStorage = Capacitor.isNativePlatform()
+  ? createNativeAuthStorage(() => import('@capacitor/preferences').then((m) => m.Preferences))
+  : createAuthStorage(typeof window !== 'undefined' ? (window.electronAPI?.secureStorage ?? null) : null)
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {

@@ -672,6 +672,14 @@ export type Database = {
     }
     Views: Record<string, never>
     Functions: {
+      register_push_token: {
+        Args: { p_token: string; p_platform?: string }
+        Returns: void
+      }
+      unregister_push_token: {
+        Args: { p_token: string }
+        Returns: void
+      }
       join_server_via_invite: {
         Args: { p_code: string }
         Returns: Server

@@ -17,6 +17,7 @@ import {
   type RemoteTrackPublication,
 } from 'livekit-client'
 import { supabase } from '../lib/supabase'
+import { applyOutput, listDevices, micNeedsSwap, onAudioDevicesSettled } from '../lib/audioDevices'
 import { takeLiveKitToken, prewarmLiveKitConnection, rememberLiveKitUrl, setActiveVoiceRoom } from '../lib/livekit'
 import { useAuth } from '../hooks/useAuth'
 import { useAudioSettings } from '../hooks/useAudioSettings'
@@ -2308,8 +2309,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Respeita o alto-falante escolhido nas configurações (antes os
       // efeitos iam sempre pro dispositivo padrão do sistema).
       const sinkId = audioSettingsRef.current.speakerId
-      const withSink = audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
-      if (sinkId && withSink.setSinkId) withSink.setSinkId(sinkId).catch(() => {})
+      void applyOutput(audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }, sinkId)
       activeSoundboardAudiosRef.current.add(audio)
       const forget = () => {
         activeSoundboardAudiosRef.current.delete(audio)
@@ -2497,6 +2497,29 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }))
   }
 
+  // Cria a entrada (ainda sem áudio/vídeo) de quem está na sala — o
+  // áudio entra depois, em recomputeParticipant, sem a pessoa "piscar".
+  function seedParticipants(ids: Iterable<string>, myId: string) {
+    const list = [...ids].filter((id) => id && id !== myId)
+    if (!list.length) return
+    setParticipants((prev) => {
+      let next = prev
+      for (const id of list) {
+        if (id in next) continue
+        if (next === prev) next = { ...prev }
+        next[id] = {
+          userId: id,
+          speaking: false,
+          cameraStream: null,
+          screenStream: null,
+          micAudioStream: null,
+          screenAudioStream: null,
+        }
+      }
+      return next
+    })
+  }
+
   function setRemoteTrack(participantId: string, source: Track.Source, track: MediaStreamTrack | null) {
     if (!remoteTracksRef.current.has(participantId)) remoteTracksRef.current.set(participantId, new Map())
     const tracks = remoteTracksRef.current.get(participantId)!
@@ -2572,6 +2595,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
     room.on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
       if (!isCurrent() || participant.identity === myId) return
+      seedParticipants([participant.identity], myId)
       playUserJoinSound()
     })
 
@@ -2979,6 +3003,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       await withTimeout(room.connect(tokenResult.url, tokenResult.token), 15_000, 'conexão com o servidor de voz')
       assertActive()
       setActiveVoiceRoom(room)
+      // Quem já estava na sala aparece NA HORA (antes só aparecia quando o
+      // áudio da pessoa chegava — a lista ficava vazia por uns segundos).
+      seedParticipants(room.remoteParticipants.keys(), user.id)
       const mic = await micPromise
       assertActive()
 
@@ -3448,38 +3475,27 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   //  - está no "Padrão do sistema" e o padrão do Windows mudou (ex.: plugou
   //    um headset) → troca pro novo padrão.
   // (Se o microfone em uso SUMIR, watchRawMicTrack abaixo já cai pro padrão.)
+  //  - fone Bluetooth: o Windows demora pra trocar o padrão, então confere
+  //    de novo algumas vezes depois de cada mudança (lib/audioDevices.ts).
   useEffect(() => {
-    let timer: number | null = null
+    let checking = false
     const check = async () => {
-      if (!connectedRef.current || !canPublishRef.current) return
+      if (checking || !connectedRef.current || !canPublishRef.current) return
       const raw = rawMicTrackRef.current
       if (!raw || raw.readyState !== 'live') return
-      const devices = await navigator.mediaDevices?.enumerateDevices?.().catch(() => [])
-      if (!devices?.length) return
-      const inputs = devices.filter((d) => d.kind === 'audioinput')
-      const current = raw.getSettings()
-      const wanted = audioSettingsRef.current.micId
-      let shouldSwap = false
-      if (wanted && wanted !== 'default') {
-        shouldSwap = inputs.some((d) => d.deviceId === wanted) && current.deviceId !== wanted
-      } else {
-        const def = inputs.find((d) => d.deviceId === 'default')
-        shouldSwap = Boolean(def?.groupId && current.groupId && def.groupId !== current.groupId)
-      }
-      if (shouldSwap) {
-        logDebug('microfone: dispositivo mudou (conectado/desconectado) — trocando')
-        void refreshAudioConstraints()
+      checking = true
+      try {
+        const devices = await listDevices()
+        if (!devices.length) return
+        if (micNeedsSwap(devices, audioSettingsRef.current.micId, raw.getSettings())) {
+          logDebug('microfone: dispositivo do sistema mudou (fone conectado/desconectado/Bluetooth) — trocando')
+          await refreshAudioConstraints()
+        }
+      } finally {
+        checking = false
       }
     }
-    const onChange = () => {
-      if (timer) window.clearTimeout(timer)
-      timer = window.setTimeout(() => void check(), 800)
-    }
-    navigator.mediaDevices?.addEventListener?.('devicechange', onChange)
-    return () => {
-      if (timer) window.clearTimeout(timer)
-      navigator.mediaDevices?.removeEventListener?.('devicechange', onChange)
-    }
+    return onAudioDevicesSettled(() => void check())
     // refreshAudioConstraints/refs: sempre a versão atual via refs
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

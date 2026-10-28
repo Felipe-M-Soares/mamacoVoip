@@ -1,3 +1,4 @@
+import { Fmp4Buffer } from './fmp4'
 import { useSyncExternalStore } from 'react'
 
 // "Replay" de transmissão: guarda em memória os últimos ~30 segundos de uma
@@ -5,11 +6,12 @@ import { useSyncExternalStore } from 'react'
 // quando você clica em "Salvar clipe". Nada sai do seu computador — o
 // arquivo vai direto pra sua pasta de downloads.
 //
-// Como funciona: o MediaRecorder não deixa "cortar" o começo de uma
-// gravação em andamento, então rodam DOIS gravadores defasados em 30 s,
-// cada um vive 60 s e recomeça. O mais antigo sempre tem entre 30 e 60 s,
-// e é ele que vira o clipe. Fica desligado até você ligar (gravar custa
-// um pouco de processador e memória — no máximo ~2 × 60 s de vídeo).
+// Como funciona (MP4 — o normal no app): UM gravador só, com quadro-chave
+// a cada 1 s. O MP4 sai em pedaços de ~1 s; o app guarda só os últimos
+// ~35 s e, ao salvar, junta o cabeçalho com os pedaços dos últimos 30 s
+// (lib/fmp4.ts) — clipe de 30 s certinho, sem recodificar.
+// Sem MP4 (navegador antigo): dois gravadores defasados, clipe de 30–60 s.
+// Fica desligado até você ligar (gravar custa um pouco de processador).
 
 export const REPLAY_SECONDS = 30
 const VIDEO_BPS = 5_000_000
@@ -54,7 +56,69 @@ export function replaySupported(): boolean {
 
 type Segment = { rec: MediaRecorder; chunks: Blob[]; startedAt: number }
 
-class ReplayBuffer {
+interface Replay {
+  readonly trackKey: string
+  readonly ext: string
+  save(): Promise<Blob | null>
+  stop(): void
+}
+
+// Modo MP4: um gravador contínuo + recorte exato (ver o topo do arquivo).
+class Mp4Replay implements Replay {
+  private rec: MediaRecorder | null = null
+  private readonly buffer = new Fmp4Buffer(REPLAY_SECONDS + 5)
+  private queue: Promise<void> = Promise.resolve()
+  private readonly stream: MediaStream
+  readonly trackKey: string
+  readonly ext = 'mp4'
+
+  constructor(source: MediaStream, mime: string) {
+    this.stream = new MediaStream([...source.getVideoTracks(), ...source.getAudioTracks()])
+    this.trackKey = trackKeyOf(source)
+    const rec = new MediaRecorder(this.stream, {
+      mimeType: mime,
+      videoBitsPerSecond: VIDEO_BPS,
+      audioBitsPerSecond: AUDIO_BPS,
+      // Quadro-chave a cada 1 s = dá pra cortar em qualquer segundo.
+      videoKeyFrameIntervalDuration: 1000,
+    } as MediaRecorderOptions)
+    rec.addEventListener('dataavailable', (e) => {
+      if (!e.data || e.data.size === 0) return
+      const data = e.data
+      // Em ordem (arrayBuffer é assíncrono).
+      this.queue = this.queue.then(async () => {
+        this.buffer.push(new Uint8Array(await data.arrayBuffer()))
+      })
+    })
+    rec.start(500)
+    this.rec = rec
+  }
+
+  async save(): Promise<Blob | null> {
+    const rec = this.rec
+    if (!rec || rec.state !== 'recording') return null
+    await new Promise<void>((resolve) => {
+      const done = () => resolve()
+      rec.addEventListener('dataavailable', done, { once: true })
+      try {
+        rec.requestData()
+      } catch {
+        resolve()
+      }
+      setTimeout(done, 1500)
+    })
+    await this.queue
+    const bytes = this.buffer.clip(REPLAY_SECONDS)
+    return bytes ? new Blob([bytes as BlobPart], { type: 'video/mp4' }) : null
+  }
+
+  stop() {
+    if (this.rec) stopQuietly(this.rec)
+    this.rec = null
+  }
+}
+
+class ReplayBuffer implements Replay {
   private segs: Segment[] = []
   private timer: ReturnType<typeof setInterval> | null = null
   private readonly stream: MediaStream
@@ -151,7 +215,24 @@ function trackKeyOf(stream: MediaStream): string {
 // ---- Estado compartilhado (o quadro da transmissão pode remontar ao
 // trocar de destaque; o buffer não pode se perder por isso) ----
 
-const buffers = new Map<string, ReplayBuffer>()
+const buffers = new Map<string, Replay>()
+
+function createReplay(stream: MediaStream): Replay | null {
+  const format = pickRecorderFormat()
+  if (!format || stream.getVideoTracks().length === 0) return null
+  try {
+    return format.ext === 'mp4' ? new Mp4Replay(stream, format.mime) : new ReplayBuffer(stream, format)
+  } catch {
+    // MP4 recusado na hora de gravar: tenta WebM
+    const webm = pickRecorderFormat((m) => m.startsWith('video/webm') && MediaRecorder.isTypeSupported(m))
+    if (!webm) return null
+    try {
+      return new ReplayBuffer(stream, webm)
+    } catch {
+      return null
+    }
+  }
+}
 let snapshot: ReadonlySet<string> = new Set()
 const listeners = new Set<() => void>()
 
@@ -174,9 +255,9 @@ export function useReplayActive(): ReadonlySet<string> {
 /** Liga o replay de uma transmissão. Retorna false se o navegador não suporta. */
 export function startReplay(key: string, stream: MediaStream): boolean {
   if (buffers.has(key)) return true
-  const format = pickRecorderFormat()
-  if (!format || stream.getVideoTracks().length === 0) return false
-  buffers.set(key, new ReplayBuffer(stream, format))
+  const replay = createReplay(stream)
+  if (!replay) return false
+  buffers.set(key, replay)
   emit()
   return true
 }
@@ -206,8 +287,8 @@ export function syncReplays(active: ReadonlyMap<string, MediaStream>) {
     }
     if (trackKeyOf(stream) !== buf.trackKey) {
       buf.stop()
-      const format = pickRecorderFormat()
-      if (format && stream.getVideoTracks().length) buffers.set(key, new ReplayBuffer(stream, format))
+      const replay = createReplay(stream)
+      if (replay) buffers.set(key, replay)
       else buffers.delete(key)
       changed = true
     }

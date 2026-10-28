@@ -568,3 +568,34 @@ select.bg-mv-dark {
 html.mv-electron .fixed.inset-0 {
   top: var(--mv-titlebar-h, 40px);
 }
+
+/* Slider fino estilo player (volume da transmissão). O preenchimento vem
+   pelo `background` inline (gradiente até o valor atual). */
+.mv-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  outline: none;
+}
+.mv-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.5);
+  transition: transform 120ms ease;
+}
+.mv-slider:hover::-webkit-slider-thumb,
+.mv-slider:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+.mv-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+}

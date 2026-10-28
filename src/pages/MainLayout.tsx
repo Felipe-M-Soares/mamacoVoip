@@ -18,6 +18,7 @@ import { DMCallOverlay } from '../components/layout/DMCallOverlay'
 import { VoiceCallAudio } from '../components/layout/VoiceCallAudio'
 import { ProfileSidePanel } from '../components/layout/ProfileSidePanel'
 import { ServersProvider } from '../context/ServersContext'
+import { consumePendingPushTarget, initPushNotifications, type PushTarget } from '../lib/pushNotifications'
 import { ChannelsProvider } from '../context/ChannelsContext'
 import { VoiceProvider } from '../context/VoiceContext'
 import { useAuth } from '../hooks/useAuth'
@@ -534,6 +535,38 @@ function MainLayoutInner() {
     }
     window.addEventListener('mv:open-voice-room', onOpenVoiceRoom)
     return () => window.removeEventListener('mv:open-voice-room', onOpenVoiceRoom)
+  }, [servers, activeServer?.id])
+
+  // Notificação do celular tocada → abre a conversa/grupo/canal dela.
+  useEffect(() => {
+    void initPushNotifications()
+  }, [])
+  useEffect(() => {
+    function open(t: PushTarget) {
+      if (t.kind === 'dm') handleOpenConversation(t.id)
+      else if (t.kind === 'group') handleOpenGroup(t.id)
+      else {
+        const target = servers.find((s) => s.id === t.serverId)
+        if (!target) return
+        if (activeServer?.id !== target.id) setActiveServer(target)
+        setServerDmId(null)
+        setActiveChannel(null)
+        setPendingChannelId(t.id)
+        setMobileSidebarOpen(false)
+      }
+    }
+    function onTarget(e: Event) {
+      const t = (e as CustomEvent<PushTarget>).detail
+      if (t) {
+        consumePendingPushTarget()
+        open(t)
+      }
+    }
+    const early = servers.length > 0 ? consumePendingPushTarget() : null
+    if (early) open(early)
+    window.addEventListener('mv:open-target', onTarget)
+    return () => window.removeEventListener('mv:open-target', onTarget)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [servers, activeServer?.id])
 
   function handleSelectHome() {

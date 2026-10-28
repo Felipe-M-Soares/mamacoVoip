@@ -1,3 +1,4 @@
+import { applyOutput, onAudioDevicesSettled } from '../../lib/audioDevices'
 import { forwardRef, useEffect, useRef } from 'react'
 
 // Aplica o alto-falante escolhido. Sem escolha (null) = padrão do sistema
@@ -6,16 +7,11 @@ import { forwardRef, useEffect, useRef } from 'react'
 // (se o escolhido sumiu, toca no padrão; se voltou, volta pra ele).
 function useSinkId(ref: { current: HTMLMediaElement | null }, sinkId: string | null | undefined) {
   useEffect(() => {
-    const apply = () => {
-      const el = ref.current as (HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> }) | null
-      if (!el?.setSinkId) return
-      el.setSinkId(sinkId ?? '').catch(() => {
-        el.setSinkId?.('').catch(() => {})
-      })
-    }
+    // Segue o fone/caixa certo mesmo quando o padrão do sistema troca
+    // (cabo ↔ Bluetooth) — ver lib/audioDevices.ts.
+    const apply = () => void applyOutput(ref.current as (HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> }) | null, sinkId)
     apply()
-    navigator.mediaDevices?.addEventListener?.('devicechange', apply)
-    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', apply)
+    return onAudioDevicesSettled(apply)
   }, [ref, sinkId])
 }
 

@@ -122,3 +122,65 @@ export function createAuthStorage(bridge: SecureStorageBridge | null | undefined
     },
   }
 }
+
+// App Android/iOS (Capacitor): a sessão vai pro armazenamento NATIVO do
+// app (SharedPreferences no Android, via @capacitor/preferences), que é
+// gravado no disco na hora. O localStorage da WebView às vezes não
+// chegava a ser salvo quando o Android fechava o app — e a pessoa tinha
+// que logar de novo toda vez que abria. Migra a sessão antiga do
+// localStorage na primeira leitura (ninguém é deslogado por isso).
+export interface NativePrefs {
+  get: (o: { key: string }) => Promise<{ value: string | null }>
+  set: (o: { key: string; value: string }) => Promise<void>
+  remove: (o: { key: string }) => Promise<void>
+}
+
+export function createNativeAuthStorage(load: () => Promise<NativePrefs>): AsyncAuthStorage {
+  let prefsPromise: Promise<NativePrefs | null> | null = null
+  const prefs = () => {
+    if (!prefsPromise) prefsPromise = load().catch(() => null)
+    return prefsPromise
+  }
+  return {
+    async getItem(key) {
+      const p = await prefs()
+      if (!p) return localGet(key)
+      try {
+        const { value } = await p.get({ key })
+        if (typeof value === 'string') return value
+      } catch {
+        return localGet(key)
+      }
+      const legacy = localGet(key)
+      if (legacy !== null) {
+        try {
+          await p.set({ key, value: legacy })
+          localRemove(key)
+        } catch {
+          // fica no localStorage até a próxima
+        }
+      }
+      return legacy
+    },
+    async setItem(key, value) {
+      const p = await prefs()
+      if (!p) return localSet(key, value)
+      try {
+        await p.set({ key, value })
+        localRemove(key)
+      } catch {
+        localSet(key, value)
+      }
+    },
+    async removeItem(key) {
+      localRemove(key)
+      const p = await prefs()
+      if (!p) return
+      try {
+        await p.remove({ key })
+      } catch {
+        // best-effort
+      }
+    },
+  }
+}

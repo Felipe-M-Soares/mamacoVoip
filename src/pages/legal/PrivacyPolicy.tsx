@@ -195,6 +195,11 @@ export function PrivacyPolicy() {
           </li>
           <li><strong>Google</strong> — só se você escolher entrar com uma conta Google.</li>
           <li>
+            <strong>Google Firebase Cloud Messaging</strong> — no app Android, entrega as notificações de mensagens.
+            Recebe um identificador do aparelho e o texto da notificação (nome de quem mandou e o começo da
+            mensagem). Dá pra desligar as notificações nas configurações do Android.
+          </li>
+          <li>
             <strong>GitHub e lojas de aplicativos</strong> — o download do instalador e a verificação de
             atualizações do app para computador são feitos no GitHub (ou na loja em que você instalou o app),
             que recebe seu endereço IP.
@@ -219,7 +224,7 @@ export function PrivacyPolicy() {
 
       <LegalSection title="8. Transferência internacional">
         <p>
-          Supabase, Oracle, Vercel, KLIPY, Google e GitHub são empresas estrangeiras, e seus dados podem ser
+          Supabase, Oracle, Vercel, KLIPY, Google (incluindo o Firebase) e GitHub são empresas estrangeiras, e seus dados podem ser
           armazenados ou processados fora do Brasil (principalmente nos Estados Unidos), inclusive pelo roteamento
           global de voz e vídeo. Essas transferências são necessárias para prestar o serviço que você pediu e
           são feitas com base nas garantias contratuais de proteção de dados oferecidas por esses provedores,

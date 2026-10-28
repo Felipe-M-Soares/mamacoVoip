@@ -53,7 +53,16 @@ Run workflow**) já gera o APK e coloca no release.
    **Configurações → Permitir desta fonte** e volte.
 3. **Instalar**.
 
-Atualizar: baixar e instalar o APK novo por cima (os dados continuam).
+Atualizar: é automático. Ao abrir, o app confere se tem versão nova,
+baixa sozinho ("Atualizando o Mamacos Voip...") e abre o instalador do
+Android — é só tocar em **Instalar** (o Android sempre pede essa
+confirmação em apps fora da Play Store). Na primeira vez ele pede pra
+liberar "Instalar apps desta fonte" pro Mamacos Voip. Os dados e o login
+continuam.
+
+## Notificações
+
+Ver `docs/NOTIFICACOES.md`.
 
 ## O que funciona no celular
 

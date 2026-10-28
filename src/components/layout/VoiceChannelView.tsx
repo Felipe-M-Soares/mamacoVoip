@@ -21,6 +21,7 @@ import type { Channel, Profile, Role } from '../../types/database'
 import { copyText } from '../../lib/copyText'
 import { focusStream, hideStream, setStreamQuality, showStream, useStreamView, type StreamQuality } from '../../lib/streamView'
 import { AudioMixer } from './AudioMixer'
+import { useVoiceRosterChannel } from '../../lib/voiceRoster'
 import { REPLAY_SECONDS, replaySupported, saveReplayClip, startReplay, stopAllReplays, stopReplay, syncReplays, useReplayActive } from '../../lib/replayBuffer'
 
 // VideoTile mora em CallMediaTiles.tsx (arquivo pequeno, compartilhado
@@ -169,21 +170,43 @@ function ShareTile({
     }
   }
 
-  const btn = 'w-8 h-8 flex items-center justify-center rounded-full text-white hover:bg-white/[0.12] transition-colors'
+  // Controles somem sozinhos depois de um tempo parado (em tela cheia
+  // também some o cursor) — igual player de vídeo.
+  const [active, setActive] = useState(false)
+  const idleTimer = useRef<number | null>(null)
+  const menuOpen = showVolume || showQuality
+  function poke() {
+    setActive(true)
+    if (idleTimer.current) window.clearTimeout(idleTimer.current)
+    idleTimer.current = window.setTimeout(() => setActive(false), 2600)
+  }
+  useEffect(
+    () => () => {
+      if (idleTimer.current) window.clearTimeout(idleTimer.current)
+    },
+    []
+  )
+  const controlsShown = active || menuOpen
+
+  const iconBtn =
+    'w-9 h-9 shrink-0 flex items-center justify-center rounded-xl text-white/90 hover:text-white hover:bg-white/[0.14] active:scale-95 transition-all'
 
   return (
     <div
       ref={tileRef}
-      className={`relative overflow-hidden bg-black group/share w-full ${
+      className={`relative overflow-hidden bg-black w-full select-none ${
         isFullscreen
-          ? 'rounded-none border-0'
-          : `aspect-video rounded-2xl border shadow-[0_18px_40px_-20px_rgb(0_0_0/0.8)] ${
-              isFocused ? 'border-mv-accent/50' : 'border-[var(--color-line)]'
+          ? `rounded-none border-0 ${controlsShown ? '' : 'cursor-none'}`
+          : `aspect-video rounded-2xl ring-1 shadow-[0_24px_50px_-24px_rgb(0_0_0/0.9)] ${
+              isFocused ? 'ring-mv-accent/60' : 'ring-white/[0.08]'
             }`
-      } ${small ? 'cursor-pointer hover:border-[var(--color-line-strong)]' : ''}`}
+      } ${small ? 'group/small cursor-pointer hover:ring-white/20 transition-shadow' : ''}`}
       onClick={small && onFocus ? () => onFocus(share.key) : undefined}
       onDoubleClick={!small && !share.isLocal ? () => void toggleFullscreen() : undefined}
+      onMouseMove={small ? undefined : poke}
+      onMouseEnter={small ? undefined : poke}
       onMouseLeave={() => {
+        setActive(false)
         setShowVolume(false)
         setShowQuality(false)
       }}
@@ -193,224 +216,318 @@ function ShareTile({
         // A SUA transmissão não tem prévia ao vivo de propósito: se a
         // captura for de tela cheia, ela pegaria esta janela mostrando a
         // própria captura — o efeito de espelho infinito.
-        <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-mv-muted bg-mv-canvas">
+        <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-mv-muted bg-[radial-gradient(ellipse_at_center,rgb(255_255_255/0.05),transparent_70%)] bg-mv-canvas">
           {!small && (
-            <div className="w-14 h-14 rounded-2xl bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 flex items-center justify-center mb-1">
-              <ScreenIcon className="w-7 h-7" />
+            <div className="relative w-16 h-16 rounded-2xl bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/30 flex items-center justify-center mb-1">
+              <span className="absolute inset-0 rounded-2xl animate-ping bg-mv-accent/10" aria-hidden />
+              <ScreenIcon className="w-7 h-7 relative" />
             </div>
           )}
-          <p className={`${small ? 'text-[12px]' : 'text-[14px]'} font-semibold text-white text-center px-4`}>
-            Você está compartilhando sua tela
+          <p className={`${small ? 'text-[12px]' : 'text-[15px]'} font-semibold text-white text-center px-4`}>
+            Você está transmitindo
           </p>
+          {!small && <p className="text-[12.5px] text-mv-muted">A prévia fica escondida pra não criar o efeito espelho.</p>}
         </div>
       ) : (
         <VideoTile stream={share.stream} fit="contain" ref={videoRef} />
       )}
 
-      <span
-        className={`glass absolute bottom-2 left-2 font-medium text-white rounded-full flex items-center gap-1.5 max-w-[80%] truncate ${
-          small ? 'text-[11px] px-2 py-0.5' : 'text-[12px] px-2.5 py-1'
-        }`}
-      >
-        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" aria-hidden />
-        {share.name}
-        {share.isLocal && ' (você)'}
-        {!share.isLocal && hasAudio && isMuted && <span className="text-rose-300">· mudo</span>}
-        {replayOn && !small && <span className="text-amber-300">· replay</span>}
-      </span>
-      {clipMsg && !small && (
-        <span className="glass absolute bottom-2 right-2 text-[12px] font-medium text-white rounded-full px-2.5 py-1 animate-fade-in max-w-[60%] truncate">
-          {clipMsg}
-        </span>
-      )}
-
+      {/* Topo: AO VIVO + nome (sempre visível) */}
       <div
-        className={`absolute top-2 right-2 flex items-center gap-1 p-1 rounded-full glass transition-all duration-150 ${
-          small
-            ? 'opacity-0 group-hover/share:opacity-100'
-            : 'opacity-0 scale-95 group-hover/share:opacity-100 group-hover/share:scale-100 focus-within:opacity-100 focus-within:scale-100'
-        }`}
-        onClick={(e) => e.stopPropagation()}
+        className={`pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 ${
+          small ? 'p-1.5' : 'p-2.5 bg-gradient-to-b from-black/60 via-black/20 to-transparent pb-8'
+        } transition-opacity duration-200 ${small || controlsShown || !isFullscreen ? 'opacity-100' : 'opacity-0'}`}
       >
-        {!small && !share.isLocal && hasAudio && (
-          <>
-            <button
-              onClick={() =>
-                toggleVolumeMute(`screen:${share.key}`, shareVolume, (v) => voice.setScreenShareVolume(share.key, v), 60)
-              }
-              title={isMuted ? 'Reativar som da transmissão' : 'Silenciar som da transmissão'}
-              aria-label={isMuted ? 'Reativar som da transmissão' : 'Silenciar som da transmissão'}
-              className={isMuted ? 'w-8 h-8 flex items-center justify-center rounded-full bg-rose-500/20 text-rose-400' : btn}
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                {isMuted ? (
-                  <path d="M16.5 12A4.5 4.5 0 0 0 14 8v1.2l2.4 2.4c.06-.2.1-.4.1-.6zM3 3l18 18-1.4 1.4-3.4-3.4A4.5 4.5 0 0 1 14 20v-2a2.5 2.5 0 0 0 1-2v-.2L3 3.4 3 3z" />
-                ) : (
-                  <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8z" />
-                )}
-              </svg>
-            </button>
-            <div className="relative">
-              <button
-                onClick={() => setShowVolume((v) => !v)}
-                title="Volume da transmissão"
-                aria-label="Volume da transmissão"
-                className={btn}
-              >
-                <SlidersIcon />
-              </button>
-              {showVolume && (
-                <div className="absolute top-10 right-0 surface-elevated rounded-xl animate-pop-in p-3 w-48 z-10">
-                  <p className="text-[11px] font-semibold text-mv-text mb-2 flex justify-between">
-                    <span>Som da transmissão</span>
-                    <span className="tabular-nums text-mv-muted">{shareVolume}%</span>
-                  </p>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={shareVolume}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      rememberVolume(`screen:${share.key}`, v)
-                      voice.setScreenShareVolume(share.key, v)
-                    }}
-                    className="w-full accent-mv-accent"
-                  />
-                </div>
-              )}
-            </div>
-          </>
-        )}
-        {!small && replaySupported() && (
-          <>
-            <button
-              onClick={() => void onClip()}
-              disabled={savingClip}
-              title={
-                replayOn
-                  ? `Salvar clipe dos últimos ${REPLAY_SECONDS} segundos`
-                  : `Ligar replay (guarda os últimos ${REPLAY_SECONDS}s pra salvar como clipe)`
-              }
-              aria-label={replayOn ? 'Salvar clipe' : 'Ligar replay'}
-              className={`${btn} w-auto px-2 gap-1 text-[10px] font-bold tracking-wide ${replayOn ? 'text-amber-300' : ''}`}
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden>
-                {replayOn ? (
-                  <path d="M12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.76-4.24L14 10h6V4l-2.35 2.35A7.97 7.97 0 0 0 12 4zm-1 4v5l4 2.4.8-1.3-3.3-2V8H11z" />
-                ) : (
-                  <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm0 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" />
-                )}
-              </svg>
-              {replayOn ? (savingClip ? '...' : 'CLIPE') : 'REPLAY'}
-            </button>
-            {replayOn && (
-              <button
-                onClick={() => {
-                  stopReplay(share.key)
-                  setClipMsg('Replay desligado')
-                }}
-                title="Desligar replay"
-                aria-label="Desligar replay"
-                className={btn}
-              >
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3" aria-hidden>
-                  <path d="M6 6h12v12H6z" />
-                </svg>
-              </button>
-            )}
-          </>
-        )}
-        {!small && !share.isLocal && (
-          <div className="relative">
-            <button
-              onClick={() => setShowQuality((v) => !v)}
-              title="Qualidade da transmissão (só pra você)"
-              aria-label="Qualidade da transmissão"
-              className={`${btn} w-auto px-2 text-[10px] font-bold tracking-wide`}
-            >
-              {QUALITY_BADGE[quality]}
-            </button>
-            {showQuality && (
-              <div className="absolute top-10 right-0 surface-elevated rounded-xl animate-pop-in p-1.5 w-56 z-10">
-                <p className="text-[11px] font-semibold text-mv-text px-2 pt-1 pb-1.5">Qualidade (só pra você)</p>
-                {QUALITY_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => {
-                      setStreamQuality(share.key, opt.value)
-                      setShowQuality(false)
-                    }}
-                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[12px] flex flex-col transition-colors ${
-                      quality === opt.value ? 'bg-mv-accent/15 text-mv-text' : 'text-mv-muted hover:bg-white/[0.06] hover:text-mv-text'
-                    }`}
-                  >
-                    <span className="font-semibold">{opt.label}</span>
-                    <span className="text-[10.5px] opacity-80">{opt.hint}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {!small && onFocus && !isFullscreen && (
-          <button
-            onClick={() => onFocus(isFocused ? null : share.key)}
-            title={isFocused ? 'Sair do destaque (mostrar todas lado a lado)' : 'Destacar esta transmissão'}
-            aria-label={isFocused ? 'Sair do destaque' : 'Destacar esta transmissão'}
-            className={btn}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span
+            className={`shrink-0 inline-flex items-center gap-1 rounded-md bg-rose-600 font-bold uppercase tracking-[0.08em] text-white shadow-[0_2px_10px_-2px_rgb(225_29_72/0.7)] ${
+              small ? 'text-[8.5px] px-1 py-px' : 'text-[10px] px-1.5 py-0.5'
+            }`}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5" aria-hidden>
-              {isFocused ? (
-                <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />
-              ) : (
-                <path d="M3 3h12v12H3zM18 3h3v5h-3zM18 11h3v5h-3zM3 18h18v3H3z" />
-              )}
-            </svg>
-          </button>
-        )}
-        {!small && !share.isLocal && (
-          <>
-            <button
-              onClick={() => void toggleFullscreen()}
-              title={isFullscreen ? 'Sair da tela cheia (Esc)' : 'Tela cheia'}
-              aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-              className={btn}
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                {isFullscreen ? (
-                  <path d="M8 4h2v6H4V8h4V4zm6 0h2v4h4v2h-6V4zM4 14h6v6H8v-4H4v-2zm10 0h6v2h-4v4h-2v-6z" />
-                ) : (
-                  <path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm16 0h-2v4h-4v2h6v-6z" />
-                )}
-              </svg>
-            </button>
-            <button
-              onClick={goFloating}
-              title="Janela flutuante (pode arrastar pra fora do app)"
-              aria-label="Janela flutuante"
-              className={btn}
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V5h14v14zm-2-7h-6v5h6v-5z" />
-              </svg>
-            </button>
-          </>
-        )}
-        {/* Fecha só pra você: some o vídeo E o som (continua no ar pros outros). */}
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden />
+            Ao vivo
+          </span>
+          <span
+            className={`min-w-0 truncate font-semibold text-white drop-shadow-[0_1px_2px_rgb(0_0_0/0.8)] ${small ? 'text-[11px]' : 'text-[13px]'}`}
+          >
+            {share.name}
+            {share.isLocal && <span className="font-normal text-white/70"> (você)</span>}
+          </span>
+          {!small && !share.isLocal && hasAudio && isMuted && (
+            <span className="shrink-0 text-[10.5px] font-semibold text-rose-200 bg-rose-500/25 rounded px-1.5 py-0.5">mudo</span>
+          )}
+          {!small && replayOn && (
+            <span className="shrink-0 inline-flex items-center gap-1 text-[10.5px] font-semibold text-amber-100 bg-amber-500/25 rounded px-1.5 py-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse" aria-hidden />
+              replay
+            </span>
+          )}
+        </div>
+        {/* Fechar: só pra você (vídeo e som) */}
         <button
-          onClick={() => onHide(share.key)}
+          onClick={(e) => {
+            e.stopPropagation()
+            onHide(share.key)
+          }}
           title="Fechar esta transmissão (some o vídeo e o som só pra você)"
           aria-label="Fechar esta transmissão"
-          className="w-8 h-8 flex items-center justify-center rounded-full text-white hover:bg-rose-500/80 transition-colors"
+          className={`pointer-events-auto shrink-0 flex items-center justify-center rounded-full bg-black/45 backdrop-blur text-white/90 hover:bg-rose-500 hover:text-white transition-all ${
+            small ? 'w-6 h-6 opacity-0 group-hover/small:opacity-100' : 'w-8 h-8'
+          } ${small ? '' : controlsShown ? 'opacity-100' : 'opacity-0'}`}
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-            <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" className={small ? 'w-3 h-3' : 'w-3.5 h-3.5'} aria-hidden>
+            <path d="M6 6l12 12M18 6 6 18" />
           </svg>
         </button>
       </div>
+
+      {clipMsg && !small && (
+        <div className="pointer-events-none absolute left-1/2 top-14 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/75 backdrop-blur text-[12.5px] font-medium text-white shadow-lg animate-fade-in max-w-[80%] truncate">
+          {clipMsg}
+        </div>
+      )}
+
+      {/* Barra de controles (estilo player) */}
+      {!small && (
+        <div
+          className={`absolute inset-x-0 bottom-0 px-2.5 pb-2.5 pt-14 bg-gradient-to-t from-black/85 via-black/45 to-transparent transition-all duration-200 ${
+            controlsShown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'
+          }`}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-1">
+            {!share.isLocal && hasAudio && (
+              <div className="group/vol flex items-center rounded-xl hover:bg-white/[0.08] transition-colors pr-0.5">
+                <button
+                  onClick={() => toggleVolumeMute(`screen:${share.key}`, shareVolume, (v) => voice.setScreenShareVolume(share.key, v), 60)}
+                  title={isMuted ? 'Reativar som da transmissão' : 'Silenciar som da transmissão'}
+                  aria-label={isMuted ? 'Reativar som da transmissão' : 'Silenciar som da transmissão'}
+                  className={`${iconBtn} ${isMuted ? '!text-rose-300' : ''}`}
+                >
+                  <VolumeLevelIcon level={isMuted ? 0 : shareVolume} />
+                </button>
+                <div
+                  className={`overflow-hidden transition-all duration-200 ${
+                    showVolume ? 'w-28 opacity-100' : 'w-0 opacity-0 group-hover/vol:w-28 group-hover/vol:opacity-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 pl-1 pr-2">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={shareVolume}
+                      aria-label="Volume da transmissão"
+                      onFocus={() => setShowVolume(true)}
+                      onBlur={() => setShowVolume(false)}
+                      onChange={(e) => {
+                        const v = Number(e.target.value)
+                        rememberVolume(`screen:${share.key}`, v)
+                        voice.setScreenShareVolume(share.key, v)
+                      }}
+                      className="mv-slider w-[72px] cursor-pointer"
+                      style={{
+                        background: `linear-gradient(to right, #fff ${shareVolume}%, rgb(255 255 255 / 0.25) ${shareVolume}%)`,
+                      }}
+                    />
+                    <span className="w-7 text-right text-[11px] tabular-nums text-white/80">{shareVolume}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex-1" />
+
+            {replaySupported() && (
+              <>
+                <button
+                  onClick={() => void onClip()}
+                  disabled={savingClip}
+                  title={
+                    replayOn
+                      ? `Salvar clipe dos últimos ${REPLAY_SECONDS} segundos`
+                      : `Ligar replay (guarda os últimos ${REPLAY_SECONDS}s pra salvar como clipe)`
+                  }
+                  aria-label={replayOn ? 'Salvar clipe' : 'Ligar replay'}
+                  className={`h-9 shrink-0 px-3 flex items-center gap-1.5 rounded-xl text-[12px] font-semibold transition-all active:scale-95 ${
+                    replayOn
+                      ? 'bg-amber-400 text-black hover:bg-amber-300 shadow-[0_4px_14px_-4px_rgb(251_191_36/0.7)]'
+                      : 'text-white/90 hover:text-white hover:bg-white/[0.14]'
+                  }`}
+                >
+                  <ClipIcon className="w-4 h-4" />
+                  {replayOn ? (savingClip ? 'Salvando…' : 'Salvar clipe') : 'Replay'}
+                </button>
+                {replayOn && (
+                  <button
+                    onClick={() => {
+                      stopReplay(share.key)
+                      setClipMsg('Replay desligado')
+                    }}
+                    title="Desligar replay"
+                    aria-label="Desligar replay"
+                    className={iconBtn}
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3" aria-hidden>
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  </button>
+                )}
+              </>
+            )}
+
+            {!share.isLocal && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowQuality((v) => !v)}
+                  title="Qualidade da transmissão (só pra você)"
+                  aria-label="Qualidade da transmissão"
+                  aria-expanded={showQuality}
+                  className={`h-9 shrink-0 px-2.5 flex items-center gap-1 rounded-xl text-white/90 hover:text-white hover:bg-white/[0.14] transition-all ${
+                    showQuality ? 'bg-white/[0.14] text-white' : ''
+                  }`}
+                >
+                  <GearIcon className={`w-4 h-4 transition-transform duration-300 ${showQuality ? 'rotate-90' : ''}`} />
+                  <span className="text-[10px] font-extrabold tracking-wide rounded px-1 py-px bg-white text-black">{QUALITY_BADGE[quality]}</span>
+                </button>
+                {showQuality && (
+                  <div className="absolute bottom-full right-0 mb-2 w-60 rounded-2xl bg-[rgb(18_18_22/0.92)] backdrop-blur-xl ring-1 ring-white/10 shadow-2xl p-1.5 animate-pop-in z-10">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/50 px-2.5 pt-1.5 pb-1">Qualidade · só pra você</p>
+                    {QUALITY_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => {
+                          setStreamQuality(share.key, opt.value)
+                          setShowQuality(false)
+                        }}
+                        className={`w-full text-left px-2.5 py-2 rounded-xl flex items-start gap-2.5 transition-colors ${
+                          quality === opt.value ? 'bg-white/[0.1] text-white' : 'text-white/70 hover:bg-white/[0.06] hover:text-white'
+                        }`}
+                      >
+                        <span
+                          className={`mt-0.5 w-4 h-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                            quality === opt.value ? 'border-mv-accent' : 'border-white/30'
+                          }`}
+                          aria-hidden
+                        >
+                          {quality === opt.value && <span className="w-2 h-2 rounded-full bg-mv-accent" />}
+                        </span>
+                        <span className="flex flex-col">
+                          <span className="text-[13px] font-semibold">{opt.label}</span>
+                          <span className="text-[11px] text-white/50">{opt.hint}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <span className="w-px h-5 bg-white/15 mx-0.5 shrink-0" aria-hidden />
+
+            {onFocus && !isFullscreen && (
+              <button
+                onClick={() => onFocus(isFocused ? null : share.key)}
+                title={isFocused ? 'Sair do destaque (mostrar todas lado a lado)' : 'Destacar esta transmissão'}
+                aria-label={isFocused ? 'Sair do destaque' : 'Destacar esta transmissão'}
+                className={iconBtn}
+              >
+                <FocusIcon focused={isFocused} />
+              </button>
+            )}
+            {!share.isLocal && (
+              <>
+                <button onClick={goFloating} title="Janela flutuante (pode arrastar pra fora do app)" aria-label="Janela flutuante" className={iconBtn}>
+                  <PipIcon />
+                </button>
+                <button
+                  onClick={() => void toggleFullscreen()}
+                  title={isFullscreen ? 'Sair da tela cheia (Esc)' : 'Tela cheia'}
+                  aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+                  className={iconBtn}
+                >
+                  <FullscreenIcon exit={isFullscreen} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+// Ícones da barra da transmissão (traço, mesmo estilo).
+function VolumeLevelIcon({ level }: { level: number }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden>
+      <path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none" />
+      {level === 0 ? (
+        <path d="M16 9l5 5M21 9l-5 5" />
+      ) : (
+        <>
+          <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+          {level > 50 && <path d="M18.5 5.5a9 9 0 0 1 0 13" />}
+        </>
+      )}
+    </svg>
+  )
+}
+function GearIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+    </svg>
+  )
+}
+function ClipIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v4h4" />
+      <path d="M12 8v4l2.5 2.5" />
+    </svg>
+  )
+}
+function FocusIcon({ focused }: { focused: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden>
+      {focused ? (
+        <>
+          <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+          <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+          <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+          <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+        </>
+      ) : (
+        <>
+          <rect x="3" y="4" width="13" height="16" rx="2" />
+          <path d="M19 6v12M22 8v8" />
+        </>
+      )}
+    </svg>
+  )
+}
+function PipIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden>
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
+      <rect x="12" y="11.5" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+function FullscreenIcon({ exit }: { exit: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden>
+      {exit ? (
+        <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+      ) : (
+        <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+      )}
+    </svg>
   )
 }
 
@@ -825,6 +942,9 @@ export function VoiceChannelView({
   const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
   const isConnectedHere = voice.connectedChannelId === channel.id
   const isConnectedElsewhere = voice.connectedChannelId !== null && !isConnectedHere
+  // Quem já está na sala (mesma lista da barra lateral) — aparece na tela
+  // de entrada em vez de "ninguém está aqui".
+  const peopleHere = useVoiceRosterChannel(channel.id).filter((id) => id !== profile?.id)
 
   async function handleSwitchHere() {
     voice.leave()
@@ -948,9 +1068,34 @@ export function VoiceChannelView({
             </div>
           </div>
           <h3 className="font-display text-xl font-semibold text-white">{channel.name}</h3>
-          <p className="text-[14px] text-mv-muted mt-1.5 max-w-sm">
-            Ninguém está no canal de voz ainda. Entre pra começar uma chamada.
-          </p>
+          {peopleHere.length > 0 ? (
+            <div className="mt-3 flex flex-col items-center gap-2 animate-fade-in">
+              <div className="flex -space-x-2">
+                {peopleHere.slice(0, 6).map((id) => {
+                  const p = profileById[id]
+                  return (
+                    <span key={id} className="rounded-full ring-2 ring-mv-canvas" title={p?.display_name || p?.username || ''}>
+                      <Avatar name={p?.username ?? '?'} avatarUrl={p?.avatar_url} size={36} />
+                    </span>
+                  )
+                })}
+                {peopleHere.length > 6 && (
+                  <span className="w-9 h-9 rounded-full ring-2 ring-mv-canvas bg-white/10 text-[12px] font-semibold text-white flex items-center justify-center">
+                    +{peopleHere.length - 6}
+                  </span>
+                )}
+              </div>
+              <p className="text-[14px] text-mv-muted max-w-sm">
+                {peopleHere.length === 1
+                  ? `${profileById[peopleHere[0]]?.display_name || profileById[peopleHere[0]]?.username || 'Alguém'} está na sala.`
+                  : `${peopleHere.length} pessoas estão na sala.`}
+              </p>
+            </div>
+          ) : (
+            <p className="text-[14px] text-mv-muted mt-1.5 max-w-sm">
+              Ninguém está no canal de voz ainda. Entre pra começar uma chamada.
+            </p>
+          )}
           {voice.error && (
             <p role="alert" className="mt-4 max-w-sm text-[13px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-[10px] px-3 py-2">
               {voice.error}

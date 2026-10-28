@@ -1,3 +1,4 @@
+import { applyOutput, onAudioDevicesSettled } from './audioDevices'
 // Identidade sonora do Mamacos Voip — 100% sintetizada por código em
 // WebAudio, sem nenhum sample baixado ou copiado de outro app.
 //
@@ -55,13 +56,16 @@ function savedSpeakerId(): string {
   }
 }
 export function applySoundsSink(sinkId: string | null = savedSpeakerId()) {
-  const ctx = audioCtx as (AudioContext & { setSinkId?: (id: string) => Promise<void> }) | null
+  const ctx = audioCtx as (AudioContext & { setSinkId?: (id: string) => Promise<void>; sinkId?: string }) | null
   if (!ctx?.setSinkId) return
-  ctx.setSinkId(sinkId ?? '').catch(() => {
-    // dispositivo sumiu — volta pro padrão
-    ctx.setSinkId?.('').catch(() => {})
-  })
+  // Resolve o "padrão" pro aparelho real (segue cabo ↔ Bluetooth).
+  void applyOutput(ctx as unknown as { setSinkId: (id: string) => Promise<void>; sinkId?: string }, sinkId)
+  if (!soundsFollowing) {
+    soundsFollowing = true
+    onAudioDevicesSettled(() => applySoundsSink())
+  }
 }
+let soundsFollowing = false
 
 // Resposta ao impulso sintética: ruído estéreo com decaimento
 // exponencial (~1,1 s). Barata de gerar e só é criada uma vez.

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { readStartupCache, writeStartupCache } from '../lib/startupCache'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { rateLimitError } from '../lib/rateLimit'
@@ -69,10 +70,12 @@ export function ServersProvider({ children }: { children: ReactNode }) {
   // tempo real E (por causa do `loading`) trocava a tela inicial inteira
   // por um spinner por um instante.
   const userId = user?.id ?? null
-  const [servers, setServers] = useState<Server[]>([])
-  const [loading, setLoading] = useState(true)
+  // Abre na hora com a lista da última vez (ver lib/startupCache.ts).
+  const [cached] = useState(() => (userId ? readStartupCache<Server[]>(`servers:${userId}`) : null))
+  const [servers, setServers] = useState<Server[]>(() => cached ?? [])
+  const [loading, setLoading] = useState(!cached)
   const loadSeqRef = useRef(0)
-  const hasLoadedRef = useRef(false)
+  const hasLoadedRef = useRef(Boolean(cached))
 
   const refresh = useCallback(async () => {
     const seq = ++loadSeqRef.current
@@ -90,6 +93,7 @@ export function ServersProvider({ children }: { children: ReactNode }) {
       if (seq !== loadSeqRef.current) return
       if (!error) {
         setServers(data ?? [])
+        writeStartupCache(`servers:${userId}`, data ?? [])
         hasLoadedRef.current = true
       } else {
         console.error('[ServersContext] Falha ao carregar servidores:', error)

@@ -3644,18 +3644,18 @@ app.whenReady().then(() => {
     // terminar de montar e começar a escutar essas mensagens, e se
     // perderiam no caminho (por isso nenhum aviso aparecia na tela).
     // Checagem da ABERTURA: começa já (sem esperar a janela), em silêncio.
-    // Se não houver resposta em 8s (internet lenta/sem internet), o app
-    // abre normal e a checagem continua por trás.
+    // Se não houver resposta em 4s (internet lenta/sem internet), o app
+    // abre normal e a checagem continua por trás (antes esperava 8s).
     if (process.windowsStore || process.platform !== 'win32') {
       releaseStartupGate()
     } else {
       startupGatePending = true
       setTimeout(() => {
         if (startupGatePending && !startupUpdating) {
-          appendDebugLog('updater', 'abertura: sem resposta em 8s — abrindo o app normalmente')
+          appendDebugLog('updater', 'abertura: sem resposta em 4s — abrindo o app normalmente')
           releaseStartupGate()
         }
-      }, 8_000)
+      }, 4_000)
       runUpdateCheck({ silent: true })
     }
 

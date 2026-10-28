@@ -31,6 +31,9 @@ public class MainActivity extends BridgeActivity {
 
   @Override
   public void onCreate(Bundle savedInstanceState) {
+    // Plugin próprio (atualização do APK) — precisa ser registrado ANTES
+    // do super.onCreate, que monta a ponte com o app.
+    registerPlugin(ApkUpdaterPlugin.class);
     super.onCreate(savedInstanceState);
 
     String[] needed = {Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA};

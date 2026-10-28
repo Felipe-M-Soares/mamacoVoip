@@ -76,8 +76,21 @@ function VoicePresenceWatcher({ channelId }: { channelId: string }) {
   // de novo no mesmo canal Realtime (o que quebrava ao voltar pra uma
   // sala em que você já estava).
   const observedIds = useVoicePresence(channelId, isConnectedHere)
+  // Última lista vista "de fora" — usada enquanto VOCÊ está entrando: a
+  // observação para (pra não assinar o mesmo canal duas vezes) e a lista
+  // da conexão ainda está vazia. Sem isso, quem já estava na sala sumia
+  // por uns segundos ao clicar pra entrar.
+  const [lastObserved, setLastObserved] = useState<string[]>(observedIds)
+  if (!isConnectedHere && lastObserved !== observedIds) setLastObserved(observedIds)
+  const stillJoining = voice.connectedChannelId !== channelId
   const userIds = isConnectedHere
-    ? [user?.id, ...Object.keys(voice.participants)].filter((id): id is string => Boolean(id))
+    ? [
+        ...new Set(
+          [user?.id, ...(stillJoining ? lastObserved : []), ...Object.keys(voice.participants)].filter(
+            (id): id is string => Boolean(id)
+          )
+        ),
+      ]
     : observedIds
   const rosterKey = userIds.join(',')
   useEffect(() => {

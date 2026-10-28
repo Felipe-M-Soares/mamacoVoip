@@ -1,6 +1,6 @@
-name: Publicar funções do Supabase (GIFs)
+name: Publicar funções do Supabase (GIFs e notificações)
 
-# Publica a Edge Function gif-search no Supabase sempre que ela mudar
+# Publica as Edge Functions gif-search e push-notify sempre que mudarem
 # (ou manualmente pela aba Actions). Assim não precisa instalar nada no PC.
 #
 # Configuração (uma vez só) — Settings > Secrets and variables > Actions:
@@ -17,6 +17,7 @@ on:
     branches: [main]
     paths:
       - 'supabase/functions/gif-search/**'
+      - 'supabase/functions/push-notify/**'
   workflow_dispatch: {}
 
 permissions:
@@ -46,7 +47,7 @@ jobs:
 
       - name: Baixar o código
         if: steps.cfg.outputs.ok == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Publicar gif-search
         if: steps.cfg.outputs.ok == 'true'
@@ -54,3 +55,12 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: npx --yes supabase@2.118.0 functions deploy gif-search --project-ref "$SUPABASE_PROJECT_REF" --use-api
+
+      # Chamada pelo próprio banco (com segredo próprio, ver PARTE 29 do
+      # SQL 007) — por isso sem a checagem de login do Supabase.
+      - name: Publicar push-notify
+        if: steps.cfg.outputs.ok == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: npx --yes supabase@2.118.0 functions deploy push-notify --project-ref "$SUPABASE_PROJECT_REF" --use-api --no-verify-jwt

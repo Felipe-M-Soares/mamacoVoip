@@ -41,6 +41,17 @@
 
         </activity>
 
+        <!-- Notificações (Firebase): ícone e canal padrão. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_mamaco" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_accent" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="mensagens" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -55,6 +66,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Atualização do app sem Play Store: abrir o instalador do APK novo
+         (o Android ainda pede a confirmação da pessoa). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Notificações de mensagem (Android 13+ pede essa permissão). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- VIGÉSIMA SEXTA RODADA — sem essas duas, getUserMedia (chamado
          pelo mesmo código React de sempre, sem mudança nenhuma nele)
          falha direto dentro da WebView do Capacitor: o Android bloqueia

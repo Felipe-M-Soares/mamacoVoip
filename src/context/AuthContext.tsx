@@ -155,6 +155,12 @@ function takeGoogleFlowId(): string | null {
   return id && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : null
 }
 
+// Códigos já recebidos: o mesmo retorno pode chegar 2 vezes (a página do
+// navegador abre o app sozinha E a pessoa clica no botão "Abrir o Mamacos
+// Voip"). Antes a 2ª chegada não achava mais o login pendente e escondia o
+// resultado da 1ª com "O login demorou demais...".
+const handledGoogleCodes = new Set<string>()
+
 async function handleGoogleAuthCallback(url: string) {
   try {
     const hashIndex = url.indexOf('#')
@@ -162,14 +168,7 @@ async function handleGoogleAuthCallback(url: string) {
     const queryIndex = beforeHash.indexOf('?')
     const query = new URLSearchParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '')
     const stateFromLink = query.get('state')
-
-    // Uso único — some com o código pendente já na primeira
-    // tentativa, bateu ou não (evita reaproveitar o mesmo código
-    // pra um segundo link forjado).
-    const pending = pendingGoogleAuthState ?? takeStoredGoogleAuthState()
-    pendingGoogleAuthState = null
-    takeStoredGoogleAuthState()
-    const flowId = takeGoogleFlowId()
+    const code = query.get('code')
 
     const providerError = query.get('error_description') || query.get('error')
     if (providerError) {
@@ -177,41 +176,50 @@ async function handleGoogleAuthCallback(url: string) {
       return
     }
 
-    // Só aceita retorno de um login que ESTE app pediu e ainda está no
-    // prazo. Se o link trouxer um state, ele tem que bater. (Sem state no
-    // link — alguns retornos perdem esse parâmetro — a proteção continua
-    // garantida pelo PKCE: um code de outra pessoa/outro login nunca vira
-    // sessão com a chave que só este app tem.)
-    if (!pending || pending.expiresAt < Date.now()) {
-      reportGoogleAuth(
-        'O login demorou demais ou foi aberto em outra janela. Clique em "Entrar com Google" de novo.',
-        `sem login pendente (pending=${pending ? 'expirado' : 'nenhum'})`
-      )
-      return
-    }
-    if (stateFromLink && stateFromLink !== pending.value) {
-      reportGoogleAuth('Esse link de login não é deste app. Clique em "Entrar com Google" de novo.', 'state não confere')
-      return
-    }
-
     // Fluxo implícito (#access_token=...) NÃO é mais aceito: com
     // flowType 'pkce' o Supabase sempre devolve ?code=.
-    const code = query.get('code')
     if (!code || !/^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
       reportGoogleAuth('O retorno do Google veio sem o código de login. Tente de novo.', `sem code no link: ${url.slice(0, 80)}`)
       return
     }
+    if (handledGoogleCodes.has(code)) return // repetido: o 1º já está cuidando
+    handledGoogleCodes.add(code)
+
+    // Já logado (ex.: o 1º retorno já entrou) — nada a fazer.
+    const { data: current } = await supabase.auth.getSession()
+    if (current.session) {
+      reportGoogleAuth(null, 'retorno ignorado: já logado')
+      return
+    }
+
+    const pending = pendingGoogleAuthState ?? takeStoredGoogleAuthState()
+    pendingGoogleAuthState = null
+    takeStoredGoogleAuthState()
+    const flowId = takeGoogleFlowId()
+
+    // Se este app tem um login pendente e o link traz um state, ele tem
+    // que bater. A proteção principal é o PKCE: um code que não foi pedido
+    // por ESTE app (link forjado, login de outra pessoa) nunca vira sessão,
+    // porque a troca exige a chave secreta que só este app guardou.
+    if (pending && stateFromLink && stateFromLink !== pending.value) {
+      reportGoogleAuth('Esse link de login não é deste app. Clique em "Entrar com Google" de novo.', 'state não confere')
+      return
+    }
+
     const linkFlowId = query.get('sb_flow_id')
     const useFlowId = linkFlowId && /^[A-Za-z0-9_-]{1,128}$/.test(linkFlowId) ? linkFlowId : flowId
     let { error } = await supabase.auth.exchangeCodeForSession(code, useFlowId ? { flowId: useFlowId } : undefined)
-    // A chave do fluxo pode ter ficado só no lugar "antigo" (versões do
+    // A chave pode ter ficado só no lugar "antigo" (versões do
     // supabase-js) — tenta sem o id antes de desistir.
     if (error && useFlowId && /verifier/i.test(error.message)) {
       ;({ error } = await supabase.auth.exchangeCodeForSession(code))
     }
     if (error) {
+      const verifierMissing = /verifier/i.test(error.message)
       reportGoogleAuth(
-        `Não foi possível concluir o login com o Google (${traduzErro(error.message)}). Tente de novo.`,
+        verifierMissing
+          ? 'Esse login foi iniciado em outra janela ou versão do app. Clique em "Entrar com Google" de novo por aqui.'
+          : `Não foi possível concluir o login com o Google (${traduzErro(error.message)}). Tente de novo.`,
         `exchangeCodeForSession falhou: ${error.name ?? ''} ${error.message}`
       )
       return

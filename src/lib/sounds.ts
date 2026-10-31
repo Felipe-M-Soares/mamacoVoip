@@ -319,6 +319,7 @@ export type UiSoundId =
   | 'deafen'
   | 'undeafen'
   | 'message'
+  | 'dm'
   | 'mention'
   | 'incomingCall'
   | 'callEnded'
@@ -395,6 +396,18 @@ const SPECS: Record<UiSoundId, { spec: SoundSpec; wet?: number }> = {
         { f: N.B5, at: 0.055, d: 0.28, g: 0.28, index: 1 },
       ],
     },
+  },
+  // Mensagem privada: duas notas "plim-plim" um pouco mais presentes que a
+  // de mensagem de canal (dá pra reconhecer sem olhar a tela).
+  dm: {
+    spec: {
+      notes: [
+        { f: N.A5, d: 0.14, g: 0.3, index: 1.1 },
+        { f: N.D6, at: 0.09, d: 0.34, g: 0.32, index: 1.3 },
+        { f: N.D5, at: 0.09, d: 0.34, g: 0.14, index: 0.5 },
+      ],
+    },
+    wet: 0.22,
   },
   mention: {
     spec: {
@@ -481,6 +494,7 @@ export const SOUND_CATALOG: { id: UiSoundId; label: string }[] = [
   { id: 'deafen', label: 'Ensurdecer' },
   { id: 'undeafen', label: 'Desensurdecer' },
   { id: 'message', label: 'Mensagem recebida' },
+  { id: 'dm', label: 'Mensagem privada' },
   { id: 'mention', label: 'Menção' },
   { id: 'incomingCall', label: 'Chamada chegando' },
   { id: 'callEnded', label: 'Chamada encerrada' },
@@ -491,7 +505,7 @@ export const SOUND_CATALOG: { id: UiSoundId; label: string }[] = [
 ]
 
 // Evita metralhadora de som (ex.: 10 mensagens chegando juntas).
-const MIN_GAP_MS: Partial<Record<UiSoundId, number>> = { message: 900, mention: 600, userJoin: 250, userLeave: 250 }
+const MIN_GAP_MS: Partial<Record<UiSoundId, number>> = { message: 900, dm: 1200, mention: 600, userJoin: 250, userLeave: 250 }
 const DEFAULT_GAP_MS = 90
 const lastPlayed = new Map<UiSoundId, number>()
 // Ensurdecer também muta o microfone (toggleDeafen chama toggleMute) —
@@ -557,6 +571,7 @@ export const playUnmuteSound = () => playUiSound('unmute')
 export const playDeafenSound = () => playUiSound('deafen')
 export const playUndeafenSound = () => playUiSound('undeafen')
 export const playMessageSound = () => playUiSound('message')
+export const playDmSound = () => playUiSound('dm')
 export const playMentionSound = () => playUiSound('mention')
 export const playCallEndedSound = () => playUiSound('callEnded')
 export const playStreamStartSound = () => playUiSound('streamStart')

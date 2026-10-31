@@ -33,3 +33,31 @@ export function notify(title: string, body: string) {
     // usuário ou contexto seguro — falha silenciosa é aceitável aqui
   }
 }
+
+export type NotificationTarget = { kind: 'dm' | 'group' | 'channel'; id: string; serverId?: string }
+
+/**
+ * Notificação de mensagem privada (app em segundo plano). No app de PC usa
+ * a notificação nativa do Windows (clique traz a janela e abre a conversa);
+ * no navegador, a do navegador. Clique → evento "mv:open-target" (o
+ * MainLayout abre a conversa — o mesmo caminho da notificação do celular).
+ */
+export function showMessageNotification(title: string, body: string, target: NotificationTarget, icon?: string | null) {
+  const api = window.electronAPI
+  if (api?.showNotification) {
+    void api.showNotification({ title, body, target }).catch(() => {})
+    api.flashWindow?.()
+    return
+  }
+  if (!('Notification' in window) || Notification.permission !== 'granted') return
+  try {
+    const n = new Notification(title, { body, icon: icon || '/logo-192.png', tag: `mv-${target.kind}-${target.id}` })
+    n.onclick = () => {
+      window.focus()
+      window.dispatchEvent(new CustomEvent('mv:open-target', { detail: target }))
+      n.close()
+    }
+  } catch {
+    // navegador recusou (contexto sem permissão etc.)
+  }
+}

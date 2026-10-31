@@ -30,10 +30,11 @@ import { useUnreadOverview } from '../hooks/useUnreadOverview'
 import { useGamePresence } from '../hooks/useGamePresence'
 import { GameDetectedToast } from '../components/ui/GameDetectedToast'
 import { VoiceMovedToast } from '../components/ui/VoiceMovedToast'
+import { MessageAlerts } from '../components/ui/MessageAlerts'
 import { OverlayStateSync } from '../components/layout/OverlayStateSync'
 import { AutoIdleStatus } from '../components/layout/AutoIdleStatus'
 import type { Channel, Profile, Server } from '../types/database'
-import { setWindowPlace } from '../lib/windowTitle'
+import { setWindowPlace, setWindowUnreadCount } from '../lib/windowTitle'
 import { MediaViewer } from '../components/ui/MediaViewer'
 import { KeybindsRunner } from '../components/KeybindsRunner'
 
@@ -143,6 +144,7 @@ function ActiveServerContent({
   drawerOpen,
   isElectronApp,
   unreadServerIds,
+  homeUnreadCount,
   onSelectServer,
   onSelectHome,
   onSelectChannel,
@@ -160,6 +162,7 @@ function ActiveServerContent({
   drawerOpen: boolean
   isElectronApp: boolean
   unreadServerIds: Set<string>
+  homeUnreadCount: number
   onSelectServer: (server: Server) => void
   onSelectHome: () => void
   onSelectChannel: (channel: Channel, serverId?: string) => void
@@ -221,6 +224,7 @@ function ActiveServerContent({
           <ServerBar
             activeServerId={server.id}
             unreadServerIds={unreadServerIds}
+            homeUnreadCount={homeUnreadCount}
             onSelectServer={onSelectServer}
             onSelectHome={onSelectHome}
           />
@@ -438,7 +442,8 @@ function MainLayoutInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTextChannelId, activeTextChannelUnread])
 
-  const openConversationId = !activeServer && homeView === 'conversation' ? activeConversationId : null
+  // DM aberta: na home OU por cima de um servidor (serverDmId).
+  const openConversationId = activeServer ? serverDmId : homeView === 'conversation' ? activeConversationId : null
   const openConversationUnread = openConversationId ? unread.unreadConversationIds.has(openConversationId) : false
   const lastMarkedConversationRef = useRef<string | null>(null)
   useEffect(() => {
@@ -451,6 +456,32 @@ function MainLayoutInner() {
     void unread.markConversationRead(openConversationId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openConversationId, openConversationUnread])
+
+  // Grupos não têm "lido" salvo no banco: o não lido deles vale pra sessão
+  // (some ao abrir o grupo).
+  const [unreadGroupIds, setUnreadGroupIds] = useState<Set<string>>(() => new Set())
+  const openGroupId = !activeServer && homeView === 'group' ? activeGroupId : null
+  useEffect(() => {
+    if (!openGroupId) return
+    setUnreadGroupIds((prev) => {
+      if (!prev.has(openGroupId)) return prev
+      const next = new Set(prev)
+      next.delete(openGroupId)
+      return next
+    })
+  }, [openGroupId])
+  const handleIncomingUnread = useCallback(
+    (kind: 'dm' | 'group', id: string) => {
+      if (kind === 'dm') unread.markConversationUnread(id)
+      else setUnreadGroupIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [unread.markConversationUnread]
+  )
+  const homeUnreadCount = unread.unreadConversationIds.size + unreadGroupIds.size
+  // Contador no título da janela/aba: "(2) Mamacos Voip".
+  useEffect(() => setWindowUnreadCount(homeUnreadCount), [homeUnreadCount])
+  useEffect(() => () => setWindowUnreadCount(0), [])
 
   function handleServerGone() {
     setActiveServer(null)
@@ -640,6 +671,7 @@ function MainLayoutInner() {
           drawerOpen={mobileSidebarOpen}
           isElectronApp={isElectronApp}
           unreadServerIds={unread.unreadServerIds}
+          homeUnreadCount={homeUnreadCount}
           onSelectServer={handleSelectServer}
           onSelectHome={handleSelectHome}
           onSelectChannel={handleSelectChannel}
@@ -667,6 +699,7 @@ function MainLayoutInner() {
               <ServerBar
                 activeServerId={null}
                 unreadServerIds={unread.unreadServerIds}
+                homeUnreadCount={homeUnreadCount}
                 onSelectServer={handleSelectServer}
                 onSelectHome={handleSelectHome}
               />
@@ -677,6 +710,7 @@ function MainLayoutInner() {
                   activeConversationId={activeConversationId}
                   activeGroupId={activeGroupId}
                   unreadConversationIds={unread.unreadConversationIds}
+                  unreadGroupIds={unreadGroupIds}
                   onSelectGroup={handleOpenGroup}
                   onSelectFriends={() => {
                     setHomeView('friends')
@@ -753,6 +787,7 @@ function MainLayoutInner() {
       <VoiceCallAudio />
       <GameDetectedToast />
       <VoiceMovedToast />
+      <MessageAlerts viewingTargetId={openConversationId ?? openGroupId} onUnread={handleIncomingUnread} />
       <OverlayStateSync />
       <AutoIdleStatus />
 

@@ -22,6 +22,7 @@ function ServerIcon({
   iconUrl,
   active,
   unread,
+  badge,
   draggable,
   isDragOver,
   onClick,
@@ -38,6 +39,8 @@ function ServerIcon({
   iconUrl?: string | null
   active?: boolean
   unread?: boolean
+  /** contador vermelho no canto (mensagens privadas não lidas no "Início") */
+  badge?: number
   draggable?: boolean
   isDragOver?: boolean
   onClick?: () => void
@@ -102,6 +105,14 @@ function ServerIcon({
           initials
         )}
       </button>
+      {badge ? (
+        <span
+          className="absolute -bottom-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-rose-500 text-white text-[11px] font-bold leading-none flex items-center justify-center ring-[3px] ring-mv-canvas pointer-events-none animate-pop-in"
+          aria-label={`${badge} conversa${badge > 1 ? 's' : ''} não lida${badge > 1 ? 's' : ''}`}
+        >
+          {badge > 9 ? '9+' : badge}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -109,11 +120,14 @@ function ServerIcon({
 export function ServerBar({
   activeServerId,
   unreadServerIds,
+  homeUnreadCount = 0,
   onSelectServer,
   onSelectHome,
 }: {
   activeServerId: string | null
   unreadServerIds: Set<string>
+  /** conversas privadas/grupos com mensagem não lida */
+  homeUnreadCount?: number
   onSelectServer: (server: Server) => void
   onSelectHome: () => void
 }) {
@@ -191,7 +205,14 @@ export function ServerBar({
   return (
     <>
       <nav aria-label="Servidores" data-tour="servers" className="w-[72px] bg-mv-canvas flex flex-col items-center py-3 gap-2.5 shrink-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none]">
-        <ServerIcon name="Início" variant="home" active={activeServerId === null} onClick={onSelectHome} />
+        <ServerIcon
+          name="Início"
+          variant="home"
+          active={activeServerId === null}
+          unread={homeUnreadCount > 0}
+          badge={homeUnreadCount}
+          onClick={onSelectHome}
+        />
         <div className="w-8 h-px bg-white/10 rounded-full my-0.5" />
 
         {!loading &&

@@ -5,9 +5,6 @@ import { applyDmMessageToConversations } from './useConversations'
 import { removeAttachmentObjects } from '../lib/storageUrls'
 import { changesChannel } from '../lib/realtimeChannel'
 import { useAuth } from './useAuth'
-import { notify } from '../lib/notifications'
-import { describeMessageContent } from '../lib/stickers'
-import { playMessageSound } from '../lib/sounds'
 import { describeError } from '../lib/errors'
 import { rateLimitError } from '../lib/rateLimit'
 import { MESSAGE_PAGE_SIZE } from './useMessages'
@@ -149,10 +146,7 @@ export function useDirectMessages(conversationId: string | null) {
         (payload) => {
           const newMessage = payload.new as DMMessage
           setMessages((prev) => (prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]))
-          if (newMessage.author_id !== userIdRef.current) {
-            notify('Nova mensagem direta', describeMessageContent(newMessage.content).slice(0, 120))
-            if (document.hidden || !document.hasFocus()) playMessageSound()
-          }
+          // Som/aviso de mensagem nova: lib/messageAlerts.ts + MessageAlerts.tsx
         }
       )
       .on(

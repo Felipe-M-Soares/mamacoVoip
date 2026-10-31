@@ -29,9 +29,11 @@
 
   if (err) return fail(String(err).slice(0, 200))
   var ok = /^[A-Za-z0-9._~-]{1,512}$/
-  if (!ok.test(code) || !ok.test(state)) return fail('O link de login está incompleto ou expirou.')
+  if (!ok.test(code) || (state && !ok.test(state))) return fail('O link de login está incompleto ou expirou.')
 
   var link = 'mamacovoip://auth-callback?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state)
+  var flow = q.get('sb_flow_id') || ''
+  if (/^[A-Za-z0-9_-]{1,128}$/.test(flow)) link += '&sb_flow_id=' + encodeURIComponent(flow)
   btn.href = link
   // Tira o code da barra de endereço/histórico.
   try {

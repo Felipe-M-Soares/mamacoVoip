@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
+import { GOOGLE_AUTH_RESULT_EVENT } from '../../context/AuthContext'
+import { isNativeMobileApp } from '../../lib/platform'
 
 // Botão compartilhado entre Login.tsx e Register.tsx — o mesmo fluxo do
 // Google serve tanto pra entrar quanto pra criar conta (se a pessoa
@@ -21,10 +23,31 @@ export function GoogleSignInButton({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // "aguardando" = o navegador já abriu e o app espera o retorno do Google
+  const [waiting, setWaiting] = useState(false)
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => {
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
   }, [])
+
+  // Retorno do Google (app de PC/celular): para de girar e mostra o erro, se houver.
+  useEffect(() => {
+    function onResult(e: Event) {
+      const err = (e as CustomEvent<{ error: string | null }>).detail?.error ?? null
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
+      setWaiting(false)
+      setLoading(false)
+      setError(err)
+    }
+    window.addEventListener(GOOGLE_AUTH_RESULT_EVENT, onResult)
+    return () => window.removeEventListener(GOOGLE_AUTH_RESULT_EVENT, onResult)
+  }, [])
+
+  function cancel() {
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
+    setWaiting(false)
+    setLoading(false)
+  }
 
   async function handleClick() {
     if (loading) return
@@ -39,8 +62,9 @@ export function GoogleSignInButton({
     // login, nada volta pro app — sem isso o botão ficava travado em
     // "Abrindo o Google..." até reiniciar o app.
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-    resetTimerRef.current = setTimeout(() => setLoading(false), 30_000)
+    resetTimerRef.current = setTimeout(cancel, 180_000)
     const { error } = await signInWithGoogle()
+    if (!error && (window.electronAPI || isNativeMobileApp())) setWaiting(true)
     // No app desktop, um sucesso aqui só significa "o navegador abriu" —
     // a sessão de verdade chega minutos depois pelo link de volta (ver
     // AuthContext.tsx), então não tem "loading" pra desligar num sucesso
@@ -49,6 +73,7 @@ export function GoogleSignInButton({
     if (error) {
       setError(error)
       setLoading(false)
+      setWaiting(false)
     }
   }
 
@@ -83,8 +108,16 @@ export function GoogleSignInButton({
           />
         </svg>
         )}
-        {loading ? 'Abrindo o Google...' : label}
+        {loading ? (waiting ? 'Termine o login no navegador...' : 'Abrindo o Google...') : label}
       </button>
+      {waiting && (
+        <p className="mt-2 text-center text-[12px] text-mv-muted">
+          Quando o navegador perguntar, clique em <b className="text-mv-text">Abrir Mamacos Voip</b>.{' '}
+          <button type="button" onClick={cancel} className="underline hover:text-white">
+            Cancelar
+          </button>
+        </p>
+      )}
       {error && (
         <p role="alert" className="mt-2 rounded-[10px] border border-rose-500/30 bg-rose-500/10 px-3 py-2.5 text-[13px] text-rose-300">
           {error}

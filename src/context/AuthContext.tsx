@@ -111,13 +111,57 @@ function takeStoredGoogleAuthState(): { value: string; expiresAt: number } | nul
   }
 }
 
+// Resultado do retorno do Google, pro botão parar de girar e mostrar o
+// erro (antes um problema aqui era engolido em silêncio e o botão ficava
+// em "Abrindo o Google..." sem explicação).
+export const GOOGLE_AUTH_RESULT_EVENT = 'mv:google-auth-result'
+function reportGoogleAuth(error: string | null, detail?: string) {
+  if (detail) {
+    try {
+      window.electronAPI?.logDebug?.(`[google-auth] ${detail}`)
+    } catch {
+      // log é só ajuda
+    }
+  }
+  try {
+    window.dispatchEvent(new CustomEvent(GOOGLE_AUTH_RESULT_EVENT, { detail: { error } }))
+  } catch {
+    // sem window
+  }
+}
+
+// O id do fluxo PKCE (supabase-js) do login pendente — com ele a troca
+// usa exatamente a chave daquele login.
+let pendingGoogleFlowId: string | null = null
+const GOOGLE_AUTH_FLOW_KEY = 'mamacos-google-auth-flow'
+function storeGoogleFlowId(id: string | null) {
+  pendingGoogleFlowId = id
+  try {
+    if (id) localStorage.setItem(GOOGLE_AUTH_FLOW_KEY, id)
+    else localStorage.removeItem(GOOGLE_AUTH_FLOW_KEY)
+  } catch {
+    // só memória
+  }
+}
+function takeGoogleFlowId(): string | null {
+  let id = pendingGoogleFlowId
+  try {
+    id = id ?? localStorage.getItem(GOOGLE_AUTH_FLOW_KEY)
+    localStorage.removeItem(GOOGLE_AUTH_FLOW_KEY)
+  } catch {
+    // só memória
+  }
+  pendingGoogleFlowId = null
+  return id && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : null
+}
+
 async function handleGoogleAuthCallback(url: string) {
   try {
     const hashIndex = url.indexOf('#')
     const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url
     const queryIndex = beforeHash.indexOf('?')
-    const stateFromLink =
-      queryIndex >= 0 ? new URLSearchParams(beforeHash.slice(queryIndex + 1)).get('state') : null
+    const query = new URLSearchParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '')
+    const stateFromLink = query.get('state')
 
     // Uso único — some com o código pendente já na primeira
     // tentativa, bateu ou não (evita reaproveitar o mesmo código
@@ -125,28 +169,56 @@ async function handleGoogleAuthCallback(url: string) {
     const pending = pendingGoogleAuthState ?? takeStoredGoogleAuthState()
     pendingGoogleAuthState = null
     takeStoredGoogleAuthState()
+    const flowId = takeGoogleFlowId()
 
-    const isExpectedLogin = Boolean(
-      pending && pending.expiresAt >= Date.now() && stateFromLink && stateFromLink === pending.value
-    )
-    if (!isExpectedLogin) {
-      // Link não corresponde a um login que ESTE app pediu (código
-      // errado, ausente, ou expirado) — ignora silenciosamente em
-      // vez de logar a pessoa numa conta que pode não ser a dela.
-      // Ver o comentário grande acima sobre por que isso é
-      // necessário com um esquema de URL customizado.
+    const providerError = query.get('error_description') || query.get('error')
+    if (providerError) {
+      reportGoogleAuth(`O Google não concluiu o login: ${providerError.slice(0, 160)}`, `erro do provedor: ${providerError}`)
       return
     }
 
-    const query = new URLSearchParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '')
-    const code = query.get('code')
+    // Só aceita retorno de um login que ESTE app pediu e ainda está no
+    // prazo. Se o link trouxer um state, ele tem que bater. (Sem state no
+    // link — alguns retornos perdem esse parâmetro — a proteção continua
+    // garantida pelo PKCE: um code de outra pessoa/outro login nunca vira
+    // sessão com a chave que só este app tem.)
+    if (!pending || pending.expiresAt < Date.now()) {
+      reportGoogleAuth(
+        'O login demorou demais ou foi aberto em outra janela. Clique em "Entrar com Google" de novo.',
+        `sem login pendente (pending=${pending ? 'expirado' : 'nenhum'})`
+      )
+      return
+    }
+    if (stateFromLink && stateFromLink !== pending.value) {
+      reportGoogleAuth('Esse link de login não é deste app. Clique em "Entrar com Google" de novo.', 'state não confere')
+      return
+    }
+
     // Fluxo implícito (#access_token=...) NÃO é mais aceito: com
     // flowType 'pkce' o Supabase sempre devolve ?code=.
-    if (code && /^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
-      await supabase.auth.exchangeCodeForSession(code)
+    const code = query.get('code')
+    if (!code || !/^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
+      reportGoogleAuth('O retorno do Google veio sem o código de login. Tente de novo.', `sem code no link: ${url.slice(0, 80)}`)
+      return
     }
-  } catch {
-    // best-effort — um link malformado não deve derrubar o app
+    const linkFlowId = query.get('sb_flow_id')
+    const useFlowId = linkFlowId && /^[A-Za-z0-9_-]{1,128}$/.test(linkFlowId) ? linkFlowId : flowId
+    let { error } = await supabase.auth.exchangeCodeForSession(code, useFlowId ? { flowId: useFlowId } : undefined)
+    // A chave do fluxo pode ter ficado só no lugar "antigo" (versões do
+    // supabase-js) — tenta sem o id antes de desistir.
+    if (error && useFlowId && /verifier/i.test(error.message)) {
+      ;({ error } = await supabase.auth.exchangeCodeForSession(code))
+    }
+    if (error) {
+      reportGoogleAuth(
+        `Não foi possível concluir o login com o Google (${traduzErro(error.message)}). Tente de novo.`,
+        `exchangeCodeForSession falhou: ${error.name ?? ''} ${error.message}`
+      )
+      return
+    }
+    reportGoogleAuth(null, 'login concluído')
+  } catch (err) {
+    reportGoogleAuth('Não foi possível concluir o login com o Google. Tente de novo.', `exceção: ${(err as Error)?.message ?? err}`)
   }
 }
 
@@ -386,6 +458,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         pendingGoogleAuthState = null
         return { error: error ? traduzErro(error.message) : 'Não foi possível abrir o login do Google.' }
       }
+      storeGoogleFlowId((data as { flowId?: string | null }).flowId ?? null)
       try {
         const { Browser } = await import('@capacitor/browser')
         await Browser.open({ url: data.url })
@@ -415,6 +488,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         pendingGoogleAuthState = null
         return { error: traduzErro(error.message) }
       }
+      storeGoogleFlowId((data as { flowId?: string | null } | null)?.flowId ?? null)
       if (data?.url) window.open(data.url, '_blank')
       return { error: null }
     }

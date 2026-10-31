@@ -36,7 +36,7 @@ Não rode esse workflow de novo depois — ele criaria uma chave diferente.
 Supabase → **Authentication → URL Configuration → Redirect URLs → Add URL**:
 
 ```
-com.mamacosvoip.app://auth-callback
+com.mamacosvoip.app://auth-callback**
 ```
 
 (É assim que o Google devolve o login pro app do celular.)

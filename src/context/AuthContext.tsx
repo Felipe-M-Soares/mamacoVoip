@@ -17,7 +17,11 @@ import { unregisterPushToken } from '../lib/pushNotifications'
 // um navegador comum não tem como abrir uma janela do Electron
 // diretamente. Só é usado dentro do app desktop; no navegador (site),
 // o próprio window.location.origin já funciona como redirecionamento.
-const GOOGLE_AUTH_REDIRECT_ELECTRON = 'mamacovoip://auth-callback'
+// (o link que chega no app é mamacovoip://auth-callback?code=...&state=...)
+// Página do site que recebe o retorno do Google e abre o app (ver
+// public/auth/desktop.html). Coberta pelo "https://mamaco-voip.vercel.app/**"
+// que já está em Redirect URLs no Supabase.
+const GOOGLE_AUTH_BRIDGE_ELECTRON = `${PUBLIC_WEB_URL}/auth/desktop.html`
 // App Android (Capacitor): o mesmo id do app como esquema de link.
 const GOOGLE_AUTH_REDIRECT_MOBILE = 'com.mamacosvoip.app://auth-callback'
 
@@ -394,10 +398,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isElectron()) {
       const state = crypto.randomUUID()
       pendingGoogleAuthState = { value: state, expiresAt: Date.now() + GOOGLE_AUTH_STATE_TTL_MS }
+      // Guardado também no armazenamento: se o Windows abrir o app de novo
+      // pelo link (app fechado no meio), o código continua valendo.
+      storeGoogleAuthState(pendingGoogleAuthState)
 
+      // Volta por uma página https do site (public/auth/desktop.html), que
+      // repassa pro app pelo link mamacovoip://. Antes o Supabase tentava
+      // voltar direto pro mamacovoip:// — se esse endereço não estivesse
+      // liberado em "Redirect URLs", a pessoa caía no site e o login
+      // nunca chegava no app.
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: `${GOOGLE_AUTH_REDIRECT_ELECTRON}?state=${state}`, skipBrowserRedirect: true },
+        options: { redirectTo: `${GOOGLE_AUTH_BRIDGE_ELECTRON}?state=${state}`, skipBrowserRedirect: true },
       })
       if (error) {
         pendingGoogleAuthState = null

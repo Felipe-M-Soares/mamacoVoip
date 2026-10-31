@@ -6,6 +6,7 @@ import { GoogleSignInButton } from '../components/ui/GoogleSignInButton'
 import { MobileDownloadBanner } from '../components/ui/MobileDownloadBanner'
 import { safeRedirectPath, validateEmail } from '../lib/authValidation'
 import { checkRateLimit } from '../lib/rateLimit'
+import { useRedirectWhenSignedIn } from '../hooks/useRedirectWhenSignedIn'
 
 export function Login() {
   const { signIn } = useAuth()
@@ -15,6 +16,9 @@ export function Login() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [confirmedBanner, setConfirmedBanner] = useState(false)
+  // Login com Google no app de PC/celular: a sessão chega sem recarregar.
+  // (Durante o login por senha quem navega é o handleSubmit.)
+  useRedirectWhenSignedIn(!loading)
 
   useEffect(() => {
     try {

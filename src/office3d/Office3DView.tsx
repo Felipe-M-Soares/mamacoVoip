@@ -84,17 +84,27 @@ function cleanSkin(raw: unknown): OfficeSkin | null {
   }
 }
 
+const skinTime = (raw: unknown) => {
+  const t = raw && typeof raw === 'object' ? Number((raw as { _at?: unknown })._at) : 0
+  return Number.isFinite(t) ? t : 0
+}
+// O visual mais NOVO vence (o do aparelho ou o do perfil). Antes o do perfil
+// sempre ganhava — e o perfil carregado no login não sabe da troca que você
+// acabou de fazer: ao sair pro clássico e voltar, o mamaco "perdia" o fone,
+// o chapéu etc.
 function loadSkin(userId: string, fromProfile: unknown): OfficeSkin {
-  const p = cleanSkin(fromProfile)
-  if (p) return p
+  let local: OfficeSkin | null = null, localAt = 0
   try {
     const raw = localStorage.getItem(SKIN_KEY)
-    const local = raw ? cleanSkin(JSON.parse(raw)) : null
-    if (local) return local
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null
+    local = cleanSkin(parsed)
+    localAt = skinTime(parsed)
   } catch {
-    // sem armazenamento: usa o padrão
+    // sem armazenamento: fica com o do perfil
   }
-  return defaultSkin(userId)
+  const p = cleanSkin(fromProfile)
+  if (p && (!local || skinTime(fromProfile) > localAt)) return p
+  return local ?? p ?? defaultSkin(userId)
 }
 
 const isTyping = () => {
@@ -449,7 +459,7 @@ export function Office3DView({
   useEffect(() => {
     officeRef.current?.setMySkin(skin)
     try {
-      localStorage.setItem(SKIN_KEY, JSON.stringify(skin))
+      localStorage.setItem(SKIN_KEY, JSON.stringify({ ...skin, _at: Date.now() }))
     } catch {
       // sem armazenamento
     }
@@ -457,7 +467,7 @@ export function Office3DView({
       firstSkinRef.current = false
       // perfil ainda sem visual: sobe o que está no aparelho (1 vez)
       if (profile && !cleanSkin(profile.office_skin) && user) {
-        void supabase.from('profiles').update({ office_skin: { ...skin } }).eq('id', user.id)
+        void supabase.from('profiles').update({ office_skin: { ...skin, _at: Date.now() } }).eq('id', user.id)
       }
       return
     }
@@ -466,6 +476,7 @@ export function Office3DView({
     skinSaveRef.current = setTimeout(() => {
       const clean: Record<string, unknown> = {}
       for (const k of SKIN_FIELDS) if (skin[k] !== undefined && skin[k] !== null) clean[k] = skin[k]
+      clean._at = Date.now()
       void supabase.from('profiles').update({ office_skin: clean }).eq('id', user.id)
     }, 1500)
     // eslint-disable-next-line react-hooks/exhaustive-deps

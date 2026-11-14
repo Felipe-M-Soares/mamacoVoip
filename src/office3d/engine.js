@@ -4754,7 +4754,21 @@ function createOffice(opts) {
         if (s) a.sitOn(s, true);
         else { const z = key === 'offline' ? ROOMS['special:offline'] : null; const [x, zz] = nearestFree(...(z ? z.center : [3, 6])); a.pos.set(x, 0, zz); }
       } else {
-        a.goTo(0, 0, { seat: s, run: key.startsWith('voice:') });
+        // Entrou numa call: aparece na porta da sala e entra (antes atravessava
+        // o escritório inteiro andando e demorava pra "chegar" na sala).
+        // Outras mudanças longe demais: já aparece sentado no lugar novo.
+        const R = key.startsWith('voice:') ? ROOMS[key.slice(6)] : null;
+        const [ax, az] = seatApproach(s);
+        const far = Math.hypot(a.pos.x - ax, a.pos.z - az);
+        if (R?.door && far > 5) {
+          if (a.seat) { a.seat.occupant = null; a.seat = null; }
+          a.settling = false; a.standFrom = null; a.path = []; a.goal = null;
+          a.m.sitting = false; a.m.lying = false; a.m.typing = false; a.m.mood = 'normal'; a.m.sway = false; a.m.sitK = 0;
+          a.pos.set(R.door[0], 0, R.door[1]);
+          a.emote('✨');
+          a.goTo(0, 0, { seat: s, run: true });
+        } else if (far > 22) a.sitOn(s, true);
+        else a.goTo(0, 0, { seat: s, run: !!R });
       }
     }
     // você: entrou numa call pelo modo clássico → aparece sentado na sala
@@ -5551,7 +5565,6 @@ function createOffice(opts) {
       for (const a of agents.values()) a.destroy();
       scene.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); } });
       RB_CACHE.clear();
-      pmrem.dispose();
       renderer.dispose();
       root.remove();
     },

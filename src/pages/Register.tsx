@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { useRedirectWhenSignedIn } from '../hooks/useRedirectWhenSignedIn'
 import { GoogleSignInButton } from '../components/ui/GoogleSignInButton'
 import { MobileDownloadBanner } from '../components/ui/MobileDownloadBanner'
 import { AuthAlert, AuthDivider, AuthField, AuthHeader, AuthIcons, AuthShell, DesktopDownloadChip } from './AuthShell'
@@ -28,6 +29,8 @@ export function Register() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [confirmationSent, setConfirmationSent] = useState(false)
+  // Cadastro pelo Google no app de PC/celular: a sessão chega sem recarregar.
+  useRedirectWhenSignedIn(!loading && !confirmationSent)
 
   const termsError = 'Você precisa aceitar os Termos de Uso e a Política de Privacidade pra continuar.'
   const adultError = 'O Mamacos Voip é só para maiores de 18 anos. Confirme que você tem 18 anos ou mais pra continuar.'

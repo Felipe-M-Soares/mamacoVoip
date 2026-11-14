@@ -135,6 +135,14 @@ declare global {
       // setDisplayMediaRequestHandler.
       getScreenShareSources: () => Promise<ScreenShareSourcesPayload>
       copyText?: (text: string) => Promise<boolean>
+      // Mensagem privada chegando — opcionais (preload antigo não tem).
+      showNotification?: (payload: {
+        title: string
+        body: string
+        target?: { kind: 'dm' | 'group' | 'channel'; id: string; serverId?: string }
+      }) => Promise<boolean>
+      onNotificationClick?: (callback: (target: { kind: 'dm' | 'group' | 'channel'; id: string; serverId?: string }) => void) => () => void
+      flashWindow?: () => void
       setGlobalKeybinds?: (list: { id: string; accelerator: string }[]) => Promise<{ failed: string[] }>
       onKeybind?: (callback: (id: string) => void) => () => void
       // Áudio automático conforme o tipo da fonte (tela cheia = sistema,

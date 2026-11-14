@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { storagePathsForBucket } from './storageRef'
+import { clearAttachmentCache } from './attachmentCache'
 
 // URLs assinadas dos anexos (buckets privados desde a migration 017).
 //
@@ -46,6 +47,7 @@ export function invalidateSignedUrl(bucket: string, path: string) {
 
 export function clearSignedUrlCache() {
   cache.clear()
+  clearAttachmentCache()
 }
 
 async function flush() {

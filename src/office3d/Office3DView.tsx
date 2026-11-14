@@ -24,6 +24,7 @@ import { useConversations } from '../hooks/useConversations'
 import { useFriendsUsage } from '../hooks/useAppUsage'
 import { useOfficeRealtime, OFFICE_EMOTES, type OfficeSignal } from './useOfficeRealtime'
 import { loadMinigameRanking, submitMinigameResult } from './minigameRanking'
+import { openKartNet, type KartRacer } from './kartRace'
 import { ACHIEVEMENTS, bumpStat, loadStats, statsFromResult, type Achievement } from './achievements'
 import {
   createOffice,
@@ -35,6 +36,7 @@ import {
   skinThumb,
   HAT_LABELS,
   type MinigameResult,
+  type KartNetOpts,
   type Office,
   type OfficeCategory,
   type OfficeMember,
@@ -133,6 +135,24 @@ function saveLastPos(serverId: string, pos: { x: number; z: number; yaw: number 
 // achava "games" primeiro e o canal Minigames virava uma sala comum)
 const isMinigamesName = (name: string) =>
   /mini ?games?|fliperama|arcade/.test(name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase())
+
+// "plim" do convite de corrida (curtinho, sem arquivo)
+function SFX_PING() {
+  try {
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AC) return
+    const c = new AC(), t = c.currentTime
+    for (const [f, d] of [[784, 0], [1175, 0.12]] as const) {
+      const o = c.createOscillator(), g = c.createGain()
+      o.type = 'triangle'; o.frequency.value = f
+      g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.08, t + d + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.25)
+      o.connect(g); g.connect(c.destination); o.start(t + d); o.stop(t + d + 0.3)
+    }
+    setTimeout(() => void c.close(), 800)
+  } catch {
+    // sem som
+  }
+}
 
 const isTyping = () => {
   const el = document.activeElement as HTMLElement | null
@@ -326,13 +346,15 @@ export function Office3DView({
   const onSignal = useCallback((s: OfficeSignal) => {
     const office = officeRef.current
     if (!office) return
+    if (s.kind === 'kart') { kartSignalRef.current(s.from, s.type, s.d); return }
     if (s.kind === 'emote') office.emote(s.from, s.emoji)
     else {
       office.emote(s.from, '👋')
       if (s.to === user?.id) office.toast(`${nameOfIdRef.current(s.from)} acenou pra você 👋`)
     }
   }, [user?.id])
-  const { sendEmote, sendWave } = useOfficeRealtime(server.id, user?.id, onSignal)
+  const kartSignalRef = useRef<(from: string, type: string, d: Record<string, unknown>) => void>(() => {})
+  const { sendEmote, sendWave, sendKart } = useOfficeRealtime(server.id, user?.id, onSignal)
   const doEmote = useCallback((emoji: string) => {
     if (!user) return
     officeRef.current?.emote(user.id, emoji)
@@ -346,10 +368,14 @@ export function Office3DView({
   const latest = useRef({ channels, voice, layout, onSelectChannel, myRoom, live: sharers.length > 0, toggleTv, roster, members, share: (text: string) => void shareRef.current(text), onStat, onGameResult })
   latest.current = { channels, voice, layout, onSelectChannel, myRoom, live: sharers.length > 0, toggleTv, roster, members, share: (text: string) => void shareRef.current(text), onStat, onGameResult }
 
-  function openGames(game: string | null) {
+  function openGames(game: string | null, kartNet?: KartNetOpts | null, onDone?: () => void) {
+    // kart com gente na mesma call: pergunta se é sozinho ou com a sala
+    // kart com gente na mesma call: todo mundo da sala entra (bots completam até 6)
+    if (game === 'kart' && kartNet === undefined && roomPeers.length > 0 && !kartLobbyRef.current) { hostKartRace(); return }
     officeRef.current?.setPaused(true)
     openMinigames(hostRef.current!, game, {
-      onClose: () => officeRef.current?.setPaused(false),
+      onClose: () => { officeRef.current?.setPaused(false); onDone?.() },
+      kartNet,
       onShare: (text) => latest.current.share(text),
       onResult: (r) => latest.current.onGameResult(r),
       ranking: { load: (g) => loadMinigameRanking(g, user?.id) },
@@ -359,6 +385,102 @@ export function Office3DView({
   }
   const openGamesRef = useRef(openGames)
   openGamesRef.current = openGames
+
+  // ---------- Corrida de kart com a sala ----------
+  // Quem está na MESMA call (sala) que você e com o Escritório aberto
+  // recebe o convite; até 4 pilotos. O convite/entrada/largada vai pelo
+  // canal do Escritório; as posições, por um canal só dos pilotos.
+  type KartLobby = { race: string; host: string; hostName: string; room: string; racers: KartRacer[]; role: 'host' | 'guest' | 'invited'; until: number }
+  const [kartChoice, setKartChoice] = useState(false)
+  const [kartLobby, setKartLobby] = useState<KartLobby | null>(null)
+  const [nowTick, setNowTick] = useState(0)
+  const kartLobbyRef = useRef(kartLobby)
+  kartLobbyRef.current = kartLobby
+  const roomPeers = useMemo(
+    () => (myRoom ? [...roster.entries()].filter(([id, ch]) => ch === myRoom && id !== user?.id && onlineIds.has(id)).map(([id]) => id) : []),
+    [myRoom, roster, onlineIds, user?.id]
+  )
+  const myRoomRef = useRef(myRoom)
+  myRoomRef.current = myRoom
+  const meRacer = (): KartRacer => ({ id: user!.id, name: myName, skin: (officeRef.current?.getMySkin() as unknown as Record<string, unknown>) ?? null })
+  function startKartRace(lobby: KartLobby) {
+    if (!user) return
+    setKartLobby(null)
+    const net = openKartNet(server.id, lobby.race, user.id, lobby.racers)
+    openGames('kart', { me: net.me, seed: lobby.race, racers: lobby.racers.map((r) => ({ ...r, skin: cleanSkin(r.skin) })), send: net.send, on: net.on }, () => net.close())
+  }
+  function hostKartRace() {
+    if (!user || !myRoom) return
+    setKartChoice(false)
+    const race = crypto.randomUUID()
+    const lobby: KartLobby = { race, host: user.id, hostName: myName, room: myRoom, racers: [meRacer()], role: 'host', until: Date.now() + 10000 }
+    setKartLobby(lobby)
+    sendKart('invite', { race, room: myRoom, name: myName })
+  }
+  kartSignalRef.current = (from, type, d) => {
+    const L = kartLobbyRef.current
+    const race = typeof d.race === 'string' ? d.race : ''
+    if (type === 'invite') {
+      if (L || d.room !== myRoomRef.current || !race) return
+      // entra sozinho na corrida da sala (dá pra sair no "Não quero")
+      setKartLobby({ race, host: from, hostName: String(d.name || nameOfIdRef.current(from)).slice(0, 40), room: String(d.room), racers: [], role: 'guest', until: Date.now() + 10000 })
+      sendKart('join', { race, name: myName, skin: meRacer().skin })
+      SFX_PING()
+      return
+    }
+    if (!L || L.race !== race) return
+    if (type === 'join' && L.role === 'host') {
+      if (L.racers.length >= 6 || L.racers.some((r) => r.id === from)) return
+      const racers = [...L.racers, { id: from, name: String(d.name || nameOfIdRef.current(from)).slice(0, 40), skin: (d.skin as Record<string, unknown>) ?? null }]
+      setKartLobby({ ...L, racers })
+      sendKart('lobby', { race, racers })
+    } else if (type === 'leave' && L.role === 'host') {
+      const racers = L.racers.filter((r) => r.id !== from)
+      setKartLobby({ ...L, racers })
+      sendKart('lobby', { race, racers })
+    } else if (type === 'lobby' && from === L.host && Array.isArray(d.racers)) {
+      setKartLobby({ ...L, racers: d.racers as KartRacer[] })
+    } else if (type === 'start' && from === L.host && Array.isArray(d.racers)) {
+      const racers = (d.racers as KartRacer[]).slice(0, 6)
+      if (L.role === 'guest' && racers.some((r) => r.id === user?.id)) startKartRace({ ...L, racers })
+      else setKartLobby(null)
+    } else if (type === 'cancel' && from === L.host) {
+      setKartLobby(null)
+      officeRef.current?.toast('A corrida foi cancelada')
+    }
+  }
+  function launchKart() {
+    const L = kartLobbyRef.current
+    if (!L || L.role !== 'host') return
+    if (L.racers.length < 2) { sendKart('cancel', { race: L.race }); setKartLobby(null); openGames('kart', null); return }
+    sendKart('start', { race: L.race, racers: L.racers })
+    startKartRace(L)
+  }
+  // contagem do convite: o anfitrião larga sozinho no fim (se tiver gente)
+  useEffect(() => {
+    if (!kartLobby) return
+    const iv = setInterval(() => {
+      setNowTick((n) => n + 1)
+      const L = kartLobbyRef.current
+      if (!L || Date.now() < L.until) return
+      if (L.role === 'host') {
+        if (L.racers.length >= 2) launchKart()
+        else { sendKart('cancel', { race: L.race }); setKartLobby(null); openGames('kart', null) } // ninguém entrou: corre com os bots
+      } else if (Date.now() > L.until + 15000) setKartLobby(null) // anfitrião sumiu
+    }, 500)
+    return () => clearInterval(iv)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kartLobby?.race])
+  // saiu da sala da call: o convite/lobby some
+  useEffect(() => {
+    const L = kartLobbyRef.current
+    if (L && L.room !== myRoom) {
+      if (L.role === 'host') sendKart('cancel', { race: L.race })
+      else if (L.role === 'guest') sendKart('leave', { race: L.race })
+      setKartLobby(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myRoom])
 
   function focusChat() {
     setChatMode((m) => (m === 'mini' ? 'open' : m))
@@ -907,6 +1029,63 @@ export function Office3DView({
           </div>
         </div>
       )}
+
+      {kartChoice && (
+        <div className="absolute inset-0 z-[58] bg-black/55 flex items-center justify-center p-4" onClick={() => setKartChoice(false)}>
+          <div className="w-[min(380px,100%)] rounded-2xl bg-[#16131c] border border-white/10 p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+            <b className="font-display text-[19px]">🏁 Kart 3D</b>
+            <p className="text-[13px] text-mv-muted">Tem {roomPeers.length} pessoa{roomPeers.length === 1 ? '' : 's'} na call com você. Chame a sala pra correr junto (até 6 pilotos, bots completam) ou corra contra os bots.</p>
+            <button onClick={hostKartRace} className="h-11 rounded-xl font-semibold text-white bg-gradient-to-r from-rose-500 to-mv-accent">Chamar a sala pra correr</button>
+            <button onClick={() => { setKartChoice(false); openGames('kart', null) }} className="h-11 rounded-xl font-semibold bg-white/10 text-white">Correr sozinho (com bots)</button>
+          </div>
+        </div>
+      )}
+
+      {kartLobby && (() => {
+        const L = kartLobby
+        const secs = Math.max(0, Math.ceil((L.until - Date.now()) / 1000))
+        void nowTick
+        return (
+          <div className="absolute left-1/2 -translate-x-1/2 top-16 z-[57] w-[min(360px,calc(100%-2rem))] rounded-2xl bg-[#16131c]/95 border border-amber-300/30 shadow-2xl p-4 flex flex-col gap-2.5 backdrop-blur max-sm:top-28" role="status">
+            {L.role === 'invited' ? (
+              <>
+                <p className="text-[14px] font-semibold">🏁 {L.hostName} chamou a sala pra uma corrida de kart!</p>
+                <p className="text-[12px] text-mv-muted">Fecha em {secs}s</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setKartLobby({ ...L, role: 'guest' }); sendKart('join', { race: L.race, name: myName, skin: meRacer().skin }) }}
+                    className="flex-1 h-10 rounded-xl font-semibold text-white bg-gradient-to-r from-rose-500 to-mv-accent"
+                  >
+                    Entrar na corrida
+                  </button>
+                  <button onClick={() => setKartLobby(null)} className="h-10 px-3 rounded-xl font-semibold bg-white/10 text-white">Agora não</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[14px] font-semibold">🏁 {L.role === 'host' ? `Corrida com a sala · largada em ${secs}s` : `${L.hostName} chamou a sala: você está na corrida! Largada em ${secs}s`}</p>
+                <ul className="flex flex-col gap-1">
+                  {L.racers.map((r, i) => (
+                    <li key={r.id} className="flex items-center gap-2 text-[13px]"><span className="w-5 text-mv-muted">{i + 1}.</span>{r.name}{r.id === user?.id ? ' (você)' : ''}{r.id === L.host ? ' 👑' : ''}</li>
+                  ))}
+                  <li className="text-[12px] text-mv-muted">{Math.max(0, 6 - L.racers.length)} bot{6 - L.racers.length === 1 ? '' : 's'} completa{6 - L.racers.length === 1 ? '' : 'm'} a largada (6 karts)</li>
+                </ul>
+                <div className="flex gap-2">
+                  {L.role === 'host' && (
+                    <button onClick={launchKart} className="flex-1 h-10 rounded-xl font-semibold text-white bg-gradient-to-r from-rose-500 to-mv-accent">Largar agora</button>
+                  )}
+                  <button
+                    onClick={() => { sendKart(L.role === 'host' ? 'cancel' : 'leave', { race: L.race }); setKartLobby(null) }}
+                    className="h-10 px-3 rounded-xl font-semibold bg-white/10 text-white"
+                  >
+                    {L.role === 'host' ? 'Cancelar' : 'Não quero'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })()}
 
       {createChannel && (
         <CreateChannelModal categories={sortedCategories} defaultCategoryId={createChannel.categoryId} defaultType="voice" onClose={() => setCreateChannel(null)} />

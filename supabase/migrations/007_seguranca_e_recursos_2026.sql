@@ -5718,3 +5718,64 @@ revoke execute on function public.get_friends_minigame_ranking(text) from public
 grant execute on function public.get_friends_minigame_ranking(text) to authenticated;
 
 notify pgrst, 'reload schema';
+
+-- ##################################################################
+-- PARTE 33 — Corrida de kart com a sala (nov/2026)
+-- ##################################################################
+-- Tópico de broadcast `kart:<id do servidor>`: só quem está CORRENDO
+-- entra nele, e só durante a corrida (posição de cada kart ~5x/s). Fica
+-- separado do `office:` pra não mandar isso pra todo mundo do Escritório.
+-- Só membros do servidor entram e enviam. Nada é gravado no banco e nada
+-- passa pelo servidor de voz.
+create or replace function public.realtime_topic_allowed(p_topic text, p_extension text, p_write boolean)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_kind text;
+  v_id uuid;
+begin
+  if auth.uid() is null or not public.mfa_requirement_met() then
+    return false;
+  end if;
+  if p_extension is null or p_extension not in ('broadcast', 'presence') then
+    return false;
+  end if;
+
+  -- postgres_changes em canal privado: só leitura (join), nunca envio.
+  if p_topic ~ '^pgc:[A-Za-z0-9_.:-]{1,200}$' then
+    return not coalesce(p_write, true);
+  end if;
+
+  if p_topic = 'presence:online' then
+    return not p_write or p_extension = 'presence';
+  end if;
+
+  if p_topic is null
+     or p_topic !~ '^(voice|typing|office|kart):[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+    return false;
+  end if;
+  v_kind := split_part(p_topic, ':', 1);
+  v_id := split_part(p_topic, ':', 2)::uuid;
+
+  if v_kind = 'voice' then
+    return (not p_write or p_extension = 'presence') and public.can_access_voice_room(v_id);
+  end if;
+  if v_kind = 'typing' then
+    return (not p_write or p_extension = 'broadcast') and public.can_access_typing_topic(v_id);
+  end if;
+  -- Escritório (emotes/aceno/convite de corrida) e corrida de kart
+  if v_kind in ('office', 'kart') then
+    return (not p_write or p_extension = 'broadcast') and public.is_server_member(v_id, auth.uid());
+  end if;
+  return false;
+end;
+$$;
+
+revoke execute on function public.realtime_topic_allowed(text, text, boolean) from public, anon;
+grant execute on function public.realtime_topic_allowed(text, text, boolean) to authenticated;
+
+notify pgrst, 'reload schema';

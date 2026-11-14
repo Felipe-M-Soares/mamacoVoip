@@ -132,7 +132,17 @@ export function openMinigames(container: HTMLElement, game?: string | null, opts
   ranking?: { load: (game: string) => Promise<{ rows: { name: string; value: number; me: boolean; avatarUrl: string | null }[]; error?: boolean }> }
   skin?: OfficeSkin
   name?: string
+  /** corrida de kart com a sala (rede); sem isso é você + bots */
+  kartNet?: KartNetOpts | null
 }): { close: () => void }
+export interface KartNetOpts {
+  me: string
+  /** semente dos bots (a mesma pra todos da corrida) */
+  seed?: string
+  racers: { id: string; name: string; skin?: OfficeSkin | null }[]
+  send: (type: string, d: Record<string, unknown>) => void
+  on: (h: (from: string, type: string, d: Record<string, unknown>) => void) => () => void
+}
 export function defaultSkin(id: string): OfficeSkin
 /** palco com o seu mamaco girando (tela "Meu mamaco") */
 export function createSkinPreview(container: HTMLElement, skin: OfficeSkin): { set(skin: OfficeSkin): void; dispose(): void }

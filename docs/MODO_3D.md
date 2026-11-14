@@ -103,7 +103,7 @@ dados que o app já busca:
 Automática, como sempre: push na `main` → app de PC atualiza sozinho, site
 (Vercel) e APK também.
 
-**Uma vez só:** rode as **PARTES 30, 31 e 32** do
+**Uma vez só:** rode as **PARTES 30 a 33** do
 `supabase/migrations/007_seguranca_e_recursos_2026.sql` no SQL Editor do
 Supabase (ou o arquivo inteiro — ele é idempotente). A 30 liga o telão de
 tempo de uso; a 31 sincroniza o visual do mamaco entre todo mundo e libera
@@ -143,6 +143,11 @@ aberto (Supabase, não o servidor de voz da Oracle).
   "🎵 som" quando alguém toca um som do soundboard na sua call.
 - **Música ambiente** (🎵, desligada por padrão) que muda com a sala, e
   **dia/noite** pelo horário de Brasília.
+- **Kart com a sala:** apertou F no kart com gente na mesma call → todo
+  mundo da sala (com o Escritório aberto) entra na corrida, até 6 pilotos,
+  e bots completam os 6 karts. Pista de ~1,3 km com floresta, praia,
+  deserto e cidade. Posições pelo Realtime (tópico `kart:`, PARTE 33),
+  só entre os pilotos e só durante a corrida.
 - **Minigames:** Kart 3D, Chuva de Banana 3D (seu mamaco com a cesta),
   Memória, Reflexo e Cobra, com **ranking entre amigos** (o seu melhor
   resultado sobe sozinho quando você bate o recorde). **Conquistas** na aba

@@ -5857,7 +5857,7 @@ const MG_AUDIO = (() => {
 })();
 
 function fmtRace(ms) { const s = ms / 1000; return `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, '0')}`; }
-function openMinigames(container, game = null, { onClose, onShare, onResult, ranking = null, skin = null, name = 'Você' } = {}) {
+function openMinigames(container, game = null, { onClose, onShare, onResult, ranking = null, skin = null, name = 'Você', kartNet = null } = {}) {
   MG_RESULT = onResult || null;
   if (!document.getElementById('mg-css')) { const st = document.createElement('style'); st.id = 'mg-css'; st.textContent = MG_CSS; document.head.appendChild(st); }
   const wrap = document.createElement('div');
@@ -5952,7 +5952,9 @@ function openMinigames(container, game = null, { onClose, onShare, onResult, ran
       wrap.style.display = 'none'; kartOpen = true;
       const onExit = () => { kartOpen = false; stopGame = null; if (game === id) close(); else { wrap.style.display = ''; menu(); } };
       const onRanking = ranking ? () => { kartOpen = false; stopGame = null; wrap.style.display = ''; rankingView(RANK_KEY[id]); } : null;
-      stopGame = (id === 'kart' ? openKart3D : openBanana3D)(container, { skin, name, onShare, onExit, onResult, onRanking });
+      // corrida com a sala: só na primeira largada (depois do menu é solo)
+      const net = id === 'kart' ? kartNet : null; kartNet = null;
+      stopGame = (id === 'kart' ? openKart3D : openBanana3D)(container, { skin, name, onShare, onExit, onResult, onRanking, net });
       return;
     }
     const bar = frameUI(id);
@@ -6210,7 +6212,7 @@ const KART_CSS = `
 @media (pointer:coarse){.k3d .touch{display:block}.k3d .keys{display:none}.k3d .mini{bottom:170px;width:120px;height:120px}}
 `;
 
-function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, onResult, onRanking } = {}) {
+function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, onResult, onRanking, net = null } = {}) {
   if (!document.getElementById('k3d-css')) { const st = document.createElement('style'); st.id = 'k3d-css'; st.textContent = KART_CSS; document.head.appendChild(st); }
   const wrap = document.createElement('div');
   wrap.className = 'k3d';
@@ -6236,7 +6238,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x8fd0f5);
   scene.fog = new THREE.Fog(0x8fd0f5, 90, 260);
-  const camera = new THREE.PerspectiveCamera(68, 1, 0.1, 500);
+  const camera = new THREE.PerspectiveCamera(68, 1, 0.1, 700);
   scene.add(new THREE.HemisphereLight(0xffffff, 0x6f8f55, 1.25));
   const sun = new THREE.DirectionalLight(0xfff2dc, 1.9);
   sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
@@ -6247,14 +6249,15 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   const T = (c, extra = {}) => new THREE.MeshToonMaterial({ color: c, gradientMap: grad, ...extra });
 
   // ---------- Pista ----------
-  const CTRL = [[0, 0], [60, -6], [110, 20], [118, 70], [80, 98], [40, 78], [10, 110], [-40, 118], [-82, 80], [-70, 30], [-95, -10], [-60, -45]];
+  // pista grande (~1,3 km) passando por 4 cenários: floresta, praia, deserto e cidade
+  const CTRL = [[0, 0], [70, -12], [140, 0], [190, 40], [196, 105], [160, 150], [105, 140], [70, 175], [40, 225], [-20, 240], [-80, 215], [-110, 165], [-90, 120], [-140, 85], [-170, 30], [-150, -30], [-95, -60], [-45, -40]];
   const curve = new THREE.CatmullRomCurve3(CTRL.map(([x, z], i) => new THREE.Vector3(x, 0, z)), true, 'centripetal');
-  const N = 600;
+  const N = 1100;
   const P = [], TG = [], SD = [];
   for (let i = 0; i < N; i++) {
     const u = i / N;
     const p = curve.getPointAt(u);
-    p.y = 3.2 * Math.sin(u * Math.PI * 2 * 2) + 1.6 * Math.sin(u * Math.PI * 2 * 5 + 1); // morrinhos
+    p.y = 3.6 * Math.sin(u * Math.PI * 2 * 3) + 1.8 * Math.sin(u * Math.PI * 2 * 7 + 1); // morrinhos
     P.push(p);
   }
   // a pista nunca desce abaixo do chão (antes os vales ficavam embaixo da
@@ -6297,7 +6300,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   ribbon(W / 2 + 1.1, W / 2, T(0xffffff, { map: curb }), 0.06, 2);
   ribbon(-W / 2, -W / 2 - 1.1, T(0xffffff, { map: curb }), 0.06, 2);
   // grama + morrinhos ao redor
-  const grass = new THREE.Mesh(new THREE.CircleGeometry(400, 64), T(0x7cc35a));
+  const grass = new THREE.Mesh(new THREE.CircleGeometry(700, 72), T(0x7cc35a));
   grass.rotation.x = -Math.PI / 2; grass.position.y = -1.2; grass.receiveShadow = true; scene.add(grass);
   // aterro embaixo da pista (morrinhos)
   ribbon(W / 2 + 6, W / 2 + 1.1, T(0x6fb34e), -0.05, 8);
@@ -6323,29 +6326,78 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     arch.position.copy(p); arch.rotation.y = Math.atan2(TG[0].x, TG[0].z);
     scene.add(arch);
   }
-  // árvores, cones e torcida (enfeite)
-  const treeTop = T(0x3f9b46), trunk = T(0x7a5232), coneM = T(0xff7a1a);
+  // ---------- Cenários: floresta → praia → deserto → cidade ----------
+  const zoneOf = (k) => { const u = k / N; return u < 0.25 ? 'forest' : u < 0.5 ? 'beach' : u < 0.75 ? 'desert' : 'city'; };
   let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 140; i++) {
-    const k = Math.floor(rnd() * N), side = rnd() < 0.5 ? -1 : 1, off = W / 2 + 9 + rnd() * 40;
-    const p = P[k].clone().addScaledVector(SD[k], side * off);
-    // não pode cair em outro trecho da pista
-    let ok = true; for (let j = 0; j < N; j += 6) if (P[j].distanceTo(p) < W / 2 + 7) { ok = false; break; }
-    if (!ok) continue;
-    const g = new THREE.Group();
-    const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 2.4, 8), trunk); tr.position.y = 1.2;
-    const s = 1.6 + rnd() * 1.4;
-    const tp = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), treeTop); tp.position.y = 2.4 + s * 0.7;
-    tr.castShadow = tp.castShadow = true; g.add(tr, tp);
+  const offTrack = (p, m = 7) => { for (let j = 0; j < N; j += 5) if ((P[j].x - p.x) ** 2 + (P[j].z - p.z) ** 2 < (W / 2 + m) ** 2) return false; return true; };
+  // chão de cada cenário (manchas grandes por baixo)
+  const GROUND = { beach: [0xeedc9f, -1.19], desert: [0xdba268, -1.185], city: [0xa3a8b0, -1.18] };
+  for (let k = 0; k < N; k += 22) {
+    const z = zoneOf(k); if (!GROUND[z]) continue;
+    const d = new THREE.Mesh(new THREE.CircleGeometry(52, 24), T(GROUND[z][0]));
+    d.rotation.x = -Math.PI / 2; d.position.set(P[k].x, GROUND[z][1], P[k].z); d.receiveShadow = true; scene.add(d);
+  }
+  // mar do lado de fora da praia
+  { const k = Math.floor(N * 0.37); for (const side of [1, -1]) { const c = P[k].clone().addScaledVector(SD[k], side * 95); if (!offTrack(c, 70)) continue;
+      const sea = new THREE.Mesh(new THREE.CircleGeometry(80, 40), new THREE.MeshToonMaterial({ color: 0x3fa9d8, gradientMap: grad, transparent: true, opacity: 0.92 }));
+      sea.rotation.x = -Math.PI / 2; sea.position.set(c.x, -1.12, c.z); scene.add(sea); break; } }
+  const M3 = {
+    trunk: T(0x7a5232), leaf: T(0x3f9b46), leaf2: T(0x2f8a3e), palmT: T(0x9a6b3c), palmL: T(0x46b05a), cactus: T(0x4f9a4a),
+    rock: T(0xc0763e), rock2: T(0xa65f30), sand: T(0xf2e2b0), glass: T(0x9cc7e8), wall: [T(0xe9e1d3), T(0xd7dde5), T(0xf2c38b), T(0xb9c7d9)],
+    umb: [T(0xff5a5f), T(0x2ec4b6), T(0xffd166), T(0x8e7dff)], seat: T(0x3b82f6), crowd: [T(0xf4511e), T(0xffffff), T(0x22c55e), T(0xeab308), T(0xec4899)],
+  };
+  const GEO = { trunk: new THREE.CylinderGeometry(0.35, 0.45, 2.4, 8), crown: new THREE.IcosahedronGeometry(1, 0), seg: new THREE.CylinderGeometry(0.28, 0.34, 1, 8), frond: new THREE.ConeGeometry(0.5, 3.4, 4), cact: new THREE.CylinderGeometry(0.45, 0.5, 1, 10), rock: new THREE.DodecahedronGeometry(1, 0), box: new THREE.BoxGeometry(1, 1, 1), ball: new THREE.SphereGeometry(0.3, 8, 6) };
+  const add = (mesh, x, y, z, sx = 1, sy = 1, sz = 1, g) => { mesh.position.set(x, y, z); mesh.scale.set(sx, sy, sz); mesh.castShadow = true; (g || scene).add(mesh); return mesh; };
+  function tree(p) { const g = new THREE.Group(); const s2 = 1.6 + rnd() * 1.4; add(new THREE.Mesh(GEO.trunk, M3.trunk), 0, 1.2, 0, 1, 1, 1, g); add(new THREE.Mesh(GEO.crown, rnd() < 0.5 ? M3.leaf : M3.leaf2), 0, 2.4 + s2 * 0.7, 0, s2, s2, s2, g); g.position.set(p.x, -1.2, p.z); scene.add(g); }
+  function palm(p) {
+    const g = new THREE.Group(); const h = 5 + rnd() * 3, lean = (rnd() - 0.5) * 0.5;
+    for (let i = 0; i < 6; i++) { const m = add(new THREE.Mesh(GEO.seg, M3.palmT), Math.sin(lean) * i * 0.3, (i + 0.5) * h / 6, 0, 1, h / 6, 1, g); m.rotation.z = -lean * 0.4; }
+    for (let i = 0; i < 7; i++) { const piv = new THREE.Group(); piv.position.set(Math.sin(lean) * 1.8, h, 0); piv.rotation.y = (i / 7) * Math.PI * 2; const f = add(new THREE.Mesh(GEO.frond, M3.palmL), 1.4, -0.3, 0, 1, 1, 0.3, piv); f.rotation.z = -1.25; g.add(piv); }
     g.position.set(p.x, -1.2, p.z); scene.add(g);
   }
+  function umbrella(p) { const g = new THREE.Group(); add(new THREE.Mesh(GEO.seg, M3.sand), 0, 1.2, 0, 0.25, 2.4, 0.25, g); const c = add(new THREE.Mesh(new THREE.ConeGeometry(1.8, 0.8, 10), M3.umb[Math.floor(rnd() * 4)]), 0, 2.6, 0, 1, 1, 1, g); c.castShadow = true; add(new THREE.Mesh(GEO.box, M3.umb[Math.floor(rnd() * 4)]), 1.3, 0.1, 0.4, 1.8, 0.1, 0.9, g); g.position.set(p.x, -1.2, p.z); scene.add(g); }
+  function cactus(p) {
+    const g = new THREE.Group(); const h = 2.5 + rnd() * 2.5;
+    add(new THREE.Mesh(GEO.cact, M3.cactus), 0, h / 2, 0, 1, h, 1, g);
+    for (const sd of [-1, 1]) if (rnd() < 0.75) { const y = h * (0.4 + rnd() * 0.3); add(new THREE.Mesh(GEO.cact, M3.cactus), sd * 0.8, y, 0, 0.6, 0.35 * 2, 0.6, g).rotation.z = Math.PI / 2; add(new THREE.Mesh(GEO.cact, M3.cactus), sd * 1.15, y + 0.6, 0, 0.6, 1.2, 0.6, g); }
+    g.position.set(p.x, -1.2, p.z); scene.add(g);
+  }
+  function rock(p, big = false) { const s2 = big ? 6 + rnd() * 6 : 1 + rnd() * 2; const m = add(new THREE.Mesh(GEO.rock, rnd() < 0.5 ? M3.rock : M3.rock2), p.x, -1.2 + s2 * (big ? 0.9 : 0.5), p.z, s2, s2 * (big ? 1.6 : 0.8), s2); m.rotation.y = rnd() * 6; }
+  const winTex = tex(64, 128, (g, w, h) => { g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h); g.fillStyle = '#7fa8cc'; for (let y = 6; y < h - 4; y += 14) for (let x = 6; x < w - 4; x += 16) g.fillRect(x, y, 10, 9); });
+  function building(p) {
+    const w = 8 + rnd() * 8, d = 8 + rnd() * 8, h = 10 + rnd() * 28;
+    const mat = new THREE.MeshToonMaterial({ color: M3.wall[Math.floor(rnd() * 4)].color, gradientMap: grad, map: winTex });
+    const b = add(new THREE.Mesh(GEO.box, mat), p.x, -1.2 + h / 2, p.z, w, h, d); b.rotation.y = rnd() * Math.PI;
+    add(new THREE.Mesh(GEO.box, M3.rock2), p.x, -1.2 + h + 0.4, p.z, w * 0.4, 0.8, d * 0.4).rotation.y = b.rotation.y;
+  }
+  function stand(k, side) {
+    const g = new THREE.Group();
+    for (let r = 0; r < 4; r++) { add(new THREE.Mesh(GEO.box, M3.seat), 0, 0.5 + r * 0.8, r * 1.2, 16, 0.8 + r * 0.8 * 0, 1.2, g).position.y = (r + 0.5) * 0.8;
+      for (let c = 0; c < 14; c++) if (rnd() < 0.7) add(new THREE.Mesh(GEO.ball, M3.crowd[Math.floor(rnd() * 5)]), -7.5 + c * 1.15, (r + 1) * 0.8 + 0.3, r * 1.2, 1, 1.2, 1, g); }
+    const p = P[k].clone().addScaledVector(SD[k], side * (W / 2 + 9));
+    g.position.set(p.x, P[k].y - 0.5, p.z);
+    g.rotation.y = Math.atan2(TG[k].x, TG[k].z) + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
+    scene.add(g);
+  }
+  for (let i = 0; i < 420; i++) {
+    const k = Math.floor(rnd() * N), side = rnd() < 0.5 ? -1 : 1, z = zoneOf(k);
+    const off = W / 2 + 9 + rnd() * (z === 'city' ? 45 : 55);
+    const p = P[k].clone().addScaledVector(SD[k], side * off);
+    if (!offTrack(p, z === 'city' ? 14 : 7)) continue;
+    if (z === 'forest') tree(p);
+    else if (z === 'beach') (rnd() < 0.65 ? palm : umbrella)(p);
+    else if (z === 'desert') { const r = rnd(); if (r < 0.5) cactus(p); else rock(p, r > 0.85 && off > W / 2 + 25); }
+    else if (rnd() < 0.55 && off > W / 2 + 16) building(p); else tree(p);
+  }
+  for (const k of [Math.floor(N * 0.8), Math.floor(N * 0.88), Math.floor(N * 0.03)]) stand(k, offTrack(P[k].clone().addScaledVector(SD[k], W / 2 + 9), 8) ? 1 : -1);
+  const coneM = T(0xff7a1a);
   for (let i = 0; i < N; i += 25) for (const side of [-1, 1]) {
     const p = P[i].clone().addScaledVector(SD[i], side * (W / 2 + 2));
     const c = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 10), coneM); c.position.set(p.x, P[i].y + 0.45, p.z); c.castShadow = true; scene.add(c);
   }
   // placas de turbo
   const boostTex = tex(64, 128, (g, w, h) => { g.fillStyle = '#ff9f1a'; g.fillRect(0, 0, w, h); g.fillStyle = '#fff3c4'; for (let y = 0; y < 3; y++) { g.beginPath(); g.moveTo(8, 34 + y * 36); g.lineTo(w / 2, 10 + y * 36); g.lineTo(w - 8, 34 + y * 36); g.lineTo(w - 8, 46 + y * 36); g.lineTo(w / 2, 22 + y * 36); g.lineTo(8, 46 + y * 36); g.fill(); } });
-  const PADS = [120, 330, 470].map((k) => {
+  const PADS = [0.2, 0.36, 0.55, 0.78].map((f) => Math.floor(N * f)).map((k) => {
     const p = P[k], m = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 5), new THREE.MeshBasicMaterial({ map: boostTex, transparent: true }));
     m.rotation.x = -Math.PI / 2; m.rotation.z = Math.atan2(TG[k].x, TG[k].z) + Math.PI; m.position.set(p.x, p.y + 0.07, p.z); scene.add(m);
     return { k, lat: 0 };
@@ -6354,7 +6406,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   const boxTex = tex(128, 128, (g, w, h) => { const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#ff5fd2'); gr.addColorStop(0.5, '#ffd54f'); gr.addColorStop(1, '#4fc3f7'); g.fillStyle = gr; g.fillRect(0, 0, w, h); g.fillStyle = 'rgba(255,255,255,.9)'; g.font = '900 84px Sora, Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('?', w / 2, h / 2 + 6); });
   const boxMat = new THREE.MeshToonMaterial({ map: boxTex, gradientMap: grad, transparent: true, opacity: 0.9 });
   const BOXES = [];
-  for (const k of [60, 250, 410, 540]) for (const lat of [-4.5, -1.5, 1.5, 4.5]) {
+  for (const k of [0.1, 0.3, 0.46, 0.66, 0.9].map((f) => Math.floor(N * f))) for (const lat of [-4.5, -1.5, 1.5, 4.5]) {
     const m = new THREE.Mesh(new RoundedBoxGeometry(1.3, 1.3, 1.3, 2, 0.18), boxMat);
     const p = P[k].clone().addScaledVector(SD[k], lat);
     m.position.set(p.x, p.y + 1.1, p.z); m.castShadow = true; scene.add(m);
@@ -6362,10 +6414,13 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   }
 
   // ---------- Karts ----------
-  const KART_COLORS = [0xf4511e, 0x3b82f6, 0x22c55e, 0xeab308];
-  const BOT_NAMES = ['Bot Banana', 'Bot Cipó', 'Bot Coco'];
+  const KART_COLORS = [0xf4511e, 0x3b82f6, 0x22c55e, 0xeab308, 0xa855f7, 0x06b6d4];
+  const BOT_NAMES = ['Bot Banana', 'Bot Cipó', 'Bot Coco', 'Bot Manga', 'Bot Caju'];
   const BOT_SKINS = ['heroi', 'dinossauro', 'astronauta', 'ninja', 'tigre', 'pirata', 'coelho', 'robo'];
-  const pickBots = BOT_SKINS.sort(() => Math.random() - 0.5).slice(0, 3);
+  // bots iguais pra todo mundo da corrida (sorteio com a mesma semente)
+  let bseed = 0; for (const ch of String(net?.seed || Math.random())) bseed = (bseed * 31 + ch.charCodeAt(0)) >>> 0;
+  const brnd = () => ((bseed = (bseed * 1103515245 + 12345) >>> 0) / 4294967296);
+  const pickBots = [...BOT_SKINS].sort(() => brnd() - 0.5).slice(0, 5);
   function makeKart(color, driverSkin) {
     const g = new THREE.Group();
     const body = new THREE.Mesh(new RoundedBoxGeometry(1.7, 0.5, 2.5, 3, 0.18), T(color)); body.position.y = 0.55; body.castShadow = true;
@@ -6401,19 +6456,35 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   }
   const meSkin = skin ? { ...skin } : defaultSkin('voce');
   const karts = [];
+  const isHost = !net || net.racers[0]?.id === net.me;
   function spawnKarts() {
     for (const k of karts) scene.remove(k.v.g);
     karts.length = 0;
-    for (let i = 0; i < 4; i++) {
-      const v = makeKart(KART_COLORS[i], i === 0 ? meSkin : { ...defaultSkin('bot' + i), outfit: pickBots[i - 1], hat: null });
+    // Corrida com a sala (net): só gente de verdade, cada um no seu lugar do
+    // grid (ordem da lista); você é sempre karts[0]. Sozinho: você + 3 bots.
+    // Sempre 6 karts: os pilotos de verdade primeiro e bots completando.
+    // Com a sala, quem chamou (o 1º da lista) "dirige" os bots e manda a
+    // posição deles pros outros — assim os bots são iguais pra todo mundo.
+    const humans = net ? net.racers.slice(0, 6) : [];
+    const total = 6;
+    const slots = [...Array(total).keys()];
+    const meSlot = net ? humans.findIndex((r) => r.id === net.me) : 0;
+    slots.sort((a, b) => (a === meSlot ? -1 : b === meSlot ? 1 : a - b));
+    let botN = 0;
+    for (const i of slots) {
+      const r = net ? humans[i] || null : null;
+      const isMe = i === meSlot;
+      const isBot = !isMe && !r;
+      const bi = isBot ? botN++ : -1;
+      const v = makeKart(KART_COLORS[i % 6], isMe ? meSkin : r ? { ...(r.skin || defaultSkin(r.id)) } : { ...defaultSkin('bot' + bi), outfit: pickBots[bi % pickBots.length], hat: null });
       const row = Math.floor(i / 2), col = i % 2;
-      const k0 = (N - 8 - row * 7) % N;
+      const k0 = (N - 8 - row * 8) % N;
       const lat = (col ? -1 : 1) * 2.8;
       karts.push({
-        i, me: i === 0, name: i === 0 ? name : BOT_NAMES[i - 1], v,
+        i, me: isMe, bot: isBot, remote: !!(net && !isMe && (r || !isHost)), id: isMe ? net?.me || 'me' : r ? r.id : 'bot:' + bi, name: isMe ? name : r ? r.name : BOT_NAMES[bi % BOT_NAMES.length], v, lastSeen: performance.now(),
         pos: P[k0].clone().addScaledVector(SD[k0], lat), yaw: Math.atan2(TG[k0].x, TG[k0].z), velYaw: Math.atan2(TG[k0].x, TG[k0].z),
         speed: 0, k: k0, lap: 0, prog: 0, lastK: k0, done: false, time: 0, item: null, rolling: 0,
-        drift: 0, driftCharge: 0, boostT: 0, spinT: 0, hopT: 0, lane: [0, 2.5, -2.5, 0.8][i], skill: [1, 0.97, 0.94, 0.99][i], itemT: 0, bestLap: null, lapStart: 0, steerVis: 0,
+        drift: 0, driftCharge: 0, boostT: 0, spinT: 0, hopT: 0, lane: [0, 2.5, -2.5, 0.8, -1.4, 3.6][i], skill: [1, 0.97, 0.94, 0.99, 0.96, 0.95][i], itemT: 0, bestLap: null, lapStart: 0, steerVis: 0,
       });
     }
   }
@@ -6423,7 +6494,8 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   const hazards = []; // bananas no chão
   const shots = [];   // cocos voando
   const bananaMat = T(0xf7d23c), cocoMat = T(0x6b4428);
-  function dropBanana(k) {
+  function dropBanana(k, fromNet = false) {
+    if (net && !fromNet && !k.remote) net.send('b', { id: k.me ? undefined : k.id, x: +k.pos.x.toFixed(2), y: +k.pos.y.toFixed(2), z: +k.pos.z.toFixed(2), yaw: +k.yaw.toFixed(3) });
     const back = new THREE.Vector3(Math.sin(k.yaw), 0, Math.cos(k.yaw)).multiplyScalar(-2.4);
     const m = new THREE.Group();
     const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.55, 4, 10), bananaMat); b.rotation.z = 1.2; b.castShadow = true;
@@ -6433,12 +6505,14 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     scene.add(m);
     hazards.push({ m, t: 0 });
   }
-  function throwCoco(k) {
+  function throwCoco(k, fromNet = false) {
     const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 10), cocoMat); m.castShadow = true;
     const f = new THREE.Vector3(Math.sin(k.yaw), 0, Math.cos(k.yaw));
     m.position.copy(k.pos).addScaledVector(f, 2.4); m.position.y += 0.6;
     scene.add(m);
-    shots.push({ m, k: k.k, lat: lateral(k), speed: Math.max(42, k.speed + 18), t: 0, owner: k });
+    const lat = fromNet ? k.lat : lateral(k), speed = fromNet ? k.speed : Math.max(42, k.speed + 18);
+    if (net && !fromNet && !k.remote) net.send('c', { id: k.me ? undefined : k.id, x: +k.pos.x.toFixed(2), y: +k.pos.y.toFixed(2), z: +k.pos.z.toFixed(2), yaw: +k.yaw.toFixed(3), k: k.k, lat: +lat.toFixed(2), sp: +speed.toFixed(1) });
+    shots.push({ m, k: k.k, lat, speed, t: 0, owner: fromNet ? k.owner : k });
   }
   function useItem(k) {
     if (!k.item || k.rolling > 0) return;
@@ -6503,6 +6577,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
   });
   wrap.querySelector('.top').prepend(MG_AUDIO.button());
+  if (net) wrap.querySelector('[data-a="restart"]')?.remove(); // com a sala não dá pra recomeçar sozinho
   wrap.querySelector('.top').addEventListener('click', (e) => { const a = e.target.closest('button')?.dataset.a; if (a === 'exit') exit(); if (a === 'restart') reset(); });
 
   // ---------- Som (sintetizado, baixinho; segue o 🔊 e some com a janela) ----------
@@ -6596,8 +6671,61 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     return { gas: true, brake: bend > 0.9 && k.speed > 20, steer: Math.max(-1, Math.min(1, d * 2.4)), drift: false };
   }
 
+  // ---------- Corrida com a sala (estado dos outros pela rede) ----------
+  // Cada um simula o próprio kart e manda a posição ~5x/s (broadcast do
+  // Supabase, nada passa pelo servidor de voz). Os outros karts aqui só
+  // seguem esse estado, com uma previsão curtinha pra não "pular".
+  function followNet(k, dt) {
+    const s = k.net;
+    const inp = { gas: false, brake: false, steer: k.netSteer || 0, drift: false };
+    if (!s) return inp;
+    const age = Math.min(0.4, (performance.now() - s.at) / 1000);
+    const tx = s.x + Math.sin(s.yaw) * s.sp * age, tz = s.z + Math.cos(s.yaw) * s.sp * age;
+    const a = Math.min(1, dt * 12);
+    k.pos.x += (tx - k.pos.x) * a; k.pos.z += (tz - k.pos.z) * a;
+    let dy = s.yaw - k.yaw; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+    k.yaw += dy * a; k.velYaw = k.yaw;
+    k.speed = s.sp; k.k = nearest(k.pos, k.k); k.pos.y = P[k.k].y;
+    k.lap = s.lap; k.prog = s.prog; k.drift = s.drift || 0; k.boostT = s.boost ? 0.2 : 0; k.spinT = s.spin ? 0.2 : 0;
+    if (s.done && !k.done) { k.done = true; k.time = s.time; finishOrder.push(k); if (state === 'done') paintEnd?.(); }
+    k.netSteer = Math.max(-1, Math.min(1, dy * 3));
+    return inp;
+  }
+  let netSendT = 0;
+  function netTick(dt) {
+    if (!net) return;
+    netSendT -= dt;
+    const me = karts[0];
+    if (netSendT <= 0 && (state === 'race' || state === 'done' || state === 'count')) {
+      netSendT = 0.2; // 5x por segundo
+      net.send('s', { x: +me.pos.x.toFixed(2), z: +me.pos.z.toFixed(2), yaw: +me.yaw.toFixed(3), sp: +me.speed.toFixed(1), lap: me.lap, prog: me.prog, drift: me.drift, boost: me.boostT > 0, spin: me.spinT > 0, done: me.done, time: me.time });
+      if (isHost) {
+        const list = karts.filter((k) => k.bot && !k.remote).map((k) => ({ id: k.id, x: +k.pos.x.toFixed(2), z: +k.pos.z.toFixed(2), yaw: +k.yaw.toFixed(3), sp: +k.speed.toFixed(1), lap: k.lap, prog: k.prog, drift: k.drift, boost: k.boostT > 0, spin: k.spinT > 0, done: k.done, time: k.time }));
+        if (list.length) net.send('bs', { list });
+      }
+    }
+    // quem parou de mandar faz tempo saiu da corrida
+    const now = performance.now();
+    for (const k of karts) if (k.remote && !k.done && !k.gone && now - k.lastSeen > 8000 && !(k.bot && karts.some((h) => h.remote && !h.bot && !h.gone && now - h.lastSeen < 8000 && h.id === net.racers[0]?.id))) { k.gone = true; k.v.g.visible = false; k.pos.set(9999, -99, 9999); if (state === 'race') flash(`${k.name} saiu da corrida`, 1.6); }
+  }
+  const offNet = net ? net.on((from, type, d) => {
+    if (type === 'bs' && Array.isArray(d.list)) {
+      for (const b of d.list) { const bk = karts.find((x) => x.remote && x.bot && x.id === b.id); if (bk) { bk.lastSeen = performance.now(); bk.net = { ...b, at: performance.now() }; } }
+      const hk = karts.find((x) => x.remote && x.id === from); if (hk) hk.lastSeen = performance.now();
+      return;
+    }
+    const k = karts.find((x) => x.remote && x.id === (typeof d.id === 'string' ? d.id : from));
+    if (!k) return;
+    k.lastSeen = performance.now();
+    if (type === 's') k.net = { ...d, at: performance.now() };
+    if (type === 'b') dropBanana({ pos: new THREE.Vector3(d.x, d.y, d.z), yaw: d.yaw }, true);
+    if (type === 'c') throwCoco({ pos: new THREE.Vector3(d.x, d.y, d.z), yaw: d.yaw, k: d.k, speed: d.sp, owner: k, lat: d.lat }, true);
+    if (type === 'leave') { k.lastSeen = 0; }
+  }) : null;
+
   const fwd = new THREE.Vector3();
   function physics(k, dt) {
+    if (k.remote) return followNet(k, dt);
     let inp;
     if (state === 'count') inp = { gas: false, brake: false, steer: 0, drift: false };
     else if (k.done) { const ai = driveInput({ ...k, me: false, item: null }); inp = { gas: k.speed < 9, brake: false, steer: ai.steer, drift: false }; }
@@ -6707,7 +6835,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   function hud() {
     const me = karts[0];
     const o = order();
-    $('.pos').innerHTML = `${ord(o.indexOf(me) + 1)}<small>/4</small>`;
+    $('.pos').innerHTML = `${ord(o.indexOf(me) + 1)}<small>/${karts.filter((k) => !k.gone).length}</small>`;
     $('.lap').textContent = `Volta ${Math.min(LAPS, Math.max(1, me.lap))}/${LAPS}`;
     $('.time').textContent = fmt(raceT) + (me.bestLap ? `  ·  melhor ${fmt(me.bestLap)}` : '');
     $('.speed').innerHTML = `${Math.round(Math.abs(me.speed) * 3.6)}<small> km/h</small>`;
@@ -6728,14 +6856,21 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     setTimeout(() => showEnd(place, better), 1600);
     flash(place === 1 ? '1º lugar!' : `${place}º lugar`, 1.6);
   }
+  let paintEnd = null;
   function showEnd(place, better) {
     const me = karts[0];
     const end = document.createElement('div'); end.className = 'end';
     // bots que não terminaram: tempo estimado
     const rows = order().map((k) => ({ k, t: k.done ? k.time : raceT + (LAPS * N + N - k.prog) / N * 22 }));
-    end.innerHTML = `<div class="card"><h2>${place === 1 ? 'Vitória! 🏆' : place + 'º lugar'}</h2><p style="margin:0;color:#cfc9d8">${fmt(me.time)}${me.bestLap ? ' · melhor volta ' + fmt(me.bestLap) : ''}${better ? ' · <b style="color:#34d399">novo recorde!</b>' : ''}</p><ol></ol><div class="row"><button class="primary" data-a="again">Correr de novo</button>${onShare ? '<button data-a="share">Desafiar no chat</button>' : ''}${onRanking ? '<button data-a="rank">🏆 Ranking</button>' : ''}<button data-a="exit">Sair</button></div></div>`;
+    end.innerHTML = `<div class="card"><h2>${place === 1 ? 'Vitória! 🏆' : place + 'º lugar'}</h2><p style="margin:0;color:#cfc9d8">${fmt(me.time)}${me.bestLap ? ' · melhor volta ' + fmt(me.bestLap) : ''}${better ? ' · <b style="color:#34d399">novo recorde!</b>' : ''}${net ? ' · corrida com a sala' : ''}</p><ol></ol><div class="row">${net ? '' : '<button class="primary" data-a="again">Correr de novo</button>'}${onShare ? '<button data-a="share">Desafiar no chat</button>' : ''}${onRanking ? '<button data-a="rank">🏆 Ranking</button>' : ''}<button data-a="exit">Sair</button></div></div>`;
     const ol = end.querySelector('ol');
-    rows.forEach((r, i) => { const li = document.createElement('li'); if (r.k.me) li.className = 'me'; li.innerHTML = `<b>${i + 1}º</b><span></span><em style="font-style:normal">${fmt(r.t)}</em>`; li.querySelector('span').textContent = r.k.name; ol.appendChild(li); });
+    paintEnd = () => {
+      ol.innerHTML = '';
+      const list = order().filter((k) => !k.gone).map((k) => ({ k, t: k.done ? k.time : null }));
+      list.forEach((r, i) => { const li = document.createElement('li'); if (r.k.me) li.className = 'me'; li.innerHTML = `<b>${i + 1}º</b><span></span><em style="font-style:normal">${r.t != null ? fmt(r.t) : net ? 'correndo…' : fmt(raceT + (LAPS * N + N - r.k.prog) / N * 22)}</em>`; li.querySelector('span').textContent = r.k.name; ol.appendChild(li); });
+    };
+    paintEnd();
+    void rows;
     end.addEventListener('click', (e) => {
       const a = e.target.closest('button')?.dataset.a;
       if (a === 'again') reset();
@@ -6796,8 +6931,9 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
       if (Math.abs(a.pos.y - b.pos.y) > 1.5) continue;
       const dx = a.pos.x - b.pos.x, dz = a.pos.z - b.pos.z, d = Math.hypot(dx, dz), R = 2.0;
       if (d >= R || d < 0.001) continue;
-      const nx = dx / d, nz = dz / d, pen = (R - d) / 2;
-      a.pos.x += nx * pen; a.pos.z += nz * pen; b.pos.x -= nx * pen; b.pos.z -= nz * pen;
+      const nx = dx / d, nz = dz / d, pen = (R - d) / (a.remote || b.remote ? 1 : 2);
+      if (!a.remote) { a.pos.x += nx * pen; a.pos.z += nz * pen; }
+      if (!b.remote) { b.pos.x -= nx * pen; b.pos.z -= nz * pen; }
       const fa = [Math.sin(a.velYaw), Math.cos(a.velYaw)], fb = [Math.sin(b.velYaw), Math.cos(b.velYaw)];
       const va = [fa[0] * a.speed + (a.shoveX || 0), fa[1] * a.speed + (a.shoveZ || 0)];
       const vb = [fb[0] * b.speed + (b.shoveX || 0), fb[1] * b.speed + (b.shoveZ || 0)];
@@ -6805,6 +6941,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
       if (rel >= 0) continue; // já se afastando
       const J = (-(1 + 0.45) * rel) / 2; // impulso (restituição 0,45)
       for (const [k, sgn, f] of [[a, 1, fa], [b, -1, fb]]) {
+        if (k.remote) continue; // o kart do outro é ele que mexe (lá no PC dele)
         const ix = nx * J * sgn, iz = nz * J * sgn;
         const along = ix * f[0] + iz * f[1];          // parte na direção do kart → velocidade
         k.speed = Math.max(-6, k.speed + along * 0.9);
@@ -6824,7 +6961,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
       const p = P[s.k].clone().addScaledVector(SD[s.k], s.lat * 0.9);
       s.m.position.set(p.x, p.y + 0.6 + Math.abs(Math.sin(s.t * 9)) * 0.4, p.z); s.m.rotation.x += dt * 12;
       let hit = false;
-      for (const k of karts) if (k !== s.owner && k.pos.distanceToSquared(s.m.position) < 3.2) { spin(k); hit = true; }
+      for (const k of karts) if (k !== s.owner && k.pos.distanceToSquared(s.m.position) < 3.2) { if (!k.remote) spin(k); hit = true; }
       if (hit || s.t > 3) { scene.remove(s.m); shots.splice(i, 1); }
     }
     for (const h of hazards) { h.t += dt; h.m.rotation.y += dt; }
@@ -6835,6 +6972,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
       // terminou a corrida: motor desliga (antes ficava roncando na tela final)
       eng.set(sp, me.boostT > 0, state === 'done' || me.done ? 0 : state === 'count' ? 0.12 : 0.16 + Math.min(0.1, sp * 0.003));
     }
+    netTick(dt);
     placeCam(dt);
     hudT -= dt; if (hudT <= 0) { hudT = 0.08; hud(); }
     renderer.render(scene, camera);
@@ -6859,6 +6997,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     cancelAnimationFrame(raf); ro.disconnect();
     removeEventListener('keydown', kd, true); removeEventListener('keyup', ku, true);
     eng?.stop(); snd.close();
+    if (net) { try { net.send('leave', {}); } catch { /* ok */ } offNet?.(); }
     removeEventListener('blur', onBlur);
     renderer.dispose();
     scene.traverse((o) => { if (o.isMesh && o.geometry && !o.geometry.userData.zones) o.geometry.dispose(); });

@@ -12,6 +12,7 @@ const SEND_GAP_MS = 1500
 export type OfficeSignal =
   | { kind: 'emote'; from: string; emoji: string }
   | { kind: 'wave'; from: string; to: string }
+  | { kind: 'kart'; from: string; type: string; d: Record<string, unknown> }
 
 export function useOfficeRealtime(serverId: string, userId: string | undefined, onSignal: (s: OfficeSignal) => void) {
   const channelRef = useRef<RealtimeChannel | null>(null)
@@ -34,6 +35,12 @@ export function useOfficeRealtime(serverId: string, userId: string | undefined, 
         const from = payload?.from, to = payload?.to
         if (typeof from !== 'string' || typeof to !== 'string' || from === userId) return
         cbRef.current({ kind: 'wave', from, to })
+      })
+      // convite/entrada/largada da corrida de kart com a sala (raro: só o "lobby")
+      rt.on('broadcast', { event: 'kart' }, ({ payload }) => {
+        const from = payload?.from, type = payload?.type, d = payload?.d
+        if (typeof from !== 'string' || typeof type !== 'string' || from === userId || !d || typeof d !== 'object') return
+        cbRef.current({ kind: 'kart', from, type, d })
       })
       // caiu ou foi recusado: tenta de novo sozinho (antes ficava mudo até reabrir)
       rt.subscribe((status) => {
@@ -73,7 +80,14 @@ export function useOfficeRealtime(serverId: string, userId: string | undefined, 
     },
     [userId]
   )
+  const sendKart = useCallback(
+    (type: string, d: Record<string, unknown>) => {
+      if (!userId || !channelRef.current) return
+      void channelRef.current.send({ type: 'broadcast', event: 'kart', payload: { from: userId, type, d } })
+    },
+    [userId]
+  )
   const sendEmote = useCallback((emoji: string) => send('emote', { emoji }), [send])
   const sendWave = useCallback((to: string) => send('wave', { to }), [send])
-  return { sendEmote, sendWave }
+  return { sendEmote, sendWave, sendKart }
 }

@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, lazy } from 'react'
 import { lazyComponent, preloadLazyChunks } from '../components/modals/lazyModal'
 import { preloadNoiseSuppression } from '../lib/noiseSuppression'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -37,6 +37,10 @@ import type { Channel, Profile, Server } from '../types/database'
 import { setWindowPlace, setWindowUnreadCount } from '../lib/windowTitle'
 import { MediaViewer } from '../components/ui/MediaViewer'
 import { KeybindsRunner } from '../components/KeybindsRunner'
+import { useAppUsageHeartbeat } from '../hooks/useAppUsage'
+import { canUseOffice3d } from '../lib/platform'
+// Modo 3D (beta): só baixa quando alguém abre (o app clássico não fica mais pesado).
+const Office3DView = lazy(() => import('../office3d/Office3DView').then((m) => ({ default: m.Office3DView })))
 
 const VoiceChannelView = lazyComponent(() =>
   import('../components/layout/VoiceChannelView').then((m) => m.VoiceChannelView)
@@ -171,6 +175,14 @@ function ActiveServerContent({
   onMessageUser?: (userId: string) => void
 }) {
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false)
+  // Modo 3D: por cima do clássico, que continua montado por baixo.
+  const [office3d, setOffice3d] = useState(false)
+  useEffect(() => {
+    // celular não tem o Escritório (ver canUseOffice3d)
+    const open = () => { if (canUseOffice3d()) setOffice3d(true) }
+    window.addEventListener('mv:open-3d', open)
+    return () => window.removeEventListener('mv:open-3d', open)
+  }, [])
   // No computador a lista de membros começa escondida; o botão "Membros"
   // do topo do chat mostra/esconde (lembra a escolha).
   const [desktopMembersOpen, setDesktopMembersOpen] = useState(() => {
@@ -263,6 +275,11 @@ function ActiveServerContent({
         desktopOpen={desktopMembersOpen && !dmConversation}
         onCloseMobile={() => setMobileMembersOpen(false)}
       />
+      {office3d && canUseOffice3d() && (
+        <Suspense fallback={<div className="fixed inset-0 z-[70] bg-[#0c0a10] flex items-center justify-center text-mv-muted text-sm">Montando o escritório…</div>}>
+          <Office3DView server={server} unreadChannelIds={unreadChannelIds} onClose={() => setOffice3d(false)} onSelectChannel={(c) => onSelectChannel(c)} />
+        </Suspense>
+      )}
     </ChannelsProvider>
   )
 }
@@ -270,6 +287,7 @@ function ActiveServerContent({
 function MainLayoutInner() {
   useGamePresence()
   const { profile: ownProfile } = useAuth()
+  useAppUsageHeartbeat(ownProfile?.id)
   const voice = useVoiceCore()
   const { servers, loading: loadingServers } = useServers()
   const location = useLocation()
@@ -420,6 +438,17 @@ function MainLayoutInner() {
   }
   const { groups } = useGroupConversations()
   const unread = useUnreadOverview()
+  // Modo Escritório: o chat aberto lá marca o canal como lido
+  const markChannelReadRef = useRef(unread.markChannelRead)
+  markChannelReadRef.current = unread.markChannelRead
+  useEffect(() => {
+    const onRead = (e: Event) => {
+      const id = (e as CustomEvent<{ channelId?: string }>).detail?.channelId
+      if (id) void markChannelReadRef.current(id)
+    }
+    window.addEventListener('mv:mark-channel-read', onRead)
+    return () => window.removeEventListener('mv:mark-channel-read', onRead)
+  }, [])
 
   // Marca como lido ao abrir E sempre que o canal/conversa aberto aparecer
   // como "não lido" de novo (mensagem nova chegando enquanto você está

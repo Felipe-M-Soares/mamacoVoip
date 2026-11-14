@@ -5465,3 +5465,256 @@ create trigger on_group_message_push after insert on public.group_messages
   for each row execute function public.notify_push_new_message();
 
 notify pgrst, 'reload schema';
+
+
+-- ##################################################################
+-- PARTE 30 — Tempo de uso do app (telão do modo 3D) (nov/2026)
+-- ##################################################################
+-- O app soma, a cada 5 minutos com a janela aberta, o tempo de uso do
+-- dia (uma linha por pessoa por dia). O telão da recepção do modo 3D
+-- mostra o ranking de você + seus amigos (pedido aceito) nos últimos
+-- 7 dias. Ninguém lê a tabela direto: só pelas duas funções abaixo.
+-- Custo: 1 chamada pequena a cada 5 min por pessoa com o app aberto (só
+-- Supabase; nada no servidor de voz).
+
+create table if not exists public.app_usage_daily (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  day date not null,
+  seconds integer not null default 0 check (seconds between 0 and 86400),
+  last_ping timestamptz not null default now(),
+  primary key (user_id, day)
+);
+alter table public.app_usage_daily enable row level security;
+revoke all on public.app_usage_daily from anon, authenticated;
+
+-- Soma o tempo. Não dá pra "inflar": cada chamada conta no máximo 5 min
+-- e nunca mais do que o tempo real desde a última chamada.
+create or replace function public.track_app_usage(p_seconds integer default 300)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_day date := (now() at time zone 'America/Sao_Paulo')::date;
+  v_last timestamptz;
+  v_add integer;
+begin
+  if v_uid is null then
+    return;
+  end if;
+  v_add := least(greatest(coalesce(p_seconds, 0), 0), 300);
+  select max(last_ping) into v_last from public.app_usage_daily where user_id = v_uid;
+  if v_last is not null then
+    v_add := least(v_add, greatest(0, floor(extract(epoch from (now() - v_last)))::integer));
+  end if;
+  insert into public.app_usage_daily as u (user_id, day, seconds, last_ping)
+  values (v_uid, v_day, v_add, now())
+  on conflict (user_id, day) do update
+    set seconds = least(86400, u.seconds + excluded.seconds),
+        last_ping = now();
+end;
+$$;
+revoke execute on function public.track_app_usage(integer) from public, anon;
+grant execute on function public.track_app_usage(integer) to authenticated;
+
+-- Ranking: você + amigos aceitos, últimos p_days dias (1 a 31).
+create or replace function public.get_friends_app_usage(p_days integer default 7)
+returns table (user_id uuid, display_name text, username text, avatar_url text, seconds bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (
+    select auth.uid() as id
+  ),
+  circle as (
+    select me.id as uid from me where me.id is not null
+    union
+    select case when f.user_id = me.id then f.friend_id else f.user_id end
+    from public.friendships f, me
+    where f.status = 'accepted' and me.id in (f.user_id, f.friend_id)
+  )
+  select p.id, p.display_name, p.username, p.avatar_url, coalesce(sum(u.seconds), 0)::bigint as seconds
+  from circle c
+  join public.profiles p on p.id = c.uid
+  left join public.app_usage_daily u
+    on u.user_id = c.uid
+   and u.day > (now() at time zone 'America/Sao_Paulo')::date - greatest(1, least(coalesce(p_days, 7), 31))
+  group by p.id, p.display_name, p.username, p.avatar_url
+  order by 5 desc, p.username
+  limit 20;
+$$;
+revoke execute on function public.get_friends_app_usage(integer) from public, anon;
+grant execute on function public.get_friends_app_usage(integer) to authenticated;
+
+notify pgrst, 'reload schema';
+
+
+-- ##################################################################
+-- PARTE 31 — Modo Escritório: visual do mamaco sincronizado + emotes (nov/2026)
+-- ##################################################################
+-- 1) profiles.office_skin: o visual do seu mamaco (pelo, skin, chapéu…)
+--    salvo no perfil, pra todo mundo te ver igual no Escritório. JSON
+--    pequeno (no máximo 1 KB) e sempre objeto. Antes ficava só no aparelho.
+-- 2) Tópico de broadcast `office:<id do servidor>`: emotes (🎉 👋 ❤️…) e
+--    "acenar pra alguém" no Escritório. Só quem é membro do servidor entra
+--    e envia. Não grava nada no banco (é só Realtime) e não passa pelo
+--    servidor de voz — custo zero no Oracle. O app limita a 1 emote a cada
+--    1,5 s por pessoa.
+-- ##################################################################
+alter table public.profiles add column if not exists office_skin jsonb;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_office_skin_check') then
+    alter table public.profiles add constraint profiles_office_skin_check
+      check (office_skin is null or (jsonb_typeof(office_skin) = 'object' and octet_length(office_skin::text) <= 1024));
+  end if;
+end $$;
+
+create or replace function public.realtime_topic_allowed(p_topic text, p_extension text, p_write boolean)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_kind text;
+  v_id uuid;
+begin
+  if auth.uid() is null or not public.mfa_requirement_met() then
+    return false;
+  end if;
+  if p_extension is null or p_extension not in ('broadcast', 'presence') then
+    return false;
+  end if;
+
+  -- postgres_changes em canal privado: só leitura (join), nunca envio.
+  if p_topic ~ '^pgc:[A-Za-z0-9_.:-]{1,200}$' then
+    return not coalesce(p_write, true);
+  end if;
+
+  if p_topic = 'presence:online' then
+    return not p_write or p_extension = 'presence';
+  end if;
+
+  if p_topic is null
+     or p_topic !~ '^(voice|typing|office):[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+    return false;
+  end if;
+  v_kind := split_part(p_topic, ':', 1);
+  v_id := split_part(p_topic, ':', 2)::uuid;
+
+  if v_kind = 'voice' then
+    return (not p_write or p_extension = 'presence') and public.can_access_voice_room(v_id);
+  end if;
+  if v_kind = 'typing' then
+    return (not p_write or p_extension = 'broadcast') and public.can_access_typing_topic(v_id);
+  end if;
+  -- Escritório: emotes/aceno entre membros do servidor
+  if v_kind = 'office' then
+    return (not p_write or p_extension = 'broadcast') and public.is_server_member(v_id, auth.uid());
+  end if;
+  return false;
+end;
+$$;
+
+revoke execute on function public.realtime_topic_allowed(text, text, boolean) from public, anon;
+grant execute on function public.realtime_topic_allowed(text, text, boolean) to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- ##################################################################
+-- PARTE 32 — Ranking dos minigames entre amigos (nov/2026)
+-- ##################################################################
+-- Guarda só o MELHOR resultado de cada pessoa em cada minigame (1 linha
+-- por pessoa por jogo). O app só manda quando você bate o seu recorde
+-- (poucas chamadas, só Supabase; nada no servidor de voz). O ranking
+-- mostra você + amigos aceitos. Ninguém lê a tabela direto: só pelas
+-- funções abaixo, que também recusam valores impossíveis.
+--   kart      tempo da corrida em ms (menor é melhor)
+--   banana3d  pontos (maior)
+--   cobra     bananas (maior)
+--   memoria   jogadas (menor)
+--   reflexo   média em ms (menor)
+
+create table if not exists public.minigame_bests (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  game text not null check (game in ('kart', 'banana3d', 'cobra', 'memoria', 'reflexo')),
+  value integer not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, game)
+);
+alter table public.minigame_bests enable row level security;
+revoke all on public.minigame_bests from anon, authenticated;
+
+create or replace function public.submit_minigame_score(p_game text, p_value integer)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_lower boolean;
+  v_best integer;
+begin
+  if v_uid is null or p_value is null then
+    return null;
+  end if;
+  -- limites do que é possível em cada jogo
+  if not (
+       (p_game = 'kart' and p_value between 30000 and 1800000)
+    or (p_game = 'banana3d' and p_value between 0 and 600)
+    or (p_game = 'cobra' and p_value between 0 and 430)
+    or (p_game = 'memoria' and p_value between 8 and 500)
+    or (p_game = 'reflexo' and p_value between 100 and 3000)
+  ) then
+    return null;
+  end if;
+  v_lower := p_game in ('kart', 'memoria', 'reflexo');
+  insert into public.minigame_bests as b (user_id, game, value, updated_at)
+  values (v_uid, p_game, p_value, now())
+  on conflict (user_id, game) do update
+    set value = case when v_lower then least(b.value, excluded.value) else greatest(b.value, excluded.value) end,
+        updated_at = case when (v_lower and excluded.value < b.value) or (not v_lower and excluded.value > b.value) then now() else b.updated_at end
+  returning value into v_best;
+  return v_best;
+end;
+$$;
+revoke execute on function public.submit_minigame_score(text, integer) from public, anon;
+grant execute on function public.submit_minigame_score(text, integer) to authenticated;
+
+-- Ranking de um jogo: você + amigos aceitos (só quem já jogou).
+create or replace function public.get_friends_minigame_ranking(p_game text)
+returns table (user_id uuid, display_name text, username text, avatar_url text, value integer, updated_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (
+    select auth.uid() as id
+  ),
+  circle as (
+    select me.id as uid from me where me.id is not null
+    union
+    select case when f.user_id = me.id then f.friend_id else f.user_id end
+    from public.friendships f, me
+    where f.status = 'accepted' and me.id in (f.user_id, f.friend_id)
+  )
+  select p.id, p.display_name, p.username, p.avatar_url, b.value, b.updated_at
+  from circle c
+  join public.minigame_bests b on b.user_id = c.uid and b.game = p_game
+  join public.profiles p on p.id = c.uid
+  order by case when p_game in ('kart', 'memoria', 'reflexo') then b.value else -b.value end, b.updated_at
+  limit 30;
+$$;
+revoke execute on function public.get_friends_minigame_ranking(text) from public, anon;
+grant execute on function public.get_friends_minigame_ranking(text) to authenticated;
+
+notify pgrst, 'reload schema';

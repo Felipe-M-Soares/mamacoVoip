@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { emitIncomingMessage } from '../lib/messageAlerts'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { changesChannel } from '../lib/realtimeChannel'
@@ -115,6 +116,13 @@ export function GroupConversationsProvider({ children }: { children: ReactNode }
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'group_conversations' }, (payload) => {
         const id = (payload.old as { id?: string }).id
         if (id) setGroups((prev) => (prev.some((g) => g.id === id) ? prev.filter((g) => g.id !== id) : prev))
+      })
+      // Mensagem nova em qualquer grupo seu (a RLS de group_messages só
+      // entrega as dos grupos de que você participa) → som + aviso.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'group_messages' }, (payload) => {
+        const m = payload.new as { id?: string; group_id?: string; author_id?: string; content?: string }
+        if (!m?.id || !m.group_id || !m.author_id) return
+        emitIncomingMessage({ kind: 'group', targetId: m.group_id, messageId: m.id, authorId: m.author_id, content: m.content ?? '' })
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'group_conversations' }, (payload) => {
         const row = payload.new as GroupConversation

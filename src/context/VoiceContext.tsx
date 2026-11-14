@@ -2363,6 +2363,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const { error } = await rpcAny('play_soundboard_sound', { p_channel_id: channelId, p_sound_id: sound.id })
     if (error) return { error: error.message }
     playLocalSoundboardAudio(url)
+    // Modo Escritório: mostra "🎵 nome do som" em cima do seu boneco
+    window.dispatchEvent(new CustomEvent('mv:soundboard-play', { detail: { userId: userIdRef.current, name: (sound as { name?: string }).name ?? null } }))
     return { error: null }
   }
 
@@ -2390,12 +2392,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             if (row.played_by === userIdRef.current) return
             void supabase
               .from('soundboard_sounds')
-              .select('storage_path, server_id')
+              .select('storage_path, server_id, name')
               .eq('id', row.sound_id)
               .maybeSingle()
               .then(({ data }) => {
                 if (cancelled || !data || data.server_id !== serverId) return
                 playLocalSoundboardAudio(soundboardUrlFor(data.storage_path))
+                window.dispatchEvent(new CustomEvent('mv:soundboard-play', { detail: { userId: row.played_by, name: (data as { name?: string }).name ?? null } }))
               })
           }
         )

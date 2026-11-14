@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { ViewModeToggle } from './ViewModeToggle'
+import { canUseOffice3d } from '../../lib/platform'
 import { ContextMenu, useContextMenuState } from '../ui/ContextMenu'
 import { useAuth } from '../../hooks/useAuth'
 import { useChannels } from '../../hooks/useChannels'
@@ -763,6 +765,12 @@ export function ChannelSidebar({
           <span className="truncate font-display text-[15px]">{server.name}</span>
           <ChevronDownIcon className="w-4 h-4 shrink-0" aria-hidden />
         </button>
+        {/* Clássico ⇄ Escritório (o clássico continua sendo o principal) */}
+        {canUseOffice3d() && (
+          <div className="px-3 py-2 border-b border-[var(--color-line)]">
+            <ViewModeToggle mode="classico" onChange={() => window.dispatchEvent(new Event('mv:open-3d'))} />
+          </div>
+        )}
 
         {menuOpen && (
           <div className="absolute top-full left-2 right-2 mt-1.5 surface-elevated rounded-xl p-1.5 z-20 animate-pop-in">

@@ -22,6 +22,8 @@ export type Profile = {
   playing_app?: string | null
   playing_since?: string | null
   profile_visibility: ProfileVisibility
+  // Visual do mamaco no modo Escritório (PARTE 31 da 007): { fur, top, outfit, hat… }
+  office_skin?: Record<string, unknown> | null
   // (A confirmação de idade +18 saiu daqui na migration 016 — agora fica
   // em user_private_settings, que só a própria pessoa lê.)
   created_at: string
@@ -439,6 +441,7 @@ export type Database = {
             | 'playing_app'
             | 'playing_since'
             | 'profile_visibility'
+            | 'office_skin'
           >
         >
         Relationships: []
@@ -672,6 +675,22 @@ export type Database = {
     }
     Views: Record<string, never>
     Functions: {
+      track_app_usage: {
+        Args: { p_seconds?: number }
+        Returns: void
+      }
+      get_friends_app_usage: {
+        Args: { p_days?: number }
+        Returns: { user_id: string; display_name: string | null; username: string; avatar_url: string | null; seconds: number }[]
+      }
+      submit_minigame_score: {
+        Args: { p_game: string; p_value: number }
+        Returns: number | null
+      }
+      get_friends_minigame_ranking: {
+        Args: { p_game: string }
+        Returns: { user_id: string; display_name: string | null; username: string; avatar_url: string | null; value: number; updated_at: string }[]
+      }
       register_push_token: {
         Args: { p_token: string; p_platform?: string }
         Returns: void

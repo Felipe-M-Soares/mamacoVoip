@@ -81,7 +81,9 @@ async function createProcessingContext(workletPaths: string[]): Promise<{ audioC
 // dBFS, a escala que o gate realmente entende.
 export const MIN_MIC_SENSITIVITY = 0
 export const MAX_MIC_SENSITIVITY = 100
-export const DEFAULT_MIC_SENSITIVITY = 50
+// Padrão 40 (out/2026): com 50 o corte ficava em -50 dB e passava muito
+// som de fundo (teclado, ventilador, TV, outras pessoas na casa).
+export const DEFAULT_MIC_SENSITIVITY = 40
 
 const SENSITIVITY_MIN_DB = -80 // sensibilidade 100 — gate quase sempre aberto
 const SENSITIVITY_MAX_DB = -20 // sensibilidade 0 — só som bem alto abre
@@ -247,6 +249,9 @@ export async function createNoiseSuppressor(): Promise<NoiseSuppressor> {
       processorOptions: {
         thresholdDb: sensitivity === null ? null : sensitivityToOpenThresholdDb(sensitivity),
         holdMs: 250,
+        // Precisa de 50 ms de som contínuo pra abrir (antes 35 ms): clique
+        // de teclado/mouse e batidas curtas não abrem mais o microfone.
+        sustainMs: 50,
       },
     })
     preGate.connect(gateNode)

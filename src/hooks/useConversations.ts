@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react'
+import { emitIncomingMessage } from '../lib/messageAlerts'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { changesChannel } from '../lib/realtimeChannel'
@@ -198,7 +199,16 @@ function subscribe(userId: string, listener: () => void): () => void {
       // entrega as das minhas conversas) → atualiza a prévia na lista.
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_messages' }, (payload) => {
         const message = payload.new as DMMessage | undefined
-        if (message?.conversation_id) applyMessage(userId, entry, message)
+        if (!message?.conversation_id) return
+        applyMessage(userId, entry, message)
+        // Som + aviso de mensagem nova (ver lib/messageAlerts.ts).
+        emitIncomingMessage({
+          kind: 'dm',
+          targetId: message.conversation_id,
+          messageId: message.id,
+          authorId: message.author_id,
+          content: message.content,
+        })
       })
       // Mensagem editada/apagada pode ser a última da lista → recarrega (com debounce).
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dm_messages' }, (payload) => {

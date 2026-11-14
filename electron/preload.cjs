@@ -48,6 +48,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // janela pelo HWND antes de buscar as fontes de novo.
   restoreGameWindow: (hwnd) => ipcRenderer.invoke('screen-share:restore-window', hwnd),
   focusAppWindow: () => ipcRenderer.send('app:focus-window'),
+  // Mensagem privada chegando (MessageAlerts.tsx): notificação nativa,
+  // clique nela e piscar na barra de tarefas.
+  showNotification: (payload) => ipcRenderer.invoke('notify:show', payload),
+  onNotificationClick: (callback) => {
+    const handler = (_event, target) => callback(target)
+    ipcRenderer.on('notify:clicked', handler)
+    return () => ipcRenderer.removeListener('notify:clicked', handler)
+  },
+  flashWindow: () => ipcRenderer.send('window:flash'),
   isGlobalPTTAvailable: () => ipcRenderer.invoke('ptt:is-global-available'),
   startPTTCapture: () => ipcRenderer.invoke('ptt:start-capture'),
   setGlobalPTTKey: (keycode) => ipcRenderer.invoke('ptt:set-active-key', keycode),

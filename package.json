@@ -1,6 +1,7 @@
 {
   "name": "mamacos-voip",
   "private": true,
+  "license": "UNLICENSED",
   "version": "1.0.0",
   "description": "Mamacos Voip — servidores, canais, chat em tempo real, voz e vídeo.",
   "author": "Mamacos Voip",
@@ -36,6 +37,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
+    "three": "0.160.0",
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
@@ -49,7 +51,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "@vitest/ui": "^4.1.11",
-    "electron": "^44.5.1",
+    "electron": "44.9.3",
     "electron-builder": "^26.15.3",
     "jsdom": "^30.0.1",
     "oxlint": "^1.75.0",

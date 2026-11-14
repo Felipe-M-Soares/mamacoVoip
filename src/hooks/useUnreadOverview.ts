@@ -226,7 +226,26 @@ export function useUnreadOverview() {
     [userId]
   )
 
-  return { unreadChannelIds, unreadServerIds, unreadConversationIds, markChannelRead, markConversationRead, refresh }
+  // Mensagem privada chegando em tempo real (MessageAlerts): mostra a
+  // bolinha na hora, sem esperar a próxima consulta (até 20 s).
+  const markConversationUnread = useCallback((conversationId: string) => {
+    setUnreadConversationIds((prev) => {
+      if (prev.has(conversationId)) return prev
+      const next = new Set(prev)
+      next.add(conversationId)
+      return next
+    })
+  }, [])
+
+  return {
+    unreadChannelIds,
+    unreadServerIds,
+    unreadConversationIds,
+    markChannelRead,
+    markConversationRead,
+    markConversationUnread,
+    refresh,
+  }
 }
 
 const EMPTY_SET: Set<string> = new Set()

@@ -1964,7 +1964,7 @@ const CLIPS = {
   })) },
   nap: { fps: 1.5, loop: true, frames: [0, 1, 0, 2].map((k) => pose({
     lie: 1, thighL: 0.02, thighR: -0.85, kneeL: 0.1, kneeR: 1.5, ankleL: 0.5, ankleR: k === 2 ? 0.0 : 0.2, hipZL: 0.08, hipZR: -0.12,
-    shL: -0.9, shR: -0.88, shZL: -0.4, shZR: 0.42, elL: -0.12, elR: -0.08, headPitch: 0.3, headRoll: -0.1, breathe: k === 1 ? 0.03 : 0,
+    shL: 0.02, shR: -0.32, shZL: 0.16, shZR: 0.34, elL: -0.2, elR: -0.55, headPitch: 0.3, headRoll: -0.1, breathe: k === 1 ? 0.03 : 0,
   })) },
   guard: { fps: 1.5, loop: true, frames: [0, 1].map((k) => pose({
     hipZL: 0.12, hipZR: -0.12, shL: -0.85, shR: -0.8, shZL: -0.42, shZR: 0.42, elL: -1.95, elR: -2.05, breathe: k * 0.02, headPitch: -0.04,
@@ -2704,27 +2704,55 @@ function sofa(x, z, yaw, len = 2, mat1 = M.fabricBlue, extra = {}) {
   footprint(x, z, len, 0.9, yaw);
   return out;
 }
+// Rede de verdade: dois postes, cordas até as pontas, travessas de madeira
+// e o pano curvado (afunda no meio e levanta nas bordas), listrado.
+const HAMMOCK_TEX = {};
+function hammockTex(hex) {
+  if (!HAMMOCK_TEX[hex]) HAMMOCK_TEX[hex] = canvasTex(256, 64, (c, w, h) => {
+    const base = '#' + new THREE.Color(hex).getHexString();
+    for (let i = 0; i < 8; i++) { c.fillStyle = i % 2 ? '#f3e6cf' : base; c.fillRect(0, (i * h) / 8, w, h / 8 + 1); }
+    c.fillStyle = 'rgba(0,0,0,.08)'; for (let x = 0; x < w; x += 6) c.fillRect(x, 0, 2, h);
+  });
+  return HAMMOCK_TEX[hex];
+}
 function hammock(x, z, yaw, color = M.fabricOrange, extra = {}) {
   const g = new THREE.Group();
-  const L = 2.7;
+  const L = 2.9, HL = 1.05, HW = 0.4, Y0 = 0.5, SAG = 0.36, POST = 1.55;
   for (const s of [-1, 1]) {
-    cyl(0.06, 0.07, 1.5, M.woodDark, s * L / 2, 0.75, 0, g, 10);
-    cyl(0.11, 0.11, 0.05, M.woodDark, s * L / 2, 0.025, 0, g, 12);
-    const rope = cyl(0.012, 0.012, 0.55, M.fabricCream, s * (L / 2 - 0.3), 1.1, 0, g, 5);
-    rope.rotation.z = s * 1.05;
+    cyl(0.065, 0.075, POST, M.woodDark, s * L / 2, POST / 2, 0, g, 10);
+    cyl(0.12, 0.12, 0.05, M.woodDark, s * L / 2, 0.025, 0, g, 12);
+    // travessa na ponta do pano
+    const bar = cyl(0.025, 0.025, HW * 2 + 0.08, M.woodDark, s * HL, Y0 + SAG, 0, g, 8);
+    bar.rotation.x = Math.PI / 2;
+    // cordas: do topo do poste até as duas pontas da travessa
+    const top = new THREE.Vector3(s * L / 2, POST - 0.1, 0);
+    for (const zz of [-HW, 0, HW]) {
+      const end = new THREE.Vector3(s * HL, Y0 + SAG, zz);
+      const len = top.distanceTo(end);
+      const r = cyl(0.01, 0.01, len, M.fabricCream, (top.x + end.x) / 2, (top.y + end.y) / 2, (top.z + end.z) / 2, g, 5);
+      r.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), end.clone().sub(top).normalize());
+    }
   }
-  // pano: casca de esfera achatada (curvinha da rede)
-  const clothM = color.clone(); clothM.side = THREE.DoubleSide;
-  const cloth = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 10, 0, Math.PI * 2, Math.PI * 0.62, Math.PI * 0.38), clothM);
-  cloth.scale.set(0.95, 0.42, 0.42);
-  cloth.position.set(0, 0.98, 0);
-  cloth.castShadow = true;
+  // pano: superfície curva (afunda no meio, bordas sobem)
+  const NX = 24, NZ = 8, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) {
+    const u = i / NX, v = j / NZ, px = (u * 2 - 1) * HL, pz = (v * 2 - 1) * HW;
+    const py = Y0 + SAG * (px / HL) ** 2 + 0.16 * (pz / HW) ** 2 * (1 - 0.6 * (px / HL) ** 2);
+    pos.push(px, py, pz); uv.push(u, v);
+  }
+  for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) { const a = i * (NZ + 1) + j, b = a + NZ + 1; idx.push(a, a + 1, b, b, a + 1, b + 1); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  const clothM = new THREE.MeshStandardMaterial({ map: hammockTex(color.color ? color.color.getHex() : 0xc9733f), roughness: 0.95, side: THREE.DoubleSide });
+  const cloth = new THREE.Mesh(geo, clothM);
+  cloth.castShadow = true; cloth.receiveShadow = true;
   g.add(cloth);
-  for (let i = 0; i < 5; i++) rbox(0.04, 0.012, 0.6, 0.005, M.fabricCream, -0.6 + i * 0.3, 0.58, 0, g);
   place(g, x, z, yaw);
   footprint(x, z, L + 0.2, 0.9, yaw);
   const [sx, sz] = rotXZ(-0.2, 0, yaw);
-  return addSeat(x + sx, z + sz, yaw + Math.PI / 2, 0.58, { kind: 'rest', ...extra, lie: true, hammock: true, bedH: 0.5 });
+  return addSeat(x + sx, z + sz, yaw + Math.PI / 2, 0.52, { kind: 'rest', ...extra, lie: true, hammock: true, bedH: 0.42 });
 }
 // Máquina de café (F = pega um café e sai bebendo)
 function coffeeBar(x, z, rot) {
@@ -3388,6 +3416,35 @@ function bed(x, z, rot, extra = {}) {
   // deita com a cabeça no travesseiro (pro lado -z da cama)
   return addSeat(x, z, rot, 0.52, { kind: 'bed', ...extra, h: 0.52, bedH: 0.5 });
 }
+// Beliche: cama de baixo + cama de cima (dois lugares pra dormir no mesmo
+// espaço), com colunas, grade de proteção e escadinha no pé.
+function bunkBed(x, z, rot, extra = {}) {
+  const g = new THREE.Group();
+  const UP = 1.3; // altura do estrado de cima
+  // de baixo
+  rbox(0.95, 0.3, 2.0, 0.04, M.woodDark, 0, 0.18, 0, g);
+  rbox(0.9, 0.2, 1.92, 0.08, M.white, 0, 0.42, 0, g);
+  rbox(0.92, 0.07, 1.3, 0.04, extra.color || M.fabricBlue, 0, 0.53, 0.3, g);
+  rbox(0.6, 0.13, 0.32, 0.07, M.fabricCream, 0, 0.58, -0.75, g);
+  // de cima
+  rbox(0.95, 0.12, 2.0, 0.03, M.woodDark, 0, UP, 0, g);
+  rbox(0.9, 0.18, 1.92, 0.08, M.white, 0, UP + 0.15, 0, g);
+  rbox(0.92, 0.07, 1.3, 0.04, extra.color2 || M.fabricGray, 0, UP + 0.26, 0.3, g);
+  rbox(0.6, 0.13, 0.32, 0.07, M.fabricCream, 0, UP + 0.31, -0.75, g);
+  // colunas, cabeceiras e grade
+  for (const [lx, lz] of [[-0.46, -0.98], [0.46, -0.98], [-0.46, 0.98], [0.46, 0.98]]) rbox(0.07, UP + 0.75, 0.07, 0.02, M.woodDark, lx, (UP + 0.75) / 2, lz, g);
+  rbox(1.0, 0.55, 0.05, 0.02, M.woodDark, 0, 0.45, -1.0, g);
+  rbox(1.0, 0.5, 0.05, 0.02, M.woodDark, 0, UP + 0.4, -1.0, g);
+  rbox(1.0, 0.3, 0.05, 0.02, M.woodDark, 0, UP + 0.35, 1.0, g);
+  rbox(0.05, 0.06, 1.3, 0.02, M.woodDark, 0.47, UP + 0.5, -0.25, g); // grade lateral
+  // escadinha no pé
+  for (const lx of [0.18, 0.4]) rbox(0.04, UP + 0.4, 0.04, 0.01, M.woodDark, lx, (UP + 0.4) / 2, 1.06, g);
+  for (let i = 1; i <= 4; i++) rbox(0.26, 0.035, 0.04, 0.01, M.woodDark, 0.29, (i * (UP + 0.2)) / 5, 1.06, g);
+  place(g, x, z, rot);
+  footprint(x, z, 1.0, 2.2, rot);
+  addSeat(x, z, rot, 0.52, { kind: 'bed', ...extra, h: 0.52, bedH: 0.5 });
+  return addSeat(x, z, rot, 0.52, { kind: 'bed', ...extra, h: 0.52, bedH: UP + 0.24, upper: true });
+}
 function nightstand(x, z) {
   const g = new THREE.Group();
   rbox(0.45, 0.5, 0.4, 0.03, M.deskWood, 0, 0.25, 0, g);
@@ -3451,7 +3508,7 @@ Object.assign(THEME_BUILD, {
     for (let i = 0; i < n; i++) {
       const u = -((n - 1) * 1.45) / 2 + i * 1.45;
       // cabeceira encostada no fundo da sala
-      bed(...F.p(u, F.d - 1.2), F.yaw(Math.PI), { room: room.id, sector: room.sector, color: pick([M.fabricBlue, M.fabricGray, M.fabricGreen]) });
+      bunkBed(...F.p(u, F.d - 1.2), F.yaw(Math.PI), { room: room.id, sector: room.sector, color: pick([M.fabricBlue, M.fabricGray, M.fabricGreen]), color2: pick([M.fabricBlue, M.fabricGray, M.fabricGreen]) });
     }
     for (let i = 0; i < n - 1; i++) nightstand(...F.p(-((n - 1) * 1.45) / 2 + i * 1.45 + 0.725, F.d - 0.35));
     plant(...F.p(-F.w / 2 + 0.45, 0.6), 1, 'snake');
@@ -4714,9 +4771,18 @@ function createOffice(opts) {
   function rebuildWorld() {
     for (const a of agents.values()) { a.seat = null; a.settling = false; a.m.sitting = false; a.m.lying = false; a.m.sway = false; a.m.mood = 'normal'; a.m.typing = false; a.path = []; a.goal = null; a.standFrom = null; a.placeKey = null; }
     const keep = { x: player.pos.x, z: player.pos.z };
+    const prevZone = player.zone?.id || null;
     built = buildWorld(specFrom(data));
     const [fx, fz] = nearestFree(keep.x, keep.z);
     player.pos.set(fx, 0, fz);
+    // As salas mudaram (canal criado/apagado): se o mesmo ponto agora cai
+    // dentro de OUTRA sala de voz, não entra na call dela sozinho (antes
+    // criar um canal te jogava, por exemplo, na call do Cinema). Exceção: a
+    // sala de Minigames que acabou de virar call — aí entra, porque você
+    // já estava nela.
+    { const zn = zoneAt(fx, fz); const nr = zn && zn.kind === 'room' && ROOMS[zn.id]?.voice ? zn.id : null;
+      const sameMg = prevZone === 'special:minigames' && nr && ROOMS[nr].theme.id === 'arcade';
+      if (nr && nr !== prevZone && nr !== playerRoom && !sameMg) ignoreRoom = nr; }
     buildSigns();
     for (const id of roomScreens.keys()) applyRoomScreen(id);
     buildGuards();

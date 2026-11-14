@@ -41,12 +41,12 @@ import {
   type OfficeSkin,
   type OfficeTvInfo,
   type OfficeZone,
-  detectRoomTheme,
 } from './engine.js'
 
 const CreateChannelModal = lazyModal(() => import('../components/modals/CreateChannelModal').then((m) => m.CreateChannelModal))
 const EditChannelModal = lazyModal(() => import('../components/modals/EditChannelModal').then((m) => m.EditChannelModal))
 const ManageMemberModal = lazyModal(() => import('../components/modals/ManageMemberModal').then((m) => m.ManageMemberModal))
+const SoundboardPanel = lazyModal(() => import('../components/ui/SoundboardPanel').then((m) => m.SoundboardPanel))
 const EventsModal = lazyModal(() => import('../components/modals/EventsModal').then((m) => m.EventsModal))
 
 // Modo Escritório. Abre por cima do app — o clássico continua montado por
@@ -129,6 +129,11 @@ function saveLastPos(serverId: string, pos: { x: number; z: number; yaw: number 
   }
 }
 
+// "Minigames", "Mini games", "Fliperama", "Arcade"… (antes a busca pelo tema
+// achava "games" primeiro e o canal Minigames virava uma sala comum)
+const isMinigamesName = (name: string) =>
+  /mini ?games?|fliperama|arcade/.test(name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase())
+
 const isTyping = () => {
   const el = document.activeElement as HTMLElement | null
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
@@ -149,6 +154,7 @@ export function Office3DView({
   const { categories, channels, createChannel: createChannelNow } = useChannels()
   const { members } = useServerMembers(server.id)
   const { permissions } = useModeration(server.id)
+  const canManageChannelsEarly = server.owner_id === user?.id || !!permissions.manage_channels
   const onlineIds = useOnlineIds()
   const roster = useVoiceRoster()
   const voice = useVoiceCore()
@@ -177,6 +183,7 @@ export function Office3DView({
   const [editChannel, setEditChannel] = useState<Channel | null>(null)
   const [moderate, setModerate] = useState<Profile | null>(null)
   const [eventsOpen, setEventsOpen] = useState(false)
+  const [soundsOpen, setSoundsOpen] = useState(false)
   const { openConversationWith } = useConversations()
   const usage = useFriendsUsage(true)
   const { events, rsvpsByEvent } = useServerEvents(server.id)
@@ -190,9 +197,23 @@ export function Office3DView({
   // ("Minigames", "Fliperama", "Arcade"…). Ele vira a sala do fliperama/kart
   // (com call) em vez de uma sala comum no setor dele.
   const minigamesChannel = useMemo(
-    () => channels.find((c) => c.type === 'voice' && detectRoomTheme(c.name).id === 'arcade') ?? null,
+    () => channels.find((c) => c.type === 'voice' && isMinigamesName(c.name)) ?? null,
     [channels]
   )
+  // Sem canal de Minigames ainda: quem pode gerenciar canais cria sozinho
+  // ao abrir o Escritório (1 vez por servidor). Assim a sala do fliperama
+  // já é uma call pra todo mundo: entrou, fala. Se apagarem o canal depois,
+  // não recria (fica o botão "Virar call").
+  const mgTriedRef = useRef(false)
+  useEffect(() => {
+    if (minigamesChannel || !canManageChannelsEarly || mgTriedRef.current || channels.length === 0) return
+    const key = `mamacos-mg-auto-${server.id}`
+    try { if (localStorage.getItem(key)) return } catch { /* segue */ }
+    mgTriedRef.current = true
+    void createChannelNow('Minigames', 'voice', null).then((res) => {
+      if (!(res as { error?: unknown } | undefined)?.error) try { localStorage.setItem(key, '1') } catch { /* ok */ }
+    })
+  }, [minigamesChannel, canManageChannelsEarly, channels.length, server.id, createChannelNow])
   // canais organizados por categoria (igual a barra lateral)
   const layout = useMemo(() => {
     const cats = [...categories].sort((a, b) => a.position - b.position)
@@ -529,7 +550,7 @@ export function Office3DView({
     return () => document.removeEventListener('visibilitychange', onVis)
   }, [])
 
-  const overlayOpen = Boolean(tv || drawer || avatarMenu || dm || dmError || memberCard || createChannel || editChannel || moderate || eventsOpen)
+  const overlayOpen = Boolean(tv || drawer || avatarMenu || dm || dmError || memberCard || createChannel || editChannel || moderate || eventsOpen || soundsOpen)
   // Esc fecha o escritório; Enter abre o chat; 1–9 mandam emotes
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -686,6 +707,10 @@ export function Office3DView({
           </div>
           <button onClick={voice.toggleMute} className={`h-8 px-3 rounded-lg text-[12.5px] font-semibold border ${voice.muted ? 'bg-rose-500/20 border-rose-400/50 text-rose-200' : 'bg-white/10 border-white/10 text-white'}`}>
             {voice.muted ? 'Mudo' : 'Mic'}
+          </button>
+          {/* soundboard do servidor (os sons tocam pra todo mundo da call) */}
+          <button onClick={() => setSoundsOpen(true)} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold border bg-white/10 border-white/10 text-white" title="Soundboard">
+            🎵 Sons
           </button>
           {sharers.some((x) => x.key !== 'local') && (
             <button
@@ -888,6 +913,7 @@ export function Office3DView({
       )}
       {editChannel && <EditChannelModal channel={editChannel} serverId={server.id} onClose={() => setEditChannel(null)} />}
       {moderate && <ManageMemberModal serverId={server.id} targetProfile={moderate} onClose={() => setModerate(null)} />}
+      {soundsOpen && voice.connectedServerId && <SoundboardPanel serverId={voice.connectedServerId} onClose={() => setSoundsOpen(false)} />}
       {eventsOpen && <EventsModal serverId={server.id} channels={channels} canCreate={canManageChannels} membersById={membersById} onClose={() => setEventsOpen(false)} />}
     </div>
   )

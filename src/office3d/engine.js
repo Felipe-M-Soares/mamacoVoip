@@ -357,6 +357,15 @@ class Mamaco {
     handle.position.set(0.075, 0, 0); handle.rotation.y = Math.PI / 2;
     const mugBand = mesh(new THREE.CylinderGeometry(0.071, 0.071, 0.03, 16), new THREE.MeshStandardMaterial({ color: 0xf4511e, roughness: 0.5 }), false);
     mug.add(cup, coffee, handle, mugBand);
+    // latinha de energético (mesma mão, troca com a caneca)
+    const can = (this.can = new THREE.Group());
+    const canBody = mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.17, 16), new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.35, metalness: 0.6 }));
+    const canTop = mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.02, 16), new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.3, metalness: 0.8 }), false);
+    canTop.position.y = 0.095;
+    const canBolt = mesh(new THREE.CylinderGeometry(0.0565, 0.0565, 0.06, 16), new THREE.MeshStandardMaterial({ color: 0x7cff3a, roughness: 0.4, emissive: 0x2a7a00, emissiveIntensity: 0.6 }), false);
+    can.add(canBody, canTop, canBolt);
+    can.visible = false;
+    mug.add(can);
     mug.position.set(0, -0.23, 0.07);
     mug.visible = false;
     this.arms[0].elbow.add(mug);
@@ -944,6 +953,49 @@ function partMesh(name, mats, mirror = false) {
   const o = fmesh(g, list.length === 1 ? list[0] : list);
   if (mirror) o.scale.x = -1;
   return o;
+}
+
+// Barriga lisinha: em vez da região "belly" recortada nos triângulos do
+// modelo (borda serrilhada, com um dente marrom entrando na barriga), o corpo
+// inteiro usa um material só e um oval suave é pintado no shader. A cor vem
+// de Z.belly (muda com a skin); skin sem barriga desliga o oval.
+const BELLY_FIT = new WeakMap();
+function smoothBelly(mesh, Z) {
+  const g = mesh.geometry, zones = g.userData.zones || [];
+  const zi = zones.indexOf('belly');
+  if (zi < 0) return;
+  let fit = BELLY_FIT.get(g);
+  if (!fit) {
+    const P = g.attributes.position, I = g.index;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity;
+    for (const gr of g.groups) {
+      if (gr.materialIndex !== zi) continue;
+      for (let k = gr.start; k < gr.start + gr.count; k++) {
+        const v = I ? I.getX(k) : k;
+        const x = P.getX(v), y = P.getY(v), z = P.getZ(v);
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z;
+      }
+    }
+    if (!Number.isFinite(x0)) return;
+    fit = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: ((x1 - x0) / 2) * 0.93, ry: ((y1 - y0) / 2) * 0.93, z0 };
+    BELLY_FIT.set(g, fit);
+  }
+  mesh.material = Z.body;
+  const mt = Z.body;
+  mt.userData.bellyOn = mt.userData.bellyOn || { value: 1 };
+  mt.onBeforeCompile = (sh) => {
+    sh.uniforms.uBelly = { value: Z.belly.color };
+    sh.uniforms.uBellyOn = mt.userData.bellyOn;
+    sh.uniforms.uEll = { value: new THREE.Vector4(fit.cx, fit.cy, fit.rx, fit.ry) };
+    sh.uniforms.uBZ = { value: fit.z0 };
+    sh.vertexShader = 'varying vec3 vBP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vBP = position;');
+    sh.fragmentShader = 'varying vec3 vBP;\nuniform vec3 uBelly;\nuniform float uBellyOn;\nuniform vec4 uEll;\nuniform float uBZ;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  { vec2 q = (vBP.xy - uEll.xy) / uEll.zw; float e = dot(q, q); float aa = fwidth(e) * 1.2 + 0.002;
+    float inside = (1.0 - smoothstep(1.0 - aa, 1.0 + aa, e)) * smoothstep(uBZ - 0.04, uBZ + 0.02, vBP.z) * uBellyOn;
+    diffuseColor.rgb = mix(diffuseColor.rgb, uBelly, inside); }`);
+  };
+  mt.customProgramCacheKey = () => 'fofo-belly-v1';
+  mt.needsUpdate = true;
 }
 
 // Esfera com um buraco oval na frente (capuz das fantasias, deixa o rosto à mostra)
@@ -1588,6 +1640,7 @@ function buildFofo(m) {
     body = fmesh(SPH(0.33, 30, 22), Z.body); body.scale.set(1, 1.12, 1.045);
     belly = fmesh(SPH(0.25, 24, 16), Z.belly); belly.scale.set(0.8, 0.98, 0.42); belly.position.set(0, -0.05, 0.262);
   }
+  else smoothBelly(body, Z);
   const shorts = fmesh(new THREE.SphereGeometry(0.334, 30, 12, 0, Math.PI * 2, Math.PI * 0.64, Math.PI * 0.36), Z.shorts);
   shorts.scale.set(1.01, 1.13, 1.055); shorts.visible = false;
   bodyG.add(body, belly, shorts);
@@ -1804,6 +1857,7 @@ function setFofoSkin(m, id) {
   }
   m.fofoBelly.visible = skin.belly !== false;
   if (skin.belly === false) Z.belly.color.copy(Z.body.color), Z.belly.map = Z.body.map;
+  if (Z.body.userData.bellyOn) Z.body.userData.bellyOn.value = skin.belly === false ? 0 : 1;
   m.fofoShorts.visible = !!skin.shorts;
   if (skin.shorts) Z.shorts.color.set(skin.shorts);
   for (const e of m.ears) e.visible = !skin.hideEars;
@@ -2035,6 +2089,7 @@ function applyRpgPose(m, p, t, air) {
   m.rig.position.set(0, L * (bedTop + 0.27), L * 0.86);
   if (L > 0) m.hips.position.y = p.hipsY * (1 - L) + 0.3 * L;
   m.mug.visible = m.drinkT > 0 && !m.lying;
+  if (m.can) { const en = m.drinkKind === 'energy'; m.can.visible = en; for (const c of m.mug.children) if (c !== m.can) c.visible = !en; }
   // gole: braço esticado (um pouco mais comprido, é desenho), caneca na frente
   // da mão e inclinada pra boca; segurando: caneca em pé na altura do peito
   const sip = m.mug.visible && m.rpg?.ov === 'drink' && m.rpg.ovFrame % 8 >= 5;
@@ -2691,8 +2746,25 @@ function coffeeBar(x, z, rot) {
   sign.position.set(0.3, 1.75, -0.25);
   g.add(sign);
   rbox(0.94, 0.34, 0.03, 0.01, M.woodDark, 0.3, 1.75, -0.27, g);
+  // galão de energético (bebedouro preto com faixa verde neon e raio)
+  rbox(0.62, 0.9, 0.55, 0.03, M.black, 1.55, 0.45, 0, g);
+  const jugM = new THREE.MeshStandardMaterial({ color: 0x17191c, roughness: 0.25, metalness: 0.4, transparent: true, opacity: 0.92 });
+  const neonM = new THREE.MeshStandardMaterial({ color: 0x7cff3a, emissive: 0x3fbf00, emissiveIntensity: 0.9, roughness: 0.4 });
+  cyl(0.24, 0.24, 0.62, jugM, 1.55, 1.25, 0, g, 22);
+  cyl(0.245, 0.245, 0.09, neonM, 1.55, 1.3, 0, g, 22);
+  cyl(0.1, 0.24, 0.12, jugM, 1.55, 1.62, 0, g, 22);
+  cyl(0.06, 0.06, 0.08, neonM, 1.55, 1.72, 0, g, 12);
+  rbox(0.08, 0.08, 0.1, 0.02, M.chrome, 1.55, 0.98, 0.3, g);
+  const lab = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.26), new THREE.MeshBasicMaterial({ toneMapped: false, map: canvasTex(220, 130, (c, w, h) => {
+    c.fillStyle = '#0d0f11'; c.fillRect(0, 0, w, h);
+    c.fillStyle = '#7cff3a'; c.beginPath(); c.moveTo(118, 8); c.lineTo(70, 72); c.lineTo(104, 72); c.lineTo(92, 122); c.lineTo(150, 50); c.lineTo(114, 50); c.closePath(); c.fill();
+    c.font = '900 22px Inter, sans-serif'; c.textAlign = 'center'; c.fillStyle = '#e8ffe0'; c.fillText('ENERGÉTICO', w / 2, 116);
+  }) }));
+  lab.position.set(1.55, 0.6, 0.281); g.add(lab);
   place(g, x, z, rot);
   footprint(x, z, 2.3, 0.66, rot);
+  { const [ex, ez] = rotXZ(1.55, 0, rot); footprint(x + ex, z + ez, 0.66, 0.6, rot);
+    INTERACT.push({ kind: 'energy', x: x + ex, z: z + ez, yaw: rot, h: 1.35, front: [x + ex + Math.sin(rot) * 0.9, z + ez + Math.cos(rot) * 0.9] }); }
   const [mx, mz] = rotXZ(-0.45, 0, rot);
   INTERACT.push({ kind: 'coffee', x: x + mx, z: z + mz, yaw: rot, h: 1.25, front: [x + mx + Math.sin(rot) * 0.9, z + mz + Math.cos(rot) * 0.9] });
 }
@@ -4402,13 +4474,29 @@ function createOffice(opts) {
       this.avatarUrl = null;
       this.camEl = el.querySelector('.cam'); this.gameEl = el.querySelector('.game'); this.emoteEl = el.querySelector('.emote');
     }
+    // Bolinha da câmera: só aparece com a câmera LIGADA de verdade. A
+    // stream da call sempre existe (leva o áudio do microfone) — antes isso
+    // mostrava uma bolinha preta em cima de quem estava sem câmera. Enquanto
+    // o vídeo não chega, o fundo é a foto de perfil.
     setVideo(stream, mirror = false) {
       const v = this.camEl.querySelector('video');
-      if ((stream || null) === (v.srcObject || null)) return;
-      v.srcObject = stream || null;
-      this.camEl.hidden = !stream;
+      const track = stream?.getVideoTracks?.()[0] || null;
+      if (track === this.camTrack) { this.camEl.classList.toggle('mirror', !!mirror); return; }
+      this.camOff?.();
+      this.camOff = null; this.camTrack = track;
+      if (!track) { v.srcObject = null; this.camEl.hidden = true; return; }
+      v.srcObject = new MediaStream([track]);
+      v.muted = true;
       this.camEl.classList.toggle('mirror', !!mirror);
-      if (stream) v.play().catch(() => {});
+      this.camEl.style.background = this.avatarUrl ? `#0c0a10 center/cover url("${this.avatarUrl}")` : '';
+      const upd = () => {
+        const on = track.readyState === 'live' && track.enabled && !track.muted;
+        this.camEl.hidden = !on;
+        if (on) v.play().catch(() => {});
+      };
+      for (const ev of ['mute', 'unmute', 'ended']) track.addEventListener(ev, upd);
+      this.camOff = () => { for (const ev of ['mute', 'unmute', 'ended']) track.removeEventListener(ev, upd); };
+      upd();
     }
     setStatusLine(text) { const t = text ? String(text).slice(0, 60) : ''; if (this.gameEl.textContent !== t) this.gameEl.textContent = t; }
     emote(emoji) {
@@ -4507,7 +4595,7 @@ function createOffice(opts) {
         let max = WALK;
         if (input && input.lengthSq() > 0) {
           want.copy(input).normalize();
-          max = input.run ? RUN : WALK;
+          max = (input.run ? RUN : WALK) * (this.isPlayer && energyT > 0 ? 1.3 : 1);
           if (this.goal?.seat && this.goal.seat.occupant === this) this.goal.seat.occupant = null;
           this.path = []; this.goal = null;
         } else if (this.path.length) {
@@ -4615,7 +4703,10 @@ function createOffice(opts) {
 
   function specFrom(d) {
     const cats = d.categories.map((c, i) => ({ id: c.id, name: c.name, color: c.color || SECTOR_COLORS[i % SECTOR_COLORS.length], text: c.text || [], voice: c.voice || [] }));
-    cats.push(SPECIALS);
+    // sala de Minigames: vira call quando o servidor tem um canal de voz pra
+    // ela (data.minigamesRoom = { id, name }); senão é só uma sala de jogar
+    const mg = d.minigamesRoom;
+    cats.push(mg ? { ...SPECIALS, voice: [{ id: mg.id, name: mg.name || 'Minigames', theme: 'arcade', voice: true, private: !!mg.private }, ...SPECIALS.voice.slice(1)] } : SPECIALS);
     sectorColors = { recepcao: '#f4511e' };
     for (const c of cats) sectorColors[c.id] = c.color;
     return { categories: cats };
@@ -4905,7 +4996,7 @@ function createOffice(opts) {
     }
   }
   const SEAT_WORD = { bed: 'Deitar', rest: 'Descansar', sofa: 'Sentar no sofá', stool: 'Sentar', desk: 'Sentar', meet: 'Sentar' };
-  const USE_WORD = { tv: 'Ver TV', arcade: 'Jogar', pc: 'Usar computador', coffee: 'Pegar café', wc: 'Usar banheiro' };
+  const USE_WORD = { tv: 'Ver TV', arcade: 'Jogar', pc: 'Usar computador', coffee: 'Pegar café', energy: 'Pegar energético', wc: 'Usar banheiro' };
   let promptSig = '';
   function renderPrompt() {
     const parts = [];
@@ -4928,21 +5019,22 @@ function createOffice(opts) {
     player.goTo(0, 0, { seat });
   }
   function useAction() { if (near.use) use(near.use); }
-  let wcSeq = null, coffeeSeq = null;
+  let wcSeq = null, coffeeSeq = null, energyT = 0;
   function say(a, text, secs = 2.5) { a.bubbleEl.textContent = text; a.bubbleEl.classList.add('show'); a.bubbleT = secs; }
   function use(it) {
     if (wcSeq) return;
-    if (it.kind === 'coffee' || it.kind === 'wc') {
+    if (it.kind === 'coffee' || it.kind === 'wc' || it.kind === 'energy') {
       const [fx, fz] = it.front;
       if (player.seat || Math.hypot(player.pos.x - fx, player.pos.z - fz) > 0.35) {
         player.goTo(fx, fz, { then: () => use(it) });
         return;
       }
       player.faceTo = Math.atan2(it.x - fx, it.z - fz);
-      if (it.kind === 'coffee') {
+      if (it.kind === 'coffee' || it.kind === 'energy') {
         if (coffeeSeq) return;
-        coffeeSeq = { t: 0, it }; stat('coffee');
-        say(player, '☕ Passando um café…', 2);
+        const en = it.kind === 'energy';
+        coffeeSeq = { t: 0, it, en }; stat(en ? 'energy' : 'coffee');
+        say(player, en ? '⚡ Enchendo um energético…' : '☕ Passando um café…', 2);
       } else {
         if (it.busy) { say(player, 'Ocupado! 🚪', 1.6); return; }
         wcSeq = { it, t: 0, from: [fx, fz] }; stat('wc');
@@ -4998,7 +5090,7 @@ function createOffice(opts) {
     }
     if (best) {
       if (best.kind === 'pc') { if (!best.seat.occupant || best.seat.occupant === player) player.goTo(0, 0, { seat: best.seat, then: () => use(best) }); }
-      else if (best.kind === 'coffee' || best.kind === 'wc') use(best);
+      else if (best.kind === 'coffee' || best.kind === 'wc' || best.kind === 'energy') use(best);
       else { const [fx, fz] = best.front || [best.x, best.z]; player.goTo(fx, fz, { then: () => { player.faceTo = Math.atan2(best.x - player.pos.x, best.z - player.pos.z); use(best); } }); }
       return;
     }
@@ -5029,14 +5121,17 @@ function createOffice(opts) {
     if (coffeeSeq) {
       // aperta o botão → espera a máquina (vapor) → pega a caneca → 1º gole "ahh"
       const c = coffeeSeq;
-      if (c.t === 0) { player.m.pressT = 0.9; c.steam = makeSteam(c.it); SFX.press(); setTimeout(() => SFX.brew(), 350); }
+      if (c.t === 0) { player.m.pressT = 0.9; c.steam = c.en ? null : makeSteam(c.it); SFX.press(); setTimeout(() => SFX.brew(), 350); }
       c.t += dt;
       if (c.steam) tickSteam(c.steam, dt, c.t < 2.2);
       if (c.t > 2.3) {
         coffeeSeq = null;
         player.m.drinkT = 30;
+        player.m.drinkKind = c.en ? 'energy' : 'coffee';
         player.m.rpg && (player.m.rpg.ovFrame = 5); // começa já no gole
-        say(player, '☕ ahh…', 1.6);
+        // energético: 25 s andando mais rápido e com cara de "bora"
+        if (c.en) { energyT = 25; player.m.emoteExpr = 'garra'; player.m.emoteT = 2; }
+        say(player, c.en ? '⚡ BORA!' : '☕ ahh…', 1.6);
         SFX.clink();
         if (c.steam) setTimeout(() => { scene.remove(c.steam.g); }, 800);
       }
@@ -5317,7 +5412,7 @@ function createOffice(opts) {
       const sc = clamp(zoom / 62, 0.82, 1.1);
       a.tag.style.transform = `translate(${((tmpV.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-tmpV.y * 0.5 + 0.5) * h).toFixed(1)}px) translate(-50%, -100%) scale(${sc.toFixed(3)})`;
       a.nameEl.classList.toggle('talking', a.m.talking && !!a.room);
-      if (!a.camEl.hidden) a.camEl.classList.toggle('talking', !!a.m.talking);
+      if (a.camTrack) { const on = a.camTrack.readyState === 'live' && a.camTrack.enabled && !a.camTrack.muted; if (a.camEl.hidden === on) a.camEl.hidden = !on; if (on) a.camEl.classList.toggle('talking', !!a.m.talking); }
     }
     whoT -= dt;
     const refresh = whoT <= 0;
@@ -5358,10 +5453,12 @@ function createOffice(opts) {
   }
   const ro = new ResizeObserver(resize);
   ro.observe(root);
-  player.pos.set(-7, 0, 0);
-  player.yaw = Math.PI / 2;
-  controls.target.set(-7, 0.6, 0);
-  const follow = new THREE.Vector3(-7, 0.6, 0);
+  // volta de onde parou (opts.startAt); senão começa na recepção
+  const st0 = opts.startAt && Number.isFinite(opts.startAt.x) && Number.isFinite(opts.startAt.z) ? opts.startAt : null;
+  player.pos.set(st0 ? st0.x : -7, 0, st0 ? st0.z : 0);
+  player.yaw = st0 && Number.isFinite(st0.yaw) ? st0.yaw : Math.PI / 2;
+  controls.target.set(player.pos.x, 0.6, player.pos.z);
+  const follow = new THREE.Vector3(player.pos.x, 0.6, player.pos.z);
   placeCamera(follow);
   // zoom (degraus inteiros pra manter o pixel nítido) e giro de 90°
   function setZoom(next) {
@@ -5425,6 +5522,7 @@ function createOffice(opts) {
     if (paused) return;
     t += dt;
     dayT -= dt; if (dayT <= 0) { dayT = 60; applyDaylight(); }
+    if (energyT > 0) energyT -= dt;
     if (boardEvents.length) { boardT -= dt; if (boardT <= 0) { boardT = 9; boardPage ^= 1; drawBoard(); } }
     musT -= dt; if (musT <= 0) { musT = 1; MUSIC.setMood(MOOD_OF[player.room && ROOMS[player.room]?.theme.id] || 'office'); }
     walkAcc += player.vel ? Math.hypot(player.vel.x, player.vel.z) * dt : 0;
@@ -5492,7 +5590,7 @@ function createOffice(opts) {
   const api = {
     setData(d) {
       data = d;
-      const sig = JSON.stringify(d.categories.map((c) => [c.id, c.name, (c.voice || []).map((v) => (typeof v === 'string' ? v : [v.id, v.name, v.theme, !!v.private]))]));
+      const sig = JSON.stringify([d.minigamesRoom || null, d.categories.map((c) => [c.id, c.name, (c.voice || []).map((v) => (typeof v === 'string' ? v : [v.id, v.name, v.theme, !!v.private]))])]);
       const first = !built;
       if (sig !== worldSig) { worldSig = sig; rebuildWorld(); syncMembers(true); }
       else syncMembers(first);
@@ -5548,9 +5646,11 @@ function createOffice(opts) {
     getMySkin() { return { ...mySkin }; },
     get playerMamaco() { return player.m; },
     setPaused(p) { paused = !!p; MUSIC.hold(paused); if (p) keys.clear(); clock.getDelta(); },
+    /** onde você está agora (pra voltar no mesmo lugar ao reabrir) */
+    getPlayerState() { return { x: player.pos.x, z: player.pos.z, yaw: player.yaw }; },
     rooms() { return Object.values(ROOMS).map((r) => ({ id: r.id, name: r.name, voice: r.voice, theme: r.theme.label, sector: r.sector })); },
     audit() { return auditOverlaps(); },
-    debug: { post: outlineMat, setZoom, rotateCam, player, agents, camera, controls, follow: () => follow, get seats() { return seats; }, get ROOMS() { return ROOMS; }, get interact() { return INTERACT; }, zoneAt, findPath },
+    debug: { post: outlineMat, setZoom, rotateCam, player, agents, camera, controls, follow: () => follow, get seats() { return seats; }, get ROOMS() { return ROOMS; }, get interact() { return INTERACT; }, zoneAt, findPath, use: (it) => use(it) },
     dispose() {
       disposed = true;
       MUSIC.stop();
@@ -6322,7 +6422,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     if (k === 'escape') { e.preventDefault(); e.stopPropagation(); exit(); return; }
     if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', ' ', 'e', 'x', 'control'].includes(k)) {
       e.preventDefault(); e.stopPropagation();
-      if (!keys.has(k) && (k === 'e' || k === 'x' || k === 'control') && state === 'race') useItem(karts[0]);
+      if (!e.repeat && (k === 'e' || k === 'x' || k === 'control') && state === 'race') useItem(karts[0]);
       keys.add(k);
     }
   };
@@ -6468,6 +6568,13 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     k.velYaw += dy * Math.min(1, g * dt);
     fwd.set(Math.sin(k.velYaw), 0, Math.cos(k.velYaw));
     k.pos.addScaledVector(fwd, k.speed * dt);
+    // empurrão de batida (vai sumindo)
+    if (k.shoveX || k.shoveZ) {
+      k.pos.x += k.shoveX * dt; k.pos.z += k.shoveZ * dt;
+      const dec = Math.exp(-5 * dt); k.shoveX *= dec; k.shoveZ *= dec;
+      if (Math.abs(k.shoveX) + Math.abs(k.shoveZ) < 0.05) k.shoveX = k.shoveZ = 0;
+    }
+    if (k.wobT > 0) { k.wobT -= dt; }
     k.k = nearest(k.pos, k.k);
     // muro invisível na beira (com pancadinha)
     const lat = lateral(k), lim = W / 2 + 4.5;
@@ -6488,7 +6595,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
     k.lastK = k.k;
     k.prog = k.lap * N + k.k;
     // caixas de item
-    for (const b of BOXES) if (!b.gone && b.m.position.distanceToSquared(k.pos) < 4.2) { b.gone = 2.5; b.m.visible = false; giveItem(k); }
+    for (const b of BOXES) if (b.gone <= 0 && b.m.position.distanceToSquared(k.pos) < 4.2) { b.gone = 2.5; b.m.visible = false; giveItem(k); }
     // bananas
     for (let i = hazards.length - 1; i >= 0; i--) { const h = hazards[i]; if (h.m.position.distanceToSquared(k.pos) < 2.2 && h.t > 0.25) { spin(k); scene.remove(h.m); hazards.splice(i, 1); } }
     return inp;
@@ -6614,10 +6721,35 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
       if (k.done && !k.waved) { k.waved = true; v.m.wave(); }
     }
     // empurrão entre karts
-    for (const a of karts) for (const b of karts) {
-      if (a === b) continue;
-      const dx = a.pos.x - b.pos.x, dz = a.pos.z - b.pos.z, d = Math.hypot(dx, dz);
-      if (d < 2.1 && d > 0.01) { const push = (2.1 - d) * 0.5; a.pos.x += (dx / d) * push; a.pos.z += (dz / d) * push; if (a.me && !a.bumpT) { sfx('bump'); a.bumpT = 0.4; } }
+    // Batida entre karts com física de verdade (massas iguais): separa os
+    // dois, troca o "tranco" na direção da batida, quem bate de lado é
+    // empurrado pro lado e dá uma rodadinha; de frente/traseira perde ou
+    // ganha velocidade. Antes eles só se afastavam como ímãs.
+    for (let i = 0; i < karts.length; i++) for (let j = i + 1; j < karts.length; j++) {
+      const a = karts[i], b = karts[j];
+      if (Math.abs(a.pos.y - b.pos.y) > 1.5) continue;
+      const dx = a.pos.x - b.pos.x, dz = a.pos.z - b.pos.z, d = Math.hypot(dx, dz), R = 2.0;
+      if (d >= R || d < 0.001) continue;
+      const nx = dx / d, nz = dz / d, pen = (R - d) / 2;
+      a.pos.x += nx * pen; a.pos.z += nz * pen; b.pos.x -= nx * pen; b.pos.z -= nz * pen;
+      const fa = [Math.sin(a.velYaw), Math.cos(a.velYaw)], fb = [Math.sin(b.velYaw), Math.cos(b.velYaw)];
+      const va = [fa[0] * a.speed + (a.shoveX || 0), fa[1] * a.speed + (a.shoveZ || 0)];
+      const vb = [fb[0] * b.speed + (b.shoveX || 0), fb[1] * b.speed + (b.shoveZ || 0)];
+      const rel = (va[0] - vb[0]) * nx + (va[1] - vb[1]) * nz;
+      if (rel >= 0) continue; // já se afastando
+      const J = (-(1 + 0.45) * rel) / 2; // impulso (restituição 0,45)
+      for (const [k, sgn, f] of [[a, 1, fa], [b, -1, fb]]) {
+        const ix = nx * J * sgn, iz = nz * J * sgn;
+        const along = ix * f[0] + iz * f[1];          // parte na direção do kart → velocidade
+        k.speed = Math.max(-6, k.speed + along * 0.9);
+        k.shoveX = (k.shoveX || 0) + (ix - along * f[0]); // parte de lado → empurrão
+        k.shoveZ = (k.shoveZ || 0) + (iz - along * f[1]);
+        const side = f[0] * iz - f[1] * ix;            // batida de lado → gira um pouco
+        k.yaw += Math.max(-0.35, Math.min(0.35, side * 0.03));
+        k.drift = 0; k.driftCharge *= 0.5; k.wobT = 0.35;
+      }
+      const hard = Math.min(1, J / 10);
+      if ((a.me || b.me) && hard > 0.08) { sfx('bump'); if (hard > 0.5) flash('Pancada!', 0.6); }
     }
     // cocos voando pela pista
     for (let i = shots.length - 1; i >= 0; i--) {
@@ -6630,7 +6762,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
       if (hit || s.t > 3) { scene.remove(s.m); shots.splice(i, 1); }
     }
     for (const h of hazards) { h.t += dt; h.m.rotation.y += dt; }
-    for (const b of BOXES) { b.m.rotation.y += dt * 1.6; b.m.rotation.x = Math.sin(t * 2) * 0.3; b.m.position.y += Math.sin(t * 3 + b.m.position.x) * 0.004; if (b.gone > 0) { b.gone -= dt; if (b.gone <= 0) b.m.visible = true; } }
+    for (const b of BOXES) { b.m.rotation.y += dt * 1.6; b.m.rotation.x = Math.sin(t * 2) * 0.3; b.m.position.y += Math.sin(t * 3 + b.m.position.x) * 0.004; if (b.gone > 0) { b.gone -= dt; if (b.gone <= 0) { b.gone = 0; b.m.visible = true; } } }
     if (msgT > 0) { msgT -= dt; if (msgT <= 0) $('.msg').textContent = ''; }
     if (eng) {
       const me = karts[0], sp = Math.abs(me.speed);
@@ -6644,6 +6776,7 @@ function openKart3D(container, { skin = null, name = 'Você', onShare, onExit, o
   reset();
   raf = requestAnimationFrame(frame);
   // teste: avança a simulação sem desenhar
+  wrap.__dbg = () => ({ karts, hazards, BOXES, P, SD, dropBanana, giveItem, spin });
   wrap.__sim = (secs, hold = []) => {
     const rafSave = window.requestAnimationFrame, renSave = renderer.render;
     window.requestAnimationFrame = () => 0; renderer.render = () => {};
@@ -6791,18 +6924,34 @@ function openBanana3D(container, { skin = null, name = 'Você', onShare, onExit,
   const pile = [];
 
   // ---------- Itens ----------
+  // banana de verdade: arco comprido, gomos (6 lados), pontas fechadas e
+  // afinando (antes era um tubo grosso e curto, aberto nas pontas)
   const bananaGeo = (() => {
     const pts = [];
-    for (let i = 0; i <= 10; i++) { const a = -0.9 + (i / 10) * 1.8; pts.push(new THREE.Vector3(Math.sin(a) * 0.42, -Math.cos(a) * 0.42 + 0.42, 0)); }
+    for (let i = 0; i <= 12; i++) { const a = -0.85 + (i / 12) * 1.7; pts.push(new THREE.Vector3(Math.sin(a) * 0.5, -Math.cos(a) * 0.5 + 0.5, 0)); }
     const curve = new THREE.CatmullRomCurve3(pts);
-    const g = new THREE.TubeGeometry(curve, 16, 0.11, 8, false);
-    // afina as pontas
-    const pos = g.attributes.position, c = new THREE.Vector3();
-    for (let i = 0; i < pos.count; i++) {
-      const u = Math.floor(i / 9) / 16; const k = 0.35 + 0.65 * Math.sin(u * Math.PI);
-      const p = curve.getPointAt(Math.min(1, u)); c.set(pos.getX(i), pos.getY(i), pos.getZ(i)).sub(p).multiplyScalar(k).add(p); pos.setXYZ(i, c.x, c.y, c.z);
+    const SEG = 24, RAD = 6, R = 0.1;
+    const frames = curve.computeFrenetFrames(SEG, false);
+    const pos = [], idx = [];
+    for (let i = 0; i <= SEG; i++) {
+      const u = i / SEG, c = curve.getPointAt(u);
+      const k = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, (u - 0.02) / 0.96))), 0.5);
+      const r = R * k * (i === 0 || i === SEG ? 0 : 1);
+      for (let j = 0; j <= RAD; j++) {
+        const t = (j / RAD) * Math.PI * 2;
+        const n = frames.normals[i].clone().multiplyScalar(Math.cos(t)).add(frames.binormals[i].clone().multiplyScalar(Math.sin(t) * 0.88));
+        pos.push(c.x + n.x * r, c.y + n.y * r, c.z + n.z * r);
+      }
     }
-    g.computeVertexNormals(); g.translate(0, -0.2, 0);
+    for (let i = 0; i < SEG; i++) for (let j = 0; j < RAD; j++) {
+      const a = i * (RAD + 1) + j, b = a + RAD + 1;
+      idx.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    g.translate(0, -0.22, 0);
     return g;
   })();
   const stemGeo = new THREE.CylinderGeometry(0.035, 0.05, 0.14, 6);
@@ -6816,7 +6965,7 @@ function openBanana3D(container, { skin = null, name = 'Você', onShare, onExit,
       for (let i = 0; i < 3; i++) { const p = new THREE.Mesh(bananaGeo, MAT.peel); p.scale.set(0.8, 0.6, 1.4); p.rotation.set(0, (i / 3) * Math.PI * 2, 0.9); p.castShadow = true; g.add(p); }
     } else {
       const b = new THREE.Mesh(bananaGeo, kind === 'gold' ? MAT.gold : MAT.banana); b.castShadow = true; g.add(b);
-      const st = new THREE.Mesh(stemGeo, MAT.stem); st.position.set(0.4, 0.27, 0); st.rotation.z = -0.6; g.add(st);
+      const st = new THREE.Mesh(stemGeo, MAT.stem); st.position.set(0.41, -0.01, 0); st.rotation.z = -0.72; g.add(st);
       if (kind === 'gold') { const halo = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.68, 24), new THREE.MeshBasicMaterial({ color: 0xfff3a0, transparent: true, opacity: 0.6, side: THREE.DoubleSide })); g.add(halo); g.userData.halo = halo; }
     }
     scene.add(g);

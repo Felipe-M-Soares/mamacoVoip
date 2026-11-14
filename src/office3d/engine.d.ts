@@ -66,7 +66,10 @@ export interface OfficeZone {
 }
 
 export interface Office {
-  setData(data: { serverName: string; categories: OfficeCategory[]; members: OfficeMember[] }): void
+  /** minigamesRoom: canal de voz que vira a sala do fliperama/kart (com call) */
+  /** onde você está agora */
+  getPlayerState(): { x: number; z: number; yaw: number }
+  setData(data: { serverName: string; categories: OfficeCategory[]; members: OfficeMember[]; minigamesRoom?: { id: string; name: string; private?: boolean } | null }): void
   setSpeaking(ids: Set<string>): void
   /** TV(s) da sala: null volta pra imagem normal */
   setRoomScreen(roomId: string, src: OfficeScreenSource | null): void
@@ -116,6 +119,8 @@ export function createOffice(opts: {
   onAvatarClick?: (userId: string, at: { x: number; y: number }) => void
   /** ações do seu boneco (conquistas): 'coffee' | 'wc' | 'sit' | 'lie' | 'wave' | 'emote' | 'room' | 'walk' */
   onStat?: (name: string, n: number) => void
+  /** posição inicial (volta de onde parou) */
+  startAt?: { x: number; z: number; yaw?: number } | null
 }): Office
 
 export interface MinigameResult { game: string; score?: number; place?: number; time?: number }

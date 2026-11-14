@@ -15,6 +15,7 @@ export interface Achievement {
 export const ACHIEVEMENTS: Achievement[] = [
   { id: 'primeiro-cafe', icon: '☕', name: 'Primeiro cafezinho', desc: 'Tome um café na copa.', stat: 'coffee', goal: 1 },
   { id: 'cafeinado', icon: '⚡', name: 'Movido a café', desc: 'Tome 25 cafés.', stat: 'coffee', goal: 25 },
+  { id: 'energizado', icon: '🔋', name: 'Energizado', desc: 'Tome 10 energéticos do galão da copa.', stat: 'energy', goal: 10 },
   { id: 'andarilho', icon: '👣', name: 'Andarilho', desc: 'Ande 1 km pelo escritório.', stat: 'walk', goal: 1000 },
   { id: 'maratonista', icon: '🏃', name: 'Maratonista do corredor', desc: 'Ande 10 km.', stat: 'walk', goal: 10000 },
   { id: 'social', icon: '👋', name: 'Simpatia', desc: 'Acene 20 vezes.', stat: 'wave', goal: 20 },

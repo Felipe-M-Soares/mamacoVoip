@@ -41,6 +41,7 @@ import {
   type OfficeSkin,
   type OfficeTvInfo,
   type OfficeZone,
+  detectRoomTheme,
 } from './engine.js'
 
 const CreateChannelModal = lazyModal(() => import('../components/modals/CreateChannelModal').then((m) => m.CreateChannelModal))
@@ -107,6 +108,27 @@ function loadSkin(userId: string, fromProfile: unknown): OfficeSkin {
   return local ?? p ?? defaultSkin(userId)
 }
 
+// Onde você estava em cada servidor (pra voltar no mesmo lugar ao reabrir o
+// Escritório). Fica salvo no aparelho.
+const LAST_POS_KEY = 'mamacos-3d-pos-v1'
+function loadLastPos(serverId: string): { x: number; z: number; yaw: number } | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(LAST_POS_KEY) || '{}') as Record<string, { x: number; z: number; yaw: number }>
+    return all[serverId] ?? null
+  } catch {
+    return null
+  }
+}
+function saveLastPos(serverId: string, pos: { x: number; z: number; yaw: number }) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LAST_POS_KEY) || '{}') as Record<string, unknown>
+    all[serverId] = pos
+    localStorage.setItem(LAST_POS_KEY, JSON.stringify(all))
+  } catch {
+    // sem armazenamento: volta pra recepção
+  }
+}
+
 const isTyping = () => {
   const el = document.activeElement as HTMLElement | null
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
@@ -124,7 +146,7 @@ export function Office3DView({
   onSelectChannel: (c: Channel) => void
 }) {
   const { user, profile } = useAuth()
-  const { categories, channels } = useChannels()
+  const { categories, channels, createChannel: createChannelNow } = useChannels()
   const { members } = useServerMembers(server.id)
   const { permissions } = useModeration(server.id)
   const onlineIds = useOnlineIds()
@@ -164,6 +186,13 @@ export function Office3DView({
   const canManageChannels = isOwner || !!permissions.manage_channels
   const canModerate = isOwner || !!(permissions.kick_members || permissions.ban_members || permissions.timeout_members || permissions.manage_roles)
 
+  // Sala de Minigames = um canal de voz do servidor com nome de jogos
+  // ("Minigames", "Fliperama", "Arcade"…). Ele vira a sala do fliperama/kart
+  // (com call) em vez de uma sala comum no setor dele.
+  const minigamesChannel = useMemo(
+    () => channels.find((c) => c.type === 'voice' && detectRoomTheme(c.name).id === 'arcade') ?? null,
+    [channels]
+  )
   // canais organizados por categoria (igual a barra lateral)
   const layout = useMemo(() => {
     const cats = [...categories].sort((a, b) => a.position - b.position)
@@ -172,13 +201,14 @@ export function Office3DView({
     const groups: { id: string; name: string; text: Channel[]; voice: Channel[] }[] = cats.map((c) => ({ id: c.id, name: c.name, text: [], voice: [] }))
     const loose = { id: '__sem-categoria', name: 'Geral', text: [] as Channel[], voice: [] as Channel[] }
     for (const ch of ordered) {
+      if (ch.id === minigamesChannel?.id) continue
       const g = groups.find((x) => x.id === ch.category_id) ?? loose
       ;(ch.type === 'voice' ? g.voice : g.text).push(ch)
     }
     if (loose.text.length || loose.voice.length) groups.unshift(loose)
     // salas por setor: até 6 (o resto ainda funciona no clássico)
     return groups.filter((g) => g.text.length || g.voice.length).map((g) => ({ ...g, voice: g.voice.slice(0, 6) }))
-  }, [categories, channels])
+  }, [categories, channels, minigamesChannel])
 
   const officeCats: OfficeCategory[] = useMemo(
     () =>
@@ -203,7 +233,10 @@ export function Office3DView({
         id: m.user_id,
         name: m.nickname || p.display_name || p.username,
         status: present && p.status !== 'offline' ? st : isMe ? 'online' : 'offline',
-        voiceChannelId: isMe ? myVoice : (roster.get(m.user_id) ?? null),
+        // Só conta como "na sala" quem está conectado de verdade agora:
+        // quem deslogou/fechou o app some da sala na hora (a lista da call
+        // pode levar alguns segundos pra perceber a queda).
+        voiceChannelId: isMe ? myVoice : present ? (roster.get(m.user_id) ?? null) : null,
         avatarUrl: p.avatar_url,
         // visual salvo no perfil (PARTE 31); sem ele, o motor sorteia um pelo id
         skin: isMe ? undefined : (cleanSkin(p.office_skin) ?? undefined),
@@ -347,9 +380,11 @@ export function Office3DView({
       },
       onArcade: (game) => openGamesRef.current(game),
       onStat: (name, n) => latest.current.onStat(name, n),
+      startAt: loadLastPos(server.id),
     })
     officeRef.current = office
     return () => {
+      try { saveLastPos(server.id, office.getPlayerState()) } catch { /* ok */ }
       office.dispose()
       officeRef.current = null
     }
@@ -358,8 +393,13 @@ export function Office3DView({
   }, [user?.id])
 
   useEffect(() => {
-    officeRef.current?.setData({ serverName: server.name, categories: officeCats, members: officeMembers })
-  }, [server.name, officeCats, officeMembers])
+    officeRef.current?.setData({
+      serverName: server.name,
+      categories: officeCats,
+      members: officeMembers,
+      minigamesRoom: minigamesChannel ? { id: minigamesChannel.id, name: minigamesChannel.name, private: Boolean(minigamesChannel.is_restricted) } : null,
+    })
+  }, [server.name, officeCats, officeMembers, minigamesChannel])
 
   // desenha a TV da sala da call (AO VIVO / a tela que você está assistindo)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -620,6 +660,15 @@ export function Office3DView({
         {zone && (
           <span className="h-9 pl-3 pr-1.5 rounded-xl bg-black/50 border border-white/10 text-[13px] font-semibold flex items-center gap-1.5 backdrop-blur">
             {zone.name}
+            {zone.id === 'special:minigames' && !minigamesChannel && canManageChannels && (
+              <button
+                onClick={() => void createChannelNow("Minigames", "voice", null)}
+                className="h-7 px-2 rounded-lg text-[12px] font-semibold text-mv-accent hover:bg-white/10"
+                title="Cria o canal de voz Minigames: quem entrar nesta sala entra na call"
+              >
+                Virar call
+              </button>
+            )}
             {zoneChannel && canManageChannels && (
               <button onClick={() => setEditChannel(zoneChannel)} className="h-7 px-2 rounded-lg text-[12px] text-mv-muted hover:text-white hover:bg-white/10" title="Editar ou apagar esta sala">
                 Editar

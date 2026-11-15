@@ -21,7 +21,7 @@ import { VoiceMemberCard, requestViewProfile, type VoiceMemberCardTarget } from 
 import { DMChatArea } from '../components/layout/DMChatArea'
 import { lazyModal } from '../components/modals/lazyModal'
 import { useConversations } from '../hooks/useConversations'
-import { useFriendsUsage } from '../hooks/useAppUsage'
+import { useFriendsUsage, type UsageRow } from '../hooks/useAppUsage'
 import { useOfficeRealtime, OFFICE_EMOTES, type OfficeSignal } from './useOfficeRealtime'
 import { loadMinigameRanking, submitMinigameResult } from './minigameRanking'
 import { openKartNet, type KartRacer } from './kartRace'
@@ -185,6 +185,9 @@ export function Office3DView({
   const officeRef = useRef<Office | null>(null)
   const [zone, setZone] = useState<OfficeZone | null>(null)
   const [tv, setTv] = useState<OfficeTvInfo | null>(null)
+  const [boardOpen, setBoardOpen] = useState(false) // telão da recepção em tamanho grande
+  const [mySeat, setMySeat] = useState<{ kind: string; roomId: string | null; theme: string | null } | null>(null)
+  const [cinema, setCinema] = useState(false) // transmissão em tela cheia (sentado no cinema)
   const [drawer, setDrawer] = useState(false)
   // estúdio aberto: pausa o escritório (economiza placa de vídeo)
   useEffect(() => { officeRef.current?.setPaused(drawer) }, [drawer])
@@ -326,6 +329,33 @@ export function Office3DView({
     if (prev === 'auto') setStreamQuality(first.key, 'baixa')
     showStream(first.key)
   }
+
+  // ---------- cinema: sentado na sala de filmes, a transmissão em tela cheia ----------
+  // Usa a mesma transmissão da TV (nada novo é baixado além dela); em tela
+  // cheia volta pra qualidade normal, e ao sair a TV volta pra qualidade baixa.
+  const canCinema = !!mySeat && mySeat.theme === 'cinema' && !!myRoom && mySeat.roomId === myRoom && sharers.length > 0
+  function openCinema() {
+    const first = remoteWatched ?? sharers.find((x) => x.key !== 'local')
+    if (first && first.key !== 'local') {
+      if (!remoteWatched) {
+        tvOpened.current.set(first.key, getStreamQuality(first.key))
+        showStream(first.key)
+      }
+      const orig = tvOpened.current.get(first.key)
+      if (orig) setStreamQuality(first.key, orig)
+    }
+    setCinema(true)
+    officeRef.current?.setPaused(true)
+  }
+  const closeCinema = useCallback(() => {
+    setCinema(false)
+    officeRef.current?.setPaused(false)
+    for (const [key, q] of tvOpened.current) if (q === 'auto') setStreamQuality(key, 'baixa')
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+  }, [])
+  useEffect(() => {
+    if (cinema && !canCinema) closeCinema()
+  }, [cinema, canCinema, closeCinema])
 
   // ---------- conquistas (só no aparelho) ----------
   const [stats, setStats] = useState(() => loadStats())
@@ -518,6 +548,8 @@ export function Office3DView({
         office.setPaused(true)
         setTv(info)
       },
+      onBoardClick: () => setBoardOpen(true),
+      onSeatChange: (seat) => setMySeat(seat),
       onAvatarClick: (userId, at) => {
         setMemberCard(null)
         setAvatarMenu({ userId, x: at.x, y: at.y })
@@ -1036,6 +1068,36 @@ export function Office3DView({
         </div>
       )}
 
+      {canCinema && !cinema && (
+        <button
+          onClick={openCinema}
+          className="absolute left-1/2 -translate-x-1/2 bottom-32 z-[60] h-11 px-5 rounded-full font-semibold text-white bg-gradient-to-r from-rose-600 to-mv-accent shadow-2xl border border-white/15 flex items-center gap-2"
+        >
+          <span aria-hidden>🎬</span> Assistir em tela cheia
+        </button>
+      )}
+
+      {cinema && (
+        <CinemaView
+          stream={shown?.stream ?? null}
+          label={shown ? `${shownName} · ${connectedName ?? 'Cinema'}` : 'Carregando a transmissão…'}
+          onClose={closeCinema}
+        />
+      )}
+
+      {boardOpen && (
+        <BoardModal
+          usage={usage}
+          meId={user?.id ?? null}
+          events={events
+            .filter((e) => new Date(e.starts_at).getTime() >= Date.now() - 2 * 3600e3)
+            .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
+            .slice(0, 8)
+            .map((e) => ({ id: e.id, name: e.name, startsAt: e.starts_at, where: e.channel_id ? (channels.find((c) => c.id === e.channel_id)?.name ?? null) : null, going: rsvpsByEvent[e.id]?.length ?? 0 }))}
+          onClose={() => setBoardOpen(false)}
+        />
+      )}
+
       {kartChoice && (
         <div className="absolute inset-0 z-[58] bg-black/55 flex items-center justify-center p-4" onClick={() => setKartChoice(false)}>
           <div className="w-[min(380px,100%)] rounded-2xl bg-[#16131c] border border-white/10 p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
@@ -1111,6 +1173,139 @@ function MenuBtn({ onClick, children }: { onClick: () => void; children: ReactNo
     </button>
   )
 }
+// transmissão em tela cheia (cinema). O som já toca pelo app; o vídeo vai mudo.
+function CinemaView({ stream, label, onClose }: { stream: MediaStream | null; label: string; onClose: () => void }) {
+  const boxRef = useRef<HTMLDivElement>(null)
+  const vidRef = useRef<HTMLVideoElement>(null)
+  const [bar, setBar] = useState(true)
+  useEffect(() => {
+    const v = vidRef.current
+    if (!v) return
+    if (v.srcObject !== stream) v.srcObject = stream
+    if (stream) void v.play().catch(() => {})
+  }, [stream])
+  useEffect(() => {
+    const el = boxRef.current
+    if (el && !document.fullscreenElement) void el.requestFullscreen?.().catch(() => {})
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  // a barra de cima some sozinha; mexeu o mouse, volta
+  useEffect(() => {
+    if (!bar) return
+    const t = setTimeout(() => setBar(false), 2500)
+    return () => clearTimeout(t)
+  }, [bar])
+  return (
+    <div ref={boxRef} className="fixed inset-0 z-[95] bg-black flex items-center justify-center" onMouseMove={() => setBar(true)}>
+      <video ref={vidRef} muted playsInline autoPlay className="w-full h-full object-contain" />
+      {!stream && <p className="absolute text-white/70 text-[15px]">Carregando a transmissão…</p>}
+      <div className={`absolute top-0 inset-x-0 p-3 flex items-center gap-3 bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${bar ? 'opacity-100' : 'opacity-0'}`}>
+        <span className="w-2.5 h-2.5 rounded-full bg-red-500" aria-hidden />
+        <b className="text-white text-[14px] truncate">{label}</b>
+        <button onClick={onClose} className="ml-auto h-9 px-4 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-semibold">Sair da tela cheia (Esc)</button>
+      </div>
+    </div>
+  )
+}
+
+const fmtHours = (sec: number) => {
+  const m = Math.round(sec / 60)
+  const h = Math.floor(m / 60)
+  return h ? `${h}h ${String(m % 60).padStart(2, '0')}min` : `${m}min`
+}
+
+// telão da recepção em tamanho grande: ranking completo + eventos
+function BoardModal({ usage, meId, events, onClose }: {
+  usage: UsageRow[] | null | 'erro'
+  meId: string | null
+  events: { id: string; name: string; startsAt: string; where: string | null; going: number }[]
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const rows = Array.isArray(usage) ? usage.filter((r) => r.seconds > 0 || r.userId === meId).sort((a, b) => b.seconds - a.seconds) : []
+  const max = Math.max(1, ...rows.map((r) => r.seconds))
+  const total = rows.reduce((n, r) => n + r.seconds, 0)
+  const myPos = rows.findIndex((r) => r.userId === meId)
+  const medal = ['#f5c518', '#cbd5e1', '#d97706']
+  return (
+    <div className="absolute inset-0 z-[70] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="w-[min(760px,100%)] max-h-[90%] overflow-y-auto rounded-2xl bg-[#13101a] border border-white/10 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="h-1.5 bg-mv-accent rounded-t-2xl" />
+        <div className="p-5 flex flex-col gap-4">
+          <div className="flex items-start gap-3">
+            <div className="min-w-0">
+              <b className="font-display text-[22px] block">Tempo no Mamacos</b>
+              <p className="text-[13px] text-mv-muted">Você e seus amigos · últimos 7 dias</p>
+            </div>
+            <button className="ml-auto text-mv-muted text-2xl leading-none px-1" aria-label="Fechar" onClick={onClose}>×</button>
+          </div>
+
+          {usage === null && <p className="text-[13px] text-mv-muted">Carregando…</p>}
+          {usage === 'erro' && <p className="text-[13px] text-mv-muted">Ranking indisponível por enquanto.</p>}
+          {Array.isArray(usage) && !rows.length && <p className="text-[13px] text-mv-muted">Ainda sem dados — o ranking enche conforme o pessoal usa o app.</p>}
+
+          {rows.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
+              <div className="rounded-xl bg-white/[0.05] p-3"><p className="text-[11px] uppercase tracking-wider text-mv-muted">Total da turma</p><b className="text-[18px]">{fmtHours(total)}</b></div>
+              <div className="rounded-xl bg-white/[0.05] p-3"><p className="text-[11px] uppercase tracking-wider text-mv-muted">Sua posição</p><b className="text-[18px]">{myPos >= 0 ? `${myPos + 1}º de ${rows.length}` : '—'}</b></div>
+              <div className="rounded-xl bg-white/[0.05] p-3"><p className="text-[11px] uppercase tracking-wider text-mv-muted">Você por dia</p><b className="text-[18px]">{myPos >= 0 ? fmtHours(rows[myPos].seconds / 7) : '—'}</b></div>
+            </div>
+          )}
+
+          <ol className="flex flex-col gap-1.5">
+            {rows.map((r, i) => {
+              const me = r.userId === meId
+              return (
+                <li key={r.userId} className={`flex items-center gap-3 rounded-xl px-3 py-2 ${me ? 'bg-mv-accent/15 ring-1 ring-mv-accent/40' : 'bg-white/[0.03]'}`}>
+                  <span className="w-7 h-7 shrink-0 rounded-full grid place-items-center text-[12px] font-extrabold" style={{ background: medal[i] ?? '#3a3542', color: i < 3 ? '#1b1620' : '#fff' }}>{i + 1}</span>
+                  {r.avatarUrl ? <img src={r.avatarUrl} alt="" className="w-8 h-8 shrink-0 rounded-full object-cover" referrerPolicy="no-referrer" /> : <span className="w-8 h-8 shrink-0 rounded-full bg-white/10 grid place-items-center text-[13px] font-bold">{r.name.slice(0, 1).toUpperCase()}</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <b className={`truncate text-[14px] ${me ? 'text-white' : 'text-white/90'}`}>{r.name}{me ? ' (você)' : ''}</b>
+                      <span className="ml-auto text-[13px] font-bold tabular-nums">{fmtHours(r.seconds)}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <div className="h-1.5 flex-1 rounded-full bg-white/10 overflow-hidden"><div className={`h-full rounded-full ${me ? 'bg-mv-accent' : 'bg-violet-500'}`} style={{ width: `${Math.max(2, (100 * r.seconds) / max)}%` }} /></div>
+                      <span className="text-[11px] text-mv-muted tabular-nums w-[92px] text-right">≈ {fmtHours(r.seconds / 7)}/dia</span>
+                    </div>
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+
+          {events.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <b className="text-[13px] uppercase tracking-wider text-mv-muted">Próximos eventos</b>
+              {events.map((e) => {
+                const d = new Date(e.startsAt)
+                return (
+                  <div key={e.id} className="flex items-center gap-3 rounded-xl bg-white/[0.03] px-3 py-2">
+                    <div className="w-12 shrink-0 rounded-lg bg-[#2a2236] text-center py-1">
+                      <p className="text-[10px] font-extrabold text-mv-accent uppercase">{d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</p>
+                      <p className="text-[17px] font-black leading-tight">{d.toLocaleDateString('pt-BR', { day: '2-digit' })}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <b className="text-[14px] truncate block">{e.name}</b>
+                      <p className="text-[12px] text-mv-muted truncate">{d.toLocaleString('pt-BR', { weekday: 'long', hour: '2-digit', minute: '2-digit' })}{e.where ? ` · ${e.where}` : ''} · {e.going} vão</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TvScreen({ image }: { image: HTMLCanvasElement | null }) {
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {

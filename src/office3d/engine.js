@@ -965,6 +965,15 @@ function partGeo(name) {
   d.g.forEach(([start, count], k) => g.addGroup(start, count, k));
   g.computeVertexNormals();
   g.computeBoundingSphere();
+  // UV pras roupas com estampa (tigre, banana, confete…): cilindro espelhado
+  // em volta do eixo vertical (0 = frente, 1 = costas), sem costura.
+  {
+    let y0 = Infinity, y1 = -Infinity;
+    for (let i = 1; i < pos.length; i += 3) { y0 = Math.min(y0, pos[i]); y1 = Math.max(y1, pos[i]); }
+    const uv = new Float32Array((pos.length / 3) * 2), hy = Math.max(1e-4, y1 - y0);
+    for (let i = 0, j = 0; i < pos.length; i += 3, j += 2) { uv[j] = Math.abs(Math.atan2(pos[i], pos[i + 2])) / Math.PI; uv[j + 1] = (pos[i + 1] - y0) / hy; }
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  }
   PART_CACHE[name] = g;
   return g;
 }
@@ -1139,10 +1148,52 @@ let TEX_F = null;
 function fofoTex() {
   if (TEX_F) return TEX_F;
   TEX_F = {
-    tiger: canvasMap(256, 256, (g, w, h) => {
-      g.fillStyle = '#f28c28'; g.fillRect(0, 0, w, h);
-      g.fillStyle = '#2a1a12';
-      for (let i = 0; i < 9; i++) { const x = (i / 9) * w; g.beginPath(); g.moveTo(x, 0); g.quadraticCurveTo(x + 18, h * 0.25, x + 4, h * 0.42); g.lineTo(x + 12, h * 0.42); g.quadraticCurveTo(x + 26, h * 0.2, x + 14, 0); g.fill(); }
+    // listras de tigre de verdade: faixas onduladas que afinam nas pontas,
+    // interrompidas e alternadas (nos braços/pernas viram anéis; no capuz, a testa listrada)
+    tiger: canvasMap(512, 512, (g, w, h) => {
+      const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#f48a24'); gr.addColorStop(0.5, '#ee7f1c'); gr.addColorStop(1, '#f48a24');
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      let sd = 11; const r = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+      // pelo: leves fios mais claros/escuros
+      for (let i = 0; i < 900; i++) { g.fillStyle = r() < 0.5 ? 'rgba(255,190,110,.10)' : 'rgba(150,60,10,.08)'; g.fillRect(r() * w, r() * h, 1.5, 5 + r() * 6); }
+      g.fillStyle = '#24140c';
+      const stripe = (x0, x1, y, th, wav) => {
+        const n = 18, top = [], bot = [];
+        for (let i = 0; i <= n; i++) {
+          const t = i / n, x = x0 + (x1 - x0) * t, taper = Math.sin(Math.PI * t) ** 0.7;
+          const yy = y + Math.sin(t * Math.PI * 1.6 + wav) * th * 0.9;
+          top.push([x, yy - th * taper]); bot.push([x, yy + th * taper * 0.8]);
+        }
+        g.beginPath(); g.moveTo(...top[0]); for (const p of top) g.lineTo(...p); for (const p of bot.reverse()) g.lineTo(...p); g.closePath(); g.fill();
+      };
+      const rows = 9;
+      for (let j = 0; j < rows; j++) {
+        const y = (j + 0.5) * (h / rows);
+        let x = (j % 2) * w * 0.12 - w * 0.1;
+        while (x < w) {
+          const len = w * (0.22 + r() * 0.2), th = 8 + r() * 7;
+          stripe(x, x + len, y + (r() - 0.5) * 10, th, r() * 6);
+          // repete do outro lado (a textura dá a volta)
+          if (x + len > w) stripe(x - w, x + len - w, y, th, 0);
+          x += len + w * (0.08 + r() * 0.1);
+        }
+      }
+    }),
+    // casca de banana: gomos mais escuros no comprido e pintinhas de madura
+    tigerRings: canvasMap(256, 64, (g, w, h) => {
+      g.fillStyle = '#f08420'; g.fillRect(0, 0, w, h); g.fillStyle = '#24140c';
+      for (let i = 0; i < 7; i++) { const x = (i + 0.5) * (w / 7); g.beginPath(); g.moveTo(x - 7, 0); g.quadraticCurveTo(x + 6, h / 2, x - 7, h); g.lineTo(x + 7, h); g.quadraticCurveTo(x + 18, h / 2, x + 7, 0); g.fill(); }
+    }),
+    banana: canvasMap(256, 256, (g, w, h) => {
+      g.fillStyle = '#f7d23c'; g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 5; i++) {
+        const x = (i / 5) * w;
+        const gr = g.createLinearGradient(x, 0, x + w / 5, 0);
+        gr.addColorStop(0, 'rgba(180,140,20,.35)'); gr.addColorStop(0.15, 'rgba(255,240,140,.25)'); gr.addColorStop(0.5, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(180,140,20,.18)');
+        g.fillStyle = gr; g.fillRect(x, 0, w / 5, h);
+      }
+      let sd = 5; const r = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < 26; i++) { g.fillStyle = `rgba(${90 + r() * 30},${55 + r() * 20},20,${0.55 + r() * 0.3})`; g.beginPath(); g.ellipse(r() * w, r() * h, 1.5 + r() * 3.5, 1.5 + r() * 2.5, r() * 3, 0, 7); g.fill(); }
     }),
     confetti: canvasMap(256, 256, (g, w, h) => {
       g.fillStyle = '#fbf7f2'; g.fillRect(0, 0, w, h);
@@ -1368,7 +1419,7 @@ function onesie({ label, color, belly, hoodColor, extras, mapKey, hideEars = tru
     mapKey,
     build(m, add) {
       const hm = fmat(hoodColor || color, 0.85, { side: THREE.DoubleSide });
-      if (mapKey) { hm.map = fofoTex()[mapKey]; hm.color.set('#ffffff'); hm.map.repeat.set(3, 2); }
+      if (mapKey) { hm.map = fofoTex()[mapKey].clone(); hm.map.needsUpdate = true; hm.color.set('#ffffff'); hm.map.repeat.set(1.5, 1.4); }
       add('head', hood(hm));
       extras?.(m, add);
     },
@@ -1454,6 +1505,12 @@ registerFofoSkin('tigre', onesie({
       g.add(e, ei);
     }
     add('head', g);
+    // rabo listrado, saindo de trás da cintura e subindo em curva
+    const tm = fmat('#ffffff', 0.85); tm.map = fofoTex().tigerRings;
+    const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0.02, m.backZ + 0.04), new THREE.Vector3(0, -0.06, m.backZ - 0.16), new THREE.Vector3(0.04, 0.02, m.backZ - 0.36), new THREE.Vector3(0.1, 0.22, m.backZ - 0.46), new THREE.Vector3(0.14, 0.4, m.backZ - 0.44)]);
+    const tail = fmesh(new THREE.TubeGeometry(curve, 28, 0.042, 10, false), tm);
+    const tipM = fmesh(SPH(0.05, 12, 10), fmat('#24140c', 0.85)); tipM.position.copy(curve.getPoint(1)); tipM.scale.set(1, 1.3, 1); tipM.userData.noSnap = true; tail.userData.noSnap = true;
+    const tg = new THREE.Group(); tg.add(tail, tipM); add('torso', tg);
   },
 }));
 
@@ -1483,7 +1540,7 @@ registerFofoSkin('festa', {
     hat.position.set(0.07, 0.8, 0.0); hat.rotation.z = -0.22;
     const pom = fmesh(SPH(0.045, 10, 8), fmat('#facc15', 0.6)); pom.position.set(0.11, 0.97, 0);
     h.add(hat, pom);
-    const sg = accMesh('sun', { w: 0.52, y: 0.355 - 0.035, z: 0.33 + 0.035, rot: Math.PI });
+    const sg = accMesh('sun', { w: 0.46, y: 0.39 - 0.035, z: 0.355 + 0.035, rot: Math.PI, keepZ: [0, 0.2], center: true });
     if (sg) { h.add(sg); add('head', h); return; }
     // óculos de sol azuis
     const fr = fmat('#1d4ed8', 0.35), lens = fmat('#0f172a', 0.15, { metalness: 0.4 });
@@ -1547,8 +1604,9 @@ registerFofoSkin('inverno', {
 registerFofoSkin('banana', {
   label: 'Banana', belly: false, coversHead: true, hideEars: true,
   colors: { body: '#f7d23c', leg: FOFO_BROWN },
+  mapKey: 'banana', mapZones: ['body'],
   build(m, add) {
-    const y = fmat('#f7d23c', 0.75, { side: THREE.DoubleSide });
+    const y = fmat('#ffffff', 0.75, { side: THREE.DoubleSide }); y.map = fofoTex().banana;
     const h = hood(y);
     let top = partMesh('bananaTop', { peel: y, stem: fmat('#5b3a1e', 0.8) }), tip = new THREE.Group();
     if (!top) { top = cone(0.2, 0.36, y, 18); top.position.set(0, 0.86, -0.04); top.rotation.x = -0.15; tip = fmesh(CAP(0.04, 0.06), fmat('#5b3a1e', 0.8)); tip.position.set(0, 1.06, -0.07); }
@@ -1922,8 +1980,10 @@ function accData(name) {
   return d;
 }
 // tint: { color, match(h, s, l) } → troca a cor das partes que casam, mantendo luz/sombra
-function accGeo(name, tint = null, part = 0) {
-  const key = name + '|' + (tint ? tint.key : '') + '|' + part;
+// keepZ: [a, b] = só os triângulos nessa faixa da profundidade (0..1), ex. só a frente dos óculos;
+// center: recentra a peça no meio da caixa dela
+function accGeo(name, tint = null, part = 0, keepZ = null, center = false) {
+  const key = name + '|' + (tint ? tint.key : '') + '|' + part + '|' + (keepZ ? keepZ.join(',') : '') + '|' + center;
   if (ACC_GEO.has(key)) return ACC_GEO.get(key);
   const d = accData(name); if (!d) return null;
   const k = new THREE.Color(), hsl = {}, th = {};
@@ -1932,6 +1992,7 @@ function accGeo(name, tint = null, part = 0) {
   for (let t = 0; t < d.pos.length; t += 9) {
     // part: -1 = só o lado esquerdo (x < 0), 1 = só o direito (asas batendo separadas)
     if (part) { const cx = (d.pos[t] + d.pos[t + 3] + d.pos[t + 6]) / 3; if (Math.sign(cx) !== part) continue; }
+    if (keepZ) { const cz = ((d.pos[t + 2] + d.pos[t + 5] + d.pos[t + 8]) / 3 + d.d / 2) / d.d; if (cz < keepZ[0] || cz > keepZ[1]) continue; }
     for (let v = 0; v < 9; v += 3) {
       const i = t + v;
       P.push(d.pos[i], d.pos[i + 1], d.pos[i + 2]);
@@ -1942,17 +2003,19 @@ function accGeo(name, tint = null, part = 0) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
-  g.computeVertexNormals();
+  if (center) { g.computeBoundingBox(); const c = g.boundingBox.getCenter(new THREE.Vector3()); g.translate(-c.x, -c.y, -c.z); }
+  g.computeVertexNormals(); g.computeBoundingBox();
   ACC_GEO.set(key, g); return g;
 }
 // w = largura final (de lado a lado, depois de girar); rot = giro em y pra frente do modelo virar +z
-function accMesh(name, { w, h, rot = 0, tint = null, part = 0, x = 0, y = 0, z = 0, rx = 0, rz = 0, shiny = false } = {}) {
+function accMesh(name, { w, h, rot = 0, tint = null, part = 0, x = 0, y = 0, z = 0, rx = 0, rz = 0, shiny = false, keepZ = null, center = false } = {}) {
   const d = accData(name); if (!d) return null;
-  const g = accGeo(name, tint, part);
+  const g = accGeo(name, tint, part, keepZ, center);
   const mt = fmat('#ffffff', 0.7, { vertexColors: true, side: THREE.DoubleSide, ...(shiny ? { metalness: 0.6 } : {}) });
   const o = fmesh(g, mt);
-  const across = Math.abs(Math.sin(rot)) > 0.5 ? d.d : d.w;
-  const k = w ? w / across : h / d.h;
+  const bb = g.boundingBox, bw = bb.max.x - bb.min.x, bd = bb.max.z - bb.min.z;
+  const across = Math.abs(Math.sin(rot)) > 0.5 ? bd : bw;
+  const k = w ? w / across : h / (bb.max.y - bb.min.y);
   o.scale.setScalar(k); o.rotation.set(rx, rot, rz); o.position.set(x, y, z);
   o.userData.k = k;
   return o;
@@ -1985,9 +2048,10 @@ function wingPair(m, name, { w, y = 0, rx = 0 }) {
   if (ACC_MODELS?.props) Object.assign(HAT_LABELS, { xerife: 'Xerife', quepe: 'Quepe', pirata: 'Pirata', mago: 'Mago', bruxo: 'Chapéu vivo' });
   // no rosto (óculos escuros, óculos pixel, máscara de gás)
   if (ACC_MODELS?.props) {
-    FACEWEAR.escuro = (m) => accHat('sun', { w: 0.52, y: 0.355, z: 0.33, rot: Math.PI });
-    FACEWEAR.pixel = (m) => accHat('pixel', { w: 0.56, y: 0.36, z: 0.34, rot: Math.PI });
-    FACEWEAR.mascara = (m) => accHat('gasmask', { w: 0.62, y: 0.03, z: 0.2, rot: Math.PI });
+    // só a frente dos óculos (as hastes do modelo ficavam soltas no ar), centrada nos olhos
+    FACEWEAR.escuro = (m) => accHat('sun', { w: 0.46, y: 0.39, z: 0.355, rot: Math.PI, keepZ: [0, 0.2], center: true });
+    FACEWEAR.pixel = (m) => accHat('pixel', { w: 0.48, y: 0.39, z: 0.355, rot: Math.PI, keepZ: [0, 0.2], center: true });
+    FACEWEAR.mascara = (m) => accHat('gasmask', { w: 0.5, y: 0.3, z: 0.27, rot: Math.PI, center: true });
   }
 }
 const SHADES_LABELS = ACC_MODELS?.props ? { escuro: 'Óculos escuros', pixel: 'Óculos pixel', mascara: 'Máscara de gás' } : {};
@@ -3382,8 +3446,24 @@ function kkData(name) {
   const bin = (b) => { const t = atob(b), u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
   const p16 = new Int16Array(bin(d.p).buffer); d.col8 = bin(d.c);
   d.pos = new Float32Array(p16.length); for (let i = 0; i < p16.length; i++) d.pos[i] = p16[i] * d.s;
-  // altura do assento/colchão: ponto mais alto no miolo do móvel, um pouco à frente do centro
-  let sy = 0; for (let i = 0; i < d.pos.length; i += 3) { const x = d.pos[i], y = d.pos[i + 1], z = d.pos[i + 2]; if (Math.abs(x) < d.w * 0.12 && z > 0 && z < d.d * 0.22 && y > sy) sy = y; }
+  // altura do assento/colchão: a superfície (triângulo) no miolo do móvel, um
+  // pouco à frente do centro. (Antes procurava vértices ali, e os modelos
+  // simples não têm vértice no meio do assento: dava 0 e o boneco sentava no chão.)
+  const surfY = (px, pz) => {
+    let best = -1;
+    for (let t = 0; t < d.pos.length; t += 9) {
+      const ax = d.pos[t], ay = d.pos[t + 1], az = d.pos[t + 2], bx = d.pos[t + 3], by = d.pos[t + 4], bz = d.pos[t + 5], cx = d.pos[t + 6], cy = d.pos[t + 7], cz = d.pos[t + 8];
+      const v0x = cx - ax, v0z = cz - az, v1x = bx - ax, v1z = bz - az, v2x = px - ax, v2z = pz - az;
+      const d00 = v0x * v0x + v0z * v0z, d01 = v0x * v1x + v0z * v1z, d11 = v1x * v1x + v1z * v1z, d20 = v2x * v0x + v2z * v0z, d21 = v2x * v1x + v2z * v1z;
+      const den = d00 * d11 - d01 * d01; if (Math.abs(den) < 1e-12) continue;
+      const u = (d11 * d20 - d01 * d21) / den, v = (d00 * d21 - d01 * d20) / den;
+      if (u < -1e-4 || v < -1e-4 || u + v > 1.0001) continue;
+      const y = ay + u * (cy - ay) + v * (by - ay); if (y > best) best = y;
+    }
+    return best;
+  };
+  const probes = [0.05, 0.12, 0.2, 0.28].map((f) => surfY(0, f * d.d)).filter((y) => y > 0).sort((a, b) => a - b);
+  let sy = probes.length ? probes[probes.length >> 1] : 0;
   d.seatY = sy;
   return d;
 }
@@ -3403,11 +3483,12 @@ function kkGeo(name, tint) {
   g.computeVertexNormals();
   KK_CACHE.set(key, g); return g;
 }
-function kk(name, { w, d, h, k, tint, parent, x = 0, y = 0, z = 0 } = {}) {
+// seat: altura final do assento (o móvel estica só na altura pra chegar nela)
+function kk(name, { w, d, h, k, tint, parent, x = 0, y = 0, z = 0, seat } = {}) {
   const D = kkData(name); if (!D) return null;
   KK_MAT ||= new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
   const m = mesh(kkGeo(name, tint?.color || tint || null), KK_MAT);
-  const sx = k ?? (w ? w / D.w : 1), sz = k ?? (d ? d / D.d : sx), sy = k ?? (h ? h / D.h : Math.min(sx, sz));
+  const sx = k ?? (w ? w / D.w : 1), sz = k ?? (d ? d / D.d : sx), sy = seat && D.seatY > 0.05 ? seat / D.seatY : (h ? h / D.h : k ?? Math.min(sx, sz));
   m.scale.set(sx, sy, sz); m.position.set(x, y, z);
   m.userData.seatY = D.seatY * sy; m.userData.h = D.h * sy;
   if (parent) parent.add(m);
@@ -3515,7 +3596,7 @@ function gamingChair(x, z, yaw, extra = {}) {
 function simpleChair(x, z, yaw, extra = {}) {
   const g = new THREE.Group();
   const c = extra.color || M.fabricOrange;
-  const km = kk('chair_C', { k: 0.62, tint: c, parent: g });
+  const km = kk('chair_C', { w: 0.75 * 0.7, d: 0.94 * 0.7, seat: 0.44, tint: c, parent: g });
   if (km) { place(g, x, z, yaw); return addSeat(x, z, yaw, km.userData.seatY + 0.02, { kind: 'meet', ...extra }); }
   for (const [lx, lz] of [[-0.19, -0.18], [0.19, -0.18], [-0.19, 0.18], [0.19, 0.18]]) cyl(0.014, 0.012, 0.45, M.black, lx, 0.225, lz, g, 6);
   rbox(0.46, 0.07, 0.44, 0.03, c, 0, 0.47, 0, g);
@@ -3526,7 +3607,7 @@ function simpleChair(x, z, yaw, extra = {}) {
 function armchair(x, z, yaw, extra = {}) {
   const g = new THREE.Group();
   const c = extra.color || M.fabricRed;
-  const km = kk('armchair', { k: 0.52, tint: c, parent: g });
+  const km = kk('armchair', { w: 1.8 * 0.56, d: 1.6 * 0.56, seat: 0.42, tint: c, parent: g });
   if (km) {
     place(g, x, z, yaw); footprint(x, z, 0.6, 0.55, yaw);
     return addSeat(x + Math.sin(yaw) * 0.08, z + Math.cos(yaw) * 0.08, yaw, km.userData.seatY + 0.02, { kind: 'meet', from: 'front', ...extra });
@@ -3567,7 +3648,7 @@ function floorCushion(x, z, yaw, extra = {}) {
 }
 function sofa(x, z, yaw, len = 2, mat1 = M.fabricBlue, extra = {}) {
   const g = new THREE.Group();
-  const km = kk(extra.lie ? 'couch' : 'couch_pillows', { w: len, d: 0.92, h: 0.72, tint: mat1, parent: g });
+  const km = kk(extra.lie ? 'couch' : 'couch_pillows', { w: len, d: 0.92, seat: 0.43, tint: mat1, parent: g });
   if (km) {
     const out = [], sy = km.userData.seatY, n = Math.max(1, Math.round((len - 0.36) / 0.62));
     if (extra.lie) { const [sx, sz] = rotXZ(-0.12, 0.1, yaw); out.push(addSeat(x + sx, z + sz, yaw + Math.PI / 2, sy + 0.02, { kind: 'rest', ...extra, lie: true, bedH: sy })); }
@@ -4327,7 +4408,7 @@ function arcadeCabinet(x, z, rot, game, color) {
 }
 function bed(x, z, rot, extra = {}) {
   const g = new THREE.Group();
-  const km = kk('bed_single_A', { w: 1.05, d: 2.05, h: 0.68, tint: extra.color || M.fabricBlue, parent: g });
+  const km = kk('bed_single_A', { w: 1.05, d: 2.05, seat: 0.46, tint: extra.color || M.fabricBlue, parent: g });
   if (km) {
     place(g, x, z, rot); footprint(x, z, 1.0, 2.1, rot);
     return addSeat(x, z, rot, km.userData.seatY, { kind: 'bed', ...extra, h: km.userData.seatY, bedH: km.userData.seatY - 0.02 });
@@ -4947,6 +5028,8 @@ function makeMamaco(name, skin) {
   if (skin.back) { m.state.back = skin.back; m.applyAccessories(); }
   if (skin.headset) { m.state.headset = true; m.applyAccessories(); }
   if (skin.shades) { setShades(m, skin.shades); m.applyAccessories(); }
+  // o mamaco novo nasce marrom: a cor do pelo escolhida vem aqui
+  if (skin.fur && m.setFur) m.setFur(skin.fur);
   toonify(m.root);
   return m;
 }
@@ -6084,6 +6167,8 @@ function createOffice(opts) {
       }
       if (hitA) { opts.onAvatarClick(hitA, { x: e.clientX, y: e.clientY }); return; }
     }
+    // telão da recepção: abre a versão grande no app
+    if (BOARD?.mesh && opts.onBoardClick && ray.intersectObject(BOARD.mesh, false).length) { opts.onBoardClick(); return; }
     // objetos usáveis: testa a "altura" deles (TV ~1.3 m, fliperama ~1.2 m, monitor ~1 m)
     let best = null, bd = 0.9;
     for (const it of INTERACT) {
@@ -6273,6 +6358,7 @@ function createOffice(opts) {
       c.fillStyle = r.me ? '#f4511e' : '#8b5cf6'; c.fillRect(bx, y - 9, Math.max(6, (bw * r.seconds) / max), 18);
       c.fillStyle = '#e9e4f0'; c.font = '700 24px Inter, sans-serif'; c.textAlign = 'right'; c.fillText(fmtTime(r.seconds), W - 48, y);
     });
+    if (opts.onBoardClick) { c.fillStyle = 'rgba(255,255,255,.45)'; c.font = '600 18px Inter, sans-serif'; c.textAlign = 'right'; c.fillText('Clique para ver detalhes', W - 48, 62); }
     boardTex.needsUpdate = true;
     BOARD.mesh.material = boardMat;
   }
@@ -6280,6 +6366,7 @@ function createOffice(opts) {
   // ---------- Salas / calls ----------
   let playerRoom = null;
   let ignoreRoom = null; // sala que você acabou de sair por fora (não reentra sozinho)
+  let lastSeatObj = null;
   function updateZones() {
     for (const a of agents.values()) {
       const z = zoneAt(a.pos.x, a.pos.z);
@@ -6290,6 +6377,13 @@ function createOffice(opts) {
     }
     const z = player.zone;
     if (z?.id !== lastZoneId) { lastZoneId = z?.id; opts.onZoneChange?.(z ? { id: z.id, kind: z.kind, name: z.name, sector: z.sector } : null); }
+    // sentou/levantou (o app mostra "tela cheia" sentado no cinema)
+    const ps = player.seat && (player.m.sitting || player.m.lying) && !player.settling ? player.seat : null;
+    if (ps !== lastSeatObj) {
+      lastSeatObj = ps;
+      const rid = ps ? ps.room || player.room : null;
+      opts.onSeatChange?.(ps ? { kind: ps.kind, roomId: rid || null, theme: (rid && ROOMS[rid]?.theme?.id) || null } : null);
+    }
     const r = player.room && ROOMS[player.room]?.voice ? player.room : null;
     if (r !== playerRoom) {
       if (r && r === ignoreRoom) return; // (null === null travava a saída da call)
@@ -6657,7 +6751,7 @@ function createOffice(opts) {
     getPlayerState() { return { x: player.pos.x, z: player.pos.z, yaw: player.yaw }; },
     rooms() { return Object.values(ROOMS).map((r) => ({ id: r.id, name: r.name, voice: r.voice, theme: r.theme.label, sector: r.sector })); },
     audit() { return auditOverlaps(); },
-    debug: { post: outlineMat, setZoom, rotateCam, player, agents, camera, controls, follow: () => follow, get seats() { return seats; }, get ROOMS() { return ROOMS; }, get interact() { return INTERACT; }, zoneAt, findPath, use: (it) => use(it) },
+    debug: { post: outlineMat, setZoom, rotateCam, player, agents, camera, controls, follow: () => follow, get seats() { return seats; }, get ROOMS() { return ROOMS; }, get interact() { return INTERACT; }, get board() { return BOARD; }, zoneAt, findPath, use: (it) => use(it) },
     dispose() {
       disposed = true;
       MUSIC.stop();

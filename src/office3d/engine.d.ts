@@ -115,6 +115,10 @@ export function createOffice(opts: {
   onRoomChange?: (roomId: string | null, room: OfficeRoomInfo | null) => void
   onZoneChange?: (zone: OfficeZone | null) => void
   onUseTv?: (info: OfficeTvInfo) => void
+  /** clique no telão da recepção (ranking / eventos) */
+  onBoardClick?: () => void
+  /** você sentou/deitou (null = levantou). theme = tema da sala (ex.: 'cinema') */
+  onSeatChange?: (seat: { kind: string; roomId: string | null; theme: string | null } | null) => void
   onUsePc?: (info: { sector: string }) => void
   onArcade?: (game: string) => void
   /** clique num boneco (posição do clique na tela) */

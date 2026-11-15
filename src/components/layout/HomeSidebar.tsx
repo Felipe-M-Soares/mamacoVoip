@@ -17,6 +17,7 @@ export function HomeSidebar({
   activeConversationId,
   activeGroupId,
   unreadConversationIds,
+  unreadGroupIds,
   onSelectFriends,
   onSelectConversation,
   onSelectGroup,
@@ -25,6 +26,8 @@ export function HomeSidebar({
   activeConversationId: string | null
   activeGroupId: string | null
   unreadConversationIds: Set<string>
+  /** grupos com mensagem nova (desde que o app abriu) */
+  unreadGroupIds?: Set<string>
   onSelectFriends: () => void
   onSelectConversation: (conversationId: string) => void
   onSelectGroup: (groupId: string) => void
@@ -221,14 +224,15 @@ export function HomeSidebar({
                       onClick={() => onSelectGroup(g.id)}
                       onContextMenu={(e) => openGroupMenu(e, g.id)}
                       aria-current={view === 'group' && activeGroupId === g.id ? 'page' : undefined}
-                      className={rowClass(view === 'group' && activeGroupId === g.id)}
+                      className={rowClass(view === 'group' && activeGroupId === g.id, unreadGroupIds?.has(g.id))}
                     >
                       <div className="flex -space-x-2.5 shrink-0 [&>*]:ring-2 [&>*]:ring-mv-side [&>*]:rounded-full">
                         {others.slice(0, 2).map((m) => (
                           <Avatar key={m.id} name={m.username} avatarUrl={m.avatar_url} size={26} />
                         ))}
                       </div>
-                      <span className="truncate font-medium text-left flex-1">{title}</span>
+                      <span className={`truncate text-left flex-1 ${unreadGroupIds?.has(g.id) ? 'font-semibold' : 'font-medium'}`}>{title}</span>
+                      {unreadGroupIds?.has(g.id) && <span className="w-2 h-2 rounded-full bg-mv-accent shrink-0" aria-label="Não lida" />}
                       <span
                         onClick={(e) => {
                           e.stopPropagation()
@@ -361,22 +365,26 @@ export function HomeSidebar({
             {groups.filter((g) => !pinnedIds.has(g.id)).map((g) => {
               const others = g.members.filter((m) => m.id !== user?.id)
               const title = g.name || others.map((m) => m.display_name || m.username).join(', ')
+              const groupUnread = unreadGroupIds?.has(g.id) ?? false
               return (
                 <button
                   key={g.id}
                   onClick={() => onSelectGroup(g.id)}
                   onContextMenu={(e) => openGroupMenu(e, g.id)}
                   aria-current={view === 'group' && activeGroupId === g.id ? 'page' : undefined}
-                  className={rowClass(view === 'group' && activeGroupId === g.id)}
+                  className={rowClass(view === 'group' && activeGroupId === g.id, groupUnread)}
                 >
+                  {groupUnread && <span className="absolute -left-2.5 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-mv-text" aria-hidden="true" />}
                   <div className="flex -space-x-2.5 shrink-0 [&>*]:ring-2 [&>*]:ring-mv-side [&>*]:rounded-full">
                     {others.slice(0, 2).map((m) => (
                       <Avatar key={m.id} name={m.username} avatarUrl={m.avatar_url} size={26} />
                     ))}
                   </div>
                   <div className="min-w-0 text-left flex-1 leading-tight">
-                    <p className="truncate font-medium">{title}</p>
-                    <p className="truncate text-xs mt-0.5 text-mv-muted">{g.members.length} membros</p>
+                    <p className={`truncate ${groupUnread ? 'font-semibold' : 'font-medium'}`}>{title}</p>
+                    <p className={`truncate text-xs mt-0.5 ${groupUnread ? 'text-mv-text' : 'text-mv-muted'}`}>
+                      {groupUnread ? 'Mensagem nova' : `${g.members.length} membros`}
+                    </p>
                   </div>
                   <span
                     onClick={(e) => {

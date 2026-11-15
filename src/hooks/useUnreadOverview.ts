@@ -91,7 +91,7 @@ export function useUnreadOverview() {
                 .select('channel_id, created_at')
                 .in('channel_id', channelIds)
                 .order('created_at', { ascending: false })
-                .limit(1000)
+                .limit(300)
             : Promise.resolve({ data: [] as { channel_id: string; created_at: string }[] }),
           supabase.from('channel_read_state').select('channel_id, last_read_at').eq('user_id', userId),
         ])
@@ -131,7 +131,7 @@ export function useUnreadOverview() {
                 .select('conversation_id, created_at')
                 .in('conversation_id', convoIds)
                 .order('created_at', { ascending: false })
-                .limit(1000)
+                .limit(300)
             : Promise.resolve({ data: [] as { conversation_id: string; created_at: string }[] }),
           supabase.from('dm_read_state').select('conversation_id, last_read_at').eq('user_id', userId),
         ])
@@ -177,7 +177,12 @@ export function useUnreadOverview() {
     void refresh()
     // Não consulta com a janela escondida/minimizada (economiza rede e
     // bateria); ao voltar, atualiza na hora.
+    // Sem a função unread_overview no banco, cada consulta baixa centenas de
+    // linhas — nesse caso consulta 1 vez a cada 3 (a cada 60 s).
+    let tick = 0
     const interval = setInterval(() => {
+      tick++
+      if (rpcMissingRef.current && tick % 3 !== 0) return
       if (document.visibilityState === 'visible') void refresh()
     }, POLL_INTERVAL_MS)
     const onVisible = () => {
@@ -226,7 +231,26 @@ export function useUnreadOverview() {
     [userId]
   )
 
-  return { unreadChannelIds, unreadServerIds, unreadConversationIds, markChannelRead, markConversationRead, refresh }
+  // Mensagem privada chegando em tempo real (MessageAlerts): mostra a
+  // bolinha na hora, sem esperar a próxima consulta (até 20 s).
+  const markConversationUnread = useCallback((conversationId: string) => {
+    setUnreadConversationIds((prev) => {
+      if (prev.has(conversationId)) return prev
+      const next = new Set(prev)
+      next.add(conversationId)
+      return next
+    })
+  }, [])
+
+  return {
+    unreadChannelIds,
+    unreadServerIds,
+    unreadConversationIds,
+    markChannelRead,
+    markConversationRead,
+    markConversationUnread,
+    refresh,
+  }
 }
 
 const EMPTY_SET: Set<string> = new Set()

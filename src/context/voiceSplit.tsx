@@ -105,6 +105,19 @@ export function useVoiceSpeaking(userId: string | null | undefined): boolean {
   })
 }
 
+/**
+ * Quem está falando agora na sua call (ids, separados por vírgula — string
+ * pra não re-renderizar à toa). Usado pelo modo 3D.
+ */
+export function useVoiceSpeakingKey(): string {
+  return useActivity((s) => {
+    const ids: string[] = []
+    if (s.selfId && s.localSpeaking) ids.push(s.selfId)
+    for (const [id, p] of Object.entries(s.participants)) if (p?.speaking) ids.push(id)
+    return ids.sort().join(',')
+  })
+}
+
 /** Qualidade da conexão de OUTRO participante com o servidor de voz. */
 export function useVoiceConnectionQuality(userId: string | null | undefined): VoiceConnectionQuality | undefined {
   return useActivity((s) => (userId ? s.connectionQuality[userId] : undefined))

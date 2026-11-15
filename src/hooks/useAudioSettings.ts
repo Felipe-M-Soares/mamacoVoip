@@ -1,6 +1,7 @@
 import { applySoundsSink } from '../lib/sounds'
 import { useCallback, useEffect, useState } from 'react'
 import { DEFAULT_MIC_SENSITIVITY } from '../lib/noiseSuppression'
+import { migrateSensitivity } from '../lib/audioSettingsMigration'
 
 export interface AudioDeviceOption {
   deviceId: string
@@ -70,10 +71,24 @@ const DEFAULTS: StoredSettings = {
   screenAudioNoiseSuppression: false,
 }
 
+// Out/2026: quem ainda estava na sensibilidade padrão antiga (50) passa
+// pro novo padrão (40), que deixa vazar bem menos som de fundo. Quem
+// escolheu outro valor continua com o seu. Roda uma vez só.
+const SENSITIVITY_MIGRATION_KEY = 'mamacos-audio-sensitivity-v2'
+
 function loadSettings(): StoredSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) }
+    if (raw) {
+      const migrated = localStorage.getItem(SENSITIVITY_MIGRATION_KEY) === '1'
+      const parsed = migrateSensitivity(JSON.parse(raw) as Partial<StoredSettings>, migrated, DEFAULT_MIC_SENSITIVITY)
+      if (!migrated) {
+        localStorage.setItem(SENSITIVITY_MIGRATION_KEY, '1')
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
+      }
+      return { ...DEFAULTS, ...parsed }
+    }
+    localStorage.setItem(SENSITIVITY_MIGRATION_KEY, '1')
   } catch {
     // localStorage indisponível (modo privado, etc.) — usa os padrões
   }

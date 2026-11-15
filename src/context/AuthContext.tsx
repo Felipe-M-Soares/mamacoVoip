@@ -17,7 +17,11 @@ import { unregisterPushToken } from '../lib/pushNotifications'
 // um navegador comum não tem como abrir uma janela do Electron
 // diretamente. Só é usado dentro do app desktop; no navegador (site),
 // o próprio window.location.origin já funciona como redirecionamento.
-const GOOGLE_AUTH_REDIRECT_ELECTRON = 'mamacovoip://auth-callback'
+// (o link que chega no app é mamacovoip://auth-callback?code=...&state=...)
+// Página do site que recebe o retorno do Google e abre o app (ver
+// public/auth/desktop.html). Coberta pelo "https://mamaco-voip.vercel.app/**"
+// que já está em Redirect URLs no Supabase.
+const GOOGLE_AUTH_BRIDGE_ELECTRON = `${PUBLIC_WEB_URL}/auth/desktop.html`
 // App Android (Capacitor): o mesmo id do app como esquema de link.
 const GOOGLE_AUTH_REDIRECT_MOBILE = 'com.mamacosvoip.app://auth-callback'
 
@@ -107,42 +111,122 @@ function takeStoredGoogleAuthState(): { value: string; expiresAt: number } | nul
   }
 }
 
+// Resultado do retorno do Google, pro botão parar de girar e mostrar o
+// erro (antes um problema aqui era engolido em silêncio e o botão ficava
+// em "Abrindo o Google..." sem explicação).
+export const GOOGLE_AUTH_RESULT_EVENT = 'mv:google-auth-result'
+function reportGoogleAuth(error: string | null, detail?: string) {
+  if (detail) {
+    try {
+      window.electronAPI?.logDebug?.(`[google-auth] ${detail}`)
+    } catch {
+      // log é só ajuda
+    }
+  }
+  try {
+    window.dispatchEvent(new CustomEvent(GOOGLE_AUTH_RESULT_EVENT, { detail: { error } }))
+  } catch {
+    // sem window
+  }
+}
+
+// O id do fluxo PKCE (supabase-js) do login pendente — com ele a troca
+// usa exatamente a chave daquele login.
+let pendingGoogleFlowId: string | null = null
+const GOOGLE_AUTH_FLOW_KEY = 'mamacos-google-auth-flow'
+function storeGoogleFlowId(id: string | null) {
+  pendingGoogleFlowId = id
+  try {
+    if (id) localStorage.setItem(GOOGLE_AUTH_FLOW_KEY, id)
+    else localStorage.removeItem(GOOGLE_AUTH_FLOW_KEY)
+  } catch {
+    // só memória
+  }
+}
+function takeGoogleFlowId(): string | null {
+  let id = pendingGoogleFlowId
+  try {
+    id = id ?? localStorage.getItem(GOOGLE_AUTH_FLOW_KEY)
+    localStorage.removeItem(GOOGLE_AUTH_FLOW_KEY)
+  } catch {
+    // só memória
+  }
+  pendingGoogleFlowId = null
+  return id && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : null
+}
+
+// Códigos já recebidos: o mesmo retorno pode chegar 2 vezes (a página do
+// navegador abre o app sozinha E a pessoa clica no botão "Abrir o Mamacos
+// Voip"). Antes a 2ª chegada não achava mais o login pendente e escondia o
+// resultado da 1ª com "O login demorou demais...".
+const handledGoogleCodes = new Set<string>()
+
 async function handleGoogleAuthCallback(url: string) {
   try {
     const hashIndex = url.indexOf('#')
     const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url
     const queryIndex = beforeHash.indexOf('?')
-    const stateFromLink =
-      queryIndex >= 0 ? new URLSearchParams(beforeHash.slice(queryIndex + 1)).get('state') : null
+    const query = new URLSearchParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '')
+    const stateFromLink = query.get('state')
+    const code = query.get('code')
 
-    // Uso único — some com o código pendente já na primeira
-    // tentativa, bateu ou não (evita reaproveitar o mesmo código
-    // pra um segundo link forjado).
-    const pending = pendingGoogleAuthState ?? takeStoredGoogleAuthState()
-    pendingGoogleAuthState = null
-    takeStoredGoogleAuthState()
-
-    const isExpectedLogin = Boolean(
-      pending && pending.expiresAt >= Date.now() && stateFromLink && stateFromLink === pending.value
-    )
-    if (!isExpectedLogin) {
-      // Link não corresponde a um login que ESTE app pediu (código
-      // errado, ausente, ou expirado) — ignora silenciosamente em
-      // vez de logar a pessoa numa conta que pode não ser a dela.
-      // Ver o comentário grande acima sobre por que isso é
-      // necessário com um esquema de URL customizado.
+    const providerError = query.get('error_description') || query.get('error')
+    if (providerError) {
+      reportGoogleAuth(`O Google não concluiu o login: ${providerError.slice(0, 160)}`, `erro do provedor: ${providerError}`)
       return
     }
 
-    const query = new URLSearchParams(queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '')
-    const code = query.get('code')
     // Fluxo implícito (#access_token=...) NÃO é mais aceito: com
     // flowType 'pkce' o Supabase sempre devolve ?code=.
-    if (code && /^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
-      await supabase.auth.exchangeCodeForSession(code)
+    if (!code || !/^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
+      reportGoogleAuth('O retorno do Google veio sem o código de login. Tente de novo.', `sem code no link: ${url.slice(0, 80)}`)
+      return
     }
-  } catch {
-    // best-effort — um link malformado não deve derrubar o app
+    if (handledGoogleCodes.has(code)) return // repetido: o 1º já está cuidando
+    handledGoogleCodes.add(code)
+
+    // Já logado (ex.: o 1º retorno já entrou) — nada a fazer.
+    const { data: current } = await supabase.auth.getSession()
+    if (current.session) {
+      reportGoogleAuth(null, 'retorno ignorado: já logado')
+      return
+    }
+
+    const pending = pendingGoogleAuthState ?? takeStoredGoogleAuthState()
+    pendingGoogleAuthState = null
+    takeStoredGoogleAuthState()
+    const flowId = takeGoogleFlowId()
+
+    // Se este app tem um login pendente e o link traz um state, ele tem
+    // que bater. A proteção principal é o PKCE: um code que não foi pedido
+    // por ESTE app (link forjado, login de outra pessoa) nunca vira sessão,
+    // porque a troca exige a chave secreta que só este app guardou.
+    if (pending && stateFromLink && stateFromLink !== pending.value) {
+      reportGoogleAuth('Esse link de login não é deste app. Clique em "Entrar com Google" de novo.', 'state não confere')
+      return
+    }
+
+    const linkFlowId = query.get('sb_flow_id')
+    const useFlowId = linkFlowId && /^[A-Za-z0-9_-]{1,128}$/.test(linkFlowId) ? linkFlowId : flowId
+    let { error } = await supabase.auth.exchangeCodeForSession(code, useFlowId ? { flowId: useFlowId } : undefined)
+    // A chave pode ter ficado só no lugar "antigo" (versões do
+    // supabase-js) — tenta sem o id antes de desistir.
+    if (error && useFlowId && /verifier/i.test(error.message)) {
+      ;({ error } = await supabase.auth.exchangeCodeForSession(code))
+    }
+    if (error) {
+      const verifierMissing = /verifier/i.test(error.message)
+      reportGoogleAuth(
+        verifierMissing
+          ? 'Esse login foi iniciado em outra janela ou versão do app. Clique em "Entrar com Google" de novo por aqui.'
+          : `Não foi possível concluir o login com o Google (${traduzErro(error.message)}). Tente de novo.`,
+        `exchangeCodeForSession falhou: ${error.name ?? ''} ${error.message}`
+      )
+      return
+    }
+    reportGoogleAuth(null, 'login concluído')
+  } catch (err) {
+    reportGoogleAuth('Não foi possível concluir o login com o Google. Tente de novo.', `exceção: ${(err as Error)?.message ?? err}`)
   }
 }
 
@@ -382,6 +466,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         pendingGoogleAuthState = null
         return { error: error ? traduzErro(error.message) : 'Não foi possível abrir o login do Google.' }
       }
+      storeGoogleFlowId((data as { flowId?: string | null }).flowId ?? null)
       try {
         const { Browser } = await import('@capacitor/browser')
         await Browser.open({ url: data.url })
@@ -394,15 +479,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isElectron()) {
       const state = crypto.randomUUID()
       pendingGoogleAuthState = { value: state, expiresAt: Date.now() + GOOGLE_AUTH_STATE_TTL_MS }
+      // Guardado também no armazenamento: se o Windows abrir o app de novo
+      // pelo link (app fechado no meio), o código continua valendo.
+      storeGoogleAuthState(pendingGoogleAuthState)
 
+      // Volta por uma página https do site (public/auth/desktop.html), que
+      // repassa pro app pelo link mamacovoip://. Antes o Supabase tentava
+      // voltar direto pro mamacovoip:// — se esse endereço não estivesse
+      // liberado em "Redirect URLs", a pessoa caía no site e o login
+      // nunca chegava no app.
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: `${GOOGLE_AUTH_REDIRECT_ELECTRON}?state=${state}`, skipBrowserRedirect: true },
+        options: { redirectTo: `${GOOGLE_AUTH_BRIDGE_ELECTRON}?state=${state}`, skipBrowserRedirect: true },
       })
       if (error) {
         pendingGoogleAuthState = null
         return { error: traduzErro(error.message) }
       }
+      storeGoogleFlowId((data as { flowId?: string | null } | null)?.flowId ?? null)
       if (data?.url) window.open(data.url, '_blank')
       return { error: null }
     }

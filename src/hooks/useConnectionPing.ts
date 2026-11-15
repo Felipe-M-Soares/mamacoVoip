@@ -15,6 +15,7 @@ export function useConnectionPing() {
 
   useEffect(() => {
     let cancelled = false
+    let first = true
 
     async function measure() {
       // Antes isso fazia uma consulta completa no banco (select numa
@@ -31,7 +32,12 @@ export function useConnectionPing() {
       // reabertura da conexão segura (TLS) — que não é latência de rede —
       // e variações pontuais do servidor não viram "ping alto" na tela.
       let best: number | null = null
-      for (let i = 0; i < 3 && !cancelled; i++) {
+      // Só a PRIMEIRA medida faz 3 idas; depois é 1 por vez. Cada ida é um
+      // pedido (e uma linha de log) no Supabase — 3 a cada 15 s por app
+      // aberto dava ~17 mil pedidos por dia por pessoa.
+      const rounds = first ? 3 : 1
+      first = false
+      for (let i = 0; i < rounds && !cancelled; i++) {
         const sample = await sampleOnce()
         if (sample !== null && (best === null || sample < best)) best = sample
       }
@@ -56,7 +62,7 @@ export function useConnectionPing() {
     }
 
     measure()
-    const interval = setInterval(measure, 15_000)
+    const interval = setInterval(measure, 30_000)
     return () => {
       cancelled = true
       clearInterval(interval)

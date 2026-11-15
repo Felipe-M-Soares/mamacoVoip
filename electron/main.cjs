@@ -1688,6 +1688,16 @@ function createWindow() {
     isQuitting = true
   })
 
+  // Piscar na barra de tarefas (mensagem privada chegando) para assim
+  // que você volta pra janela.
+  win.on('focus', () => {
+    try {
+      win.flashFrame(false)
+    } catch {
+      // janela fechando
+    }
+  })
+
   mainWindow = win
   return win
 }
@@ -1827,6 +1837,9 @@ app.on('second-instance', (_event, argv) => {
 })
 
 app.whenReady().then(() => {
+  // Sem isso o Windows pode engolir as notificações do app (elas precisam
+  // do mesmo AppUserModelId do atalho que o instalador cria = appId).
+  if (process.platform === 'win32') app.setAppUserModelId('com.mamacosvoip.app')
   if (process.platform === 'win32') {
     const ok = win32native.available()
     appendDebugLog('main', `win32native: ${ok ? 'ok' : `FALHOU — ${win32native.loadErrorMessage()}`}; detecção de jogos ${isGameDetectionEnabled() ? 'ligada' : 'DESLIGADA (privacidade)'}`)
@@ -2382,6 +2395,56 @@ app.whenReady().then(() => {
   // Windows focar a janela de novo nesse meio-tempo.
   onTrusted('app:focus-window', () => {
     scheduleFocusReclaim()
+  })
+
+  // Notificação do sistema de mensagem privada (MessageAlerts.tsx). Feita
+  // aqui (e não com o Notification da página) porque no Windows a da
+  // página às vezes não aparece e o clique nela não traz a janela de volta.
+  // Clicou → mostra a janela e manda a página abrir a conversa.
+  const liveNotifications = new Set()
+  handleTrusted('notify:show', (_event, payload) => {
+    if (!Notification.isSupported() || !payload || typeof payload !== 'object') return false
+    const text = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '')
+    const title = text(payload.title, 120)
+    if (!title) return false
+    const t = payload.target
+    const target =
+      t && typeof t === 'object' && ['dm', 'group', 'channel'].includes(t.kind) && typeof t.id === 'string' && t.id.length < 64
+        ? { kind: t.kind, id: t.id, serverId: typeof t.serverId === 'string' && t.serverId.length < 64 ? t.serverId : undefined }
+        : null
+    try {
+      const n = new Notification({
+        title,
+        body: text(payload.body, 240),
+        // o som é o do próprio app (lib/sounds.ts), não o do Windows
+        silent: true,
+        icon: path.join(__dirname, '..', 'build', 'icon.png'),
+      })
+      // Guarda a referência: notificação coletada pelo GC perde o clique.
+      liveNotifications.add(n)
+      const forget = () => liveNotifications.delete(n)
+      n.on('click', () => {
+        forget()
+        forceFocusMainWindow()
+        if (target && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('notify:clicked', target)
+      })
+      n.on('close', forget)
+      setTimeout(forget, 10 * 60 * 1000)
+      n.show()
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  // Pisca o ícone na barra de tarefas até você voltar pra janela.
+  onTrusted('window:flash', () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFocused()) return
+    try {
+      mainWindow.flashFrame(true)
+    } catch {
+      // sem barra de tarefas (ex.: Linux sem suporte)
+    }
   })
 
   Menu.setApplicationMenu(null)

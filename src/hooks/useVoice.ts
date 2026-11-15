@@ -4,6 +4,7 @@ import { VoiceCoreContext } from '../context/voiceSplit'
 
 export {
   useVoiceSpeaking,
+  useVoiceSpeakingKey,
   useVoiceConnectionQuality,
   useLocalVoiceConnectionQuality,
   type VoiceCoreValue,

@@ -14,3 +14,17 @@ import { Capacitor } from '@capacitor/core'
 export function isNativeMobileApp(): boolean {
   return Capacitor.isNativePlatform()
 }
+
+// Modo Escritório (3D): só no computador. No celular (app nativo ou site
+// aberto no celular/tablet) a opção nem aparece — tela pequena, toque e
+// placa de vídeo fraca deixam a experiência ruim e gastam bateria.
+export function canUseOffice3d(): boolean {
+  if (isNativeMobileApp()) return false
+  if (typeof navigator === 'undefined') return true
+  const ua = navigator.userAgent || ''
+  if (/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(ua)) return false
+  // iPad novo se apresenta como Mac: tem toque e não tem mouse
+  if (/Macintosh/.test(ua) && (navigator.maxTouchPoints ?? 0) > 1) return false
+  if (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches && !window.matchMedia('(any-pointer: fine)').matches) return false
+  return true
+}

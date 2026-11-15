@@ -3833,6 +3833,8 @@ function bigBoard(x, z, rot) {
   place(g, x, z, rot);
   footprint(x, z, W, 0.5, rot);
   BOARD = { mesh: scr, x, z, yaw: rot };
+  // dá pra usar como TV: chega perto e aperta F (ou clica nele)
+  INTERACT.push({ kind: 'board', x, z, yaw: rot, h: 1.75, front: [x + Math.sin(rot) * 1.6, z + Math.cos(rot) * 1.6] });
 }
 function coffeeTable(x, z, yaw, w = 1.1, d = 0.6) {
   const g = new THREE.Group();
@@ -6083,7 +6085,7 @@ function createOffice(opts) {
     }
   }
   const SEAT_WORD = { bed: 'Deitar', rest: 'Descansar', sofa: 'Sentar no sofá', stool: 'Sentar', desk: 'Sentar', meet: 'Sentar' };
-  const USE_WORD = { tv: 'Ver TV', arcade: 'Jogar', pc: 'Usar computador', coffee: 'Pegar café', energy: 'Pegar energético', wc: 'Usar banheiro' };
+  const USE_WORD = { board: 'Ver ranking', tv: 'Ver TV', arcade: 'Jogar', pc: 'Usar computador', coffee: 'Pegar café', energy: 'Pegar energético', wc: 'Usar banheiro' };
   let promptSig = '';
   function renderPrompt() {
     const parts = [];
@@ -6129,6 +6131,7 @@ function createOffice(opts) {
       }
       return;
     }
+    if (it.kind === 'board') { opts.onBoardClick?.(); return; }
     if (it.kind === 'tv') {
       const rm = (it.room && ROOMS[it.room]) || zoneAt(it.x, it.z)?.room || null;
       opts.onUseTv?.({ screen: it.screen, image: SCREEN[it.screen]?.map?.image || null, room: rm ? { id: rm.id, name: rm.name, voice: rm.voice, theme: rm.theme.id } : null, live: !!(rm && roomScreens.has(rm.id)) });
@@ -6145,6 +6148,14 @@ function createOffice(opts) {
   scene.add(marker);
   let downAt = null;
   canvas.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+  let hoverT = 0;
+  canvas.addEventListener('pointermove', (e) => {
+    if (!BOARD?.mesh || !opts.onBoardClick || e.buttons) return;
+    const now = performance.now(); if (now - hoverT < 80) return; hoverT = now;
+    const r = canvas.getBoundingClientRect();
+    ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+    canvas.style.cursor = ray.intersectObject(BOARD.mesh, false).length ? 'pointer' : '';
+  });
   canvas.addEventListener('pointerup', (e) => {
     if (!downAt || wcSeq) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
@@ -6178,6 +6189,7 @@ function createOffice(opts) {
       if (d < bd) { bd = d; best = it; }
     }
     if (best) {
+      if (best.kind === 'board') { opts.onBoardClick?.(); return; }
       if (best.kind === 'pc') { if (!best.seat.occupant || best.seat.occupant === player) player.goTo(0, 0, { seat: best.seat, then: () => use(best) }); }
       else if (best.kind === 'coffee' || best.kind === 'wc' || best.kind === 'energy') use(best);
       else { const [fx, fz] = best.front || [best.x, best.z]; player.goTo(fx, fz, { then: () => { player.faceTo = Math.atan2(best.x - player.pos.x, best.z - player.pos.z); use(best); } }); }

@@ -1,22 +1,22 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { isPinned, togglePinned, getPinnedSet, getUserNote, setUserNote } from './pinnedItems'
+import { togglePinned, getPinnedSet, getUserNote, setUserNote } from './pinnedItems'
 
 beforeEach(() => {
   localStorage.clear()
 })
 
-describe('fixar itens (isPinned/togglePinned/getPinnedSet)', () => {
+describe('fixar itens (togglePinned/getPinnedSet)', () => {
   it('começa sem nada fixado', () => {
-    expect(isPinned('canal-1')).toBe(false)
+    expect(getPinnedSet().has('canal-1')).toBe(false)
     expect(getPinnedSet().size).toBe(0)
   })
 
   it('fixa e desafixa alternando a cada chamada', () => {
     expect(togglePinned('canal-1')).toBe(true)
-    expect(isPinned('canal-1')).toBe(true)
+    expect(getPinnedSet().has('canal-1')).toBe(true)
 
     expect(togglePinned('canal-1')).toBe(false)
-    expect(isPinned('canal-1')).toBe(false)
+    expect(getPinnedSet().has('canal-1')).toBe(false)
   })
 
   it('mantém vários itens fixados independentes', () => {

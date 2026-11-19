@@ -1,25 +1,8 @@
 import { applyOutput, onAudioDevicesSettled } from './audioDevices'
-// Identidade sonora do Mamacos Voip — 100% sintetizada por código em
-// WebAudio, sem nenhum sample baixado ou copiado de outro app.
-//
-// A "família" sonora: sinos FM suaves (uma senoide portadora modulada
-// por outra senoide cujo índice cai rápido — ataque brilhante que vira
-// um tom redondo), todos afinados na mesma escala pentatônica de Ré
-// maior (Ré, Mi, Fá#, Lá, Si), com um reverb sintético curto (resposta
-// ao impulso gerada com ruído que decai) pra dar "ar" sem embolar.
-// Eventos positivos sobem, negativos descem; mute/desmute são "clicks"
-// com glissando curtinho; transmissão ganha um sopro de ruído filtrado.
-//
-// Gerenciamento de recursos: UM AudioContext só (criado na primeira vez
-// que um som toca) e um barramento fixo (volume → limitador → saída,
-// mais o reverb). Cada som cria os próprios osciladores/ganhos e
-// DESCONECTA tudo quando termina — nada fica pendurado no grafo.
 
 const STORAGE_KEY = 'mamacos-ui-sounds'
 const VOLUME_KEY = 'mamacos-ui-sounds-volume'
 const DEFAULT_VOLUME = 70
-// Folga geral: com o volume em 100% o pico fica bem abaixo de 0 dBFS,
-// e o limitador segura o resto se dois sons se sobrepuserem.
 const HEADROOM = 0.55
 
 let audioCtx: AudioContext | null = null
@@ -44,9 +27,6 @@ function getContext(): AudioContext | null {
   return audioCtx
 }
 
-// Sons do app (entrar/sair, mutar, toque de chamada) saem no MESMO
-// alto-falante escolhido nas configurações — antes iam sempre pro padrão
-// do sistema. Lê a preferência salva (useAudioSettings) direto.
 function savedSpeakerId(): string {
   try {
     const raw = JSON.parse(localStorage.getItem('mamacos-audio-settings') ?? '{}') as { speakerId?: string | null }
@@ -58,7 +38,6 @@ function savedSpeakerId(): string {
 export function applySoundsSink(sinkId: string | null = savedSpeakerId()) {
   const ctx = audioCtx as (AudioContext & { setSinkId?: (id: string) => Promise<void>; sinkId?: string }) | null
   if (!ctx?.setSinkId) return
-  // Resolve o "padrão" pro aparelho real (segue cabo ↔ Bluetooth).
   void applyOutput(ctx as unknown as { setSinkId: (id: string) => Promise<void>; sinkId?: string }, sinkId)
   if (!soundsFollowing) {
     soundsFollowing = true
@@ -67,8 +46,6 @@ export function applySoundsSink(sinkId: string | null = savedSpeakerId()) {
 }
 let soundsFollowing = false
 
-// Resposta ao impulso sintética: ruído estéreo com decaimento
-// exponencial (~1,1 s). Barata de gerar e só é criada uma vez.
 function buildImpulse(ctx: AudioContext): AudioBuffer {
   const seconds = 1.1
   const length = Math.floor(ctx.sampleRate * seconds)
@@ -107,10 +84,6 @@ function getBus(ctx: AudioContext): { bus: GainNode; reverb: ConvolverNode } {
   return { bus: busGain, reverb: reverbIn }
 }
 
-// ---------------------------------------------------------------------
-// Preferências
-// ---------------------------------------------------------------------
-
 export function isSoundEnabled(): boolean {
   try {
     return localStorage.getItem(STORAGE_KEY) !== '0'
@@ -123,12 +96,10 @@ export function setSoundEnabled(enabled: boolean) {
   try {
     localStorage.setItem(STORAGE_KEY, enabled ? '1' : '0')
   } catch {
-    // best-effort
   }
   if (!enabled) stopIncomingCallRing()
 }
 
-/** Volume dos efeitos sonoros, 0–100. */
 export function getSoundVolume(): number {
   try {
     const raw = localStorage.getItem(VOLUME_KEY)
@@ -145,16 +116,10 @@ export function setSoundVolume(volume: number) {
   try {
     localStorage.setItem(VOLUME_KEY, String(clamped))
   } catch {
-    // best-effort
   }
   if (busGain) busGain.gain.value = (clamped / 100) * HEADROOM
 }
 
-// ---------------------------------------------------------------------
-// Síntese
-// ---------------------------------------------------------------------
-
-// Escala da marca (Ré maior pentatônica)
 const N = {
   D4: 293.66,
   F4: 349.23,
@@ -171,21 +136,13 @@ const N = {
 } as const
 
 interface Note {
-  /** Frequência inicial (Hz) */
   f: number
-  /** Atraso em segundos a partir do início do som */
   at?: number
-  /** Duração do decaimento em segundos */
   d: number
-  /** Pico de ganho relativo (0–1) */
   g?: number
-  /** Razão modulador/portadora do FM (timbre). 2 = sino limpo, 3.5 = metálico */
   ratio?: number
-  /** Índice de modulação inicial (brilho do ataque) */
   index?: number
-  /** Glissando: frequência final */
   to?: number
-  /** Quanto vai pro reverb (0–1) */
   wet?: number
 }
 
@@ -299,15 +256,10 @@ function render(spec: SoundSpec, wet = 0.22) {
       try {
         node.disconnect()
       } catch {
-        // já desconectado
       }
     }
   }, ms)
 }
-
-// ---------------------------------------------------------------------
-// Catálogo
-// ---------------------------------------------------------------------
 
 export type UiSoundId =
   | 'connect'
@@ -397,8 +349,6 @@ const SPECS: Record<UiSoundId, { spec: SoundSpec; wet?: number }> = {
       ],
     },
   },
-  // Mensagem privada: duas notas "plim-plim" um pouco mais presentes que a
-  // de mensagem de canal (dá pra reconhecer sem olhar a tela).
   dm: {
     spec: {
       notes: [
@@ -420,7 +370,6 @@ const SPECS: Record<UiSoundId, { spec: SoundSpec; wet?: number }> = {
     },
     wet: 0.26,
   },
-  // Uma "frase" do toque de chamada — startIncomingCallRing repete em loop.
   incomingCall: {
     spec: {
       notes: [
@@ -483,7 +432,6 @@ const SPECS: Record<UiSoundId, { spec: SoundSpec; wet?: number }> = {
   },
 }
 
-/** Lista exibida em Configurações → Voz e áudio (prévia de cada som). */
 export const SOUND_CATALOG: { id: UiSoundId; label: string }[] = [
   { id: 'connect', label: 'Entrar na call' },
   { id: 'disconnect', label: 'Sair da call' },
@@ -504,15 +452,11 @@ export const SOUND_CATALOG: { id: UiSoundId; label: string }[] = [
   { id: 'error', label: 'Erro' },
 ]
 
-// Evita metralhadora de som (ex.: 10 mensagens chegando juntas).
 const MIN_GAP_MS: Partial<Record<UiSoundId, number>> = { message: 900, dm: 1200, mention: 600, userJoin: 250, userLeave: 250 }
 const DEFAULT_GAP_MS = 90
 const lastPlayed = new Map<UiSoundId, number>()
-// Ensurdecer também muta o microfone (toggleDeafen chama toggleMute) —
-// nessa janela o som de mute é engolido pra não tocar os dois juntos.
 let suppressMuteUntil = 0
 
-/** Toca um som de interface (respeita o liga/desliga de sons). */
 function playUiSound(id: UiSoundId) {
   if (!isSoundEnabled()) return
   const now = Date.now()
@@ -525,31 +469,13 @@ function playUiSound(id: UiSoundId) {
   render(spec, wet)
 }
 
-/** Prévia em Configurações: toca mesmo com os sons desligados. */
 export function previewUiSound(id: UiSoundId) {
   const { spec, wet } = SPECS[id]
   render(spec, wet)
 }
 
-// ---------------------------------------------------------------------
-// Toque de chamada em loop
-// ---------------------------------------------------------------------
-
 let ringTimer: ReturnType<typeof setInterval> | null = null
 let ringStopTimer: ReturnType<typeof setTimeout> | null = null
-const RING_PERIOD_MS = 2400
-const RING_MAX_MS = 45_000
-
-/** Começa o toque de "chamada chegando" (loop suave, para sozinho em 45 s). */
-export function startIncomingCallRing(): () => void {
-  stopIncomingCallRing()
-  if (!isSoundEnabled()) return stopIncomingCallRing
-  const ring = () => render(SPECS.incomingCall.spec, SPECS.incomingCall.wet)
-  ring()
-  ringTimer = setInterval(ring, RING_PERIOD_MS)
-  ringStopTimer = setTimeout(stopIncomingCallRing, RING_MAX_MS)
-  return stopIncomingCallRing
-}
 
 export function stopIncomingCallRing() {
   if (ringTimer) clearInterval(ringTimer)
@@ -557,10 +483,6 @@ export function stopIncomingCallRing() {
   ringTimer = null
   ringStopTimer = null
 }
-
-// ---------------------------------------------------------------------
-// Atalhos com nome (API usada pelo resto do app)
-// ---------------------------------------------------------------------
 
 export const playConnectSound = () => playUiSound('connect')
 export const playDisconnectSound = () => playUiSound('disconnect')
@@ -573,8 +495,6 @@ export const playUndeafenSound = () => playUiSound('undeafen')
 export const playMessageSound = () => playUiSound('message')
 export const playDmSound = () => playUiSound('dm')
 export const playMentionSound = () => playUiSound('mention')
-export const playCallEndedSound = () => playUiSound('callEnded')
 export const playStreamStartSound = () => playUiSound('streamStart')
 export const playStreamStopSound = () => playUiSound('streamStop')
-export const playErrorSound = () => playUiSound('error')
 export const playFriendRequestSound = () => playUiSound('friendRequest')

@@ -4,7 +4,7 @@
   "license": "UNLICENSED",
   "version": "1.0.0",
   "description": "Mamacos Voip — servidores, canais, chat em tempo real, voz e vídeo.",
-  "author": "Mamacos Voip",
+  "author": "Felipe Moreira Soares",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -176,6 +176,7 @@
       "artifactName": "MamacosVoip-Store.${ext}",
       "identityName": "zom1n1.MamacosVoip",
       "publisher": "CN=7C32AF9F-38B6-40EA-B20F-D1219940C232"
-    }
+    },
+    "copyright": "Copyright © 2026 Felipe Moreira Soares"
   }
 }

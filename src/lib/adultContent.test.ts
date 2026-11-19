@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { giphyRating, shouldGateAdultChannel } from './adultContent'
+import { shouldGateAdultChannel } from './adultContent'
 
 describe('shouldGateAdultChannel', () => {
   const base = { isNsfw: true, verified: false, showAdult: true, revealedThisVisit: false }
@@ -22,9 +22,3 @@ describe('shouldGateAdultChannel', () => {
   })
 })
 
-describe('giphyRating', () => {
-  it('usa pg-13 fora de canal +18 e r (máximo da GIPHY) dentro', () => {
-    expect(giphyRating(false)).toBe('pg-13')
-    expect(giphyRating(true)).toBe('r')
-  })
-})

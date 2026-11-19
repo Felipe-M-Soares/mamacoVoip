@@ -1,24 +1,9 @@
--- ============================================================
--- CONSOLIDADO 004: cargos, permissões, banimentos, log de moderação
--- (junta: 006_roles_moderation)
---
--- Só pra ORGANIZAÇÃO/REFERÊNCIA — não rode num banco que já tem essa
--- migration aplicada.
--- ============================================================
-
-
--- ==== originalmente: 006_roles_moderation.sql ====
--- ============================================================
--- FASE 7 — Administração (cargos, permissões, moderação)
--- Rode isto no SQL Editor do Supabase, depois da 005_friends_dms.sql
--- ============================================================
-
 create table if not exists public.roles (
   id uuid primary key default gen_random_uuid(),
   server_id uuid not null references public.servers(id) on delete cascade,
   name text not null check (char_length(name) between 1 and 100),
   color text not null default '#99aab5',
-  position int not null default 0, -- maior posição = mais alto na hierarquia
+  position int not null default 0,
   permissions text[] not null default '{}',
   created_at timestamptz not null default now()
 );
@@ -57,29 +42,10 @@ create table if not exists public.moderation_logs (
   created_at timestamptz not null default now()
 );
 
--- timeout_until já está direto na tabela server_members, lá no 001_core.sql
-
 create index if not exists roles_server_idx on public.roles (server_id);
 create index if not exists server_member_roles_user_idx on public.server_member_roles (server_id, user_id);
 create index if not exists moderation_logs_server_idx on public.moderation_logs (server_id, created_at);
 
--- ============================================================
--- Permissões válidas (documentação — não é um enum de verdade pra
--- manter flexibilidade, mas as funções abaixo só reconhecem estas):
--- 'administrator'    — ignora todas as outras checagens
--- 'manage_server'    — editar nome/ícone do servidor (dono sempre pode)
--- 'manage_roles'     — criar/editar/excluir cargos e atribuí-los
--- 'manage_channels'  — criar/editar/excluir canais e categorias
--- 'manage_messages'  — excluir mensagens de qualquer membro
--- 'kick_members'
--- 'ban_members'
--- 'timeout_members'
--- 'view_audit_log'
--- ============================================================
-
--- ============================================================
--- Helper: verifica permissão (dono do servidor sempre passa)
--- ============================================================
 create or replace function public.has_permission(p_server_id uuid, p_user_id uuid, p_permission text)
 returns boolean
 language sql
@@ -99,11 +65,6 @@ as $$
     );
 $$;
 
--- ============================================================
--- Helper: posição do cargo mais alto do usuário (dono = infinito)
--- Usado pra impedir que alguém modere/atribua cargo igual ou acima
--- do próprio nível hierárquico.
--- ============================================================
 create or replace function public.top_role_position(p_server_id uuid, p_user_id uuid)
 returns int
 language sql
@@ -126,9 +87,6 @@ as $$
   end;
 $$;
 
--- ============================================================
--- RLS: roles / server_member_roles / bans / moderation_logs
--- ============================================================
 alter table public.roles enable row level security;
 alter table public.server_member_roles enable row level security;
 alter table public.bans enable row level security;
@@ -154,14 +112,6 @@ create policy "Quem pode ver o log vê o log"
   on public.moderation_logs for select to authenticated
   using (public.has_permission(server_id, auth.uid(), 'view_audit_log'));
 
--- roles/server_member_roles/bans/moderation_logs não têm policy de
--- INSERT/UPDATE/DELETE — toda escrita passa pelas funções abaixo,
--- que checam permissão E hierarquia antes de agir.
-
--- ============================================================
--- Atualiza policies de fases anteriores pra respeitar permissões
--- de cargo, não só o dono (canais, categorias, mensagens)
--- ============================================================
 drop policy if exists "Dono cria categorias" on public.categories;
 drop policy if exists "Dono edita categorias" on public.categories;
 drop policy if exists "Dono exclui categorias" on public.categories;
@@ -209,7 +159,6 @@ create policy "Autor ou moderador exclui mensagem"
     or public.has_permission(server_id, auth.uid(), 'manage_messages')
   );
 
--- Bloqueia envio de mensagens por quem está em timeout
 drop policy if exists "Membros enviam mensagens" on public.messages;
 
 drop policy if exists "Membros enviam mensagens, se não estiverem em timeout" on public.messages;
@@ -227,7 +176,6 @@ create policy "Membros enviam mensagens, se não estiverem em timeout"
     )
   );
 
--- Impede reingresso de usuários banidos, mesmo com convite válido
 create or replace function public.join_server_via_invite(p_code text)
 returns public.servers
 language plpgsql
@@ -268,9 +216,6 @@ begin
 end;
 $$;
 
--- ============================================================
--- Funções: cargos
--- ============================================================
 create or replace function public.create_role(p_server_id uuid, p_name text, p_color text, p_permissions text[])
 returns public.roles
 language plpgsql
@@ -404,11 +349,6 @@ begin
 end;
 $$;
 
--- ============================================================
--- Funções: moderação (kick / ban / unban / timeout)
--- Todas protegem o dono do servidor e respeitam hierarquia: você só
--- modera quem tem um cargo mais baixo que o seu (dono é sempre o topo).
--- ============================================================
 create or replace function public.kick_member(p_server_id uuid, p_user_id uuid, p_reason text default null)
 returns void
 language plpgsql
@@ -530,14 +470,6 @@ begin
 end;
 $$;
 
--- ============================================================
--- Canal restrito por cargo — visibilidade específica por canal,
--- além das permissões gerais do servidor. Fica aqui (não em
--- 001_core.sql) porque depende de has_permission() e da tabela
--- roles, que só existem a partir deste arquivo.
--- ============================================================
-
--- Quais cargos conseguem ver um canal marcado como restrito
 create table if not exists public.channel_role_access (
   channel_id uuid not null references public.channels(id) on delete cascade,
   role_id uuid not null references public.roles(id) on delete cascade,
@@ -546,24 +478,6 @@ create table if not exists public.channel_role_access (
 
 alter table public.channel_role_access enable row level security;
 
--- ============================================================
--- CORREÇÃO (rodando de novo por cima): as duas policies abaixo, do
--- jeito que estavam, consultavam "channels" direto dentro da policy de
--- channel_role_access — e a policy de "channels" (mais abaixo) consulta
--- "channel_role_access" direto de volta. Sem passar por uma função
--- security definer, o Postgres reavalia RLS dos dois lados: channels
--- pede channel_role_access, que pede channels nesse mesmo cheque, que
--- pede channel_role_access de novo... e nunca termina — daí o erro
--- "infinite recursion detected in policy for relation \"channels\""
--- (42P17) ao tentar simplesmente listar os canais de um servidor.
---
--- A correção é a mesma receita já usada em is_server_member() e
--- has_permission(): mover a consulta cruzada pra dentro de uma função
--- security definer, que roda com privilégio elevado e por isso NÃO
--- reaciona a RLS das tabelas que ela mesma consulta — quebra o ciclo.
--- ============================================================
-
--- Helper: server_id de um canal, sem passar pela RLS de "channels"
 create or replace function public.channel_server_id(p_channel_id uuid)
 returns uuid
 language sql
@@ -574,8 +488,6 @@ as $$
   select server_id from public.channels where id = p_channel_id;
 $$;
 
--- Helper: o usuário tem, via algum cargo, acesso liberado a um canal
--- restrito? Sem passar pela RLS de "channel_role_access".
 create or replace function public.user_has_channel_role_access(p_channel_id uuid, p_user_id uuid)
 returns boolean
 language sql
@@ -603,10 +515,6 @@ create policy "Quem gerencia canais define o acesso"
   using (public.has_permission(public.channel_server_id(channel_id), auth.uid(), 'manage_channels'))
   with check (public.has_permission(public.channel_server_id(channel_id), auth.uid(), 'manage_channels'));
 
--- Substitui a política de visibilidade de canal (criada em
--- 001_core.sql) pra respeitar canais restritos: dono e quem tem
--- manage_channels sempre vê tudo; o resto só vê canal restrito se
--- tiver algum cargo liberado pra ele.
 drop policy if exists "Membros veem canais do servidor" on public.channels;
 create policy "Membros veem canais do servidor"
   on public.channels for select to authenticated
@@ -619,9 +527,6 @@ create policy "Membros veem canais do servidor"
     )
   );
 
--- Igual precisa valer pra mensagens também (defesa em profundidade —
--- mesmo que o canal não apareça na lista, a mensagem não pode
--- vazar por uma consulta direta).
 drop policy if exists "Membros veem mensagens do servidor" on public.messages;
 create policy "Membros veem mensagens do servidor"
   on public.messages for select to authenticated
@@ -638,12 +543,6 @@ create policy "Membros veem mensagens do servidor"
     )
   );
 
--- ==== originalmente: 012_pinned_messages.sql (política) ====
--- Movida de 002_messaging.sql (lá ela vinha antes de existir
--- has_permission() e quebrava a instalação do zero). Mesmo SQL de antes.
--- Só quem tem permissão de gerenciar mensagens no servidor (dono ou
--- cargo com essa permissão) pode fixar/desafixar — reaproveita a
--- função has_permission() criada acima, neste arquivo.
 drop policy if exists "messages_pin_update" on public.messages;
 create policy "messages_pin_update"
   on public.messages for update

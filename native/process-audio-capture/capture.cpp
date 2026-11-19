@@ -1,62 +1,3 @@
-// process-audio-capture.exe
-// ============================================================
-// Ferramenta de linha de comando standalone (NÃO é um módulo nativo do
-// Node/Electron — é um .exe separado, chamado via spawn a partir de
-// electron/main.cjs) que captura o áudio de UM processo específico do
-// Windows (e da árvore de processos-filho dele), usando a API oficial
-// "Process Loopback Capture" da Microsoft (documentada, disponível a
-// partir do Windows 10 build 20348 / efetivamente Windows 11 em geral
-// uso). Isso é o que permite "focar o áudio só na janela/app que está
-// sendo compartilhado" em vez de pegar o som do sistema inteiro
-// (incluindo o próprio Mamacos Voip) — ver o comentário grande em
-// electron/main.cjs (seção "Captura de áudio por processo") pra
-// entender o pipeline completo main -> renderer.
-//
-// Por que um .exe separado em vez de um módulo nativo do Node (N-API)?
-// Um addon N-API precisa ser compilado casando EXATAMENTE com a versão
-// ABI do Electron (node-gyp/electron-rebuild) — qualquer atualização do
-// Electron quebra o binário e exige recompilar de novo. Um .exe
-// standalone não tem esse problema: compila uma vez com o compilador
-// C++ puro (MSVC, via GitHub Actions) e continua funcionando não
-// importa a versão do Electron/Node. O preço é um processo extra
-// rodando (igual o app já faz com o PowerShell do "vigia de foco",
-// ver main.cjs) e comunicação via pipe (stdout) em vez de chamada de
-// função direta — plenamente aceitável pra um fluxo de áudio.
-//
-// Uso: process-audio-capture.exe <PID>
-//   <PID> = id numérico do processo cujo áudio (dele + processos-filho)
-//   deve ser capturado — ver electron/main.cjs (getGameWindowInfo /
-//   getForegroundWindowInfo / mapa de PID por janela) pra como esse
-//   número é descoberto.
-//
-// Protocolo de saída (stdout, binário — NUNCA misturar texto nele):
-//   1. Um cabeçalho fixo de 16 bytes, uma única vez, assim que a
-//      captura começa de verdade:
-//        uint32 magic       = 0x4D43504C ('MCPL' em little-endian)
-//        uint32 sampleRate  (Hz, ex: 48000)
-//        uint16 channels    (ex: 2)
-//        uint16 sampleFormat (1 = float32, 2 = int16)
-//        uint32 reserved     (sempre 0 por enquanto)
-//   2. Depois disso, um fluxo contínuo de frames PCM intercalados
-//      (interleaved) no formato acima, até o processo ser encerrado
-//      (Ctrl+C / kill, é assim que electron/main.cjs para a captura).
-//
-// stderr é só texto, UTF-8, uma linha por evento — usado pro processo
-// principal (e, se precisar depurar, a própria pessoa) entender o que
-// aconteceu. Prefixos:
-//   "STATUS <mensagem>"  — progresso normal (ex: "STATUS ativando...")
-//   "ERROR <mensagem>"   — falha (o processo sai com código != 0 logo
-//                          em seguida)
-//
-// Este código segue de perto a estrutura da amostra oficial da
-// Microsoft "ApplicationLoopback"
-// (github.com/microsoft/Windows-classic-samples/tree/main/Samples/ApplicationLoopback),
-// a única fonte confiável documentada de como usar corretamente essa
-// API — evitar inventar uma sequência de chamadas própria era
-// importante aqui, já que essa parte não tem como ser testada nesta
-// máquina (é código Windows-only; só compila e roda de verdade num
-// runner Windows real do GitHub Actions).
-
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
@@ -75,13 +16,6 @@
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "mmdevapi.lib")
 
-// Valores de GUID padrão (documentados, estáveis — parte da spec de
-// "SubTypes" derivados de tag de formato de áudio do Windows) escritos
-// na mão em vez de usar as macros KSDATAFORMAT_SUBTYPE_* de ksmedia.h —
-// essas macros dependem de DEFINE_GUID + INITGUID pra alocar o símbolo
-// de verdade (senão dá erro de link "unresolved external symbol"), uma
-// pegadinha clássica que preferimos simplesmente evitar aqui, já que
-// não tem como testar o link nesta máquina.
 const GUID kSubtypeIeeeFloat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 const GUID kSubtypePcm = {0x00000001, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 
@@ -101,18 +35,10 @@ void LogError(const char* msg, HRESULT hr = S_OK) {
   fflush(stderr);
 }
 
-// Sinalizado (SetEvent) de dentro de ActivateCompleted, que o próprio
-// Windows chama numa thread de pool arbitrária assim que a ativação
-// termina (com sucesso ou falha) — precisamos esperar por ele antes de
-// seguir em frente na thread principal.
 HANDLE g_activateCompletedEvent = nullptr;
 std::atomic<bool> g_stopRequested{false};
 
 BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) {
-  // Ctrl+C ou o processo sendo morto (taskkill /F cai direto, mas
-  // process.kill() padrão do Node manda esse sinal primeiro) — marca
-  // pra sair do laço de captura de forma limpa (fecha o IAudioClient
-  // direito em vez de só sumir).
   if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_BREAK_EVENT || ctrlType == CTRL_CLOSE_EVENT) {
     g_stopRequested.store(true);
     return TRUE;
@@ -120,22 +46,11 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) {
   return FALSE;
 }
 
-// AUDITORIA — "cão de guarda" do processo pai. O Electron cria este .exe
-// com o stdin ligado a um pipe (padrão do spawn do Node) e nunca escreve
-// nada nele. Se o app principal MORRER sem conseguir matar este processo
-// (travamento, "Finalizar tarefa", queda de energia do lado do Electron),
-// o Windows NÃO mata os processos filhos junto — e este .exe ficava
-// capturando e codificando pra sempre em segundo plano, gastando
-// CPU/GPU até reiniciar o PC. Quando o pai morre, o pipe do stdin fecha
-// e o ReadFile abaixo retorna — aí pedimos pra sair do laço principal.
-// Só é ativado quando o stdin é de fato um pipe (rodando à mão num
-// console, nada muda).
 DWORD WINAPI ParentWatchdogThread(LPVOID) {
   HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
   char buffer[256];
   DWORD bytesRead = 0;
   while (ReadFile(in, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) {
-    // ninguém deveria escrever aqui — só descarta
   }
   g_stopRequested.store(true);
   return 0;
@@ -149,22 +64,11 @@ void StartParentWatchdog() {
   if (thread) CloseHandle(thread);
 }
 
-// AUDITORIA: antes, o resultado de fwrite/fflush no stdout era ignorado —
-// se o pipe fechasse (app principal encerrou), o laço seguia capturando e
-// codificando quadros que ninguém mais ia ler. Agora qualquer falha de
-// escrita encerra a captura.
 bool WriteAllStdout(const void* data, size_t size) {
   if (size == 0) return true;
   return fwrite(data, 1, size, stdout) == size;
 }
 
-// Handler de conclusão da ativação assíncrona — só existe porque
-// ActivateAudioInterfaceAsync() é uma API assíncrona (não bloqueia),
-// então precisamos de um objeto COM que implementa essa interface pra
-// o sistema chamar de volta quando terminar. IAgileObject (interface
-// "marcadora", sem métodos) avisa o COM que esse objeto pode ser
-// chamado de qualquer thread sem problema de apartment — obrigatório
-// aqui, já que o callback chega numa thread do pool do sistema.
 class ActivateCompletionHandler : public IActivateAudioInterfaceCompletionHandler, public IAgileObject {
  public:
   ActivateCompletionHandler() : m_refCount(1) {}
@@ -191,10 +95,7 @@ class ActivateCompletionHandler : public IActivateAudioInterfaceCompletionHandle
     return count;
   }
 
-  HRESULT ActivateCompleted(IActivateAudioInterfaceAsyncOperation* /*operation*/) override {
-    // O resultado de verdade é lido na thread principal (via
-    // GetActivateResult, chamado logo depois do WaitForSingleObject
-    // abaixo) — aqui só avisamos que já pode seguir em frente.
+  HRESULT ActivateCompleted(IActivateAudioInterfaceAsyncOperation* ) override {
     SetEvent(g_activateCompletedEvent);
     return S_OK;
   }
@@ -203,11 +104,6 @@ class ActivateCompletionHandler : public IActivateAudioInterfaceCompletionHandle
   volatile LONG m_refCount;
 };
 
-// Formato "de reserva" caso GetMixFormat() não seja suportado pelo
-// dispositivo virtual de process-loopback (não há garantia documentada
-// de que seja — por segurança, cobre os dois casos). 48kHz estéreo
-// float32 é o padrão mais comum do mecanismo de áudio compartilhado do
-// Windows nas máquinas atuais.
 WAVEFORMATEX BuildFallbackFormat() {
   WAVEFORMATEX wfx = {};
   wfx.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
@@ -220,10 +116,6 @@ WAVEFORMATEX BuildFallbackFormat() {
   return wfx;
 }
 
-// Descobre se o formato é ponto flutuante (float32) ou inteiro (PCM
-// int16) — cobre tanto WAVEFORMATEX "simples" (wFormatTag direto)
-// quanto WAVEFORMATEXTENSIBLE (comum em dispositivos modernos, onde o
-// formato de verdade está no SubFormat, um GUID).
 uint16_t DetectSampleFormatTag(const WAVEFORMATEX* wfx) {
   if (wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return 1;
   if (wfx->wFormatTag == WAVE_FORMAT_PCM) return 2;
@@ -232,23 +124,12 @@ uint16_t DetectSampleFormatTag(const WAVEFORMATEX* wfx) {
     if (ext->SubFormat == kSubtypeIeeeFloat) return 1;
     if (ext->SubFormat == kSubtypePcm) return 2;
   }
-  // Formato desconhecido — assume float32 (o mais comum) em vez de
-  // travar; se estiver errado, o áudio sai distorcido do lado do
-  // renderer, mas pelo menos não quebra a captura inteira.
   return 1;
 }
 
-}  // namespace
+}
 
 int wmain(int argc, wchar_t* argv[]) {
-  // Uso:
-  //   process-audio-capture.exe <PID>             -> só o áudio da árvore do PID
-  //   process-audio-capture.exe --exclude <PID>   -> TODO o áudio do sistema
-  //                                                  MENOS a árvore do PID
-  // O modo --exclude é usado com o PID do próprio Mamacos Voip: transmite
-  // o "áudio do sistema" sem a voz da call junto (evita eco pra quem
-  // assiste). Só LÊ o áudio mixado pelo Windows — nada é injetado em
-  // processo nenhum (seguro com qualquer anti-cheat).
   if (argc < 2) {
     LogError("uso: process-audio-capture.exe [--exclude] <PID>");
     return 1;
@@ -271,12 +152,6 @@ int wmain(int argc, wchar_t* argv[]) {
     return 1;
   }
 
-  // stdout em modo binário puro — no Windows, por padrão, stdout em
-  // modo texto converte todo \n em \r\n, o que corrompe silenciosamente
-  // qualquer byte 0x0A dentro do fluxo de PCM (áudio não é texto, tem
-  // bytes de qualquer valor). Sem isso, a cada tantos bytes o áudio
-  // ficaria com pequenas amostras trocadas/deslocadas — um bug bem
-  // sutil de ouvir, mas grave.
   _setmode(_fileno(stdout), _O_BINARY);
 
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
@@ -295,20 +170,12 @@ int wmain(int argc, wchar_t* argv[]) {
     return 1;
   }
 
-  // Monta os parâmetros de ativação: "quero um IAudioClient de
-  // loopback, mas só da árvore de processos do PID alvo" — é essa
-  // struct que diferencia isso de um loopback comum (que pegaria TODO
-  // o mix de saída do sistema, igual o checkbox "áudio do sistema" já
-  // existente no app).
   AUDIOCLIENT_ACTIVATION_PARAMS activationParams = {};
   activationParams.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
   activationParams.ProcessLoopbackParams.TargetProcessId = targetPid;
   activationParams.ProcessLoopbackParams.ProcessLoopbackMode =
       excludeMode ? PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE : PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
 
-  // PROPVARIANT é só uma struct comum (POD) — zerar tudo com "= {}"
-  // equivale ao que PropVariantInit() faria, sem precisar de mais um
-  // header/lib só por causa disso.
   PROPVARIANT activateParamsProp = {};
   activateParamsProp.vt = VT_BLOB;
   activateParamsProp.blob.cbSize = sizeof(activationParams);
@@ -332,9 +199,6 @@ int wmain(int argc, wchar_t* argv[]) {
     return 1;
   }
 
-  // Espera até 10s pela conclusão — em condições normais isso é quase
-  // instantâneo (menos de 100ms), um timeout bem folgado só cobre o
-  // caso de algo estar realmente travado no sistema.
   DWORD waitResult = WaitForSingleObject(g_activateCompletedEvent, 10000);
   if (waitResult != WAIT_OBJECT_0) {
     LogError("timeout esperando ActivateAudioInterfaceAsync");
@@ -381,11 +245,7 @@ int wmain(int argc, wchar_t* argv[]) {
     formatToUse = &fallbackFormat;
   }
 
-  // Buffer de 200ms — pequeno o bastante pra não introduzir atraso
-  // perceptível na transmissão, grande o bastante pra não estourar
-  // (perder frames) se o processo principal do Electron demorar um
-  // pouco pra ler o pipe de vez em quando.
-  const REFERENCE_TIME bufferDuration = 200 * 10000;  // 100ns units
+  const REFERENCE_TIME bufferDuration = 200 * 10000;
 
   hr = audioClient->Initialize(
       AUDCLNT_SHAREMODE_SHARED,
@@ -432,8 +292,6 @@ int wmain(int argc, wchar_t* argv[]) {
     return 1;
   }
 
-  // Cabeçalho binário — ver documentação do protocolo no topo do
-  // arquivo. Mandado UMA vez, antes de qualquer frame de PCM.
   {
     uint32_t sampleRate = formatToUse->nSamplesPerSec;
     uint16_t channels = formatToUse->nChannels;
@@ -445,7 +303,6 @@ int wmain(int argc, wchar_t* argv[]) {
     memcpy(header + 4, &sampleRate, 4);
     memcpy(header + 8, &channels, 2);
     memcpy(header + 10, &sampleFormatTag, 2);
-    // bytes 12..15 ficam zerados (reservado)
     if (!WriteAllStdout(header, sizeof(header)) || fflush(stdout) != 0) {
       LogError("falha ao escrever o cabecalho no stdout");
       captureClient->Release();
@@ -470,17 +327,10 @@ int wmain(int argc, wchar_t* argv[]) {
 
   LogStatus("capturando");
 
-  // AUDITORIA: erros de dispositivo (ex.: AUDCLNT_E_DEVICE_INVALIDATED —
-  // placa de som trocada, processo-alvo fechou) só saíam do laço INTERNO;
-  // o externo continuava rodando pra sempre, repetindo o mesmo erro a cada
-  // evento. Agora qualquer falha de GetBuffer/ReleaseBuffer/escrita
-  // encerra a captura de vez (o Electron já trata o fim do processo).
   bool fatalError = false;
   while (!g_stopRequested.load() && !fatalError) {
     DWORD waitRes = WaitForSingleObject(bufferReadyEvent, 500);
     if (waitRes != WAIT_OBJECT_0) {
-      // Timeout normal (nada tocando no momento) — só continua o laço
-      // e checa de novo se foi pedido pra parar.
       continue;
     }
 
@@ -509,9 +359,6 @@ int wmain(int argc, wchar_t* argv[]) {
         size_t totalBytes = static_cast<size_t>(numFrames) * bytesPerFrame;
 
         if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
-          // Trecho de silêncio (comum quando o app-alvo não está
-          // tocando nada no momento) — o buffer pode conter lixo, então
-          // manda zeros explícitos em vez do conteúdo de `data`.
           static thread_local std::vector<uint8_t> silence;
           if (silence.size() < totalBytes) silence.assign(totalBytes, 0);
           if (!WriteAllStdout(silence.data(), totalBytes)) fatalError = true;

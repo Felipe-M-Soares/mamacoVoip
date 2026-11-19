@@ -1,9 +1,5 @@
-// Versão do cache — mudar aqui força o navegador a descartar o cache
-// antigo na próxima ativação.
 const CACHE_NAME = 'mamacos-voip-v3'
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/favicon.png', '/logo.png', '/logo-192.png']
-// Teto de itens no cache de runtime — sem isso o cache crescia pra
-// sempre (cada build novo gera arquivos com hash diferente).
 const MAX_RUNTIME_ENTRIES = 120
 
 self.addEventListener('install', (event) => {
@@ -36,12 +32,6 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // SÓ o próprio site é cacheado. Antes, qualquer GET de outro domínio
-  // que desse certo ia pro cache (respostas da API do GIPHY com a chave
-  // na URL, imagens de preview de link de sites quaisquer, arquivos do
-  // Storage do Supabase servidos por domínio próprio...) — e ficava lá
-  // pra sempre, inclusive depois de sair da conta. Chamadas à API do
-  // Supabase (auth, dados, Realtime) nunca passam por aqui.
   if (url.origin !== self.location.origin) return
   if (request.headers.has('range')) return
 
@@ -50,7 +40,6 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Só arquivos estáticos (assets com hash do build + ícones/manifest).
   const isStatic = url.pathname.startsWith('/assets/') || APP_SHELL.includes(url.pathname)
   if (!isStatic) return
 

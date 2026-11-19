@@ -9,10 +9,6 @@ import {
   type VideoLink,
 } from '../../lib/videoEmbed'
 
-// Vídeo do YouTube / clipe da Twitch tocando dentro do chat.
-// Até a pessoa clicar no play aparece SÓ a miniatura — o player (e o
-// YouTube/Twitch) só carrega depois do clique.
-
 function PlayIcon() {
   return (
     <svg viewBox="0 0 24 24" className="w-7 h-7 translate-x-[1px]" fill="currentColor" aria-hidden>

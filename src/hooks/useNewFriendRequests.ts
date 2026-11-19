@@ -8,10 +8,6 @@ export function useNewFriendRequests() {
 
   useEffect(() => {
     if (seenIdsRef.current === null) {
-      // Primeira vez que a lista carrega — tudo que já está pendente
-      // nesse momento é "antigo", não dispara popup (senão, toda vez
-      // que abrisse o app com pedidos pendentes, ia aparecer um popup
-      // pra cada um).
       seenIdsRef.current = new Set(incoming.map((r) => r.id))
       return
     }

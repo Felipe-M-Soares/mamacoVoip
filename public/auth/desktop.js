@@ -1,14 +1,3 @@
-// Ponte do login com Google do app de PC.
-//
-// O Google/Supabase devolve a pessoa pra ESTA página (um endereço https
-// normal, que já está liberado no Supabase) com ?code=...&state=...; ela
-// repassa os dois pro app pelo link mamacovoip://auth-callback. Antes o
-// Supabase tentava voltar direto pro mamacovoip:// e, quando esse endereço
-// não estava na lista de "Redirect URLs", jogava a pessoa pro site e o
-// login nunca chegava no app.
-//
-// O "code" sozinho não serve pra nada: só vira sessão junto com a chave
-// secreta (PKCE) que ficou guardada dentro do app que pediu o login.
 ;(function () {
   var q = new URLSearchParams(window.location.search)
   var code = q.get('code') || ''
@@ -35,11 +24,9 @@
   var flow = q.get('sb_flow_id') || ''
   if (/^[A-Za-z0-9_-]{1,128}$/.test(flow)) link += '&sb_flow_id=' + encodeURIComponent(flow)
   btn.href = link
-  // Tira o code da barra de endereço/histórico.
   try {
     window.history.replaceState(null, '', window.location.pathname)
-  } catch (e) {}
-  // Tenta abrir sozinho; se o navegador bloquear, o botão resolve.
+  } catch {}
   setTimeout(function () {
     window.location.href = link
   }, 150)

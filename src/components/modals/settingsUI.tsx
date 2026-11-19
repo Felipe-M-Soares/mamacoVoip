@@ -1,10 +1,6 @@
 import type { ReactNode } from 'react'
 import { CheckIcon } from '../ui/icons'
 
-// Peças visuais compartilhadas pelas telas de configuração (usuário e
-// servidor): cabeçalho de aba, cartões de grupo, linhas "rótulo +
-// controle", slider estilizado e controle segmentado.
-
 export function TabHeader({ title, description }: { title: string; description?: ReactNode }) {
   return (
     <header className="mb-6">
@@ -51,7 +47,6 @@ export function SettingsCard({
   )
 }
 
-/** Linha de configuração: título + descrição à esquerda, controle à direita. */
 export function SettingRow({
   title,
   description,
@@ -85,7 +80,6 @@ export function SettingRow({
   )
 }
 
-/** Divisor entre SettingRows dentro de um cartão. */
 export function RowList({ children }: { children: ReactNode }) {
   return <div className="divide-y divide-[var(--color-line)]">{children}</div>
 }
@@ -126,7 +120,6 @@ export function RangeSlider({
   )
 }
 
-/** Controle segmentado (tipo abas em pílula). */
 export function Segmented<T extends string>({
   value,
   options,
@@ -181,7 +174,6 @@ export function InlineMessage({ tone, children }: { tone: 'error' | 'success' | 
   )
 }
 
-/** Estado vazio: ícone em "azulejo" + título + dica curta. */
 export function EmptyState({ icon, title, hint }: { icon: ReactNode; title: string; hint?: ReactNode }) {
   return (
     <div className="flex flex-col items-center text-center py-8 px-4">
@@ -196,7 +188,6 @@ export function EmptyState({ icon, title, hint }: { icon: ReactNode; title: stri
   )
 }
 
-/** Linhas-esqueleto de carregamento pra listas. */
 export function ListSkeleton({ rows = 4, avatar = false }: { rows?: number; avatar?: boolean }) {
   return (
     <div className="space-y-1" aria-busy="true" aria-label="Carregando">
@@ -213,7 +204,6 @@ export function ListSkeleton({ rows = 4, avatar = false }: { rows?: number; avat
   )
 }
 
-/** Caixa de seleção visual (pro lugar dos checkboxes nativos em listas). */
 export function CheckMark({ checked }: { checked: boolean }) {
   return (
     <span
@@ -229,7 +219,6 @@ export function CheckMark({ checked }: { checked: boolean }) {
   )
 }
 
-/** Opção "cartão com rádio" — usada em tipo de canal, visibilidade etc. */
 export function OptionCard({
   selected,
   onSelect,
@@ -281,7 +270,6 @@ export function OptionCard({
   )
 }
 
-/** Linha com Toggle pra opções dentro de modais (substitui checkbox + texto). */
 export function ToggleRow({
   title,
   description,

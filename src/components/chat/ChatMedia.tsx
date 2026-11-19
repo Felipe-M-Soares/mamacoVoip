@@ -1,7 +1,5 @@
 import { openMedia } from '../../lib/mediaViewer'
 
-// Imagem/vídeo de anexo no chat: clicar abre o visualizador DENTRO do app
-// (lib/mediaViewer), em vez de uma aba do navegador.
 export function ChatImage({ url, name, onError }: { url: string | undefined; name?: string; onError?: () => void }) {
   return (
     <button

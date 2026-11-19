@@ -28,7 +28,6 @@ type Pattern = {
 
 const PATTERNS: Pattern[] = [
   {
-    // bloco de código ```...```
     regex: /```([\s\S]*?)```/,
     render: (inner, key) => (
       <pre
@@ -40,7 +39,6 @@ const PATTERNS: Pattern[] = [
     ),
   },
   {
-    // código inline `...`
     regex: /`([^`\n]+)`/,
     render: (inner, key) => (
       <code key={key} className="bg-mv-canvas border border-[var(--color-line)] rounded-md px-1.5 py-0.5 text-[0.85em] font-mono">
@@ -49,42 +47,31 @@ const PATTERNS: Pattern[] = [
     ),
   },
   {
-    // spoiler ||...||
     regex: /\|\|([\s\S]+?)\|\|/,
     render: (inner, key, parseChildren) => <Spoiler key={key}>{parseChildren(inner, key)}</Spoiler>,
   },
   {
-    // negrito **...**
     regex: /\*\*([\s\S]+?)\*\*/,
     render: (inner, key, parseChildren) => <strong key={key}>{parseChildren(inner, key)}</strong>,
   },
   {
-    // tachado ~~...~~
     regex: /~~([\s\S]+?)~~/,
     render: (inner, key, parseChildren) => <s key={key}>{parseChildren(inner, key)}</s>,
   },
   {
-    // itálico *...* (evita conflito com negrito por já ter sido consumido acima)
     regex: /\*([^*\n]+)\*/,
     render: (inner, key, parseChildren) => <em key={key}>{parseChildren(inner, key)}</em>,
   },
   {
-    // itálico _..._
     regex: /_([^_\n]+)_/,
     render: (inner, key, parseChildren) => <em key={key}>{parseChildren(inner, key)}</em>,
   },
 ]
 
-// Aceita só cor hexadecimal (#rgb, #rrggbb) — a cor do cargo vem do
-// banco e é escrita direto em `style`; qualquer outra coisa cai pra cor
-// padrão em vez de ir parar no CSS.
 export function safeHexColor(color: string | null | undefined, fallback = '#99aab5'): string {
   return typeof color === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color) ? color : fallback
 }
 
-// Só devolve a URL se for http(s) de verdade — protege href/src que vêm
-// do banco (anexos, emoji, preview de link) contra "javascript:",
-// "data:" etc., que num <a href> executariam código na origem do app.
 export function safeHttpUrl(url: string | null | undefined): string | null {
   if (typeof url !== 'string' || url.length === 0 || url.length > 4096) return null
   try {
@@ -95,11 +82,8 @@ export function safeHttpUrl(url: string | null | undefined): string | null {
   }
 }
 
-const CODE_PATTERN_COUNT = 2 // os dois primeiros PATTERNS são de código (literal)
+const CODE_PATTERN_COUNT = 2
 
-// Figurinha: a mensagem inteira é `[[sticker:<id>]]` (ver lib/stickers.ts).
-// Vira uma imagem grande, sem nenhuma outra formatação em volta; id
-// desconhecido cai num texto discreto em vez de mostrar a marcação crua.
 function renderSticker(id: string): ReactNode {
   const sticker = getSticker(id)
   if (!sticker) {
@@ -151,9 +135,6 @@ export function parseMessageContent(text: string, members: Profile[], emojis: Se
   }
 
   function parse(segment: string, keyPrefix: string): ReactNode[] {
-    // Código (``` e `) primeiro: dentro de código nada é interpretado
-    // (antes, :emoji: e @menção dentro de um bloco de código eram
-    // transformados mesmo assim, quebrando o bloco).
     let codeMatch: { i: number; match: RegExpMatchArray } | null = null
     for (let i = 0; i < CODE_PATTERN_COUNT; i++) {
       const m = segment.match(PATTERNS[i].regex)
@@ -167,9 +148,6 @@ export function parseMessageContent(text: string, members: Profile[], emojis: Se
       return splitAround(segment, match.index!, match[0].length, PATTERNS[i].render(match[1], key, parse), keyPrefix)
     }
 
-    // Emoji customizado :nome: — procura o PRIMEIRO que realmente
-    // existe no servidor (antes só olhava o primeiro ":algo:" do texto;
-    // se esse não fosse um emoji, os seguintes nunca eram renderizados).
     if (emojiByName.size > 0) {
       for (const emojiMatch of segment.matchAll(/:([a-z0-9_]+):/gi)) {
         const emoji = emojiByName.get(emojiMatch[1].toLowerCase())
@@ -195,9 +173,6 @@ export function parseMessageContent(text: string, members: Profile[], emojis: Se
       }
     }
 
-    // Menção de cargo (@Nome do Cargo) — checada antes da de usuário
-    // porque nomes de cargo podem ter espaço, o que a regex de usuário
-    // não cobre. Olha todos os "@" do trecho, não só o primeiro.
     if (sortedRoles.length > 0) {
       let atIndex = segment.indexOf('@')
       while (atIndex !== -1) {
@@ -220,11 +195,6 @@ export function parseMessageContent(text: string, members: Profile[], emojis: Se
       }
     }
 
-    // Menções (@username, @everyone, @here) — checadas depois da de cargo, nesse
-    // segmento, sem interferir na formatação — texto puro fora delas
-    // continua indo pros outros padrões (negrito, itálico, etc.). Procura
-    // a primeira menção VÁLIDA (ex: "email@site.com @joao" ainda destaca
-    // o @joao).
     for (const mentionMatch of segment.matchAll(/@(everyone|here|[a-zA-Z0-9_.]+)/g)) {
       const word = mentionMatch[1].toLowerCase()
       const isBroadcast = word === 'everyone' || word === 'here'

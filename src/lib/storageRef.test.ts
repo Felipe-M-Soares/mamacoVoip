@@ -40,7 +40,6 @@ describe('parseStorageObjectUrl', () => {
   it('recusa outro host, outro formato e traversal codificado', () => {
     expect(parseStorageObjectUrl(`https://evil.com/storage/v1/object/public/attachments/${S}/x.png`, SB)).toBeNull()
     expect(parseStorageObjectUrl(`${SB}/rest/v1/messages`, SB)).toBeNull()
-    // "/../" com a barra codificada só aparece depois do decode — tem que ser recusado
     expect(parseStorageObjectUrl(`${SB}/storage/v1/object/public/attachments/${S}%2F..%2Fx.png`, SB)).toBeNull()
     expect(parseStorageObjectUrl(`${SB}/storage/v1/object/public/attachments/${S}/%E0%A4%A`, SB)).toBeNull()
     expect(parseStorageObjectUrl('nem-url', SB)).toBeNull()
@@ -67,7 +66,6 @@ describe('resolveAttachmentSource', () => {
       kind: 'external',
       url: `${SB}/storage/v1/object/public/avatars/${S}/a.png`,
     })
-    // Host de fora do projeto: não carrega (evita rastreamento por IP).
     expect(resolveAttachmentSource('https://cdn.exemplo.com/a.png', 'attachments', SB)).toEqual({ kind: 'unavailable' })
     expect(resolveAttachmentSource(`https://outro.supabase.co/storage/v1/object/public/attachments/${S}/${C}/m.png`, 'attachments', SB)).toEqual({
       kind: 'unavailable',

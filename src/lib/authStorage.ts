@@ -1,22 +1,3 @@
-// Onde o supabase-js guarda a sessão (access/refresh token) e o
-// code_verifier do PKCE.
-//
-// - Web / Android: localStorage (comportamento padrão de antes).
-// - App desktop (Electron): arquivo cifrado com o safeStorage do sistema
-//   (DPAPI no Windows, Keychain no macOS, libsecret no Linux) via IPC —
-//   ver "secure-storage:*" em electron/main.cjs. Antes os tokens ficavam
-//   em texto puro no localStorage do perfil do Electron (Local Storage/
-//   leveldb na pasta de dados do app): qualquer programa rodando como o
-//   usuário copiava a sessão inteira.
-//
-// Migração: na primeira leitura de uma chave que ainda não existe no
-// armazenamento cifrado, pega o valor antigo do localStorage, grava
-// cifrado e apaga o antigo — a pessoa continua logada.
-//
-// Se o sistema não tiver cifragem disponível (ex.: Linux sem chaveiro),
-// o processo principal recusa e cai de volta no localStorage — pior
-// caso = o comportamento de antes, nunca deslogar a pessoa por isso.
-
 export interface AsyncAuthStorage {
   getItem: (key: string) => Promise<string | null>
   setItem: (key: string, value: string) => Promise<void>
@@ -29,8 +10,6 @@ export interface SecureStorageBridge {
   removeItem: (key: string) => Promise<{ ok: boolean }>
 }
 
-// Só chaves do supabase-js passam pelo cofre (o processo principal
-// também confere).
 const SECURE_STORAGE_PREFIX = 'sb-'
 
 function safeLocalStorage(): Storage | null {
@@ -53,7 +32,6 @@ function localSet(key: string, value: string) {
   try {
     safeLocalStorage()?.setItem(key, value)
   } catch {
-    // cota cheia / bloqueado — nada a fazer
   }
 }
 
@@ -61,7 +39,6 @@ function localRemove(key: string) {
   try {
     safeLocalStorage()?.removeItem(key)
   } catch {
-    // best-effort
   }
 }
 
@@ -88,15 +65,12 @@ export function createAuthStorage(bridge: SecureStorageBridge | null | undefined
       if (!result.ok) return localGet(key)
       if (typeof result.value === 'string') return result.value
 
-      // Ainda não está no cofre: migra do localStorage (sessão de uma
-      // versão anterior do app), sem deslogar.
       const legacy = localGet(key)
       if (legacy === null) return null
       try {
         const saved = await bridge.setItem(key, legacy)
         if (saved.ok) localRemove(key)
       } catch {
-        // fica no localStorage por enquanto; tenta de novo na próxima
       }
       return legacy
     },
@@ -117,18 +91,11 @@ export function createAuthStorage(bridge: SecureStorageBridge | null | undefined
       try {
         await bridge.removeItem(key)
       } catch {
-        // best-effort
       }
     },
   }
 }
 
-// App Android/iOS (Capacitor): a sessão vai pro armazenamento NATIVO do
-// app (SharedPreferences no Android, via @capacitor/preferences), que é
-// gravado no disco na hora. O localStorage da WebView às vezes não
-// chegava a ser salvo quando o Android fechava o app — e a pessoa tinha
-// que logar de novo toda vez que abria. Migra a sessão antiga do
-// localStorage na primeira leitura (ninguém é deslogado por isso).
 export interface NativePrefs {
   get: (o: { key: string }) => Promise<{ value: string | null }>
   set: (o: { key: string; value: string }) => Promise<void>
@@ -157,7 +124,6 @@ export function createNativeAuthStorage(load: () => Promise<NativePrefs>): Async
           await p.set({ key, value: legacy })
           localRemove(key)
         } catch {
-          // fica no localStorage até a próxima
         }
       }
       return legacy
@@ -179,7 +145,6 @@ export function createNativeAuthStorage(load: () => Promise<NativePrefs>): Async
       try {
         await p.remove({ key })
       } catch {
-        // best-effort
       }
     },
   }

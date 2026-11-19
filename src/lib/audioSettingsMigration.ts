@@ -1,6 +1,3 @@
-// Ver loadSettings em hooks/useAudioSettings.ts: quem ainda estava na
-// sensibilidade padrão antiga (50) passa pro padrão novo; quem escolheu
-// outro valor continua com o seu.
 export function migrateSensitivity<T extends { micSensitivity?: number }>(
   stored: T,
   alreadyMigrated: boolean,

@@ -1,11 +1,6 @@
 import { Link } from 'react-router-dom'
 import { LegalPageLayout, LegalSection } from './LegalPageLayout'
 
-// Página pública (sem login) explicando como excluir a conta — a Google
-// Play exige um link assim na ficha do app ("Exclusão de dados").
-//
-// E-mail de contato: o mesmo de PrivacyPolicy.tsx e TermsOfService.tsx.
-
 export function DeleteAccountInfo() {
   return (
     <LegalPageLayout title="Como excluir sua conta" updatedAt="30 de setembro de 2026">

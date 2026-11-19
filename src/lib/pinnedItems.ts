@@ -1,7 +1,3 @@
-// Fixar canal/conversa no topo da lista — preferência pessoal,
-// guardada localmente (não sincroniza entre dispositivos, mas evita
-// precisar de uma tabela nova no banco pra algo puramente de
-// interface).
 const STORAGE_KEY = 'mamacos-pinned-items'
 
 function readAll(): Record<string, true> {
@@ -17,12 +13,7 @@ function writeAll(data: Record<string, true>) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   } catch {
-    // best-effort — se o localStorage falhar, só não persiste
   }
-}
-
-export function isPinned(id: string): boolean {
-  return Boolean(readAll()[id])
 }
 
 export function togglePinned(id: string): boolean {
@@ -38,15 +29,6 @@ export function getPinnedSet(): Set<string> {
   return new Set(Object.keys(readAll()))
 }
 
-// Nota privada sobre um usuário — só quem escreveu vê (não sincroniza
-// com o banco, fica só no seu dispositivo, igual o "fixar" acima).
-//
-// No app de PC as notas ficam CIFRADAS pelo sistema (DPAPI no Windows,
-// Keychain no Mac — o mesmo cofre da sessão, ver "secure-storage:*" em
-// electron/main.cjs). Ficam numa cópia em memória pra leitura instantânea;
-// a gravação no cofre é em segundo plano. Notas antigas, que estavam em
-// texto puro no localStorage, são migradas pro cofre e apagadas de lá.
-// No site/Android (ou sem cofre disponível) continua no localStorage.
 const LEGACY_NOTES_KEY = 'mamacos-user-notes'
 const SECURE_NOTES_KEY = 'mv-user-notes'
 
@@ -92,7 +74,6 @@ function persistNotes(all: Record<string, string>) {
   const b = bridge()
   if (useSecure && b) {
     void b.setItem(SECURE_NOTES_KEY, json).then((r) => {
-      // Cofre falhou: não perde a nota — guarda no lugar antigo.
       if (!r.ok) writeLegacy(json)
     })
     return
@@ -105,11 +86,9 @@ function writeLegacy(json: string) {
     if (json === '{}') localStorage.removeItem(LEGACY_NOTES_KEY)
     else localStorage.setItem(LEGACY_NOTES_KEY, json)
   } catch {
-    // best-effort
   }
 }
 
-/** Carrega as notas do cofre (app de PC). Chamado uma vez ao abrir o app. */
 export async function initSecureNotes(): Promise<void> {
   const b = bridge()
   if (!b) return
@@ -127,12 +106,10 @@ export async function initSecureNotes(): Promise<void> {
         try {
           localStorage.removeItem(LEGACY_NOTES_KEY)
         } catch {
-          // best-effort
         }
       }
     }
   } catch {
-    // sem cofre: segue no localStorage
   }
 }
 
@@ -148,7 +125,6 @@ export function setUserNote(userId: string, note: string) {
   persistNotes(all)
 }
 
-/** Ao sair da conta: apaga as notas (do cofre e do localStorage). */
 export function clearUserNotes() {
   notesCache = {}
   writeLegacy('{}')

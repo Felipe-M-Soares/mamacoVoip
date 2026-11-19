@@ -6,8 +6,6 @@ import type { Message, MessageAttachment, MessageReaction, Profile, ServerEmoji,
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
 const DEFAULT_ROLE_COLOR = '#99aab5'
-// Referências estáveis pra "sem nada" — um `[]` novo a cada render
-// quebraria o React.memo do MessageItem.
 const EMPTY_ATTACHMENTS: MessageAttachment[] = []
 const EMPTY_REACTIONS: MessageReaction[] = []
 const EMPTY_ROLES: Role[] = []
@@ -74,7 +72,6 @@ export function MessageList({
   onReport,
 }: {
   channelName: string
-  /** Identifica o canal/thread exibido — trocar isso reposiciona a rolagem no fim. */
   viewKey?: string
   messages: Message[]
   loading?: boolean
@@ -123,9 +120,6 @@ export function MessageList({
     onLoadOlder,
   })
 
-  // Cor do nome igual a apps de chat populares faz — usa o cargo de posição mais alta
-  // que tenha uma cor definida (ignora o cinza padrão, que significa "sem
-  // cor específica"). Calculado uma vez por autor, não por mensagem.
   const roleColorByAuthor = useMemo(() => {
     const map = new Map<string, string | undefined>()
     if (!rolesForUser) return map
@@ -135,8 +129,6 @@ export function MessageList({
     return map
   }, [messages, rolesForUser])
 
-  // Separadores de data e agrupamento por autor — pré-calculados (antes
-  // eram 4 `new Date()` por mensagem a cada render).
   const layout = useMemo(() => {
     let prevDay = ''
     let prevTime = 0

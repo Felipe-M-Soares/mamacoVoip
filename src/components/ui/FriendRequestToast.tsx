@@ -3,12 +3,6 @@ import { useNewFriendRequests } from '../../hooks/useNewFriendRequests'
 import { useFriends } from '../../context/FriendsContext'
 import { useOverlayOpen } from '../../hooks/useOverlayOpen'
 
-// Aviso de pedido de amizade novo.
-//  - Sai da frente quando tem algo aberto por cima (modal, tour, menu
-//    lateral do celular) e volta quando fecha.
-//  - No celular vira uma faixa compacta no topo (antes era um cartão
-//    grande no meio da tela, em cima do chat, do menu e do tour), e só
-//    mostra o pedido mais novo (+N se tiver mais).
 export function FriendRequestToast() {
   const { newRequests, dismiss } = useNewFriendRequests()
   const { acceptRequest, declineRequest } = useFriends()
@@ -29,7 +23,6 @@ export function FriendRequestToast() {
 
   return (
     <>
-      {/* Celular: faixa compacta no topo, só o mais novo. */}
       <div className="sm:hidden fixed top-[60px] left-2 right-2 z-[270]" aria-live="polite">
         <div role="status" className="surface-elevated rounded-xl px-3 py-2 flex items-center gap-2.5 animate-pop-in">
           <Avatar name={latest.profile.username} avatarUrl={latest.profile.avatar_url} size={32} />
@@ -74,7 +67,6 @@ export function FriendRequestToast() {
         </div>
       </div>
 
-      {/* Computador: cartões no canto. */}
       <div className="max-sm:hidden fixed bottom-20 right-4 z-[270] flex flex-col gap-2 w-80" aria-live="polite">
         {newRequests.map((req) => (
           <div key={req.id} role="status" className="surface-elevated rounded-2xl p-4 animate-pop-in">

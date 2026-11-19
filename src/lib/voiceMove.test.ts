@@ -18,7 +18,7 @@ describe('arraste de participante de voz', () => {
   it('rejeita payload inválido', () => {
     expect(decodeVoiceMemberDrag('')).toBeNull()
     expect(decodeVoiceMemberDrag(null)).toBeNull()
-    expect(decodeVoiceMemberDrag('c1')).toBeNull() // id de canal (arraste de canal)
+    expect(decodeVoiceMemberDrag('c1')).toBeNull()
     expect(decodeVoiceMemberDrag('{"userId":"u1"}')).toBeNull()
     expect(decodeVoiceMemberDrag('{"userId":1,"fromChannelId":"c","serverId":"s"}')).toBeNull()
   })
@@ -57,7 +57,7 @@ describe('shouldApplyVoiceMove', () => {
 
 describe('describeVoiceMoveError', () => {
   it('traduz função ausente e rede, repassa as mensagens da RPC', () => {
-    expect(describeVoiceMoveError('Could not find the function public.move_voice_member')).toMatch(/migration 007/)
+    expect(describeVoiceMoveError('Could not find the function public.move_voice_member')).toMatch(/não está disponível/)
     expect(describeVoiceMoveError('TypeError: Failed to fetch')).toMatch(/Sem conexão/)
     expect(describeVoiceMoveError('Você não tem permissão para mover membros')).toBe('Você não tem permissão para mover membros')
     expect(describeVoiceMoveError(undefined)).toBe('Não foi possível mover o membro.')

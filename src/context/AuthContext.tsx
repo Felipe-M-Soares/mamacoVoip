@@ -10,38 +10,9 @@ import { PUBLIC_WEB_URL } from '../lib/config'
 import { isNativeMobileApp } from '../lib/platform'
 import { unregisterPushToken } from '../lib/pushNotifications'
 
-// Esquema de URL customizado que o app desktop registra no sistema
-// operacional (ver "protocols" em package.json e o bloco grande no
-// topo de electron/main.cjs) — é o "endereço de volta" que o Google
-// usa pra devolver a pessoa pro app depois de aceitar o login, já que
-// um navegador comum não tem como abrir uma janela do Electron
-// diretamente. Só é usado dentro do app desktop; no navegador (site),
-// o próprio window.location.origin já funciona como redirecionamento.
-// (o link que chega no app é mamacovoip://auth-callback?code=...&state=...)
-// Página do site que recebe o retorno do Google e abre o app (ver
-// public/auth/desktop.html). Coberta pelo "https://mamaco-voip.vercel.app/**"
-// que já está em Redirect URLs no Supabase.
 const GOOGLE_AUTH_BRIDGE_ELECTRON = `${PUBLIC_WEB_URL}/auth/desktop.html`
-// App Android (Capacitor): o mesmo id do app como esquema de link.
 const GOOGLE_AUTH_REDIRECT_MOBILE = 'com.mamacosvoip.app://auth-callback'
 
-// mamacovoip:// é um esquema de URL REGISTRADO NO SISTEMA OPERACIONAL —
-// isso significa que, tecnicamente, QUALQUER site ou programa no
-// computador da pessoa pode "abrir" um link desses, não só o navegador
-// que a gente mesmo abriu no signInWithGoogle() abaixo. Sem alguma
-// forma de conferir "esse link realmente é resposta de um login que EU
-// pedi", alguém malicioso poderia forjar um link com token de UMA OUTRA
-// conta (a dele mesmo) e, se convencesse a vítima a clicar nele (num
-// site, e-mail, etc.), o app da vítima aceitaria e logaria ela sem
-// perceber na conta do golpista — um tipo de ataque conhecido (login
-// CSRF / session fixation via deep link customizado).
-//
-// A defesa: gera um código aleatório ANTES de abrir o navegador,
-// manda ele junto na URL de volta (?state=...), e só aceita o link que
-// chegar de volta se o código bater com o que a gente mesmo gerou —
-// um link forjado por fora nunca vai ter o código certo. Uso único
-// (apaga assim que usado) e expira sozinho depois de alguns minutos,
-// caso a pessoa desista no meio do caminho.
 let pendingGoogleAuthState: { value: string; expiresAt: number } | null = null
 const GOOGLE_AUTH_STATE_TTL_MS = 5 * 60 * 1000
 
@@ -55,11 +26,8 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string, username: string) => Promise<{ error: string | null }>
   signInWithGoogle: () => Promise<{ error: string | null }>
-  // Sai só deste aparelho (outros aparelhos continuam logados).
   signOut: () => Promise<void>
-  // Encerra a sessão em TODOS os aparelhos, inclusive este.
   signOutEverywhere: () => Promise<void>
-  // Mantém este aparelho e derruba todas as outras sessões.
   signOutOtherSessions: () => Promise<{ error: string | null }>
   refreshProfile: () => Promise<void>
   updateProfile: (
@@ -68,10 +36,6 @@ interface AuthContextValue {
       custom_status?: string | null
       playing?: string | null
       profile_visibility?: 'everyone' | 'friends_only'
-      // Só aceitam `null` explícito aqui (não uma URL de verdade) — a URL
-      // de verdade só é setada internamente, depois de um upload bem
-      // sucedido logo abaixo. `null` é como a tela de edição pede pra
-      // REMOVER um banner/decoração já enviado, sem trocar por outro.
       banner_url?: null
       avatar_decoration_url?: null
     },
@@ -84,19 +48,11 @@ interface AuthContextValue {
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
-// Retorno do login com Google no app desktop e no Android: confere o
-// state (só aceita um login que ESTE app pediu, dentro do prazo) e troca o
-// "?code=" (PKCE) pela sessão. O code sozinho não serve pra nada sem o
-// code_verifier que ficou guardado neste aparelho.
-// No Android o sistema pode fechar o app enquanto a pessoa está no
-// navegador do Google — o state pendente fica guardado no aparelho também
-// (o code_verifier do PKCE já fica, no armazenamento da sessão).
 const GOOGLE_AUTH_STATE_KEY = 'mamacos-google-auth-state'
 function storeGoogleAuthState(v: { value: string; expiresAt: number }) {
   try {
     localStorage.setItem(GOOGLE_AUTH_STATE_KEY, JSON.stringify(v))
   } catch {
-    // sem storage: vale só o da memória
   }
 }
 function takeStoredGoogleAuthState(): { value: string; expiresAt: number } | null {
@@ -111,27 +67,20 @@ function takeStoredGoogleAuthState(): { value: string; expiresAt: number } | nul
   }
 }
 
-// Resultado do retorno do Google, pro botão parar de girar e mostrar o
-// erro (antes um problema aqui era engolido em silêncio e o botão ficava
-// em "Abrindo o Google..." sem explicação).
 export const GOOGLE_AUTH_RESULT_EVENT = 'mv:google-auth-result'
 function reportGoogleAuth(error: string | null, detail?: string) {
   if (detail) {
     try {
       window.electronAPI?.logDebug?.(`[google-auth] ${detail}`)
     } catch {
-      // log é só ajuda
     }
   }
   try {
     window.dispatchEvent(new CustomEvent(GOOGLE_AUTH_RESULT_EVENT, { detail: { error } }))
   } catch {
-    // sem window
   }
 }
 
-// O id do fluxo PKCE (supabase-js) do login pendente — com ele a troca
-// usa exatamente a chave daquele login.
 let pendingGoogleFlowId: string | null = null
 const GOOGLE_AUTH_FLOW_KEY = 'mamacos-google-auth-flow'
 function storeGoogleFlowId(id: string | null) {
@@ -140,7 +89,6 @@ function storeGoogleFlowId(id: string | null) {
     if (id) localStorage.setItem(GOOGLE_AUTH_FLOW_KEY, id)
     else localStorage.removeItem(GOOGLE_AUTH_FLOW_KEY)
   } catch {
-    // só memória
   }
 }
 function takeGoogleFlowId(): string | null {
@@ -149,16 +97,11 @@ function takeGoogleFlowId(): string | null {
     id = id ?? localStorage.getItem(GOOGLE_AUTH_FLOW_KEY)
     localStorage.removeItem(GOOGLE_AUTH_FLOW_KEY)
   } catch {
-    // só memória
   }
   pendingGoogleFlowId = null
   return id && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : null
 }
 
-// Códigos já recebidos: o mesmo retorno pode chegar 2 vezes (a página do
-// navegador abre o app sozinha E a pessoa clica no botão "Abrir o Mamacos
-// Voip"). Antes a 2ª chegada não achava mais o login pendente e escondia o
-// resultado da 1ª com "O login demorou demais...".
 const handledGoogleCodes = new Set<string>()
 
 async function handleGoogleAuthCallback(url: string) {
@@ -176,16 +119,13 @@ async function handleGoogleAuthCallback(url: string) {
       return
     }
 
-    // Fluxo implícito (#access_token=...) NÃO é mais aceito: com
-    // flowType 'pkce' o Supabase sempre devolve ?code=.
     if (!code || !/^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
       reportGoogleAuth('O retorno do Google veio sem o código de login. Tente de novo.', `sem code no link: ${url.slice(0, 80)}`)
       return
     }
-    if (handledGoogleCodes.has(code)) return // repetido: o 1º já está cuidando
+    if (handledGoogleCodes.has(code)) return
     handledGoogleCodes.add(code)
 
-    // Já logado (ex.: o 1º retorno já entrou) — nada a fazer.
     const { data: current } = await supabase.auth.getSession()
     if (current.session) {
       reportGoogleAuth(null, 'retorno ignorado: já logado')
@@ -197,10 +137,6 @@ async function handleGoogleAuthCallback(url: string) {
     takeStoredGoogleAuthState()
     const flowId = takeGoogleFlowId()
 
-    // Se este app tem um login pendente e o link traz um state, ele tem
-    // que bater. A proteção principal é o PKCE: um code que não foi pedido
-    // por ESTE app (link forjado, login de outra pessoa) nunca vira sessão,
-    // porque a troca exige a chave secreta que só este app guardou.
     if (pending && stateFromLink && stateFromLink !== pending.value) {
       reportGoogleAuth('Esse link de login não é deste app. Clique em "Entrar com Google" de novo.', 'state não confere')
       return
@@ -209,8 +145,6 @@ async function handleGoogleAuthCallback(url: string) {
     const linkFlowId = query.get('sb_flow_id')
     const useFlowId = linkFlowId && /^[A-Za-z0-9_-]{1,128}$/.test(linkFlowId) ? linkFlowId : flowId
     let { error } = await supabase.auth.exchangeCodeForSession(code, useFlowId ? { flowId: useFlowId } : undefined)
-    // A chave pode ter ficado só no lugar "antigo" (versões do
-    // supabase-js) — tenta sem o id antes de desistir.
     if (error && useFlowId && /verifier/i.test(error.message)) {
       ;({ error } = await supabase.auth.exchangeCodeForSession(code))
     }
@@ -236,13 +170,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [mfaPending, setMfaPending] = useState(false)
 
-  // Capturado de forma síncrona (fora de qualquer efeito) porque o próprio
-  // cliente do Supabase pode "limpar" o hash da URL assim que processa a
-  // sessão — se a gente checar isso só dentro de um useEffect, pode já ser
-  // tarde demais.
-  // Com PKCE o link de confirmação volta como "/?type=signup&code=..."
-  // (o "?type=signup" é colocado pelo próprio signUp abaixo); links no
-  // formato antigo traziam "#...&type=signup".
   const isEmailConfirmationRef = useRef(
     typeof window !== 'undefined' &&
       (() => {
@@ -258,22 +185,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(data ?? null)
   }
 
-  // Id do usuário da sessão atual — usado pra descartar respostas
-  // atrasadas de fetchProfile/checkMfaLevel que chegam depois de um
-  // logout ou troca de conta.
   const currentUserIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      // O link de confirmação de e-mail já vem com uma sessão válida
-      // embutida (pra funcionar o "detectSessionInUrl"). Só que não
-      // queremos logar a pessoa automaticamente nesse caso — a gente
-      // desloga na hora e manda pra tela de login com um aviso de sucesso.
-      //
-      // Com PKCE, se o link foi aberto em OUTRO navegador/aparelho (sem o
-      // code_verifier do cadastro), não há sessão nenhuma — mas o e-mail
-      // já foi confirmado pelo Supabase antes do redirecionamento, então
-      // mostra o mesmo aviso de sucesso.
       const confirmationWithoutSession =
         isEmailConfirmationRef.current && !session && new URLSearchParams(window.location.search).has('code')
       if (isEmailConfirmationRef.current && (session || confirmationWithoutSession)) {
@@ -281,7 +196,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           sessionStorage.setItem('mamacos-email-confirmed', '1')
         } catch {
-          // best-effort — se não der pra guardar a flag, só não mostra o aviso
         }
         window.history.replaceState(null, '', '/login')
         isEmailConfirmationRef.current = false
@@ -296,30 +210,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session)
       if (session?.user) {
         fetchProfile(session.user.id)
-        // Espera saber se falta o 2º fator ANTES de liberar a tela —
-        // antes o app chegava a renderizar (e disparar consultas) por um
-        // instante com a sessão aal1, até o checkMfaLevel responder.
         await checkMfaLevel()
       }
       setLoading(false)
     })
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      // Ignora eventos disparados enquanto ainda estamos processando o
-      // caso de confirmação de e-mail acima, pra não piscar "logado" na tela
       if (isEmailConfirmationRef.current) return
 
       const previousUserId = currentUserIdRef.current
       currentUserIdRef.current = session?.user?.id ?? null
       setSession(session)
       if (session?.user) {
-        // Renovação de token não muda perfil nem nível de MFA — evita
-        // uma consulta extra a cada ~1h.
         if (event === 'TOKEN_REFRESHED' && previousUserId === session.user.id) return
         const userId = session.user.id
-        // A documentação do Supabase pede pra não chamar outras funções
-        // do cliente de dentro deste callback (pode travar o lock de
-        // auth) — adia pro próximo tick.
         setTimeout(() => {
           if (currentUserIdRef.current !== userId) return
           fetchProfile(userId)
@@ -335,10 +239,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  // Checa se a sessão está travada esperando o código do autenticador
-  // (aal1 = só senha, aal2 = senha + segundo fator já verificado).
-  // Alguém com 2FA ativado fica preso em "mfaPending" até completar o
-  // desafio — o app não deixa entrar antes disso.
   async function checkMfaLevel() {
     const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
     if (error) return
@@ -351,8 +251,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: factors, error: listError } = await supabase.auth.mfa.listFactors()
     if (listError) return { error: traduzErro(listError.message) }
-    // Só fator JÁ VERIFICADO — um cadastro de 2FA abandonado no meio
-    // deixa um fator "unverified" que nunca vai aceitar código nenhum.
     const factor = factors?.totp?.find((f) => f.status === 'verified')
     if (!factor) return { error: 'Nenhum autenticador ativo encontrado nesta conta.' }
 
@@ -363,13 +261,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null }
   }
 
-  // Segunda camada de proteção pro problema de "token expira enquanto
-  // a janela fica escondida" — mesmo com os timers não mais
-  // desacelerados (veja backgroundThrottling no processo principal),
-  // essa é uma garantia a mais: sempre que a janela volta a ficar
-  // visível (reaberta da bandeja, ou só voltando o foco), confirma que
-  // a sessão ainda é válida e renova se precisar, em vez de esperar o
-  // próximo ciclo natural de renovação.
   useEffect(() => {
     function handleVisibilityChange() {
       if (document.visibilityState === 'visible') {
@@ -380,17 +271,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
 
-  // Marca online ao logar / abrir o app. Só muda se o usuário estava
-  // "offline" — não sobrescreve um status manual (ausente/não perturbe).
-  //
-  // Fechar o app abruptamente (crash, sem internet, sem logout) ainda
-  // deixa essa coluna travada em "online" no banco — mas isso não é mais
-  // um problema pra quem VÊ o status de outra pessoa: o PresenceContext
-  // (src/context/PresenceContext.tsx) cruza esse valor com um canal de
-  // Realtime Presence, que reflete se o socket da pessoa está mesmo
-  // aberto agora, e o Avatar usa esse cruzamento pra decidir a bolinha —
-  // então mesmo com o banco desatualizado, ninguém mais vê alguém
-  // desconectado como "online".
   useEffect(() => {
     if (!session?.user) return
 
@@ -417,44 +297,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
       options: {
         data: { username: username.trim() },
-        // No site, o link de confirmação volta pro próprio domínio. No
-        // app desktop (app://, file://) isso não é uma URL que o
-        // navegador consiga abrir, então vai pro site público.
-        // "?type=signup" marca a volta como confirmação de cadastro — com
-        // PKCE o Supabase só acrescenta "&code=..." (sem "type"), e sem
-        // essa marca a tela de login não saberia mostrar o aviso.
         emailRedirectTo: `${
           !isElectron() && /^https?:$/.test(window.location.protocol) ? window.location.origin : PUBLIC_WEB_URL
         }/?type=signup`,
       },
     })
     if (error) return { error: traduzErro(error.message) }
-    // Com confirmação de e-mail ligada, o Supabase NÃO devolve erro pra
-    // e-mail já cadastrado (pra não revelar quem tem conta) — devolve um
-    // usuário "falso" sem identidades. Mostramos a mesma tela de
-    // "confirme seu e-mail" nos dois casos, de propósito.
     return { error: null }
   }
 
-  // No app desktop, não dá pra deixar o Supabase redirecionar a própria
-  // janela pro Google — a janela carrega arquivos locais (app://...),
-  // não um site de verdade, então "voltar" pra ela depois do Google não
-  // funcionaria. Em vez disso: pede a URL de autorização SEM navegar
-  // pra ela (skipBrowserRedirect), abre essa URL no navegador padrão do
-  // sistema (window.open aqui é interceptado no processo principal e
-  // redirecionado pro navegador — ver setWindowOpenHandler em
-  // electron/main.cjs), e espera o link de volta chegar pelo esquema
-  // customizado mamacovoip:// (capturado no listener de
-  // onGoogleAuthCallback logo abaixo).
-  //
-  // No navegador (site), o fluxo é o padrão do Supabase: a própria
-  // página é redirecionada pro Google e volta sozinha pro mesmo
-  // endereço, sem precisar de nada especial aqui.
   async function signInWithGoogle(): Promise<{ error: string | null }> {
     if (isNativeMobileApp()) {
-      // Android: o Google não deixa logar dentro da WebView do app, então
-      // abre no navegador do sistema (aba segura) e volta pelo link
-      // com.mamacosvoip.app:// (ver o useEffect do appUrlOpen).
       const state = crypto.randomUUID()
       pendingGoogleAuthState = { value: state, expiresAt: Date.now() + GOOGLE_AUTH_STATE_TTL_MS }
       storeGoogleAuthState(pendingGoogleAuthState)
@@ -479,15 +332,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isElectron()) {
       const state = crypto.randomUUID()
       pendingGoogleAuthState = { value: state, expiresAt: Date.now() + GOOGLE_AUTH_STATE_TTL_MS }
-      // Guardado também no armazenamento: se o Windows abrir o app de novo
-      // pelo link (app fechado no meio), o código continua valendo.
       storeGoogleAuthState(pendingGoogleAuthState)
 
-      // Volta por uma página https do site (public/auth/desktop.html), que
-      // repassa pro app pelo link mamacovoip://. Antes o Supabase tentava
-      // voltar direto pro mamacovoip:// — se esse endereço não estivesse
-      // liberado em "Redirect URLs", a pessoa caía no site e o login
-      // nunca chegava no app.
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: `${GOOGLE_AUTH_BRIDGE_ELECTRON}?state=${state}`, skipBrowserRedirect: true },
@@ -508,28 +354,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error ? traduzErro(error.message) : null }
   }
 
-  // Só existe dentro do app desktop (window.electronAPI) — é o outro
-  // lado do signInWithGoogle() acima: quando o link mamacovoip://
-  // chega de volta (ver electron/main.cjs), confere o state e troca o
-  // "?code=" (PKCE) pela sessão. O code sozinho não serve pra nada sem
-  // o code_verifier que ficou guardado (cifrado) neste app — um link
-  // interceptado/forjado não vira sessão em outro lugar.
-  // onAuthStateChange (já escutado lá em cima) cuida do resto (buscar
-  // perfil, etc.) automaticamente a partir daqui.
   useEffect(() => {
     if (!window.electronAPI?.onGoogleAuthCallback) return
     return window.electronAPI.onGoogleAuthCallback(handleGoogleAuthCallback)
   }, [])
 
-  // Mesmo retorno no app Android: o Google volta pelo link
-  // com.mamacosvoip.app://auth-callback (ver AndroidManifest.xml), o
-  // Android entrega pro app, e o navegador interno fecha sozinho.
   useEffect(() => {
     if (!isNativeMobileApp()) return
     let remove: (() => void) | null = null
     let cancelled = false
     void import('@capacitor/app').then(({ App }) => {
-      // App aberto do zero pelo link (o Android tinha fechado ele).
       void App.getLaunchUrl()
         .then((launch) => {
           if (launch?.url?.startsWith(GOOGLE_AUTH_REDIRECT_MOBILE)) void handleGoogleAuthCallback(launch.url)
@@ -550,9 +384,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Limpa tudo que é da conta e fica guardado no aparelho — num
-  // computador compartilhado, a próxima pessoa não pode ver notas,
-  // itens fixados ou o destino pós-login de quem saiu.
   function clearLocalUserData() {
     clearLinkPreviewCache()
     clearSignedUrlCache()
@@ -560,26 +391,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         localStorage.removeItem(key)
       } catch {
-        // best-effort
       }
     }
     try {
       sessionStorage.removeItem('mamacos-post-login-redirect')
     } catch {
-      // best-effort
     }
-    // Outros módulos (rascunhos, caches de contexto) podem escutar isso
-    // pra se limparem também.
     try {
       window.dispatchEvent(new Event('mamacos:signed-out'))
     } catch {
-      // best-effort
     }
   }
 
-  // Obs.: signOut/signOutEverywhere não recebem parâmetro de propósito —
-  // são usados direto como onClick={signOut}, e o evento do clique não
-  // pode ser confundido com uma opção.
   function signOut() {
     return performSignOut('local')
   }
@@ -590,26 +413,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function performSignOut(scope: 'local' | 'global') {
     const userId = session?.user?.id
-    // Celular: para de receber notificações desta conta neste aparelho.
     await unregisterPushToken()
     if (userId) {
-      // Não deixa uma falha de rede aqui impedir o logout.
       try {
         await supabase.from('profiles').update({ status: 'offline' }).eq('id', userId)
       } catch {
-        // ignora
       }
     }
-    // Fecha todas as assinaturas de Realtime ANTES de derrubar a sessão —
-    // senão os canais continuam abertos com o token antigo até expirar.
     try {
       await supabase.removeAllChannels()
     } catch {
-      // ignora
     }
     const { error } = await supabase.auth.signOut({ scope })
     if (error) {
-      // Mesmo se o servidor não responder, a sessão local tem que sumir.
       await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
     }
     currentUserIdRef.current = null
@@ -643,7 +459,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) {
     if (!session?.user) return { error: 'Não autenticado' }
 
-    // Limites de tamanho (o banco também confere — migration 013).
     if (updates.display_name !== undefined) {
       const name = updates.display_name.trim()
       if (name.length > 32) return { error: 'O nome de exibição pode ter no máximo 32 caracteres.' }
@@ -679,11 +494,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       patch.avatar_url = data.publicUrl
     }
 
-    // Banner e decoração seguem o MESMO esquema do avatar (upload pro
-    // bucket próprio, path {user_id}/{tipo}-{timestamp}.ext — ver
-    // 007_profile_customization.sql) — só a URL enviada por último é que
-    // fica valendo, arquivos antigos não são apagados do Storage (mesmo
-    // comportamento que o avatar já tinha, por simplicidade).
     if (bannerFile) {
       const ext = imageExtension(bannerFile)
       if (!ext) return { error: 'Formato de imagem não aceito.' }
@@ -712,7 +522,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.from('profiles').update(patch).eq('id', session.user.id)
     if (error) return { error: traduzErro(error.message) }
     await refreshProfile()
-    // Listas de membros (salas, servidores) recarregam com a foto/nome novos.
     window.dispatchEvent(new Event('mv:profile-updated'))
     return { error: null }
   }
@@ -723,9 +532,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshProfile()
   }
 
-  // Funções com identidade estável (sempre chamam a versão mais recente)
-  // + value memoizado: sem isso, TODO render do AuthProvider (e cada
-  // renovação de token) re-renderizava o app inteiro.
   const actions = useStableActions({
     verifyMfaChallenge,
     signIn,
@@ -750,9 +556,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
-// Extensão do arquivo derivada do TIPO (mime) real, não do nome — o
-// nome vem do sistema da pessoa e pode ter qualquer coisa ("foto.php",
-// "a.b.c", sem extensão...). null = tipo não aceito.
 function imageExtension(file: File): string | null {
   const map: Record<string, string> = {
     'image/png': 'png',
@@ -774,7 +577,6 @@ function traduzErroUpload(message: string): string {
   return 'Não foi possível enviar a imagem. Tente de novo.'
 }
 
-// Mensagens de erro do Supabase Auth vêm em inglês — traduzimos as mais comuns
 export function traduzErro(message: string): string {
   const mapa: Record<string, string> = {
     'Invalid login credentials': 'E-mail ou senha incorretos.',
@@ -814,14 +616,6 @@ export function traduzErro(message: string): string {
     return 'Sem conexão com o servidor. Verifique sua internet e tente de novo.'
   }
 
-  // Esses dois vêm com texto variável (número de segundos, etc.), então
-  // não dá pra bater exato no mapa acima — o Supabase limita quantos
-  // e-mails o PROJETO TODO pode enviar por hora quando não tem um
-  // provedor de e-mail próprio configurado (SMTP customizado), não é
-  // algo que dependa de código do app. Só quem administra o projeto no
-  // Supabase consegue aumentar isso de verdade (Authentication → Emails
-  // → SMTP Settings, configurando Resend/SendGrid/etc.) — aqui só dá
-  // pra deixar a mensagem clara em vez do texto em inglês.
   if (/email rate limit exceeded/i.test(message)) {
     return 'Muitas contas foram criadas em pouco tempo e o envio de e-mails atingiu o limite temporário do servidor. Aguarde um pouco e tente de novo — se continuar acontecendo, o administrador precisa configurar um provedor de e-mail próprio no Supabase.'
   }

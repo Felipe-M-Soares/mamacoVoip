@@ -28,7 +28,6 @@ export function EventsModal({
   const { user } = useAuth()
   const { events, rsvpsByEvent, createEvent, deleteEvent, toggleRsvp } = useServerEvents(serverId)
   const [showCreate, setShowCreate] = useState(false)
-  // Evento aguardando confirmação de exclusão (no lugar do confirm() nativo).
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   const now = Date.now()

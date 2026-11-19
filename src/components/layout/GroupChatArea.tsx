@@ -38,20 +38,15 @@ export function GroupChatArea({
     useGroupMessages(group.id)
   const { leaveGroup, deleteGroup } = useGroupConversations()
   const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null)
-  // Confirmações inline (antes eram confirm() nativos)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [confirmingLeave, setConfirmingLeave] = useState(false)
-  // Apagar o grupo inteiro: só quem criou (a RLS confere de novo no banco).
   const [confirmingDeleteGroup, setConfirmingDeleteGroup] = useState(false)
   const [deleteGroupError, setDeleteGroupError] = useState<string | null>(null)
   const isCreator = Boolean(user?.id && group.created_by === user.id)
   const [reportingMessageId, setReportingMessageId] = useState<string | null>(null)
-  // Celular: "Sair do grupo"/"Apagar grupo" ficam num menu "⋯" (no
-  // header de 390px eles não cabiam e "Apagar grupo" saía da tela).
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false)
   const actionsMenuRef = useClickOutside<HTMLDivElement>(actionsMenuOpen, () => setActionsMenuOpen(false))
   const voice = useVoiceCore()
-  // Grupo não tinha indicador de "digitando…" (DM e canal tinham).
   const { typingUserIds, notifyTyping, stopTyping } = useTypingIndicator(group.id, user?.id)
 
   const profileById = useMemo(() => Object.fromEntries(group.members.map((m) => [m.id, m])), [group.members])
@@ -86,16 +81,11 @@ export function GroupChatArea({
   }, [messages])
 
   async function handleDelete(messageId: string) {
-    // antes excluía direto, sem confirmação, e ignorava erro — a
-    // confirmação agora é inline na própria mensagem (confirmingDeleteId)
     setConfirmingDeleteId(null)
     const { error } = await deleteMessage(messageId)
     if (error) alert(error)
   }
 
-  // Mesmo bug do ChatArea.tsx: sem o `return`, o MessageComposer nunca
-  // recebia o erro de volta e sempre limpava a caixa como se tivesse
-  // dado certo, mesmo quando o envio falhava.
   async function handleSend(content: string, files: File[]) {
     const result = await sendMessage(content, replyingTo?.id ?? null, files)
     if (!result.error) {

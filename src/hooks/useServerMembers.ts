@@ -6,20 +6,6 @@ import type { Profile, ServerMember } from '../types/database'
 
 export type ServerMemberWithProfile = ServerMember & { profile: Profile }
 
-// Armazenamento COMPARTILHADO por servidor.
-//
-// useServerMembers() é chamado ao mesmo tempo por vários componentes pro
-// MESMO servidor (ChatArea, ChannelSidebar, MemberList, OverlayStateSync,
-// ServerHoverCard, VoiceChannelView, SearchModal…). Antes cada chamada
-// fazia a sua própria busca (server_members + profiles) E abria a sua
-// própria assinatura de tempo real — com o servidor aberto eram 4–5 cópias
-// idênticas de tudo, e cada entrada/saída de membro disparava 4–5 recargas
-// completas. Agora existe uma entrada por servidor, com uma busca e uma
-// assinatura só, compartilhadas por todo mundo que pedir aquele servidor.
-// Quando o último componente solta o servidor, a entrada fica em cache por
-// alguns segundos (ex.: passar o mouse de novo no mesmo ícone do
-// ServerHoverCard não refaz a busca) e depois é descartada.
-
 interface Snapshot {
   members: ServerMemberWithProfile[]
   loading: boolean
@@ -66,7 +52,6 @@ function getEntry(serverId: string): Entry {
       reloadTimer: null,
     }
     store.set(serverId, entry)
-    // Se ninguém chegar a assinar (render descartado), não fica pra sempre.
     scheduleRelease(serverId, entry)
   }
   return entry
@@ -89,7 +74,6 @@ async function load(serverId: string) {
           memberRows.map((m) => m.user_id)
         )
       if (profilesError) throw profilesError
-      // Map em vez de `profiles.find()` dentro do loop (era O(n²)).
       const byId = new Map((profiles ?? []).map((p) => [p.id, p]))
       merged = memberRows.flatMap((m) => {
         const profile = byId.get(m.user_id)
@@ -104,8 +88,6 @@ async function load(serverId: string) {
   }
 }
 
-// Várias mudanças seguidas (ex.: alguém entra e recebe cargo) viram uma
-// recarga só.
 function scheduleReload(serverId: string, entry: Entry) {
   if (entry.reloadTimer) clearTimeout(entry.reloadTimer)
   entry.reloadTimer = setTimeout(() => {
@@ -125,17 +107,14 @@ function subscribe(serverId: string, listener: () => void): () => void {
   installProfileRefresh()
   if (!entry.channel) {
     void load(serverId)
-    // Sem isso, quem entrasse no servidor com ele já aberto não tinha o
-    // perfil carregado (o aviso "entrou no servidor" mostrava "Alguém").
     let hadProblem = false
     const channel = changesChannel(`server_members:${serverId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'server_members', filter: `server_id=eq.${serverId}` }, () =>
         scheduleReload(serverId, entry)
       )
       .subscribe((status) => {
-        if (entry.channel !== channel) return // canal já descartado
+        if (entry.channel !== channel) return
         if (status === 'SUBSCRIBED') {
-          // voltou depois de uma queda: pega o que mudou enquanto estava fora
           if (hadProblem) scheduleReload(serverId, entry)
           hadProblem = false
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
@@ -152,11 +131,6 @@ function subscribe(serverId: string, listener: () => void): () => void {
   }
 }
 
-// Fotos/nomes de perfil não chegam em tempo real (a tabela profiles não
-// está no Realtime, de propósito: status muda o tempo todo). Pra que uma
-// foto nova apareça nas listas e salas sem precisar reiniciar o app,
-// recarrega os servidores abertos ao voltar pra janela e a cada 90s com
-// ela visível — uma consulta leve por servidor aberto.
 let profileRefreshInstalled = false
 function installProfileRefresh() {
   if (profileRefreshInstalled || typeof window === 'undefined') return

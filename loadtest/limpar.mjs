@@ -1,9 +1,4 @@
 #!/usr/bin/env node
-// LIMPEZA do teste de carga — roda na sua máquina, com a service_role
-// (mesmo cuidado do preparar-usuarios.mjs: nunca no app nem em commit).
-//
-// Apaga o servidor de teste (as mensagens vão junto em cascata). Com
-// LIMPAR_USUARIOS=1 apaga também os usuários de teste.
 import { readFileSync, rmSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 import { ARQUIVO_USUARIOS_PADRAO, carregarEnvDoProjeto, env, exigir } from './lib/comum.mjs'

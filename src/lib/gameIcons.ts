@@ -1,15 +1,3 @@
-// Ícone do jogo que a pessoa está jogando (lista de quem está nas salas
-// de voz). As imagens vêm direto de quem publica o jogo — nada é
-// guardado no Mamacos:
-//  1. Jogo da Steam → capa da própria Steam (pelo id do jogo).
-//  2. Jogo de fora da Steam (Valorant, LoL, Fortnite...) → ícone do site
-//     oficial do jogo.
-//  3. Nenhum dos dois → quadradinho com a inicial do jogo.
-//
-// O app NUNCA abre o processo do jogo pra pegar o ícone do .exe (é o
-// tipo de coisa que anti-cheat não gosta) — por isso a tabela abaixo.
-
-// Mesmos ids de STEAM_APP_IDS em electron/main.cjs + os que faltavam lá.
 const STEAM_IDS: Record<string, number> = {
   'Counter-Strike 2': 730,
   'Counter-Strike': 730,
@@ -83,7 +71,6 @@ const STEAM_IDS: Record<string, number> = {
   'Sea of Thieves': 1172620,
 }
 
-// Jogos fora da Steam → site oficial (o ícone do site é o do jogo).
 const OFFICIAL_SITES: Record<string, string> = {
   Valorant: 'playvalorant.com',
   'League of Legends': 'leagueoflegends.com',
@@ -99,17 +86,14 @@ const OFFICIAL_SITES: Record<string, string> = {
   'EA Sports FC 26': 'ea.com',
   'NBA 2K26': 'nba.2k.com',
   'Aion 2': 'aion2.plaync.com',
-  // Não é jogo, mas é comum ter categoria de anime.
   Crunchyroll: 'crunchyroll.com',
   Netflix: 'netflix.com',
 }
 
-/** Todos os jogos com ícone conhecido (lista do seletor na edição da categoria). */
 export const KNOWN_GAMES: string[] = [...new Set([...Object.keys(STEAM_IDS), ...Object.keys(OFFICIAL_SITES)])].sort((a, b) =>
   a.localeCompare(b, 'pt-BR')
 )
 
-// Apelidos que a galera usa no nome das categorias → jogo.
 const ALIASES: [string, string][] = [
   ['rainbow six', 'Rainbow Six Siege X'],
   ['rainbow', 'Rainbow Six Siege X'],
@@ -221,13 +205,11 @@ function normalize(text: string): string {
     .trim()} `
 }
 
-// Nome exato (normalizado) + apelidos, do mais longo pro mais curto.
 const MATCHERS: [string, string][] = [
   ...KNOWN_GAMES.map((g) => [normalize(g), g] as [string, string]),
   ...ALIASES.map(([a, g]) => [normalize(a), g] as [string, string]),
 ].sort((a, b) => b[0].length - a[0].length)
 
-/** Adivinha o jogo pelo nome da categoria ("Rambo 6" → Rainbow Six Siege X). */
 export function guessGameFromName(name: string): string | null {
   const n = normalize(name)
   if (n.trim() === '') return null
@@ -235,7 +217,6 @@ export function guessGameFromName(name: string): string | null {
   return null
 }
 
-/** Jogo da categoria: escolhido na edição, ou adivinhado pelo nome. '' = sem ícone. */
 export function categoryGame(category: { name: string; game?: string | null }): string | null {
   if (category.game === '') return null
   if (category.game) return category.game
@@ -255,13 +236,10 @@ function hueOf(name: string): number {
   return h % 360
 }
 
-/** De onde tirar o ícone de um jogo (`playing_app` vem do perfil: 'steam:<id>' ou a loja). */
 export function gameIconSource(game: string, playingApp?: string | null): GameIconSource {
   const steamId = steamIdFromApp(playingApp) ?? STEAM_IDS[game] ?? null
   const urls: string[] = []
   if (steamId) {
-    // A Steam serve os mesmos arquivos em dois endereços (o antigo e o
-    // novo "store_item_assets"); se um não tiver, tenta o outro.
     urls.push(
       `https://cdn.akamai.steamstatic.com/steam/apps/${steamId}/library_600x900.jpg`,
       `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${steamId}/library_600x900.jpg`,

@@ -1,6 +1,4 @@
 'use strict'
-// Monta o anel de pontinhos e deixa o processo principal trocar a tela
-// pro modo "Atualizando..." (window.mvSetUpdating(percentual)).
 ;(function () {
   var dots = document.querySelector('.dots')
   var N = 12

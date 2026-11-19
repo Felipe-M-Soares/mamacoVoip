@@ -1,10 +1,6 @@
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { openSharedChannel } from '../lib/realtimeChannel'
 
-// Canal da corrida de kart com a sala: `kart:<servidor>` (PARTE 33 da 007
-// libera pra membros do servidor). Só quem está correndo entra nele, e só
-// durante a corrida — assim as posições (5x por segundo) não chegam pra
-// todo mundo do Escritório. Nada passa pelo servidor de voz.
 export interface KartRacer { id: string; name: string; skin?: Record<string, unknown> | null }
 export interface KartNet {
   me: string

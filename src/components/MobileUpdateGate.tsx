@@ -2,10 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { isNativeMobileApp } from '../lib/platform'
 import { ApkUpdater, fetchLatestApk, isNewerVersion } from '../lib/mobileUpdate'
 
-// Tela de "Atualizando o Mamacos Voip..." do app Android — igual a do
-// app de PC: ao abrir, se tem versão nova, baixa sozinho e abre o
-// instalador. Sem internet ou sem versão nova, não aparece nada.
-
 type State =
   | { kind: 'idle' }
   | { kind: 'downloading'; version: string; percent: number }
@@ -35,7 +31,6 @@ export function MobileUpdateGate() {
         await ApkUpdater.download({ url: latest.apkUrl })
         const { needsPermission } = await ApkUpdater.install()
         setState({ kind: 'install', version: latest.version, needsPermission })
-        // Voltou da tela de permissão: tenta instalar de novo sozinho.
         resumeHandle = await App.addListener('resume', () => {
           void ApkUpdater.install()
             .then(({ needsPermission: still }) => setState({ kind: 'install', version: latest.version, needsPermission: still }))

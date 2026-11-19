@@ -11,16 +11,6 @@ export type ConversationWithDetails = DMConversation & {
   lastMessage: DMMessage | null
 }
 
-// Estado COMPARTILHADO por usuário. Esse hook é chamado ao mesmo tempo
-// por vários componentes (MainLayout, HomeSidebar, FriendsPanel — duas
-// vezes —, UserProfileModal, InviteFriendsModal…) e antes cada chamada
-// fazia a busca inteira E abria a sua própria assinatura de tempo real.
-// Pior: a busca era N+1 — uma consulta de "última mensagem" POR conversa.
-// Com 30 conversas e 4 componentes montados, abrir a tela inicial
-// disparava ~130 requisições. Agora: uma entrada por usuário, uma
-// assinatura, e a última mensagem de todas as conversas vem numa consulta
-// só (com fallback individual só pras poucas que não couberem nela).
-
 interface Snapshot {
   conversations: ConversationWithDetails[]
   loading: boolean
@@ -78,10 +68,6 @@ async function load(userId: string) {
   if (!entry) return
   const seq = ++entry.loadSeq
   try {
-    // Só traz conversas que a pessoa NÃO apagou do próprio lado (ver
-    // hideConversation abaixo e 003_social_FIX_dm_delete.sql) — apagar
-    // uma conversa só esconde ela pra quem apagou, então o filtro
-    // precisa considerar de que lado (user_a ou user_b) essa pessoa está.
     const { data: convos, error } = await supabase
       .from('dm_conversations')
       .select('*')
@@ -105,8 +91,6 @@ async function load(userId: string) {
       const lastByConvo = new Map<string, DMMessage>()
       for (const m of recent ?? []) if (!lastByConvo.has(m.conversation_id)) lastByConvo.set(m.conversation_id, m)
 
-      // Conversas antigas que não couberam na consulta em lote (só quando
-      // o lote veio cheio — senão a ausência significa "sem mensagens").
       if ((recent?.length ?? 0) >= BULK_LAST_MESSAGES_LIMIT) {
         const missing = convoIds.filter((id) => !lastByConvo.has(id))
         await Promise.all(
@@ -126,8 +110,6 @@ async function load(userId: string) {
         const otherProfile = profileById.get(c.user_a === userId ? c.user_b : c.user_a)
         return otherProfile ? [{ ...c, otherProfile, lastMessage: lastByConvo.get(c.id) ?? null }] : []
       })
-      // created_at é ISO — comparação de string já ordena certo, sem
-      // criar dois Date por comparação.
       result.sort((a, b) => {
         const aTime = a.lastMessage?.created_at ?? a.created_at
         const bTime = b.lastMessage?.created_at ?? b.created_at
@@ -150,8 +132,6 @@ function scheduleReload(userId: string, entry: Entry) {
   }, 250)
 }
 
-// Atualiza a "última mensagem" de uma conversa (e a ordem da lista) sem
-// recarregar tudo. Conversa desconhecida (nova/escondida) → recarrega.
 function applyMessage(userId: string, entry: Entry, message: DMMessage) {
   const list = entry.snapshot.conversations
   const idx = list.findIndex((c) => c.id === message.conversation_id)
@@ -166,7 +146,6 @@ function applyMessage(userId: string, entry: Entry, message: DMMessage) {
   emit(entry, { ...entry.snapshot, conversations: [updated, ...rest] })
 }
 
-/** Chamado por useDirectMessages logo depois de enviar (atualização otimista). */
 export function applyDmMessageToConversations(userId: string, message: DMMessage) {
   const entry = store.get(userId)
   if (entry) applyMessage(userId, entry, message)
@@ -182,12 +161,6 @@ function subscribe(userId: string, listener: () => void): () => void {
 
   if (!entry.channel) {
     void load(userId)
-    // Sem isso, uma conversa nova (a PRIMEIRA mensagem que alguém te manda)
-    // só aparecia pra quem recebeu depois de recarregar o app. O filtro do
-    // Realtime só aceita uma comparação por vez, e a pessoa pode estar em
-    // "user_a" ou "user_b" — por isso duas inscrições. UPDATE também
-    // importa: é assim que uma conversa apagada "reaparece" quando a outra
-    // pessoa manda mensagem de novo (gatilho on_dm_message_unhide_conversation).
     const reload = () => scheduleReload(userId, entry)
     let hadProblem = false
     const channel = changesChannel(`dm_conversations:${userId}`)
@@ -195,13 +168,10 @@ function subscribe(userId: string, listener: () => void): () => void {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_conversations', filter: `user_b=eq.${userId}` }, reload)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dm_conversations', filter: `user_a=eq.${userId}` }, reload)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dm_conversations', filter: `user_b=eq.${userId}` }, reload)
-      // Mensagem nova em qualquer conversa minha (a RLS de dm_messages só
-      // entrega as das minhas conversas) → atualiza a prévia na lista.
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_messages' }, (payload) => {
         const message = payload.new as DMMessage | undefined
         if (!message?.conversation_id) return
         applyMessage(userId, entry, message)
-        // Som + aviso de mensagem nova (ver lib/messageAlerts.ts).
         emitIncomingMessage({
           kind: 'dm',
           targetId: message.conversation_id,
@@ -210,7 +180,6 @@ function subscribe(userId: string, listener: () => void): () => void {
           content: message.content,
         })
       })
-      // Mensagem editada/apagada pode ser a última da lista → recarrega (com debounce).
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dm_messages' }, (payload) => {
         const message = payload.new as DMMessage | undefined
         if (message && entry.snapshot.conversations.some((c) => c.lastMessage?.id === message.id)) reload()
@@ -257,11 +226,6 @@ export function useConversations() {
     [refresh]
   )
 
-  // "Apaga" a conversa só da SUA lista (a outra pessoa continua vendo
-  // normalmente) — ver o comentário grande em
-  // 003_social_FIX_dm_delete.sql pro porquê de não ser um delete de
-  // verdade. Se a outra pessoa mandar mensagem de novo depois, a
-  // conversa reaparece sozinha.
   const hideConversation = useCallback(
     async (conversationId: string) => {
       const { error } = await supabase.rpc('hide_dm_conversation', { p_conversation_id: conversationId })

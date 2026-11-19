@@ -1,7 +1,3 @@
-// Mensagens de boas-vindas do aviso automático "fulano entrou no servidor"
-// (messages.system_event = 'member_join'). A frase é escolhida pelo id da
-// mensagem: todo mundo vê a MESMA frase pra mesma entrada, e cada entrada
-// nova sorteia outra. `{nome}` vira o nome de quem entrou.
 export const WELCOME_MESSAGES = [
   '{nome} chegou chegando! Seja bem-vindo(a) 🎉',
   'Abram alas: {nome} acabou de entrar no servidor!',
@@ -34,7 +30,6 @@ function hash(text: string): number {
   return h >>> 0
 }
 
-/** Partes da frase (antes/depois do nome), pra deixar o nome clicável. */
 export function welcomeMessageParts(messageId: string): { before: string; after: string } {
   const template = WELCOME_MESSAGES[hash(messageId) % WELCOME_MESSAGES.length]
   const [before, after = ''] = template.split('{nome}')

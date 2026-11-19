@@ -36,7 +36,6 @@ import { categoryGame } from '../../lib/gameIcons'
 import { clearVoiceRoster, setVoiceRoster, useVoiceRosterByChannel, useVoiceRosterChannel } from '../../lib/voiceRoster'
 import { VoiceMemberCard, type VoiceMemberCardTarget } from './VoiceMemberCard'
 
-// Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const InviteModal = lazyModal(() => import('../modals/InviteModal').then((m) => m.InviteModal))
 const InviteFriendsModal = lazyModal(() => import('../modals/InviteFriendsModal').then((m) => m.InviteFriendsModal))
 const ServerSettingsModal = lazyModal(() => import('../modals/ServerSettingsModal').then((m) => m.ServerSettingsModal))
@@ -66,22 +65,11 @@ function CallDurationTimer({ startedAt }: { startedAt: number }) {
   return <span className="text-[11px] text-mv-green font-mono tabular-nums shrink-0">{label}</span>
 }
 
-// Observa quem está numa sala de voz e publica no voiceRoster. Fica
-// montado pra TODAS as salas (mesmo em categoria recolhida): é isso que
-// deixa abrir sozinha a categoria que tem gente.
 function VoicePresenceWatcher({ channelId }: { channelId: string }) {
   const { user } = useAuth()
   const voice = useVoiceCore()
   const isConnectedHere = voice.connectedChannelId === channelId || voice.joiningChannelId === channelId
-  // Pro canal que você já está conectado de verdade, usa a lista de
-  // participantes que já vem da própria conexão — evita se inscrever
-  // de novo no mesmo canal Realtime (o que quebrava ao voltar pra uma
-  // sala em que você já estava).
   const observedIds = useVoicePresence(channelId, isConnectedHere)
-  // Última lista vista "de fora" — usada enquanto VOCÊ está entrando: a
-  // observação para (pra não assinar o mesmo canal duas vezes) e a lista
-  // da conexão ainda está vazia. Sem isso, quem já estava na sala sumia
-  // por uns segundos ao clicar pra entrar.
   const [lastObserved, setLastObserved] = useState<string[]>(observedIds)
   if (!isConnectedHere && lastObserved !== observedIds) setLastObserved(observedIds)
   const stillJoining = voice.connectedChannelId !== channelId
@@ -119,22 +107,18 @@ function VoiceChannelPresence({
   channelId: string
   profileById: Record<string, Profile>
   userLimit?: number
-  // Mover membros entre salas (migration 014) — só pra quem pode.
   serverId?: string
   ownerId?: string
   canMoveMembers?: boolean
   isOwner?: boolean
   onMemberDragStart?: (payload: VoiceMemberDragPayload) => void
   onMemberDragEnd?: () => void
-  // A lista de participantes também aceita o "soltar" (igual à linha do canal).
   onDragOver?: (e: React.DragEvent) => void
   onDragLeave?: () => void
   onDrop?: (e: React.DragEvent) => void
 }) {
   const { user, profile: ownProfile } = useAuth()
   const voice = useVoiceCore()
-  // Quem está na sala vem do VoicePresenceWatcher (sempre montado, mesmo
-  // com a categoria recolhida).
   const userIds = useVoiceRosterChannel(channelId)
   const [memberCard, setMemberCard] = useState<VoiceMemberCardTarget | null>(null)
 
@@ -154,13 +138,9 @@ function VoiceChannelPresence({
         </p>
       )}
       {userIds.map((id) => {
-        // Você mesmo: usa o SEU perfil (sempre atualizado) — antes ficava
-        // sem foto (só a inicial "V" de "Você").
         const p = id === user?.id ? (ownProfile ?? profileById[id]) : profileById[id]
         const name = id === user?.id ? 'Você' : p?.display_name || p?.username || '...'
         const isSharingScreen = id === user?.id ? voice.screenSharing : Boolean(voice.participants[id]?.screenStream)
-        // Arrastar pra outra sala: não vale pra si mesmo (é só clicar no
-        // outro canal) nem pro dono do servidor, se quem arrasta não é o dono.
         const movable = Boolean(canMoveMembers && serverId && id !== user?.id && (isOwner || id !== ownerId))
         return (
           <div
@@ -200,10 +180,6 @@ function VoiceChannelPresence({
               movable ? 'active:cursor-grabbing' : ''
             }`}
           >
-            {/* Só a FOTO pisca ao detectar áudio, não a linha inteira — a
-                pessoa reclamou que antes o nome também "acendia" junto,
-                o que distraía mais do que ajudava numa lista com vários
-                nomes lado a lado. */}
             <SpeakingAvatarRing userId={id}>
               <Avatar name={p?.username ?? name} avatarUrl={p?.avatar_url} size={20} />
             </SpeakingAvatarRing>
@@ -217,8 +193,6 @@ function VoiceChannelPresence({
               />
             )}
             {isSharingScreen && (
-              // Clique no "Ao vivo" = abre a sala já assistindo essa
-              // transmissão em destaque (não abre o cartão da pessoa).
               <button
                 type="button"
                 title={id === user?.id ? 'Ver sua transmissão' : `Assistir a transmissão de ${name}`}
@@ -241,8 +215,6 @@ function VoiceChannelPresence({
   )
 }
 
-// Só este anel re-renderiza quando a pessoa começa/para de falar — antes a
-// barra lateral inteira (todos os canais) era redesenhada a cada mudança.
 function SpeakingAvatarRing({ userId, children }: { userId: string; children: ReactNode }) {
   const isSpeaking = useVoiceSpeaking(userId)
   return (
@@ -323,7 +295,6 @@ function InlineEditableLabel({
   )
 }
 
-// Separador de seção ("Canais de texto", "Salas de voz") com o "+" de criar.
 function SectionHeader({ label, onCreate, createLabel }: { label: string; onCreate?: () => void; createLabel: string }) {
   return (
     <div className="px-1 mb-1 flex items-center justify-between select-none">
@@ -358,7 +329,6 @@ function ChannelRow({
   onInvite,
   games = [],
 }: {
-  // Jogos de quem está na sala agora (sem repetir) — ícones ao lado do nome.
   games?: { game: string; app: string | null }[]
   channel: Channel
   active: boolean
@@ -380,8 +350,6 @@ function ChannelRow({
   onContextMenu: (e: React.MouseEvent) => void
 }) {
   const voice = useVoiceCore()
-  // Canal de voz: pede o token de entrada ao parar o mouse em cima (ou
-  // focar pelo teclado) — o clique encontra ele pronto.
   const hoverTimer = useRef<number | null>(null)
   const isVoice = channel.type === 'voice'
   const schedulePrefetch = () => {
@@ -466,7 +434,6 @@ function ChannelRow({
         </span>
       )}
 
-      {/* Atalhos ao passar o mouse: chat da sala, convidar e configurar. */}
       <div className={`${active ? 'flex' : 'hidden group-hover:flex'} items-center gap-1 shrink-0`}>
         {onOpenChat && (
           <button
@@ -549,9 +516,6 @@ export function ChannelSidebar({
   const { pinnedIds, toggle: togglePinChannel } = usePinnedItems()
   const upcomingEventsCount = events.filter((e) => new Date(e.starts_at).getTime() >= Date.now()).length
   const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
-  // Categoria aberta/recolhida: por padrão, abre só a que tem gente em
-  // alguma sala de voz (ou o canal aberto agora); as outras ficam
-  // recolhidas. Clicar no nome troca, e vale até fechar o app.
   const rosterByChannel = useVoiceRosterByChannel()
   const { connectedChannelId } = useVoiceCore()
   const [categoryOverrides, setCategoryOverrides] = useState<Map<string, boolean>>(() => new Map())
@@ -578,9 +542,6 @@ export function ChannelSidebar({
   }
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null)
 
-  // --- Mover participante de voz pra outra sala (migration 014) ---------
-  // Usa um tipo próprio no dataTransfer (VOICE_MEMBER_DRAG_TYPE), então o
-  // arraste de canais/categorias (que usa 'text/plain') segue igual.
   const canMoveMembers = isOwner || Boolean(permissions.move_members) || Boolean(permissions.administrator)
   const [memberDrag, setMemberDrag] = useState<VoiceMemberDragPayload | null>(null)
   const [memberDropTarget, setMemberDropTarget] = useState<string | null>(null)
@@ -602,11 +563,9 @@ export function ChannelSidebar({
     if (error) setMoveError(describeVoiceMoveError(error.message))
   }
 
-  // Devolve true se o evento era de um participante sendo arrastado (e já
-  // foi tratado) — aí os handlers de reordenar canal não fazem nada.
   function handleMemberDragOver(e: React.DragEvent, channel: Channel): boolean {
     if (!isVoiceMemberDrag(e.dataTransfer.types)) return false
-    e.stopPropagation() // não deixa a categoria "acender" nem aceitar o drop
+    e.stopPropagation()
     if (canMoveMembers && canDropVoiceMemberOn(channel, memberDrag)) {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
@@ -674,16 +633,13 @@ export function ChannelSidebar({
   const canManageRoles = isOwner || permissions.manage_roles
   const canViewAuditLog = isOwner || permissions.view_audit_log
 
-  // Sala AFK: sempre a última da lista, fora das categorias.
   const afkChannel = server.afk_channel_id ? channels.find((c) => c.id === server.afk_channel_id) : undefined
   const listed = afkChannel ? channels.filter((c) => c.id !== afkChannel.id) : channels
   const uncategorizedGroups = orderChannels(listed.filter((c) => c.category_id === null))
-  // Chat de texto "par" de uma sala de voz: mesmo nome, mesma categoria.
   function pairedTextChannel(voiceChannel: Channel): Channel | undefined {
     const slug = channelNameFor('text', voiceChannel.name)
     return channels.find((c) => c.type === 'text' && c.category_id === voiceChannel.category_id && c.name === slug)
   }
-  // Jogos de quem está numa sala de voz (um ícone por jogo, sem repetir).
   function gamesInRoom(channelId: string): { game: string; app: string | null }[] {
     const ids = rosterByChannel.get(channelId)
     if (!ids?.length) return []
@@ -765,7 +721,6 @@ export function ChannelSidebar({
           <span className="truncate font-display text-[15px]">{server.name}</span>
           <ChevronDownIcon className="w-4 h-4 shrink-0" aria-hidden />
         </button>
-        {/* Clássico ⇄ Escritório (o clássico continua sendo o principal) */}
         {canUseOffice3d() && (
           <div className="px-3 py-2 border-b border-[var(--color-line)]">
             <ViewModeToggle mode="classico" onChange={() => window.dispatchEvent(new Event('mv:open-3d'))} />
@@ -845,7 +800,6 @@ export function ChannelSidebar({
             >
               Configurações do servidor
             </button>
-            {/* Divisor só quando há item depois dele (o dono não tem "Sair"). */}
             {!isOwner && (
               <>
                 <div className="h-px bg-white/10 my-1.5" />

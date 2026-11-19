@@ -5,10 +5,6 @@ import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
 import type { Profile } from '../../types/database'
 
-// Cartão que abre ao PASSAR O MOUSE na atividade de alguém ("Jogando X"):
-// capa do jogo, há quanto tempo está jogando, botão pra loja (Steam) e
-// uma resposta rápida por mensagem privada (emoji ou texto).
-
 const QUICK_EMOJIS = ['✅', '🤣', '🇧🇷', '🤔', '❤️']
 
 function steamIdOf(app: string | null | undefined): number | null {
@@ -29,7 +25,6 @@ function elapsed(since: string | null | undefined, now: number): string | null {
 }
 
 function GameCover({ steamId, name }: { steamId: number | null; name: string }) {
-  // Capa vertical da Steam → cabeçalho horizontal → ícone.
   const sources = steamId
     ? [
         `https://cdn.akamai.steamstatic.com/steam/apps/${steamId}/library_600x900.jpg`,

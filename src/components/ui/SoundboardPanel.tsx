@@ -7,14 +7,6 @@ import { decodeAudioFile, isUploadReadyAudio, MAX_SOUND_SECONDS } from '../../li
 import { SoundTrimmer } from './SoundTrimmer'
 import type { SoundboardSound } from '../../types/database'
 
-// Soundboard — efeitos sonoros que qualquer um no canal de voz ouve na
-// hora, igual a apps de chat populares. Cada servidor tem o próprio catálogo de sons
-// (ver useSoundboard.ts + 006_soundboard.sql); tocar um som usa
-// voice.playSoundboardSound (VoiceContext.tsx), que toca localmente E
-// avisa todo mundo mais no canal (RPC play_soundboard_sound) pra tocarem o mesmo som aí também —
-// nenhum áudio é misturado no microfone, cada um ouve pelo próprio
-// alto-falante (e no volume PRÓPRIO que cada um escolher — ver o
-// controle de "Volume dos efeitos" abaixo).
 export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClose: () => void }) {
   const { user } = useAuth()
   const { permissions } = useModeration(serverId)
@@ -26,20 +18,12 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
   const [uploading, setUploading] = useState(false)
   const [decoding, setDecoding] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Enquanto o arquivo escolhido for mais longo que o limite, guarda o
-  // AudioBuffer decodificado + o início do trecho escolhido (até MAX_SOUND_SECONDS) — a
-  // ferramenta de recorte abaixo mexe só nisso até a pessoa confirmar,
-  // sem tocar em pendingFile (que só existe pro arquivo final, já dentro
-  // do limite, pronto pra nomear e enviar).
   const [trimState, setTrimState] = useState<{ buffer: AudioBuffer; fileName: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const rawFileRef = useRef<File | null>(null)
 
   const query = search.trim().toLowerCase()
   const filtered = query ? soundboard.sounds.filter((s) => s.name.toLowerCase().includes(query)) : soundboard.sounds
-  // "Usados com frequência" — igual a apps de chat populares separa os sons mais
-  // tocados numa seção própria em cima. Só mostra enquanto não há busca
-  // ativa, pra não duplicar resultado com "Todos os sons" logo abaixo.
   const frequent = [...soundboard.sounds]
     .filter((s) => s.play_count > 0)
     .sort((a, b) => b.play_count - a.play_count)
@@ -50,8 +34,6 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
   }
 
   function handlePlay(sound: SoundboardSound) {
-    // A RPC play_soundboard_sound (migration 016) já soma o uso no banco;
-    // aqui só reflete o +1 na lista local.
     void voice.playSoundboardSound(sound).then(({ error: playError }) => {
       if (playError) setError(playError)
       else soundboard.bumpPlayCount(sound.id, { localOnly: true })
@@ -67,14 +49,10 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
     const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 32)
     try {
       const buffer = await decodeAudioFile(file)
-      // Todo som passa pelo editor (trecho + volume) — sons muito altos já
-      // chegam nivelados. Formatos que o servidor não aceita viram WAV.
       setTrimState({ buffer, fileName: file.name })
       setPendingFile(null)
     } catch {
       if (isUploadReadyAudio(file)) {
-        // Não deu pra decodificar aqui, mas o formato é aceito: tenta
-        // enviar assim mesmo.
         setPendingFile(file)
         setUploadName(baseName)
       } else {
@@ -153,10 +131,6 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
           </button>
         </div>
 
-        {/* Volume dos efeitos — INDEPENDENTE do volume geral da call
-            (voice.masterVolume). Pedido explícito: cada pessoa controla
-            o próprio volume dos sons pra não levar susto com efeito
-            alto, sem precisar mexer no volume de quem está falando. */}
         <div className="mb-3 px-3 py-2.5 rounded-xl bg-white/[0.03] border border-[var(--color-line)] shrink-0 flex items-center gap-3">
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-mv-muted shrink-0" aria-hidden>
             <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8z" />
@@ -318,11 +292,6 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
   )
 }
 
-// Antes cada som virava um quadrado grande com ícone + nome (tipo card),
-// gastando MUITO espaço vertical pra pouca informação — com uma lista
-// de sons um pouco maior, o painel virava um scroll infinito. Um app de chat popular
-// de verdade mostra só o NOME num botãozinho compacto (só o texto,
-// sem ícone), bem mais denso — é esse o visual que reproduzimos aqui.
 function SoundButton({
   sound,
   onPlay,

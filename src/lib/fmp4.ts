@@ -1,10 +1,3 @@
-// Recorte de MP4 fragmentado (o que o MediaRecorder do Chromium grava em
-// "video/mp4"): um cabeçalho (ftyp + moov) seguido de pedaços (moof +
-// mdat), um por quadro-chave. Com quadro-chave a cada 1 s, dá pra montar
-// um clipe dos ÚLTIMOS N segundos exatos juntando o cabeçalho com os
-// pedaços finais — sem recodificar nada — e reescrevendo o tempo de cada
-// pedaço (tfdt) pra o clipe começar no 0.
-
 type Box = { type: string; start: number; size: number; header: number }
 
 function readBox(buf: Uint8Array, off: number, end: number): Box | null {
@@ -38,7 +31,6 @@ function children(buf: Uint8Array, start: number, end: number): Box[] {
   return out
 }
 
-/** track_ID → timescale, lidos do moov. */
 export function readTimescales(moov: Uint8Array): Map<number, number> {
   const map = new Map<number, number>()
   const dv = new DataView(moov.buffer, moov.byteOffset, moov.byteLength)
@@ -67,7 +59,6 @@ export function readTimescales(moov: Uint8Array): Map<number, number> {
 
 type TfdtRef = { trackId: number; offset: number; version: number }
 
-/** Acha os tfdt (tempo de início) de cada faixa dentro de um moof. */
 export function findTfdts(moof: Uint8Array): TfdtRef[] {
   const out: TfdtRef[] = []
   const dv = new DataView(moof.buffer, moof.byteOffset, moof.byteLength)
@@ -99,7 +90,6 @@ function writeTime(buf: Uint8Array, ref: TfdtRef, value: bigint) {
 
 type Fragment = { bytes: Uint8Array; startSec: number; tfdt: Map<number, bigint> }
 
-/** Junta os pedaços que chegam do MediaRecorder e guarda só os últimos segundos. */
 export class Fmp4Buffer {
   private pending = new Uint8Array(0)
   private init: Uint8Array | null = null
@@ -141,8 +131,6 @@ export class Fmp4Buffer {
         this.initParts.push(bytes)
         if (type === 'moov') {
           this.scales = readTimescales(bytes)
-          // Faixa de referência pro tempo: a de maior escala costuma ser o
-          // vídeo; qualquer uma serve, desde que seja sempre a mesma.
           let best = 0
           for (const [id, sc] of this.scales) if (!best || sc > (this.scales.get(best) ?? 0)) best = id
           this.mainTrack = best
@@ -173,7 +161,6 @@ export class Fmp4Buffer {
     while (this.fragments.length > 1 && this.fragments[0].startSec < cutoff) this.fragments.shift()
   }
 
-  /** Clipe dos últimos `seconds` segundos (MP4 que começa no tempo 0). */
   clip(seconds: number): Uint8Array | null {
     if (!this.init || this.fragments.length === 0) return null
     const last = this.fragments[this.fragments.length - 1]
@@ -188,7 +175,6 @@ export class Fmp4Buffer {
     const parts: Uint8Array[] = [this.init]
     for (const f of picked) {
       const copy = f.bytes.slice()
-      // O moof é a primeira caixa do pedaço — reescreve o tempo nele.
       for (const ref of findTfdts(copy)) {
         const b = base.get(ref.trackId) ?? 0n
         writeTime(copy, ref, readTime(copy, ref) - b)

@@ -36,8 +36,6 @@ export function ThreadPanel({
   const { typingUserIds, notifyTyping, stopTyping } = useTypingIndicator(thread.id, user?.id)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
 
-  // Esc fecha o painel (a não ser que um modal por cima já tenha tratado
-  // o Esc — o Modal.tsx para a propagação).
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   useEffect(() => {
@@ -52,8 +50,6 @@ export function ThreadPanel({
     .map((id) => profilesById[id]?.display_name || profilesById[id]?.username)
     .filter((name): name is string => Boolean(name))
 
-  // Sem o `return`, o MessageComposer nunca recebia o erro e limpava a
-  // caixa como se tivesse dado certo (mesmo bug já corrigido no ChatArea).
   async function handleSend(content: string, files: File[]) {
     const result = await sendMessage(content, replyingTo?.id ?? null, files)
     if (!result.error) {

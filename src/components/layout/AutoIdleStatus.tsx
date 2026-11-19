@@ -1,14 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 
-const IDLE_AFTER_MS = 10 * 60 * 1000 // 10 minutos sem mexer em nada
+const IDLE_AFTER_MS = 10 * 60 * 1000
 
 export function AutoIdleStatus() {
   const { profile, updateStatus } = useAuth()
-  // true só quando FOI a gente que marcou "ausente" automaticamente —
-  // assim, quando a pessoa mexe de novo, só volta pra "online" se foi
-  // o app que mudou sozinho (nunca desfaz uma escolha manual, tipo
-  // "não perturbe")
   const autoIdleRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 

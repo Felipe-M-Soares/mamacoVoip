@@ -1,17 +1,7 @@
-// Ping REAL da call: ida-e-volta (RTT) medida pelo próprio WebRTC no par
-// de candidatos ICE em uso entre você e o servidor de mídia (LiveKit).
-// É o número que importa pra voz — o "ping" HTTP até o Supabase
-// (useConnectionPing) mede outra coisa (a API do banco, que pode estar em
-// outro continente). Ver docs/PING.md.
-
 export interface MediaPathInfo {
-  /** RTT atual em ms (currentRoundTripTime do candidate-pair selecionado). */
   rttMs: number
-  /** host | srflx | prflx | relay — "relay" = passando por TURN (mais lento). */
   localCandidateType: string | null
-  /** udp | tcp (do candidato local). TCP/TLS = fallback, latência pior. */
   protocol: string | null
-  /** Protocolo até o TURN, quando relay (udp/tcp/tls). */
   relayProtocol: string | null
 }
 
@@ -28,11 +18,6 @@ function statsList(report: RTCStatsReport | Iterable<AnyStats> | Map<string, Any
   return out
 }
 
-/**
- * Acha o par de candidatos em uso e devolve o RTT. Ordem de preferência:
- * transport.selectedCandidatePairId → candidate-pair com `selected` →
- * `nominated` + `state === 'succeeded'`.
- */
 export function extractMediaPath(report: RTCStatsReport | Iterable<AnyStats> | Map<string, AnyStats> | undefined | null): MediaPathInfo | null {
   if (!report) return null
   const list = statsList(report)
@@ -61,7 +46,6 @@ export function extractMediaPath(report: RTCStatsReport | Iterable<AnyStats> | M
   }
 }
 
-/** Texto curto pra tooltip: "UDP direto", "via TURN (TCP)" etc. */
 export function describeMediaPath(info: MediaPathInfo): string {
   if (info.localCandidateType === 'relay') {
     return `via TURN${info.relayProtocol ? ` (${info.relayProtocol.toUpperCase()})` : ''}`

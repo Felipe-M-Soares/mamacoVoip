@@ -6,7 +6,6 @@ describe('createAutoSensitivity', () => {
     const a = createAutoSensitivity()
     let t: number | null = null
     for (let i = 0; i < 40; i++) {
-      // ruído ~-60 dB com picos de -25 dB (fala/teclado) a cada 3 leituras
       const r = a.push(i % 3 === 0 ? -25 : -60)
       if (r !== null) t = r
     }

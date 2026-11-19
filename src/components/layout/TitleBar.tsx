@@ -1,28 +1,5 @@
 import { useEffect, useRef } from 'react'
 import { useWindowPlace } from '../../lib/windowTitle'
-// Barra de título CUSTOM do app desktop — substitui a barra nativa fina
-// e cinza do Windows (que não tinha nada a ver com a cara do app e não
-// dava pra deixar maior). Só existe dentro do Electron: no site (web),
-// o navegador já tem sua própria barra/aba, então isso não deve
-// renderizar nada lá (ver checagem de window.electronAPI abaixo).
-//
-// A janela é criada com titleBarStyle:'hidden' + titleBarOverlay (ver
-// electron/main.cjs) — isso mantém os botões nativos de
-// minimizar/maximizar/fechar (sem precisar reimplementar isso na mão
-// com IPC), reservando uma faixa arrastável em cima que a gente
-// preenche com o ícone + nome do app, do tamanho e cor do tema atual.
-// Fica ACIMA da barra de servidores e da barra lateral de canais só por
-// causa da ORDEM normal do layout (é o primeiro item dentro do
-// flex-col em App.tsx, empilhado por cima do resto) — não precisa de
-// z-index alto nenhum pra isso. Um z-index alto aqui (era 600 antes)
-// é o que causava telas tipo Configurações ficarem com o topo cortado:
-// como os modais usam `position: fixed` cobrindo a tela inteira (com
-// z-index até 500), um valor MAIOR que o deles fazia essa faixa de 40px
-// "furar" por cima do modal em vez de ficar por baixo dele. Mantém um
-// z-index bem baixo — só o suficiente pra garantir que fica por cima do
-// conteúdo normal da página (que não usa z-index nenhum), nunca de um
-// modal/overlay de verdade.
-// Converte qualquer cor CSS calculada (rgb, color-mix, oklab…) em #rrggbb.
 function toHex(css: string): string | null {
   try {
     const c = document.createElement('canvas')
@@ -45,8 +22,6 @@ export function TitleBar() {
   const barRef = useRef<HTMLDivElement>(null)
   const isElectron = Boolean(window.electronAPI?.isElectron)
 
-  // Pinta os botões nativos de minimizar/maximizar/fechar com a cor desta
-  // barra (e reaplica ao trocar de tema), pra não ficar um bloco de outra cor.
   useEffect(() => {
     if (!isElectron) return
     let last = ''
@@ -80,7 +55,6 @@ export function TitleBar() {
       <img src="/logo-192.png" alt="" className="w-5 h-5 rounded-md shrink-0 ring-1 ring-[var(--color-line-strong)]" />
       <span className="font-display font-semibold text-[13px] text-mv-muted">Mamacos <span className="text-mv-text">Voip</span></span>
       {place && (
-        // Centralizado na janela inteira (não só no espaço que sobra).
         <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 max-w-[40%] pointer-events-none">
           {place.iconUrl ? (
             <img src={place.iconUrl} alt="" className="w-4 h-4 rounded-[5px] object-cover shrink-0" />

@@ -1,9 +1,5 @@
 import { useSyncExternalStore } from 'react'
 
-// Atalhos de teclado configuráveis (Configurações → Atalhos). Começam
-// todos VAZIOS — cada pessoa escolhe as teclas que quer.
-// Uma combinação é guardada como texto, ex.: "Ctrl+Shift+M".
-
 export type KeybindAction =
   | 'toggle-mute'
   | 'toggle-deafen'
@@ -22,9 +18,7 @@ export const KEYBIND_ACTIONS: {
   label: string
   group: 'Chamada' | 'Navegação'
   defaultCombo: string | null
-  /** Pode funcionar fora do app (com o jogo em foco) */
   global: boolean
-  /** Só existe no app de computador */
   desktopOnly?: boolean
 }[] = [
   { id: 'toggle-mute', label: 'Ligar/desligar microfone', group: 'Chamada', defaultCombo: null, global: true },
@@ -69,7 +63,6 @@ function load(): State {
       if (typeof raw.global === 'boolean') base.global = raw.global
     }
   } catch {
-    // sem armazenamento — fica no padrão
   }
   return base
 }
@@ -82,7 +75,6 @@ function save(next: State) {
   try {
     localStorage.setItem(KEY, JSON.stringify(next))
   } catch {
-    // só não lembra
   }
   listeners.forEach((l) => l())
 }
@@ -98,7 +90,6 @@ export function useKeybinds(): State {
   )
 }
 
-/** Define a combinação de uma ação; se outra ação já usava, ela fica sem atalho. Devolve a ação que perdeu o atalho. */
 export function setKeybind(id: KeybindAction, combo: string | null): KeybindAction | null {
   const bindings = { ...state.bindings }
   let displaced: KeybindAction | null = null
@@ -123,12 +114,6 @@ export function setGlobalKeybindsEnabled(enabled: boolean) {
   save({ ...state, global: enabled })
 }
 
-export function getKeybinds(): State {
-  return state
-}
-
-// Atalhos globais que o Windows recusou (outro programa — AMD, NVIDIA,
-// Xbox Game Bar… — já usa a mesma combinação).
 let globalFailures: KeybindAction[] = []
 const failureListeners = new Set<() => void>()
 export function setGlobalKeybindFailures(ids: string[]) {
@@ -146,12 +131,9 @@ export function useGlobalKeybindFailures(): KeybindAction[] {
   )
 }
 
-/** Texto do atalho da sobreposição pra mostrar em dicas ("Ctrl+Alt+O" ou "sem atalho"). */
 export function overlayShortcutText(bindings: Record<KeybindAction, string | null>): string {
   return bindings['toggle-overlay'] ?? 'sem atalho (defina em Configurações → Atalhos)'
 }
-
-// ---------------------------------------------------------------- teclas
 
 const CODE_NAMES: Record<string, string> = {
   Space: 'Espaço',
@@ -189,7 +171,6 @@ function keyName(code: string): string | null {
   return CODE_NAMES[code] ?? null
 }
 
-/** Combinação de um evento de teclado ("Ctrl+Shift+M"), ou null se for só modificador/tecla não suportada. */
 export function comboFromEvent(e: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>): string | null {
   const key = keyName(e.code)
   if (!key) return null
@@ -202,7 +183,6 @@ export function comboFromEvent(e: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altK
   return parts.join('+')
 }
 
-/** Precisa de pelo menos um modificador (Ctrl/Alt/Win) ou ser uma tecla F — senão atrapalharia digitar. */
 export function isUsableCombo(combo: string): boolean {
   const parts = combo.split('+')
   const key = parts[parts.length - 1]
@@ -220,7 +200,6 @@ const ACCEL_KEYS: Record<string, string> = {
   Delete: 'Delete',
 }
 
-/** Combinação no formato do Electron (globalShortcut). */
 export function toAccelerator(combo: string): string | null {
   const parts = combo.split('+')
   if (combo.endsWith('++')) return null
@@ -232,8 +211,6 @@ export function toAccelerator(combo: string): string | null {
   return out.join('+')
 }
 
-// Enquanto a pessoa grava um atalho novo nas Configurações, os atalhos
-// existentes não disparam.
 let recording = false
 export function setKeybindRecording(on: boolean) {
   recording = on

@@ -25,10 +25,6 @@ async function fetchAttachments(messageIds: string[]): Promise<AttachmentMap> {
   return groupByMessage(data)
 }
 
-// Mesma estrutura do useMessages.ts (ver os comentários de lá): página
-// mais RECENTE primeiro, "carregar mais antigas" sob demanda, proteção
-// contra resposta atrasada de outro grupo e contra o `CLOSED` da
-// própria limpeza disparar um refresh do grupo antigo.
 export function useGroupMessages(groupId: string | null) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<GroupMessage[]>([])
@@ -145,7 +141,6 @@ export function useGroupMessages(groupId: string | null) {
         (payload) => {
           const newMessage = payload.new as GroupMessage
           setMessages((prev) => (prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]))
-          // Som/aviso de mensagem nova: lib/messageAlerts.ts + MessageAlerts.tsx
         }
       )
       .on(
@@ -156,8 +151,6 @@ export function useGroupMessages(groupId: string | null) {
           setMessages((prev) => (prev.some((m) => m.id === updated.id) ? prev.map((m) => (m.id === updated.id ? updated : m)) : prev))
         }
       )
-      // Sem filtro de propósito — exclusões não podem ser filtradas por
-      // coluna no Realtime (ver useMessages.ts).
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'group_messages' }, (payload) => {
         const deletedId = (payload.old as { id?: string }).id
         if (!deletedId) return
@@ -179,9 +172,6 @@ export function useGroupMessages(groupId: string | null) {
           hadProblem = false
           return
         }
-        // Loga qualquer status que não seja "inscrito com sucesso" — sem
-        // isso, uma falha de inscrição (tabela fora da publicação
-        // supabase_realtime, erro de RLS) passava em silêncio.
         console.error('[useGroupMessages] Status da inscrição em tempo real:', status, err ?? '')
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           hadProblem = true
@@ -199,8 +189,6 @@ export function useGroupMessages(groupId: string | null) {
     async (content: string, replyToId: string | null = null, files: File[] = []): Promise<{ error: string | null }> => {
       const userId = userIdRef.current
       if (!groupId || !userId) return { error: 'Não foi possível enviar' }
-      // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
-      // flood acidental — por grupo, não global.
       const limited = rateLimitError(`message:group:${groupId}`, 8, 10_000, 'você está mandando mensagem')
       if (limited) return { error: limited }
       const key = groupId
@@ -236,8 +224,6 @@ export function useGroupMessages(groupId: string | null) {
             continue
           }
 
-          // Bucket privado (migration 017): grava só o CAMINHO dentro do
-          // bucket; quem exibe gera uma URL assinada (useAttachmentUrl).
           const { data: att, error: attError } = await supabase
             .from('group_message_attachments')
             .insert({
@@ -284,14 +270,10 @@ export function useGroupMessages(groupId: string | null) {
 
   const deleteMessage = useCallback(async (messageId: string) => {
     try {
-      // Anexos lidos ANTES de apagar (o delete da mensagem leva as
-      // linhas de anexo junto, em cascata) — pra remover os arquivos do
-      // Storage depois.
       const { data: attRows } = await supabase.from('group_message_attachments').select('file_url').eq('message_id', messageId)
       const { error } = await supabase.from('group_messages').delete().eq('id', messageId)
       if (error) return { error: describeError(error, 'Não foi possível excluir a mensagem') }
       setMessages((prev) => prev.filter((m) => m.id !== messageId))
-      // Best-effort: não segura a UI nem transforma a exclusão em erro.
       if (attRows && attRows.length > 0) {
         void removeAttachmentObjects('group-attachments', attRows.map((r) => r.file_url))
       }

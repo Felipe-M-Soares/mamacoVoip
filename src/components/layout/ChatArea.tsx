@@ -15,8 +15,6 @@ import { shouldGateAdultChannel } from '../../lib/adultContent'
 import type { Channel, Message, Server, Profile, Thread } from '../../types/database'
 import { ClockIcon, LockIcon, MembersIcon, PinIcon, SearchIcon, TextChannelIcon } from '../ui/icons'
 
-// Painéis/modais que só aparecem sob demanda — carregados só quando abertos,
-// fora do pacote inicial do app.
 const SearchModal = lazyComponent(() => import('../modals/SearchModal').then((m) => m.SearchModal))
 const PinnedMessagesPanel = lazyComponent(() => import('../chat/PinnedMessagesPanel').then((m) => m.PinnedMessagesPanel))
 const ThreadPanel = lazyComponent(() => import('./ThreadPanel').then((m) => m.ThreadPanel))
@@ -68,10 +66,6 @@ export function ChatArea({
   const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null)
   const [reportingMessageId, setReportingMessageId] = useState<string | null>(null)
   const [revealedSpoilerChannelId, setRevealedSpoilerChannelId] = useState<string | null>(null)
-  // Canal +18 (migration 015): portão de idade por cima do conteúdo, no
-  // mesmo padrão visual do aviso de spoiler. Confirmar grava no perfil
-  // (e localmente); com "Mostrar conteúdo +18" desligado nas
-  // Configurações, o portão volta a cada visita.
   const adultContent = useAdultContent()
   const [revealedAdultChannelId, setRevealedAdultChannelId] = useState<string | null>(null)
   const isAdultGated = shouldGateAdultChannel({
@@ -100,7 +94,6 @@ export function ChatArea({
       if (thread) setActiveThread(thread)
       if (error) alert(error)
     },
-    // createThread do hook é recriado a cada render; o que importa é o canal/servidor
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [channel.id, server.id]
   )
@@ -115,11 +108,6 @@ export function ChatArea({
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set())
   const [confirmingBulk, setConfirmingBulk] = useState(false)
 
-  // Troca de canal: o ChatArea NÃO remonta (mesmo componente, outro
-  // `channel`), então tudo que é "deste canal" precisa ser zerado. Antes,
-  // "respondendo a…", a thread aberta, a seleção de mensagens e os modais
-  // de encaminhar/denunciar passavam pro canal seguinte — dava pra mandar
-  // no canal B uma resposta apontando pra uma mensagem do canal A.
   const [stateChannelId, setStateChannelId] = useState(channel.id)
   if (stateChannelId !== channel.id) {
     setStateChannelId(channel.id)
@@ -167,7 +155,6 @@ export function ChatArea({
 
   async function handleBulkDelete() {
     if (selectedMessageIds.size === 0) return
-    // Confirmação agora é inline na própria barra de seleção (confirmingBulk)
     setConfirmingBulk(false)
     const results = await Promise.all([...selectedMessageIds].map((id) => deleteMessage(id)))
     const failed = results.filter((r) => r.error).length
@@ -180,19 +167,9 @@ export function ChatArea({
     .map((id) => profilesById[id]?.display_name || profilesById[id]?.username)
     .filter((name): name is string => Boolean(name))
 
-  // Antes essa função não devolvia nada pra quem chamou (o `await` sem
-  // `return` faz o handleSend sempre resolver como undefined, mesmo
-  // quando sendMessage() retornava um erro de verdade). O MessageComposer
-  // depende exatamente desse retorno pra decidir se mostra o erro ou
-  // limpa a caixa de texto — sem o `return` aqui, ele sempre tratava como
-  // sucesso: limpava o que foi digitado e nunca mostrava nenhum erro,
-  // mesmo quando o envio falhava silenciosamente. É esse o motivo de
-  // "escrevo e mando e não aparece nada".
   async function handleSend(content: string, files: File[]) {
     if (content.length === 0 && files.length === 0) return
     const result = await sendMessage(content, replyingTo?.id ?? null, files)
-    // Só descarta o "respondendo a…" se deu certo — antes sumia mesmo com
-    // erro, e o reenvio ia sem a resposta.
     if (!result.error) {
       setReplyingTo(null)
       stopTyping()
@@ -299,8 +276,6 @@ export function ChatArea({
             <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
               <button
                 onClick={() => {
-                  // Leva pro primeiro canal de texto comum do servidor; se
-                  // não houver, o conteúdo simplesmente continua oculto.
                   const fallback = channels.find(
                     (c) => c.server_id === server.id && c.type === 'text' && !c.is_nsfw && c.id !== channel.id
                   )
@@ -313,9 +288,6 @@ export function ChatArea({
               <button
                 onClick={() => {
                   setRevealedAdultChannelId(channel.id)
-                  // O banco só libera as mensagens de canal +18 depois que
-                  // a confirmação está salva (RLS, migration 016) — por
-                  // isso recarrega a lista quando ela termina.
                   void adultContent.confirmAdult().then(({ error }) => {
                     if (error) alert(error)
                     else refresh()
@@ -481,8 +453,6 @@ export function ChatArea({
             <ForwardMessageModal
               message={msg}
               author={profilesById[msg.author_id]}
-              // De um canal +18, só dá pra encaminhar pra outro canal +18
-              // (o conteúdo adulto não vaza pros canais comuns).
               channels={channels.filter((c) => c.server_id === server.id && (!channel.is_nsfw || c.is_nsfw))}
               serverId={server.id}
               onClose={() => setForwardingMessageId(null)}

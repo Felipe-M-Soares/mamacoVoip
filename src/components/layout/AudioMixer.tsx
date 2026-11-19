@@ -4,10 +4,6 @@ import { focusStream, hideStream, showStream, useStreamView } from '../../lib/st
 import { rememberVolume, toggleVolumeMute } from '../../lib/muteMemory'
 import type { Profile } from '../../types/database'
 
-// Mixer de áudio da chamada: UM lugar só pra todos os volumes, separado
-// em "Geral", "Vozes" (microfone de cada pessoa) e "Transmissões" (som do
-// jogo/tela de cada pessoa). Tudo aqui vale só pra você.
-
 function VolumeRow({
   label,
   sublabel,
@@ -74,7 +70,6 @@ function VolumeRow({
   )
 }
 
-// Volume geral antes de silenciar pelo mixer (pra voltar no mesmo ponto).
 let lastMaster = 100
 
 export function AudioMixer({ profileById }: { profileById: Record<string, Profile | undefined> }) {
@@ -100,7 +95,6 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
             if (v > 0) lastMaster = v
             voice.setMasterVolume(v)
           }}
-          // Silencia só o que você OUVE (não mexe no seu microfone).
           muted={voice.masterVolume === 0 || voice.deafened}
           onToggleMute={() => {
             if (voice.deafened) voice.toggleDeafen()

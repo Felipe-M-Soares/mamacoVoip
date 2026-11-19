@@ -4,13 +4,12 @@ import { useServers } from '../../hooks/useServers'
 import { ConfirmDialog } from './ConfirmDialog'
 import { EditIcon, ImageAddIcon } from '../ui/icons'
 
-const ICON_MAX_BYTES = 5 * 1024 * 1024 // precisa bater com o file_size_limit do bucket 'server-icons'
+const ICON_MAX_BYTES = 5 * 1024 * 1024
 
 export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
   const { createServer, joinServerByInvite } = useServers()
   const [tab, setTab] = useState<'create' | 'join'>('create')
 
-  // criar servidor
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [iconFile, setIconFile] = useState<File | null>(null)
@@ -18,13 +17,10 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
   const [iconError, setIconError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // entrar por convite
   const [code, setCode] = useState('')
 
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  // Aviso pós-criação (ex.: o ícone não salvou) — antes era um
-  // window.alert() nativo depois de fechar o modal.
   const [createdWarning, setCreatedWarning] = useState<string | null>(null)
 
   function handleIconChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -52,11 +48,6 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
       setError(error)
       return
     }
-    // O servidor em si foi criado com sucesso — só o ícone falhou ao
-    // salvar (ver comentário grande em ServersContext.tsx). Não vale a
-    // pena travar a criação por isso, mas também não pode desaparecer
-    // sem avisar ninguém (era exatamente esse o bug). Mostra o aviso num
-    // diálogo do app e só fecha quando a pessoa confirmar.
     if (warning) {
       setCreatedWarning(warning)
       return
@@ -70,7 +61,6 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
       setError('Cole um código ou link de convite.')
       return
     }
-    // aceita tanto o código puro quanto uma URL tipo .../convite/abcd1234
     const cleanCode = code.trim().split('/').pop() ?? code.trim()
 
     setLoading(true)
@@ -140,15 +130,6 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
           </p>
 
           <div className="flex flex-col items-center gap-2">
-            {/* TRIGÉSIMA OITAVA RODADA — bug relatado: esse botão de ícone
-                ficava muito apertado, com "Enviar / ícone" quebrado em
-                texto minúsculo dentro do círculo tracejado — visual
-                confuso e amador. Troca: quando não tem imagem, mostra um
-                ícone de imagem (mais legível que texto picotado) e o
-                rótulo "Adicionar ícone" fica FORA do círculo, embaixo,
-                com espaço de sobra. Quando já tem imagem, o hover mostra
-                uma sobreposição escura com ícone de lápis + "Trocar",
-                igual ao padrão usado no avatar do EditProfileModal. */}
             <button
               onClick={() => fileInputRef.current?.click()}
               className="relative w-24 h-24 rounded-full bg-mv-canvas border-2 border-dashed border-white/[0.18] flex items-center justify-center hover:border-mv-accent transition-colors group"
@@ -165,9 +146,6 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
               ) : (
                 <ImageAddIcon className="w-8 h-8 text-mv-muted group-hover:text-mv-accent transition-colors" strokeWidth={1.5} aria-hidden />
               )}
-              {/* Selo de "editar" no canto — mesma linguagem visual que a
-                  troca de avatar/banner usa em EditProfileModal, deixa
-                  claro que dá pra clicar de novo pra trocar. */}
               <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-mv-accent flex items-center justify-center border-2 border-[var(--color-elevated)] group-hover:brightness-110 transition-all">
                 <EditIcon className="w-3.5 h-3.5 text-white" aria-hidden />
               </span>

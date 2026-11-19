@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-// Tour guiado: escurece a tela, destaca uma parte de cada vez e explica.
-// No primeiro uso o app pergunta se a pessoa quer fazer (TourOffer);
-// depois dá pra refazer em Configurações (evento 'mv:start-tour').
-// Passos cujo alvo não está na tela agora (ex.: sem servidor aberto) são
-// pulados sozinhos.
-
-// `drawer`: no celular o alvo fica dentro do menu lateral — o tour abre
-// o menu antes de mostrar o passo.
 type Step = { target?: string; title: string; text: string; drawer?: boolean }
 
 const STEPS: Step[] = [
@@ -76,8 +68,6 @@ const STEPS: Step[] = [
 
 const isMobileWidth = () => window.innerWidth < 1024
 
-// Só conta alvo VISÍVEL na tela (no celular, o que está no menu lateral
-// fechado fica fora da tela e antes o cartão ia parar fora da tela junto).
 function findTarget(step: Step): HTMLElement | null {
   if (!step.target) return null
   const els = Array.from(document.querySelectorAll<HTMLElement>(step.target))
@@ -91,7 +81,6 @@ function findTarget(step: Step): HTMLElement | null {
 function stepAvailable(step: Step): boolean {
   if (!step.target) return true
   if (findTarget(step)) return true
-  // No celular, o que mora no menu lateral existe mas está escondido.
   return Boolean(step.drawer && isMobileWidth() && document.querySelector(step.target))
 }
 
@@ -100,7 +89,6 @@ function setMobileDrawer(open: boolean) {
 }
 
 export function GuidedTour({ onClose }: { onClose: () => void }) {
-  // Só os passos que dá pra mostrar agora (sem alvo = cartão no centro).
   const [steps] = useState(() => STEPS.filter(stepAvailable))
   const [index, setIndex] = useState(0)
   const [rect, setRect] = useState<DOMRect | null>(null)
@@ -113,8 +101,6 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
   }, [step])
 
   useLayoutEffect(() => {
-    // Celular: abre o menu lateral nos passos que precisam dele (e fecha
-    // nos outros), e mede depois da animação de abrir.
     if (isMobileWidth()) {
       setMobileDrawer(Boolean(step?.drawer))
       setRect(null)
@@ -124,7 +110,6 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
     measure()
   }, [measure, step])
 
-  // Ao terminar o tour no celular, fecha o menu que ele abriu.
   useEffect(() => () => {
     if (isMobileWidth()) setMobileDrawer(false)
   }, [])
@@ -155,11 +140,8 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
   const vh = window.innerHeight
   const cardW = Math.min(340, vw - 24)
 
-  // Cartão ao lado do destaque (direita, senão esquerda, senão acima/abaixo).
   let cardStyle: React.CSSProperties = { left: (vw - cardW) / 2, top: vh / 2 - 110, width: cardW }
   if (vw < 640) {
-    // Celular: cartão largo embaixo (ou em cima, se o destaque estiver
-    // na metade de baixo da tela), sem nunca sair da tela.
     const w = vw - 24
     cardStyle = rect && rect.top + rect.height / 2 > vh / 2 ? { left: 12, top: 12, width: w } : { left: 12, bottom: 16, width: w }
     if (!rect) cardStyle = { left: 12, top: vh / 2 - 110, width: w }
@@ -173,13 +155,11 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
     else cardStyle = { left: Math.min(Math.max(12, rect.left), vw - cardW - 12), top: Math.min(rect.bottom + 16, vh - 230), width: cardW }
   }
 
-  // Nunca deixa o cartão sair da tela.
   if (typeof cardStyle.left === 'number') cardStyle.left = Math.min(Math.max(12, cardStyle.left), vw - cardW - 12)
   if (typeof cardStyle.top === 'number') cardStyle.top = Math.min(Math.max(12, cardStyle.top), vh - 240)
 
   return createPortal(
     <div className="fixed inset-0 z-[2000]" role="dialog" aria-modal="true" aria-label="Tour guiado">
-      {/* Escurece tudo menos o destaque. */}
       {rect ? (
         <div
           className="fixed rounded-xl transition-all duration-300 pointer-events-none ring-2 ring-mv-accent"
@@ -194,7 +174,6 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
       ) : (
         <div className="fixed inset-0 bg-black/70" />
       )}
-      {/* Bloqueia cliques no app durante o tour. */}
       <div className="fixed inset-0" onClick={(e) => e.stopPropagation()} />
 
       <div className="fixed surface-elevated rounded-2xl p-4 animate-pop-in" style={cardStyle} key={index}>
@@ -227,7 +206,6 @@ export function GuidedTour({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** Convite do primeiro uso: "Quer fazer um tour rápido?" */
 export function TourOffer({ onStart, onDismiss }: { onStart: () => void; onDismiss: () => void }) {
   return createPortal(
     <div className="fixed inset-0 z-[1900] bg-black/60 flex items-center justify-center p-4 animate-fade-in">

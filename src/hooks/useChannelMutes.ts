@@ -37,9 +37,6 @@ export function useChannelMutes() {
     await refresh()
   }
 
-  // Mantido pra compatibilidade com o que já usava isso — considera
-  // "silenciado" tanto o modo totalmente mudo quanto o só-menções,
-  // já que os dois pulam a notificação de mensagem comum.
   const mutedChannelIds = new Set(Object.keys(levels))
 
   async function toggleChannelMute(channelId: string) {

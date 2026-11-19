@@ -8,17 +8,10 @@ import { supabase } from '../../lib/supabase'
 import type { ServerInvite } from '../../types/database'
 import { copyText } from '../../lib/copyText'
 
-// Dentro do app desktop, window.location.origin não é uma URL de
-// verdade (é o protocolo interno do Electron) — ver o comentário em
-// lib/config.ts. Fora dele (no navegador), window.location.origin já
-// reflete o domínio certo sozinho, inclusive em previews/domínios
-// customizados.
 function inviteBaseUrl(): string {
   return isElectron() ? PUBLIC_WEB_URL : window.location.origin
 }
 
-// Validade em horas (null = nunca expira — o create_server_invite do
-// banco já aceita p_expires_hours nulo).
 const EXPIRY_OPTIONS: { label: string; hours: number | null }[] = [
   { label: '1 dia', hours: 24 },
   { label: '7 dias', hours: 24 * 7 },
@@ -47,7 +40,6 @@ export function InviteModal({
   onClose,
 }: {
   serverId: string
-  /** Convite pra uma sala específica: quem entrar pelo link já cai nela. */
   channel?: { id: string; name: string; type: 'text' | 'voice' } | null
   onClose: () => void
 }) {
@@ -63,9 +55,6 @@ export function InviteModal({
   const [error, setError] = useState<string | null>(null)
   const [invites, setInvites] = useState<ServerInvite[]>([])
 
-  // Convites ATIVOS que a pessoa pode revogar (RLS de delete: quem criou
-  // ou o dono do servidor). Importante agora que dá pra criar convite
-  // permanente: um link vazado precisa poder ser desligado.
   const loadInvites = useCallback(async () => {
     if (!user) return
     let q = supabase

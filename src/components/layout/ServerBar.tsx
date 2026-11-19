@@ -10,7 +10,6 @@ import type { Server, Channel } from '../../types/database'
 import { lazyModal } from '../modals/lazyModal'
 import { PlusIcon } from '../ui/icons'
 
-// Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const CreateOrJoinServerModal = lazyModal(() => import('../modals/CreateOrJoinServerModal').then((m) => m.CreateOrJoinServerModal))
 const InviteFriendsModal = lazyModal(() => import('../modals/InviteFriendsModal').then((m) => m.InviteFriendsModal))
 const LeaveServerModal = lazyModal(() => import('../modals/LeaveServerModal').then((m) => m.LeaveServerModal))
@@ -39,7 +38,6 @@ function ServerIcon({
   iconUrl?: string | null
   active?: boolean
   unread?: boolean
-  /** contador vermelho no canto (mensagens privadas não lidas no "Início") */
   badge?: number
   draggable?: boolean
   isDragOver?: boolean
@@ -60,8 +58,6 @@ function ServerIcon({
     .join('')
     .toUpperCase()
 
-  // Gradiente de identidade por servidor (ver lib/identityColor) —
-  // paleta curada em vez de um hue aleatório 0-360.
   const gradient = identityGradient(name)
 
   return (
@@ -126,7 +122,6 @@ export function ServerBar({
 }: {
   activeServerId: string | null
   unreadServerIds: Set<string>
-  /** conversas privadas/grupos com mensagem não lida */
   homeUnreadCount?: number
   onSelectServer: (server: Server) => void
   onSelectHome: () => void
@@ -157,11 +152,6 @@ export function ServerBar({
   }, [showSettingsFor])
   const { menuState, openMenu, closeMenu } = useContextMenuState()
 
-  // Card de "quem está online" ao passar o mouse por cima de um
-  // servidor — ver ServerHoverCard.tsx. Só mostra depois de um pequeno
-  // atraso (300ms) parado em cima do ícone, pra não ficar piscando um
-  // card pra cada servidor enquanto o mouse só está passando por cima
-  // deles a caminho de outro lugar.
   const [hoverInfo, setHoverInfo] = useState<{ server: Server; rect: DOMRect } | null>(null)
   const hoverTimerRef = useRef<number | null>(null)
 

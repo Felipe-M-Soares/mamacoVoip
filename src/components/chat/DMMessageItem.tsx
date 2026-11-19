@@ -14,9 +14,6 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
-// Callbacks recebem a mensagem/id como argumento pra que o DMChatArea
-// possa passar funções estáveis e o React.memo (lá embaixo) evite
-// re-renderizar todas as mensagens a cada tecla digitada/mensagem nova.
 function DMMessageItemImpl({
   message,
   author,
@@ -39,12 +36,10 @@ function DMMessageItemImpl({
   onEdit: (messageId: string, content: string) => Promise<{ error: string | null }>
   onDelete: (messageId: string) => void
   onReply: (message: DMMessage) => void
-  // Denunciar (só em mensagem de outra pessoa) — ver ReportModal.
   onReport?: (messageId: string) => void
   attachments?: DMMessageAttachment[]
 }) {
   const inviteData = useMemo(() => parseInviteMessage(message.content), [message.content])
-  // Figurinha não tem texto pra editar — o botão de editar some nela.
   const isSticker = useMemo(() => parseStickerId(message.content) !== null, [message.content])
   const renderedContent = useMemo(() => parseMessageContent(message.content, []), [message.content])
   const firstUrl = useMemo(() => extractFirstUrl(message.content), [message.content])
@@ -52,11 +47,9 @@ function DMMessageItemImpl({
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState(message.content)
   const [editError, setEditError] = useState<string | null>(null)
-  // Confirmação de exclusão inline (antes era um confirm() nativo)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   function startEditing() {
-    // sempre parte do texto atual (antes ficava o de quando montou)
     setEditValue(message.content)
     setEditError(null)
     setEditing(true)
@@ -111,7 +104,6 @@ function DMMessageItemImpl({
               title="Excluir (Shift+clique exclui sem confirmar)"
               aria-label="Excluir mensagem"
               onClick={(e) => {
-                // antes excluía direto, sem nenhuma confirmação
                 if (e.shiftKey) onDelete(message.id)
                 else setConfirmingDelete(true)
               }}

@@ -7,11 +7,6 @@ import { REPORT_ESCALATION_COLUMN } from '../../hooks/useReports'
 import { TabHeader, EmptyState, InlineMessage } from './settingsUI'
 import type { Profile, ReportStatus } from '../../types/database'
 
-// "Denúncias da plataforma" — só aparece pra equipe do Mamacos Voip
-// (is_app_admin()). Lista as denúncias enviadas à equipe: de DM, de
-// grupo, sem servidor, ou de servidor com "enviar também para a equipe".
-// O banco (RLS + funções admin_*) é quem garante o acesso.
-
 type PlatformReport = {
   id: string
   reporter_id: string
@@ -191,7 +186,6 @@ function ReportCard({
       return
     }
     setRemoved(true)
-    // A função do banco já marca a denúncia como revisada.
     onChanged()
   }
 
@@ -273,9 +267,6 @@ function ReportCard({
   )
 }
 
-// Formato de admin_report_context (migration 007): uma linha com a
-// mensagem denunciada — texto atual, ou o retrato guardado se ela já foi
-// apagada (from_snapshot) — e o autor.
 type ContextRow = {
   target_type?: string
   server_id?: string | null

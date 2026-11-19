@@ -7,48 +7,28 @@ export type Profile = {
   username: string
   display_name: string | null
   avatar_url: string | null
-  // Banner mostrado no topo do card de perfil (ProfileSidePanel) — imagem
-  // (inclusive GIF animado), null quando a pessoa não enviou nenhum (cai
-  // de volta pro gradiente automático por nome).
   banner_url: string | null
-  // Moldura/anel decorativo desenhado por cima do avatar em todo canto
-  // que ele aparece grande o bastante (ver Avatar.tsx) — também pode ser
-  // um GIF animado. null = sem decoração.
   avatar_decoration_url: string | null
   status: ProfileStatus
   custom_status: string | null
   playing: string | null
-  // De onde é o jogo ('steam:<id>' ou nome da loja) e desde quando — cartão de atividade.
   playing_app?: string | null
   playing_since?: string | null
   profile_visibility: ProfileVisibility
-  // Visual do mamaco no modo Escritório (PARTE 31 da 007): { fur, top, outfit, hat… }
   office_skin?: Record<string, unknown> | null
-  // (A confirmação de idade +18 saiu daqui na migration 016 — agora fica
-  // em user_private_settings, que só a própria pessoa lê.)
   created_at: string
   updated_at: string
 }
 
-// Configurações privadas da conta (migration 016): RLS só do dono.
 export type UserPrivateSettings = {
   user_id: string
-  // Quando a pessoa confirmou (no portão de canal +18) ter 18 anos ou
-  // mais — o banco carimba a hora do servidor. null = não confirmou ou
-  // revogou nas Configurações > Privacidade.
   age_verified_adult_at: string | null
-  // Aceite dos Termos/Política (migration 007, parte 19) — gravado pela
-  // RPC accept_terms; o banco carimba a hora do servidor.
   terms_accepted_at: string | null
   terms_version: string | null
-  // Quando declarou ter 18+ no cadastro (≠ age_verified_adult_at, que é
-  // o portão dos canais +18).
   age_declared_adult_at: string | null
   updated_at: string
 }
 
-// Um som tocado no canal de voz (migration 016) — só a RPC
-// play_soundboard_sound grava; o app escuta via postgres_changes.
 export type SoundboardPlay = {
   id: string
   server_id: string
@@ -67,12 +47,8 @@ export type ServerEmoji = {
   created_at: string
 }
 
-// 'dm_message'/'group_message': migration 007, parte 19 (quem denuncia
-// precisa participar da conversa — o banco confere).
 export type ReportTargetType = 'message' | 'user' | 'dm_message' | 'group_message'
 export type ReportStatus = 'pending' | 'reviewed' | 'dismissed'
-// 'platform' = sem servidor (usuário/DM/grupo) ou escalada → vai pra
-// equipe da plataforma (app_admins); 'server' = moderadores do servidor.
 export type ReportScope = 'platform' | 'server'
 
 export type Report = {
@@ -88,20 +64,15 @@ export type Report = {
   reviewed_by: string | null
   reviewed_at: string | null
   created_at: string
-  // Migration 007, parte 19:
   dm_message_id: string | null
   group_message_id: string | null
   dm_conversation_id: string | null
   group_id: string | null
-  // Também enviada à equipe da plataforma (só vai de false pra true).
   escalated: boolean
-  // Retrato do texto no momento da denúncia (preenchido pelo banco).
   content_snapshot: string | null
-  // Coluna gerada pelo banco.
   scope: ReportScope
 }
 
-// Retorno de admin_report_context (só app admins).
 export type AdminReportContext = {
   report_id: string
   target_type: ReportTargetType
@@ -223,8 +194,6 @@ export const PERMISSIONS = [
 ] as const
 export type Permission = (typeof PERMISSIONS)[number]
 
-// Pedido de "mover para outro canal de voz" (migration 014). Só a RPC
-// move_voice_member() grava; o alvo recebe via postgres_changes.
 export type VoiceMoveRequest = {
   id: string
   server_id: string
@@ -265,10 +234,7 @@ export type Category = {
   name: string
   position: number
   created_at: string
-  // Ícone de jogo (migration 007 PARTE 26): null/ausente = automático pelo
-  // nome; '' = sem ícone; texto = nome do jogo escolhido.
   game?: string | null
-  // Imagem própria do ícone (migration 007 PARTE 27) — tem prioridade.
   icon_url?: string | null
 }
 
@@ -284,9 +250,6 @@ export type Channel = {
   slowmode_seconds: number
   user_limit: number
   is_restricted: boolean
-  // Canal com restrição de idade (+18) — migration 015. O conteúdo fica
-  // oculto até a pessoa confirmar a idade, e o seletor de GIF usa o
-  // rating mais permissivo da GIPHY ("r") só aqui.
   is_nsfw: boolean
   position: number
   created_at: string
@@ -408,19 +371,6 @@ export type DMMessage = {
   created_at: string
 }
 
-// Estrutura completa do banco (crescerá a cada fase: channels,
-// messages, etc. serão adicionados aqui conforme forem criados no Supabase)
-//
-// Observação: RLS é quem de fato bloqueia inserts/updates indevidos no
-// servidor. Os tipos "Insert"/"Update" aqui servem só pra checagem no
-// frontend.
-//
-// IMPORTANTE: use sempre `type` (não `interface`) para Row/Insert/Update.
-// O postgrest-js exige que cada tabela seja estruturalmente um
-// `Record<string, unknown>` (ver GenericTable), e por uma particularidade
-// do TypeScript, `interface` não satisfaz essa checagem em posição de tipo
-// condicional (`extends`) mesmo quando a atribuição direta funcionaria.
-// `type` alias com o mesmo shape funciona normalmente.
 export type Database = {
   public: {
     Tables: {
@@ -511,19 +461,19 @@ export type Database = {
       }
       friendships: {
         Row: Friendship
-        Insert: never // inserts só via send_friend_request()
+        Insert: never
         Update: never
         Relationships: []
       }
       blocked_users: {
         Row: BlockedUser
-        Insert: never // inserts só via block_user()
+        Insert: never
         Update: never
         Relationships: []
       }
       dm_conversations: {
         Row: DMConversation
-        Insert: never // inserts só via get_or_create_dm()
+        Insert: never
         Update: never
         Relationships: []
       }
@@ -541,8 +491,6 @@ export type Database = {
       }
       group_conversations: {
         Row: GroupConversation
-        // id opcional: o app gera no cliente (ver createGroup) — quem criou
-        // vira membro por gatilho no banco.
         Insert: Partial<Pick<GroupConversation, 'id' | 'name' | 'icon_url'>> & Pick<GroupConversation, 'created_by'>
         Update: Partial<Pick<GroupConversation, 'name' | 'icon_url'>>
         Relationships: []
@@ -567,31 +515,30 @@ export type Database = {
       }
       roles: {
         Row: Role
-        Insert: never // inserts só via create_role()
+        Insert: never
         Update: never
         Relationships: []
       }
       server_member_roles: {
         Row: ServerMemberRole
-        Insert: never // inserts só via assign_role()
+        Insert: never
         Update: never
         Relationships: []
       }
       bans: {
         Row: Ban
-        Insert: never // inserts só via ban_member()
+        Insert: never
         Update: never
         Relationships: []
       }
       moderation_logs: {
         Row: ModerationLog
-        Insert: never // inserts só pelas funções de moderação (security definer)
+        Insert: never
         Update: never
         Relationships: []
       }
       user_private_settings: {
         Row: UserPrivateSettings
-        // terms_*/age_declared_adult_at: prefira a RPC accept_terms.
         Insert: Pick<UserPrivateSettings, 'user_id'> &
           Partial<Pick<UserPrivateSettings, 'age_verified_adult_at' | 'terms_accepted_at' | 'terms_version' | 'age_declared_adult_at'>>
         Update: Partial<Pick<UserPrivateSettings, 'age_verified_adult_at' | 'terms_accepted_at' | 'terms_version' | 'age_declared_adult_at'>>
@@ -599,13 +546,13 @@ export type Database = {
       }
       soundboard_plays: {
         Row: SoundboardPlay
-        Insert: never // só via play_soundboard_sound()
+        Insert: never
         Update: never
         Relationships: []
       }
       voice_move_requests: {
         Row: VoiceMoveRequest
-        Insert: never // inserts só via move_voice_member()
+        Insert: never
         Update: never
         Relationships: []
       }
@@ -653,7 +600,6 @@ export type Database = {
         Relationships: []
       }
       app_admins: {
-        // Só leitura da PRÓPRIA linha; inserir pelo SQL Editor.
         Row: { user_id: string; created_at: string }
         Insert: never
         Update: never
@@ -661,14 +607,10 @@ export type Database = {
       }
       reports: {
         Row: Report
-        // server_id e reported_user_id (no caso de denúncia de mensagem)
-        // são recalculados no servidor por um trigger — o que o cliente
-        // manda aqui é só a intenção, não a decisão final de acesso.
         Insert: Pick<Report, 'reporter_id' | 'target_type' | 'reason'> &
           Partial<
             Pick<Report, 'message_id' | 'dm_message_id' | 'group_message_id' | 'reported_user_id' | 'server_id' | 'details' | 'escalated'>
           >
-        // escalated só de false pra true (moderador do servidor).
         Update: Partial<Pick<Report, 'status' | 'escalated'>>
         Relationships: []
       }
@@ -807,14 +749,10 @@ export type Database = {
         Args: { p_sound_id: string }
         Returns: void
       }
-      // Caminhos dos arquivos do grupo no bucket group-attachments (só
-      // quem criou o grupo) — usado antes de apagar o grupo inteiro.
       group_attachment_objects: {
         Args: { p_group_id: string; p_limit?: number }
         Returns: string[]
       }
-      // Canais/DMs com mensagem mais nova que a última leitura (bolinhas
-      // de não lido) — ver useUnreadOverview.ts.
       unread_overview: {
         Args: Record<string, never>
         Returns: {
@@ -829,23 +767,18 @@ export type Database = {
         Args: { p_sound_id: string }
         Returns: void
       }
-      // Migration 007, parte 19 — aceite dos termos + declaração 18+.
-      // p_is_adult precisa ser true (senão: 'Você precisa ter 18 anos ou mais').
       accept_terms: {
         Args: { p_version: string; p_is_adult: boolean }
         Returns: UserPrivateSettings
       }
-      // Administrador da plataforma (app_admins) com o 2FA em dia?
       is_app_admin: {
         Args: Record<string, never>
         Returns: boolean
       }
-      // Só app admins, só denúncias de escopo 'platform'.
       admin_report_context: {
         Args: { p_report_id: string }
         Returns: AdminReportContext[]
       }
-      // Apaga a mensagem denunciada e marca a denúncia como 'reviewed'.
       admin_remove_reported_message: {
         Args: { p_report_id: string }
         Returns: boolean

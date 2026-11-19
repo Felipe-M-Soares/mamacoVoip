@@ -10,22 +10,12 @@ import {
 } from '../lib/storageUrls'
 import { getCachedAttachment, getMemoryAttachment } from '../lib/attachmentCache'
 
-// Intervalo mínimo entre duas tentativas "forçadas" (onError) — evita
-// loop de pedidos se o arquivo não existe mais ou a permissão caiu.
 const RETRY_COOLDOWN_MS = 30_000
 
 interface Options {
-  // Troca a URL sozinho antes de expirar. Desligue pra <audio>/<video>:
-  // trocar o src no meio da reprodução reinicia o player — nesses, a
-  // renovação acontece pelo onError (quando a URL velha já expirou).
   autoRenew?: boolean
 }
 
-// URL pronta pra usar em src/href de um anexo (file_url do banco).
-// Gera URL assinada pros objetos do nosso Storage (buckets privados) e
-// devolve URLs antigas do próprio projeto já filtradas por safeHttpUrl
-// (URL de outro host nunca é carregada: `unavailable`). `onError`
-// deve ir no onError do <img>/<audio>/<video>: força uma URL nova.
 export function useAttachmentUrl(bucket: string, fileUrl: string | null | undefined, { autoRenew = true }: Options = {}) {
   const source = useMemo(() => resolveAttachmentSource(fileUrl, bucket, SUPABASE_URL), [fileUrl, bucket])
   const storageBucket = source?.kind === 'storage' ? source.bucket : null
@@ -51,9 +41,6 @@ export function useAttachmentUrl(bucket: string, fileUrl: string | null | undefi
       })
     }
     const load = () => {
-      // Mídia tocável (autoRenew desligado) vai direto pela URL assinada.
-      // O resto tenta o cache em disco: imagem é baixada UMA vez e nunca
-      // mais (a URL assinada muda a cada hora e furava o cache HTTP).
       if (!autoRenew || reloadToken > 0) { loadSigned(); return }
       void getCachedAttachment(storageBucket, storagePath, () => getSignedUrl(storageBucket, storagePath).then((e) => e?.url ?? null)).then((res) => {
         if (cancelled) return
@@ -83,9 +70,6 @@ export function useAttachmentUrl(bucket: string, fileUrl: string | null | undefi
     const mem = autoRenew ? getMemoryAttachment(source.bucket, source.path) : null
     url = state.key === key ? state.url : mem && mem !== 'direct' ? mem : (getCachedSignedUrl(source.bucket, source.path)?.url ?? null)
   }
-  // imagem servida do cache em disco
   if (url && url.startsWith('blob:')) return { url, onError, unavailable: false }
-  // `unavailable`: URL de fora do nosso projeto — não carrega; a tela
-  // mostra "anexo indisponível" (ver SignedAttachment).
   return { url: safeHttpUrl(url), onError, unavailable: source?.kind === 'unavailable' }
 }

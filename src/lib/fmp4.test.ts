@@ -35,7 +35,6 @@ describe('Fmp4Buffer', () => {
     const b = new Fmp4Buffer(10)
     const parts = [box('ftyp', new Uint8Array(4)), moov(1, 1000)]
     for (let s = 0; s < 20; s++) parts.push(...frag(1, s * 1000))
-    // Chega em pedaços quebrados no meio das caixas.
     const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
     let off = 0
     for (const p of parts) {
@@ -45,7 +44,6 @@ describe('Fmp4Buffer', () => {
     for (let i = 0; i < all.length; i += 7) b.push(all.slice(i, i + 7))
     const clip = b.clip(5)!
     expect(clip).not.toBeNull()
-    // Acha os moof do clipe: 5 pedaços (15..19 s), o primeiro em 0.
     const times: number[] = []
     let o = 0
     const dv = new DataView(clip.buffer)

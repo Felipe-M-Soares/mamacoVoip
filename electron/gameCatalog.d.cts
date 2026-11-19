@@ -1,5 +1,3 @@
-// Tipos do catálogo de jogos (electron/gameCatalog.cjs) — só pros testes
-// do Vitest/TypeScript; o main.cjs usa o .cjs direto.
 export type AntiCheatKey =
   | 'vanguard'
   | 'eac'

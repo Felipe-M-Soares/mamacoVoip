@@ -1,9 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Modal } from './Modal'
 
-// Substitui o confirm()/alert() nativo do navegador (que trava a janela,
-// ignora o tema e no app desktop aparece com o título "Electron") por um
-// diálogo do próprio app, usando o Modal base (foco preso, Esc, etc.).
 export function ConfirmDialog({
   title,
   message,
@@ -21,7 +18,6 @@ export function ConfirmDialog({
   danger?: boolean
   onConfirm: () => void | Promise<void>
   onCancel: () => void
-  /** Só um botão de "OK" (equivalente ao alert()). */
   alertOnly?: boolean
 }) {
   const [busy, setBusy] = useState(false)

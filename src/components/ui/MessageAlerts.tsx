@@ -12,9 +12,6 @@ import { showMessageNotification } from '../../lib/notifications'
 import { isNativeMobileApp } from '../../lib/platform'
 import { decideAlert, isAppFocused, onIncomingMessage, previewText, type IncomingMessage } from '../../lib/messageAlerts'
 
-// Aviso de mensagem privada (DM/grupo) chegando — ver lib/messageAlerts.ts.
-// Montado uma vez no MainLayout.
-
 type Toast = {
   key: string
   kind: 'dm' | 'group'
@@ -45,9 +42,7 @@ export function MessageAlerts({
   viewingTargetId,
   onUnread,
 }: {
-  /** conversa/grupo aberto na tela agora (null = nenhum) */
   viewingTargetId: string | null
-  /** marca a conversa/grupo como não lido na hora (bolinha + contador) */
   onUnread: (kind: 'dm' | 'group', id: string) => void
 }) {
   const { user } = useAuth()
@@ -60,7 +55,6 @@ export function MessageAlerts({
 
   const blockedIds = useMemo(() => new Set(blocked.map((b) => b.blocked_id)), [blocked])
 
-  // Tudo que o ouvinte precisa, sempre atualizado, sem reinscrever.
   const ctx = useRef({ userId: user?.id ?? null, viewingTargetId, conversations, groups, blockedIds, onUnread })
   ctx.current = { userId: user?.id ?? null, viewingTargetId, conversations, groups, blockedIds, onUnread }
 
@@ -99,12 +93,9 @@ export function MessageAlerts({
       if (mode === 'none') return
       c.onUnread(m.kind, m.targetId)
 
-      // Celular em segundo plano: quem avisa é a notificação push (com o
-      // som do Android) — não toca nada aqui pra não dobrar.
       if (mode === 'system' && isNativeMobileApp()) return
       playDmSound()
 
-      // Quem mandou / onde
       let authorName = 'Alguém'
       let avatarUrl: string | null = null
       let title: string
@@ -141,7 +132,6 @@ export function MessageAlerts({
         return
       }
 
-      // Aviso no canto: várias mensagens da mesma conversa viram um aviso só.
       const key = `${m.kind}:${m.targetId}`
       setToasts((prev) => {
         const existing = prev.find((t) => t.key === key)
@@ -166,13 +156,11 @@ export function MessageAlerts({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Abriu a conversa por outro caminho → some o aviso dela.
   useEffect(() => {
     if (!viewingTargetId) return
     setToasts((prev) => (prev.some((t) => t.targetId === viewingTargetId) ? prev.filter((t) => t.targetId !== viewingTargetId) : prev))
   }, [viewingTargetId])
 
-  // Clique na notificação do Windows (app de PC).
   useEffect(() => {
     const off = window.electronAPI?.onNotificationClick?.((target) => {
       if (target?.id) window.dispatchEvent(new CustomEvent('mv:open-target', { detail: target }))

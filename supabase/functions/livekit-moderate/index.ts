@@ -1,37 +1,3 @@
-// Edge Function: livekit-moderate
-//
-// Aplica no LiveKit o efeito de uma moderação que JÁ aconteceu no banco
-// (kick_member / ban_member / timeout_member / move_voice_member). Sem
-// isso, quem já estava numa sala de voz continuava falando depois de ser
-// expulso/banido/silenciado — o token do LiveKit (livekit-token) só é
-// checado na ENTRADA, e o servidor LiveKit renova a sessão sozinho.
-//
-// Corpo: { server_id, user_id, action: 'kick' | 'ban' | 'timeout' | 'move', to_channel_id? }
-// Autenticação: JWT do MODERADOR (header Authorization). A permissão é
-// conferida no banco com my_permissions (kick_members / ban_members /
-// timeout_members / move_members; recusa sessão sem o 2FA exigido), e o
-// estado da moderação também:
-//   * kick    → o alvo NÃO pode mais ser membro do servidor;
-//   * ban     → o alvo precisa estar em `bans` daquele servidor;
-//   * timeout → o alvo precisa estar em castigo agora (is_timed_out);
-//   * move    → o alvo abaixo do moderador na hierarquia; tira a pessoa
-//               de todas as salas do servidor EXCETO `to_channel_id`
-//               (se informado). O app não chama essa ação hoje — o
-//               "mover" normal é feito pelo próprio app do alvo (014);
-//               ela existe pra forçar a saída de um cliente que ignora
-//               o pedido.
-// Assim ninguém usa esta função pra derrubar da voz quem não foi de fato
-// moderado (ex.: alguém de cargo acima do seu).
-//
-// Ação no LiveKit: kick/ban/move → removeParticipant em cada sala de voz
-// do servidor (sala = id do canal); timeout → updateParticipant com
-// canPublish=false (continua ouvindo, igual ao livekit-token).
-//
-// Variáveis: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET (as mesmas
-// da livekit-token). SUPABASE_URL, SUPABASE_ANON_KEY e
-// SUPABASE_SERVICE_ROLE_KEY já existem em toda Edge Function.
-// Publicar: `supabase functions deploy livekit-moderate`.
-
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { RoomServiceClient } from 'npm:livekit-server-sdk@2'
 
@@ -71,8 +37,6 @@ Deno.serve(async (req: Request) => {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
     if (!supabaseUrl || !anonKey || !serviceKey) throw new Error('Configuração do Supabase ausente no servidor.')
 
-    // Cliente COM o JWT do moderador: identidade e permissão vêm daqui
-    // (inclusive a exigência de 2FA das RPCs/RLS).
     const asUser = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } })
     const {
       data: { user },
@@ -95,11 +59,6 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Ação inválida sobre si mesmo.' }, 400)
     }
 
-    // my_permissions (migration 007) devolve as permissões EFETIVAS de
-    // quem chamou e RECUSA a chamada se a conta tem 2FA e esta sessão
-    // ainda não passou pelo código (aal1) — mesma regra das RPCs de
-    // moderação. Antes usávamos has_permission, que não olha o 2FA: com
-    // só a senha de um moderador dava pra derrubar gente da voz ('move').
     const { data: perms, error: permErr } = await asUser.rpc('my_permissions', { p_server_id: serverId })
     if (permErr) {
       const needsMfa = /duas etapas/i.test(permErr.message ?? '')
@@ -115,11 +74,8 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Você não tem permissão para isso.', code: 'forbidden' }, 403)
     }
 
-    // Service role só pra LER estado (quem é membro, banido, canais de
-    // voz — inclusive restritos que o moderador talvez não enxergue).
     const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
 
-    // Confere que a moderação de fato aconteceu no banco.
     if (action === 'kick' || action === 'ban') {
       const { data: member } = await admin
         .from('server_members')
@@ -179,15 +135,12 @@ Deno.serve(async (req: Request) => {
           }
           affected++
         } catch {
-          // A pessoa não está nessa sala (ou a sala nem existe) — normal.
         }
       })
     )
 
     return jsonResponse({ ok: true, affected })
   } catch (err) {
-    // Detalhe só no log da função — nunca a mensagem crua pro cliente
-    // (pode vazar configuração/infra).
     console.error('livekit-moderate:', err instanceof Error ? err.message : err)
     return jsonResponse({ error: 'Não foi possível aplicar a moderação na voz agora.' }, 500)
   }

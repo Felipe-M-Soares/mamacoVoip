@@ -1,21 +1,7 @@
 import { ANDROID_DOWNLOAD_URL, DESKTOP_DOWNLOAD_URL } from '../../lib/config'
 import { isNativeMobileApp } from '../../lib/platform'
 
-// VIGÉSIMA SEXTA RODADA — pedido explícito: "colocar modo de baixar o
-// app no mobile". O app já tinha um link discreto de "Baixar o app pra
-// PC" no rodapé da tela de login (ver Login.tsx) — mas ele é fácil de
-// nem notar, ainda mais rolando a tela num celular. Este banner é bem
-// mais chamativo, e some sozinho em duas situações onde não faz
-// sentido nenhum mostrar ele:
-//   - `md:hidden` — só aparece em telas pequenas (celular). Em
-//     desktop/tablet o link discreto do rodapé já é suficiente.
-//   - dentro do próprio app desktop (Electron) — ninguém que já está
-//     rodando o app precisa ser convidado a baixar ele de novo.
-//
-// No Android o banner oferece o app de celular (APK); em outros
-// celulares (iPhone) continua oferecendo a versão de computador.
 export function MobileDownloadBanner() {
-  // Também some dentro do app Android (já está no app).
   if (window.electronAPI?.isElectron || isNativeMobileApp()) return null
   const android = /android/i.test(navigator.userAgent)
 

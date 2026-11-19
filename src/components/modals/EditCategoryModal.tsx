@@ -15,7 +15,6 @@ function initialChoice(game: string | null | undefined): { choice: string; other
   return KNOWN_GAMES.includes(game) ? { choice: game, other: '' } : { choice: OTHER, other: game }
 }
 
-// Editar (renomear) ou excluir uma categoria da barra de canais.
 export function EditCategoryModal({
   category,
   startDeleting = false,
@@ -26,7 +25,6 @@ export function EditCategoryModal({
   onClose: () => void
 }) {
   const { updateCategory, setCategoryGame, setCategoryIcon, deleteCategory, channels } = useChannels()
-  // Imagem própria: undefined = sem mudança; null = remover; File = nova.
   const [pendingIcon, setPendingIcon] = useState<File | null | undefined>(undefined)
   const [pendingPreview, setPendingPreview] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)

@@ -29,7 +29,6 @@ export function Register() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [confirmationSent, setConfirmationSent] = useState(false)
-  // Cadastro pelo Google no app de PC/celular: a sessão chega sem recarregar.
   useRedirectWhenSignedIn(!loading && !confirmationSent)
 
   const termsError = 'Você precisa aceitar os Termos de Uso e a Política de Privacidade pra continuar.'
@@ -47,10 +46,6 @@ export function Register() {
     )
   }
 
-  // O banco acrescenta um número no fim se o nome já estiver em uso
-  // (ex.: "joao" vira "joao1") — melhor avisar ANTES de criar a conta.
-  // Usa a função is_username_available (migration 013); se ela ainda não
-  // existir no banco, simplesmente segue sem essa checagem.
   async function isUsernameTaken(name: string): Promise<boolean> {
     try {
       const { data, error } = await (
@@ -65,7 +60,7 @@ export function Register() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (loading) return // evita duplo envio
+    if (loading) return
     setError(null)
 
     const validationError = validate()
@@ -81,13 +76,9 @@ export function Register() {
       setError('Esse nome de usuário já está em uso. Escolha outro.')
       return
     }
-    // Aceite + 18+ ficam "pendentes" neste aparelho: com confirmação de
-    // e-mail ainda não há sessão pra chamar accept_terms agora — o
-    // TermsGate envia sozinho no primeiro login (ver lib/termsAcceptance.ts).
     rememberPendingTerms(email)
     const { error } = await signUp(email, password, trimmedUsername)
     if (!error) {
-      // Projeto sem confirmação de e-mail: já existe sessão — registra agora.
       const { data } = await supabase.auth.getSession()
       if (data.session) await acceptCurrentTerms()
     }

@@ -17,9 +17,6 @@ const STATUS_DOT: Record<ProfileStatus, string> = {
   offline: 'bg-zinc-500',
 }
 
-// Mesmo truque de gradiente-por-nome de ServerBar.tsx (ServerIcon) — o
-// "banner" do card fica com uma cor diferente por pessoa, em vez de
-// todo mundo com o mesmo fundo genérico.
 function gradientFor(seed: string) {
   let hash = 0
   for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash)
@@ -27,17 +24,6 @@ function gradientFor(seed: string) {
   return `linear-gradient(135deg, hsl(${hue} 70% 40%), hsl(${(hue + 45) % 360} 65% 22%))`
 }
 
-// Painel fixo do lado direito da tela inicial (Amigos/DM/Grupo) — igual
-// um app de chat popular mostra um cartão de perfil persistente ali. Substitui a
-// antiga barra de ping isolada em cima do UserPanel (ver
-// UserPanel.tsx/task #9): a MESMA ideia de "mostrar informação sobre
-// alguém" agora vira um card de verdade, com avatar grande e ação de
-// ver o perfil completo, em vez de só um número de latência solto.
-//
-// Mostra o perfil de QUEM FAZ SENTIDO pra tela atual: a própria pessoa
-// na tela de Amigos/Grupos, ou quem está do outro lado quando é uma
-// conversa direta — ver a lógica de qual profile passar em
-// MainLayout.tsx.
 export function ProfileSidePanel({
   profile,
   isSelf,
@@ -49,10 +35,6 @@ export function ProfileSidePanel({
 }) {
   const isPresent = useIsPresent(profile.id)
   const avatarTransparent = useAvatarTransparent(profile.avatar_url)
-  // Perfil próprio: sempre "efetivamente online" do jeito que a pessoa
-  // escolheu (ela sabe o próprio status). Perfil de outra pessoa: só
-  // conta como online se a presença em tempo real confirmar (mesmo
-  // critério usado em Avatar.tsx/MemberList.tsx).
   const isEffectivelyOnline = profile.status !== 'offline' && (isSelf || isPresent)
 
   return (

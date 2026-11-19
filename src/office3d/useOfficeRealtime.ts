@@ -2,10 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { openSharedChannel } from '../lib/realtimeChannel'
 
-// Emotes e "acenar pra alguém" no modo Escritório. É só broadcast do
-// Realtime no tópico `office:<servidor>` (PARTE 31 da 007 libera pra
-// membros do servidor): nada é gravado no banco e nada passa pelo
-// servidor de voz. Limite: 1 envio a cada 1,5 s por pessoa.
 export const OFFICE_EMOTES = ['👋', '🎉', '😂', '❤️', '👍', '🔥', '😮', '🤔', '😴', '👏', '💃', '😡', '🫡', '👎'] as const
 const SEND_GAP_MS = 1500
 
@@ -36,13 +32,11 @@ export function useOfficeRealtime(serverId: string, userId: string | undefined, 
         if (typeof from !== 'string' || typeof to !== 'string' || from === userId) return
         cbRef.current({ kind: 'wave', from, to })
       })
-      // convite/entrada/largada da corrida de kart com a sala (raro: só o "lobby")
       rt.on('broadcast', { event: 'kart' }, ({ payload }) => {
         const from = payload?.from, type = payload?.type, d = payload?.d
         if (typeof from !== 'string' || typeof type !== 'string' || from === userId || !d || typeof d !== 'object') return
         cbRef.current({ kind: 'kart', from, type, d })
       })
-      // caiu ou foi recusado: tenta de novo sozinho (antes ficava mudo até reabrir)
       rt.subscribe((status) => {
         if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && !retryT) retryT = setTimeout(() => setRetry((n) => n + 1), 4000)
       })
@@ -55,9 +49,6 @@ export function useOfficeRealtime(serverId: string, userId: string | undefined, 
     }
   }, [serverId, userId, retry])
 
-  // Limite de 1 envio a cada 1,5 s: o que passar do limite NÃO some —
-  // espera a vez e sai (só o último). Antes você via o seu emote e os
-  // outros não, quando mandava dois seguidos.
   const pendingRef = useRef<{ event: 'emote' | 'wave'; payload: Record<string, string> } | null>(null)
   const pendingTRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => { if (pendingTRef.current) clearTimeout(pendingTRef.current) }, [])

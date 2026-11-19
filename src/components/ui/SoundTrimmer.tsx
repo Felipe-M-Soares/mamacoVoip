@@ -1,13 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MAX_SOUND_SECONDS, computePeaks, trimAudioBufferToWav } from '../../lib/audioTrim'
 
-// Recorte de som pro soundboard: forma de onda + seleção arrastável.
-//  - arraste as alças (bordas) pra mudar início/fim;
-//  - arraste o meio da seleção pra mover o trecho inteiro;
-//  - clique fora da seleção pra levá-la até ali;
-//  - setas do teclado movem a seleção (Shift = passo maior).
-// O trecho pode ter de 0,3s até MAX_SOUND_SECONDS.
-
 const MIN_SELECTION = 0.3
 const BUCKETS = 240
 
@@ -32,8 +25,6 @@ export function SoundTrimmer({
   const [start, setStart] = useState(0)
   const [end, setEnd] = useState(Math.min(duration, MAX_SOUND_SECONDS))
   const [playhead, setPlayhead] = useState<number | null>(null)
-  // Volume SÓ da prévia (pra ouvir enquanto corta, sem levar susto com
-  // som alto). O arquivo salvo mantém o volume original.
   const [gain, setGain] = useState(0.5)
   const gainNodeRef = useRef<GainNode | null>(null)
   useEffect(() => {
@@ -45,7 +36,6 @@ export function SoundTrimmer({
   const dragRef = useRef<Drag>(null)
   const playRef = useRef<{ ctx: AudioContext; src: AudioBufferSourceNode; raf: number } | null>(null)
 
-  // ---------------------------------------------------------- desenho
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -70,7 +60,6 @@ export function SoundTrimmer({
     }
   }, [peaks, start, end, duration])
 
-  // ---------------------------------------------------------- prévia
   function stopPreview() {
     const p = playRef.current
     if (!p) return
@@ -78,7 +67,6 @@ export function SoundTrimmer({
     try {
       p.src.stop()
     } catch {
-      // já parou
     }
     p.ctx.close().catch(() => {})
     playRef.current = null
@@ -109,10 +97,8 @@ export function SoundTrimmer({
     playRef.current = { ctx, src, raf: requestAnimationFrame(tick) }
   }
 
-  // Para a prévia ao fechar.
   useEffect(() => () => stopPreview(), []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------------------------------------------------------- arrastar
   function timeAt(clientX: number) {
     const rect = wrapRef.current!.getBoundingClientRect()
     return Math.max(0, Math.min(duration, ((clientX - rect.left) / rect.width) * duration))
@@ -141,7 +127,6 @@ export function SoundTrimmer({
     else if (Math.abs(e.clientX - px(end)) <= handleZone) kind = 'end'
     else if (e.clientX > px(start) && e.clientX < px(end)) kind = 'move'
     else {
-      // Clique fora: centraliza a seleção (mesmo tamanho) ali.
       const len = end - start
       const center = timeAt(e.clientX)
       const [ns, ne] = clampSel(center - len / 2, center + len / 2, 'move')
@@ -222,7 +207,6 @@ export function SoundTrimmer({
         className="relative h-20 rounded-lg bg-black/30 select-none touch-none cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-mv-accent"
       >
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-hidden />
-        {/* área fora da seleção escurecida */}
         <div
           className="absolute inset-y-0 left-0 bg-black/45 pointer-events-none rounded-l-lg"
           style={{ width: pct(start) }}
@@ -231,7 +215,6 @@ export function SoundTrimmer({
           className="absolute inset-y-0 right-0 bg-black/45 pointer-events-none rounded-r-lg"
           style={{ left: pct(end) }}
         />
-        {/* seleção + alças */}
         <div
           className="absolute inset-y-0 border-y-2 border-mv-accent pointer-events-none"
           style={{ left: pct(start), width: pct(len) }}

@@ -1,18 +1,5 @@
-// Detecta se uma imagem (avatar) tem fundo transparente, pra poder
-// mostrá-la "solta" — sem o recorte em círculo e sem o fundo cinza —
-// quando a pessoa sobe um PNG/WebP/GIF sem fundo.
-//
-// Estratégia barata: desenha a imagem já carregada num canvas pequeno
-// (32x32) e olha o canal alfa das bordas. Se uma parte relevante da
-// borda é transparente, consideramos "sem fundo". O resultado fica em
-// cache por URL (a mesma foto aparece em dezenas de lugares).
-// Se o canvas ficar "contaminado" (imagem de outra origem sem CORS), a
-// leitura lança erro e simplesmente tratamos como opaca.
-
 const cache = new Map<string, boolean>()
 const MAX_CACHE = 500
-// Quem precisa saber quando uma foto foi detectada como transparente
-// (ex.: a moldura em volta do avatar no cartão de perfil).
 const listeners = new Set<() => void>()
 
 export function subscribeTransparency(listener: () => void): () => void {
@@ -20,13 +7,11 @@ export function subscribeTransparency(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
-/** Formatos que podem ter transparência (JPEG nunca tem). */
 export function mayHaveTransparency(url: string): boolean {
   const path = url.split(/[?#]/)[0].toLowerCase()
   return !/\.(jpe?g)$/.test(path)
 }
 
-/** Fração de pixels transparentes (alfa < 16) na borda de uma matriz RGBA. */
 export function edgeTransparencyRatio(data: Uint8ClampedArray, width: number, height: number): number {
   let total = 0
   let transparent = 0

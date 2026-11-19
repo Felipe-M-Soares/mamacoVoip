@@ -16,10 +16,6 @@ export const THEMES = [
 export type ThemeId = (typeof THEMES)[number]['id']
 
 const STORAGE_KEY = 'mamacos-theme'
-// O vermelho é a identidade da marca (foco em público gamer) — fica
-// como padrão. O tema "Clássico" (paleta azul-acinzentada) continua
-// disponível em Configurações → Aparência pra quem preferir, só não é
-// mais o que quem abre o app pela primeira vez recebe.
 const DEFAULT_THEME: ThemeId = 'vermelho'
 
 function isThemeId(value: string | null): value is ThemeId {
@@ -31,7 +27,6 @@ function loadTheme(): ThemeId {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (isThemeId(stored)) return stored
   } catch {
-    // localStorage indisponível — usa o padrão
   }
   return DEFAULT_THEME
 }
@@ -55,12 +50,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem(STORAGE_KEY, next)
     } catch {
-      // best-effort — se não der pra persistir, vale só pra essa sessão
     }
   }, [])
 
-  // Memoizado: o ThemeProvider fica no topo do app — um objeto novo a cada
-  // render forçaria todo consumidor de tema a re-renderizar junto.
   const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme])
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }

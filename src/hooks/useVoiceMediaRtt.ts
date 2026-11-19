@@ -4,12 +4,6 @@ import { extractMediaPath, type MediaPathInfo } from '../lib/webrtcRtt'
 
 const POLL_MS = 3_000
 
-/**
- * RTT real (WebRTC getStats, candidate-pair em uso) até o servidor de mídia
- * do LiveKit, atualizado a cada 3s enquanto `active` (em call). Usa o
- * microfone publicado; se você só ouve (Palco/sem mic), usa uma track
- * remota — as duas passam pelo mesmo servidor. `null` enquanto não mede.
- */
 export function useVoiceMediaRtt(active: boolean): MediaPathInfo | null {
   const [info, setInfo] = useState<MediaPathInfo | null>(null)
 
@@ -35,7 +29,6 @@ export function useVoiceMediaRtt(active: boolean): MediaPathInfo | null {
             return
           }
         } catch {
-          // track saindo no meio da medição — tenta a próxima
         }
       }
     }

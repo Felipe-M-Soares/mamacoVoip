@@ -1,35 +1,4 @@
 #!/usr/bin/env node
-// TESTE DE CARGA do chat/Realtime — só com a chave PÚBLICA (anon) e os
-// usuários de teste criados por preparar-usuarios.mjs. Nada de service_role.
-//
-// O que faz:
-//   1. Loga N usuários de teste (N clientes independentes, cada um com seu
-//      próprio WebSocket — igual N pessoas com o app aberto).
-//   2. Cada cliente entra, como o app faz:
-//        - presença na sala de voz de teste (voice:<id>, canal PRIVADO);
-//        - postgres_changes de INSERT em `messages` do canal de texto de
-//          teste (mesma assinatura do useMessages.ts);
-//        - broadcast no tópico typing:<canal> (canal PRIVADO, igual ao
-//          "digitando…"), pra comparar Broadcast × Postgres Changes.
-//   3. Durante DURACAO_S segundos, envia TAXA_MSG mensagens/s no total
-//      (revezando entre os clientes; o banco limita 8 msgs/10s por pessoa).
-//   4. Mede, em cada cliente que recebe, a latência de ENTREGA (envio →
-//      chegada) e conta perdas/erros. Tudo roda no mesmo relógio (mesma
-//      máquina), então a latência é exata — mas inclui o atraso do próprio
-//      Node se ele estiver sobrecarregado (o relatório mostra esse atraso).
-//   5. Gera loadtest/relatorios/carga-<data>.json e .md.
-//
-// Variáveis (todas opcionais menos a URL/anon, que vêm do .env do projeto):
-//   SUPABASE_URL / SUPABASE_ANON_KEY  (ou VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY do .env)
-//   LOADTEST_ARQUIVO   arquivo gerado pelo preparo (padrão loadtest/.carga-usuarios.json)
-//   CLIENTES           quantos clientes conectar (padrão: todos do arquivo)
-//   RAMPA_POR_S        clientes novos por segundo (padrão 10)
-//   TAXA_MSG           mensagens por segundo, no total (padrão 2)
-//   DURACAO_S          duração do envio (padrão 60)
-//   MODO               postgres | broadcast | ambos (padrão ambos)
-//   PRESENCA           1 = entra na presença da sala de voz (padrão 1)
-//   PG_PRIVADO         1 = assina postgres_changes num canal privado (padrão 0,
-//                      igual ao app)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -55,8 +24,6 @@ const PG_PRIVADO = env('PG_PRIVADO', '0') === '1'
 const usarPg = MODO === 'postgres' || MODO === 'ambos'
 const usarBc = MODO === 'broadcast' || MODO === 'ambos'
 
-// O banco recusa mais de 8 mensagens a cada 10s por pessoa
-// (check_message_rate_limit) — 0,7/s por cliente deixa folga.
 const TAXA_MAX = CLIENTES * 0.7
 const TAXA = Math.min(TAXA_PEDIDA, TAXA_MAX)
 if (TAXA < TAXA_PEDIDA) {
@@ -150,7 +117,6 @@ async function conectar(i) {
     promessas.push(inscrever(bc, est.inscricaoBcMs, 'broadcast'))
   }
   if (usarPg && !PG_PRIVADO) {
-    // Igual ao app: canal público de nome único, filtro por canal.
     const pg = sb.channel(`carga-msgs:${dados.textChannelId}:${i}:${execucao}`)
     registrarPg(pg)
     promessas.push(inscrever(pg, est.inscricaoPgMs, 'postgres_changes'))
@@ -188,7 +154,6 @@ function registrarPg(canal) {
   )
 }
 
-// ---------------------------------------------------------------------
 console.log(`Execução ${execucao}: ${CLIENTES} clientes, rampa ${RAMPA}/s, ${TAXA.toFixed(2)} msg/s por ${DURACAO_S}s, modo=${MODO}, presença=${PRESENCA ? 'sim' : 'não'}`)
 const clientes = []
 const tRampa = performance.now()
@@ -209,7 +174,6 @@ if (clientes.length < 2) {
   process.exit(1)
 }
 
-// Envio: um "tique" a cada 1/TAXA segundos, revezando o remetente.
 const intervalo = 1000 / TAXA
 const fim = Date.now() + DURACAO_S * 1000
 let seq = 0
@@ -257,8 +221,6 @@ await Promise.allSettled(pendentes)
 console.log('\n  envio encerrado; esperando 8s pelas últimas entregas…')
 await dormir(8000)
 
-// Cada INSERT chega pra TODOS os clientes (inclusive quem mandou); o
-// broadcast (self: false) chega pra todos menos quem mandou.
 const esperadasPg = est.enviadasPg * clientes.length
 const esperadasBc = est.enviadasBc * (clientes.length - 1)
 const pct = (a, b) => (b === 0 ? null : Math.round((a / b) * 10000) / 100)
@@ -318,6 +280,5 @@ writeFileSync(`${base}.md`, md)
 console.log('\n' + md)
 console.log(`Relatório salvo em ${base}.md / .json`)
 
-// Sai: fecha tudo.
 await Promise.allSettled(clientes.map((c) => c.sb.removeAllChannels().then(() => c.sb.auth.signOut({ scope: 'local' }))))
 process.exit(0)

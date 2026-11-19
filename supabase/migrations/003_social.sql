@@ -1,25 +1,9 @@
--- ============================================================
--- CONSOLIDADO 003: amizades, bloqueios, conversas diretas (1-pra-1
--- e em grupo), anexos de DM
--- (junta: 005_friends_dms, 020_dm_attachments, 021_group_dms)
---
--- Só pra ORGANIZAÇÃO/REFERÊNCIA — não rode num banco que já tem essas
--- migrations aplicadas.
--- ============================================================
-
-
--- ==== originalmente: 005_friends_dms.sql ====
--- ============================================================
--- FASE 6 — Usuários (amigos, mensagens privadas, bloqueio)
--- Rode isto no SQL Editor do Supabase, depois da 004_messages.sql
--- ============================================================
-
 create table if not exists public.friendships (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,   -- quem enviou o pedido
-  friend_id uuid not null references auth.users(id) on delete cascade, -- quem recebeu
+  user_id uuid not null references auth.users(id) on delete cascade,
+  friend_id uuid not null references auth.users(id) on delete cascade,
   status text not null default 'pending' check (status in ('pending', 'accepted')),
-  request_note text check (char_length(request_note) <= 200), -- mensagem opcional ao enviar o pedido
+  request_note text check (char_length(request_note) <= 200),
   created_at timestamptz not null default now(),
   unique (user_id, friend_id),
   check (user_id <> friend_id)
@@ -35,7 +19,7 @@ create table if not exists public.blocked_users (
 
 create table if not exists public.dm_conversations (
   id uuid primary key default gen_random_uuid(),
-  user_a uuid not null references auth.users(id) on delete cascade, -- sempre o menor uuid dos dois
+  user_a uuid not null references auth.users(id) on delete cascade,
   user_b uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default now(),
   unique (user_a, user_b)
@@ -57,8 +41,6 @@ create index if not exists dm_conversations_user_a_idx on public.dm_conversation
 create index if not exists dm_conversations_user_b_idx on public.dm_conversations (user_b);
 create index if not exists dm_messages_conversation_idx on public.dm_messages (conversation_id, created_at);
 
--- Rede de segurança pra bancos que já tinham essas tabelas criadas
--- antes destas colunas/constraints existirem
 alter table public.friendships add column if not exists request_note text;
 do $$
 declare r record;
@@ -72,9 +54,6 @@ begin
 end $$;
 alter table public.dm_messages add constraint dm_messages_content_length check (char_length(content) between 0 and 4000);
 
--- ============================================================
--- Trigger: edited_at + rate limit (mesma lógica das mensagens de canal)
--- ============================================================
 drop trigger if exists on_dm_message_edited on public.dm_messages;
 create trigger on_dm_message_edited
   before update on public.dm_messages
@@ -107,34 +86,26 @@ create trigger on_dm_rate_limit
   before insert on public.dm_messages
   for each row execute function public.check_dm_rate_limit();
 
--- ============================================================
--- RLS
--- ============================================================
 alter table public.friendships enable row level security;
 alter table public.blocked_users enable row level security;
 alter table public.dm_conversations enable row level security;
 alter table public.dm_messages enable row level security;
 
--- friendships: leitura pros dois lados; toda escrita passa por função
--- (evita pedidos duplicados, respeita bloqueios, valida quem responde)
 drop policy if exists "Vê as próprias amizades e pedidos" on public.friendships;
 create policy "Vê as próprias amizades e pedidos"
   on public.friendships for select to authenticated
   using (auth.uid() = user_id or auth.uid() = friend_id);
 
--- blocked_users: só o bloqueador vê a própria lista (não expõe pra quem foi bloqueado)
 drop policy if exists "Vê a própria lista de bloqueios" on public.blocked_users;
 create policy "Vê a própria lista de bloqueios"
   on public.blocked_users for select to authenticated
   using (auth.uid() = blocker_id);
 
--- dm_conversations: só os participantes
 drop policy if exists "Participantes veem a própria conversa" on public.dm_conversations;
 create policy "Participantes veem a própria conversa"
   on public.dm_conversations for select to authenticated
   using (auth.uid() = user_a or auth.uid() = user_b);
 
--- dm_messages
 drop policy if exists "Participantes veem as mensagens da conversa" on public.dm_messages;
 create policy "Participantes veem as mensagens da conversa"
   on public.dm_messages for select to authenticated
@@ -175,10 +146,6 @@ create policy "Autor exclui a própria DM"
   on public.dm_messages for delete to authenticated
   using (author_id = auth.uid());
 
--- ============================================================
--- Funções: amizade, bloqueio e conversas (security definer —
--- validam regras de negócio que RLS sozinha não expressa bem)
--- ============================================================
 create or replace function public.send_friend_request(p_username text, p_note text default null)
 returns public.friendships
 language plpgsql
@@ -220,7 +187,6 @@ begin
     if v_reverse.status = 'accepted' then
       raise exception 'Vocês já são amigos';
     end if;
-    -- o outro usuário já tinha te chamado: aceita automaticamente
     update public.friendships set status = 'accepted' where id = v_reverse.id returning * into v_result;
     return v_result;
   end if;
@@ -336,9 +302,6 @@ begin
 end;
 $$;
 
--- ============================================================
--- Realtime
--- ============================================================
 do $$
 begin
   if not exists (
@@ -358,14 +321,10 @@ begin
   end if;
 end $$;
 
--- ============================================================
--- Storage: bucket público de avatares
--- ============================================================
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('avatars', 'avatars', true, 5242880, array['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 on conflict (id) do nothing;
 
--- Convenção de path: {user_id}/avatar-{timestamp}.ext
 drop policy if exists "Avatares são publicamente visíveis" on storage.objects;
 create policy "Avatares são publicamente visíveis"
   on storage.objects for select
@@ -386,14 +345,6 @@ create policy "Usuário remove o próprio avatar"
   on storage.objects for delete to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 
--- ==== originalmente: 020_dm_attachments.sql ====
--- ============================================================
--- Anexos em mensagens diretas (DM) — rode isto no SQL Editor do
--- Supabase, depois da 019_stage_channels.sql
--- ============================================================
-
--- audio/webm é o formato que a gravação de mensagem de voz produz —
--- faltava na lista de tipos aceitos no bucket de anexos dos canais.
 update storage.buckets
 set allowed_mime_types = array[
   'image/png', 'image/jpeg', 'image/webp', 'image/gif',
@@ -437,8 +388,6 @@ create policy "dm_message_attachments_insert"
     )
   );
 
--- Bucket de armazenamento pros arquivos em si (pasta raiz = id da
--- conversa, checado contra quem participa dela)
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'dm-attachments',
@@ -479,11 +428,6 @@ create policy "dm_attachments_insert"
     )
   );
 
--- Faltava: sem estar na publicação, a assinatura de tempo real que o
--- app já faz pra "dm_message_attachments" nunca recebia evento nenhum
--- (tabela com RLS não é suficiente pro Realtime — precisa estar
--- explicitamente na publicação). Só dava pra ver um anexo de DM depois
--- de reabrir a conversa.
 do $$
 begin
   if not exists (
@@ -494,15 +438,6 @@ begin
   end if;
 end $$;
 
--- ==== originalmente: 021_group_dms.sql ====
--- ============================================================
--- Grupos de conversa (DM em grupo) — rode isto no SQL Editor do
--- Supabase, depois da 020_dm_attachments.sql
---
--- Implementado como um sistema SEPARADO das conversas 1-pra-1
--- (dm_conversations/dm_messages) de propósito — evita qualquer
--- risco de quebrar o que já funciona lá.
--- ============================================================
 create table if not exists public.group_conversations (
   id uuid primary key default gen_random_uuid(),
   name text,
@@ -557,7 +492,6 @@ alter table public.group_conversation_members enable row level security;
 alter table public.group_messages enable row level security;
 alter table public.group_message_attachments enable row level security;
 
--- Função auxiliar (evita recursão de política em cima da própria tabela de membros)
 create or replace function public.is_group_member(p_group_id uuid, p_user_id uuid)
 returns boolean
 language sql
@@ -594,7 +528,6 @@ drop policy if exists "group_members_insert" on public.group_conversation_member
 create policy "group_members_insert"
   on public.group_conversation_members for insert
   with check (
-    -- o próprio dono do grupo adicionando alguém, OU a própria pessoa entrando
     user_id = auth.uid()
     or exists (select 1 from public.group_conversations g where g.id = group_id and g.created_by = auth.uid())
   );
@@ -641,7 +574,6 @@ create policy "group_message_attachments_insert"
     exists (select 1 from public.group_messages m where m.id = message_id and m.author_id = auth.uid())
   );
 
--- Bucket de armazenamento pros arquivos (pasta raiz = id do grupo)
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'group-attachments',
@@ -674,10 +606,6 @@ create policy "group_attachments_insert"
     and public.is_group_member((storage.foldername(name))[1]::uuid, auth.uid())
   );
 
--- Faltavam as duas: "group_messages" nunca tinha sido adicionada à
--- publicação de Realtime — ou seja, o chat em grupo não recebia NENHUMA
--- mensagem em tempo real (só reaparecia ao trocar de conversa/recarregar
--- a página), e o mesmo valia pros anexos de grupo.
 do $$
 begin
   if not exists (
@@ -697,9 +625,6 @@ begin
   end if;
 end $$;
 
--- ==== originalmente: 007_read_state.sql (parte das DMs) ====
--- Movida de 002_messaging.sql (lá ela vinha antes de existir
--- dm_conversations e quebrava a instalação do zero). Mesmo SQL de antes.
 create table if not exists public.dm_read_state (
   conversation_id uuid not null references public.dm_conversations(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,

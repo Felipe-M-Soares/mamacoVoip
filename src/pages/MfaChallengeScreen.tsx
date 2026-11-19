@@ -10,7 +10,7 @@ export function MfaChallengeScreen() {
   const [error, setError] = useState<string | null>(null)
 
   async function handleVerify() {
-    if (loading || code.length !== 6) return // evita duplo envio (Enter + clique)
+    if (loading || code.length !== 6) return
     setLoading(true)
     setError(null)
     const { error } = await verifyMfaChallenge(code)

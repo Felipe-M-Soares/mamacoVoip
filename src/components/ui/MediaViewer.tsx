@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react'
 import { closeMedia, useOpenMedia } from '../../lib/mediaViewer'
 
-// Tela cheia escura com a imagem/vídeo grande. Fecha com Esc, clique fora
-// ou no X. Imagem: clique alterna entre "caber na tela" e tamanho real
-// (com rolagem). Baixar salva o arquivo; "Abrir original" fica como opção.
 export function MediaViewer() {
   const item = useOpenMedia()
   const [zoom, setZoom] = useState(false)

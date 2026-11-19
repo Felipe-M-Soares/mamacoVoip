@@ -1,18 +1,6 @@
 import { Fmp4Buffer } from './fmp4'
 import { useSyncExternalStore } from 'react'
 
-// "Replay" de transmissão: guarda em memória os últimos ~30 segundos de uma
-// transmissão (a sua ou a de quem você está assistindo) e salva um clipe
-// quando você clica em "Salvar clipe". Nada sai do seu computador — o
-// arquivo vai direto pra sua pasta de downloads.
-//
-// Como funciona (MP4 — o normal no app): UM gravador só, com quadro-chave
-// a cada 1 s. O MP4 sai em pedaços de ~1 s; o app guarda só os últimos
-// ~35 s e, ao salvar, junta o cabeçalho com os pedaços dos últimos 30 s
-// (lib/fmp4.ts) — clipe de 30 s certinho, sem recodificar.
-// Sem MP4 (navegador antigo): dois gravadores defasados, clipe de 30–60 s.
-// Fica desligado até você ligar (gravar custa um pouco de processador).
-
 export const REPLAY_SECONDS = 30
 const VIDEO_BPS = 5_000_000
 const AUDIO_BPS = 160_000
@@ -34,16 +22,11 @@ export function pickRecorderFormat(
     try {
       if (isSupported(c.mime)) return c
     } catch {
-      // ignora e tenta o próximo
     }
   }
   return null
 }
 
-/**
- * Qual segmento vira o clipe: o mais antigo que ainda está gravando
- * (é o que tem mais conteúdo, entre `window` e `2 × window`).
- */
 export function pickOldestSegment<T extends { startedAt: number }>(segs: readonly T[]): T | null {
   let best: T | null = null
   for (const s of segs) if (!best || s.startedAt < best.startedAt) best = s
@@ -63,7 +46,6 @@ interface Replay {
   stop(): void
 }
 
-// Modo MP4: um gravador contínuo + recorte exato (ver o topo do arquivo).
 class Mp4Replay implements Replay {
   private rec: MediaRecorder | null = null
   private readonly buffer = new Fmp4Buffer(REPLAY_SECONDS + 5)
@@ -79,13 +61,11 @@ class Mp4Replay implements Replay {
       mimeType: mime,
       videoBitsPerSecond: VIDEO_BPS,
       audioBitsPerSecond: AUDIO_BPS,
-      // Quadro-chave a cada 1 s = dá pra cortar em qualquer segundo.
       videoKeyFrameIntervalDuration: 1000,
     } as MediaRecorderOptions)
     rec.addEventListener('dataavailable', (e) => {
       if (!e.data || e.data.size === 0) return
       const data = e.data
-      // Em ordem (arrayBuffer é assíncrono).
       this.queue = this.queue.then(async () => {
         this.buffer.push(new Uint8Array(await data.arrayBuffer()))
       })
@@ -126,8 +106,6 @@ class ReplayBuffer implements Replay {
   readonly trackKey: string
 
   constructor(source: MediaStream, format: { mime: string; ext: string }) {
-    // Cópia só com as faixas atuais: se a original ganhar/perder faixa no
-    // meio, o gravador não quebra.
     this.stream = new MediaStream([...source.getVideoTracks(), ...source.getAudioTracks()])
     this.trackKey = trackKeyOf(source)
     this.format = format
@@ -163,7 +141,6 @@ class ReplayBuffer implements Replay {
   }
 
   private rotate() {
-    // Mantém no máximo 2: o mais antigo (já com 60 s) sai, entra um novo.
     while (this.segs.length >= 2) {
       const old = this.segs.shift()!
       stopQuietly(old.rec)
@@ -204,16 +181,12 @@ function stopQuietly(rec: MediaRecorder) {
   try {
     if (rec.state !== 'inactive') rec.stop()
   } catch {
-    // já parado
   }
 }
 
 function trackKeyOf(stream: MediaStream): string {
   return [...stream.getVideoTracks(), ...stream.getAudioTracks()].map((t) => t.id).join('|')
 }
-
-// ---- Estado compartilhado (o quadro da transmissão pode remontar ao
-// trocar de destaque; o buffer não pode se perder por isso) ----
 
 const buffers = new Map<string, Replay>()
 
@@ -223,7 +196,6 @@ function createReplay(stream: MediaStream): Replay | null {
   try {
     return format.ext === 'mp4' ? new Mp4Replay(stream, format.mime) : new ReplayBuffer(stream, format)
   } catch {
-    // MP4 recusado na hora de gravar: tenta WebM
     const webm = pickRecorderFormat((m) => m.startsWith('video/webm') && MediaRecorder.isTypeSupported(m))
     if (!webm) return null
     try {
@@ -252,7 +224,6 @@ export function useReplayActive(): ReadonlySet<string> {
   )
 }
 
-/** Liga o replay de uma transmissão. Retorna false se o navegador não suporta. */
 export function startReplay(key: string, stream: MediaStream): boolean {
   if (buffers.has(key)) return true
   const replay = createReplay(stream)
@@ -270,11 +241,6 @@ export function stopReplay(key: string) {
   emit()
 }
 
-/**
- * Chamado sempre que a lista de transmissões muda: desliga o replay das
- * que acabaram/foram fechadas e reinicia as que trocaram de faixa (ex.:
- * a pessoa trocou a janela transmitida).
- */
 export function syncReplays(active: ReadonlyMap<string, MediaStream>) {
   let changed = false
   for (const [key, buf] of [...buffers]) {
@@ -320,7 +286,6 @@ export function clipFileName(name: string, ext: string, now = new Date()): strin
   return `mamacos-clipe_${safeName(name)}_${stamp}.${ext}`
 }
 
-/** Salva o clipe (baixa o arquivo). Retorna false se não tinha nada gravado. */
 export async function saveReplayClip(key: string, name: string): Promise<boolean> {
   const b = buffers.get(key)
   if (!b) return false

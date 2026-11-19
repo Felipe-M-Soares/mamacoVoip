@@ -1,13 +1,8 @@
-// Conquistas do modo Escritório — só no aparelho (localStorage), zero
-// servidor. O motor avisa as ações do seu boneco (onStat) e os minigames
-// avisam o resultado de cada partida (onResult).
-
 export interface Achievement {
   id: string
   icon: string
   name: string
   desc: string
-  /** contador e meta */
   stat: string
   goal: number
 }
@@ -50,11 +45,9 @@ function saveStats(s: Stats) {
   try {
     localStorage.setItem(KEY, JSON.stringify(s))
   } catch {
-    // sem armazenamento: conquistas só nesta sessão
   }
 }
 
-/** soma (ou guarda o máximo, nos "_best") e devolve as conquistas desbloqueadas agora */
 export function bumpStat(name: string, n = 1): Achievement[] {
   const s = loadStats()
   const before = { ...s }
@@ -64,7 +57,6 @@ export function bumpStat(name: string, n = 1): Achievement[] {
   return ACHIEVEMENTS.filter((a) => a.stat === name && (before[name] ?? 0) < a.goal && s[name] >= a.goal)
 }
 
-/** traduz o resultado de um minigame em contadores */
 export function statsFromResult(r: { game: string; score?: number; place?: number }): [string, number][] {
   if (r.game === 'kart3d') return [['kart_race', 1], ...(r.place === 1 ? ([['kart_win', 1]] as [string, number][]) : [])]
   if (r.game === 'banana3d' && typeof r.score === 'number') return [['banana_best', r.score]]

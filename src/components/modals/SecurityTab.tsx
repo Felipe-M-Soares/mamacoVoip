@@ -26,7 +26,6 @@ export function SecurityTab() {
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // Confirmação própria do app no lugar do confirm() nativo.
   const [pendingConfirm, setPendingConfirm] = useState<{
     title: string
     message: string
@@ -37,15 +36,10 @@ export function SecurityTab() {
   async function refreshFactors() {
     setLoading(true)
     const { data } = await supabase.auth.mfa.listFactors()
-    // Só conta como "ativado" o fator já verificado — um cadastro
-    // abandonado no meio deixa um fator "unverified" que não protege nada.
     setFactors((data?.totp ?? []).filter((f) => !f.status || f.status === 'verified'))
     setLoading(false)
   }
 
-  // Apaga fatores TOTP não verificados (cadastros abandonados). Sem isso
-  // eles se acumulam e o próximo "Ativar" pode falhar com "já existe um
-  // fator com esse nome".
   async function cleanupUnverifiedFactors() {
     const { data } = await supabase.auth.mfa.listFactors()
     const stale = (data?.all ?? []).filter((f) => f.factor_type === 'totp' && f.status === 'unverified')
@@ -96,8 +90,6 @@ export function SecurityTab() {
   }
 
   function cancelEnroll() {
-    // Remove o fator pendente no servidor também (antes ele ficava lá
-    // pra sempre como "unverified").
     if (pendingFactorId) supabase.auth.mfa.unenroll({ factorId: pendingFactorId }).catch(() => null)
     setEnrolling(false)
     setQrCode(null)
@@ -127,7 +119,6 @@ export function SecurityTab() {
       setError(traduzErro(error.message))
       return
     }
-    // O nível de garantia da sessão (aal) muda — renova o token.
     await supabase.auth.refreshSession().catch(() => null)
     await refreshFactors()
   }

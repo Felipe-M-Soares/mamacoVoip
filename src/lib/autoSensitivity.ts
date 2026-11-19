@@ -1,10 +1,3 @@
-// Sensibilidade AUTOMÁTICA: estima o ruído de fundo pelo percentil 20
-// das leituras dos últimos ~6 s (mais robusto que média — fala e
-// cliques não puxam o piso pra cima) e põe o corte 20 dB acima dele,
-// nunca abaixo de -46 dB (antes -55: som de fundo e teclado passavam)
-// nem acima de -26 dB (senão cortava voz baixa).
-// Chame push() a cada ~150 ms com sampleLevelDb(); devolve o limiar novo
-// quando mudou o suficiente (≥1.5 dB), senão null.
 export const AUTO_SENSITIVITY_TICK_MS = 150
 export function createAutoSensitivity() {
   const WINDOW = Math.round(6000 / AUTO_SENSITIVITY_TICK_MS)
@@ -22,7 +15,6 @@ export function createAutoSensitivity() {
       last = threshold
       return threshold
     },
-    /** Último limiar aplicado (pra reaplicar depois de refazer o gráfico). */
     get current() {
       return last
     },

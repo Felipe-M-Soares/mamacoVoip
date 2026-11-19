@@ -1,17 +1,6 @@
-// Ícones de interface do app — todos vêm do Lucide (lucide-react,
-// licença ISC), reexportados aqui com nomes do próprio app. Centralizar
-// num arquivo só permite trocar um ícone no app inteiro de uma vez e
-// mantém o tree-shaking: cada export é um import NOMEADO, então só os
-// ícones listados aqui entram no bundle.
-//
-// Uso: <MicIcon className="w-5 h-5" aria-hidden /> — o tamanho vem da
-// classe (w-/h-), a cor de `currentColor`. Traço padrão 2; para ícones
-// muito pequenos (≤14px) vale passar strokeWidth={2.25}.
-
-export type { LucideIcon as AppIcon, LucideProps as AppIconProps } from 'lucide-react'
+export type { LucideIcon as AppIcon } from 'lucide-react'
 
 export {
-  // Voz / chamada
   Mic as MicIcon,
   MicOff as MicOffIcon,
   Headphones as HeadphonesIcon,
@@ -26,7 +15,6 @@ export {
   LayoutGrid as SoundboardIcon,
   Sparkles as NoiseSuppressionIcon,
 
-  // Navegação / estrutura
   Settings as SettingsIcon,
   ChevronDown as ChevronDownIcon,
   ChevronUp as ChevronUpIcon,
@@ -38,7 +26,6 @@ export {
   X as CloseIcon,
   Search as SearchIcon,
 
-  // Pessoas
   Users as MembersIcon,
   User as UserIcon,
   UserPlus as AddFriendIcon,
@@ -46,7 +33,6 @@ export {
   ShieldCheck as ShieldCheckIcon,
   LogOut as LogOutIcon,
 
-  // Mensagens
   MessageCircle as MessageIcon,
   MessagesSquare as ThreadIcon,
   Pin as PinIcon,
@@ -64,7 +50,6 @@ export {
   Trash as TrashIcon,
   Megaphone as AnnouncementIcon,
 
-  // Diversos
   Check as CheckIcon,
   TriangleAlert as WarningIcon,
   Calendar as CalendarIcon,

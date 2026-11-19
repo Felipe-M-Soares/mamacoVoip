@@ -56,21 +56,9 @@ async function uploadServerImage(
   return { error: null, url: data.publicUrl }
 }
 
-// Estado de servidores compartilhado entre TODA a árvore de componentes.
-// Antes disso, useServers() era um hook "solto" — cada componente que o
-// chamava (ServerBar, os modais, o MainLayout) tinha sua PRÓPRIA cópia
-// da lista, sem se avisarem quando algo mudava. Resultado: criar um
-// servidor atualizava só o estado interno do modal, e a barra lateral
-// nunca ficava sabendo. Centralizando aqui num Context, um único
-// refresh() propaga pra tudo que usa useServers() ao mesmo tempo.
 export function ServersProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
-  // Só o ID (string estável): o objeto `user` muda a cada renovação do
-  // token (~1h) — antes isso recarregava a lista, recriava a assinatura do
-  // tempo real E (por causa do `loading`) trocava a tela inicial inteira
-  // por um spinner por um instante.
   const userId = user?.id ?? null
-  // Abre na hora com a lista da última vez (ver lib/startupCache.ts).
   const [cached] = useState(() => (userId ? readStartupCache<Server[]>(`servers:${userId}`) : null))
   const [servers, setServers] = useState<Server[]>(() => cached ?? [])
   const [loading, setLoading] = useState(!cached)
@@ -85,8 +73,6 @@ export function ServersProvider({ children }: { children: ReactNode }) {
       hasLoadedRef.current = false
       return
     }
-    // Spinner só na PRIMEIRA carga — recargas depois de criar/editar/sair
-    // de servidor atualizam a lista sem esconder a interface.
     if (!hasLoadedRef.current) setLoading(true)
     try {
       const { data, error } = await supabase.from('servers').select('*').order('created_at', { ascending: true })
@@ -109,23 +95,9 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     refresh()
   }, [refresh])
 
-  // Sem isso, a lista de servidores só era carregada UMA VEZ (no
-  // primeiro carregamento do app) e nunca mais — então entrar num
-  // servidor novo (aceitar convite por link, aceitar convite mandado no
-  // chat, ou até ser adicionado por outra pessoa) não aparecia em lugar
-  // nenhum até fechar e abrir o app de novo (o que forçava esse
-  // primeiro carregamento a rodar de novo). Mesmo padrão já usado em
-  // GroupConversationsContext.tsx: escuta mudanças na MINHA linha de
-  // `server_members` e recarrega a lista assim que algo mudar.
   useEffect(() => {
     if (!userId) return
     let active = true
-    // Sufixo aleatório no nome do canal — mesma proteção usada em
-    // useConversations.ts/useServerMembers.ts: se por qualquer motivo esse
-    // efeito rodar mais de uma vez ao mesmo tempo (StrictMode do React em
-    // dev, Fast Refresh, etc.) com o MESMO nome de canal, o Supabase
-    // devolveria o canal já inscrito e o segundo `.on()` derrubaria o app
-    // com "cannot add postgres_changes callbacks ... after subscribe()".
     const channel = changesChannel(`server_membership:${userId}`)
       .on(
         'postgres_changes',
@@ -133,7 +105,6 @@ export function ServersProvider({ children }: { children: ReactNode }) {
         () => void refresh()
       )
       .subscribe((status) => {
-        // `CLOSED` também vem da própria limpeza do efeito — ignora
         if (!active) return
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') void refresh()
       })
@@ -157,18 +128,7 @@ export function ServersProvider({ children }: { children: ReactNode }) {
       .single()
 
     if (error || !server) {
-      // Diagnóstico de permissão (RLS) só no log — nada de "[DEBUG …]"
-      // na mensagem mostrada pra pessoa.
       if (error?.code === '42501') {
-        try {
-          const { data: whoami } = await supabase.rpc('debug_whoami')
-          const row = whoami?.[0]
-          console.warn(
-            `[createServer] RLS recusou — app: ${user.id} | banco enxerga: ${row?.jwt_uid ?? 'null'} (role: ${row?.jwt_role ?? 'null'})`
-          )
-        } catch {
-          // diagnóstico é opcional
-        }
         return { error: 'Sem permissão para criar o servidor. Saia e entre de novo na conta e tente outra vez.' }
       }
       return { error: error?.message ?? 'Erro ao criar servidor' }
@@ -178,12 +138,6 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     if (iconFile) {
       const { error: uploadError, url: iconUrl } = await uploadServerImage(server.id, iconFile, 'icon')
       if (!uploadError && iconUrl) {
-        // TRIGÉSIMA NONA RODADA — bug relatado em auditoria: o resultado
-        // desse `.update()` nunca era checado — se ele falhasse (RLS,
-        // rede), o servidor ficava criado SEM ícone, mas `server.icon_url`
-        // já tinha sido marcado como se tivesse funcionado (otimista
-        // demais), sem avisar ninguém. Agora, se o update falhar, volta
-        // um aviso pra quem chamou em vez de fingir que deu certo.
         const { error: updateError } = await supabase.from('servers').update({ icon_url: iconUrl }).eq('id', server.id)
         if (updateError) {
           iconWarning = 'Servidor criado, mas não foi possível salvar o ícone. Tente trocá-lo de novo nas configurações.'
@@ -268,8 +222,6 @@ export function ServersProvider({ children }: { children: ReactNode }) {
   }
 
   async function createInvite(serverId: string, maxUses?: number, expiresHours?: number) {
-    // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
-    // flood acidental — por servidor.
     const limited = rateLimitError(`invite:${serverId}`, 5, 60_000, 'você está criando convite')
     if (limited) return { error: limited, invite: undefined }
     const { data, error } = await supabase.rpc('create_server_invite', {
@@ -280,11 +232,6 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null, invite: data ?? undefined }
   }
 
-  // Valor memoizado: antes um objeto novo a cada render do provider fazia
-  // TODO consumidor de useServers() re-renderizar junto. As ações usam
-  // `user`/`refresh` do render em que foram criadas; como o memo só é
-  // refeito quando `servers`/`loading`/`refresh` mudam, elas nunca ficam
-  // com um userId desatualizado (refresh muda junto com o userId).
   const value = useMemo(
     () => ({
       servers,

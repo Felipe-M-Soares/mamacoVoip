@@ -4,33 +4,17 @@ import { useServerMembers } from '../../hooks/useServerMembers'
 import { useOnlineIds } from '../../hooks/usePresence'
 import type { Server } from '../../types/database'
 
-// Card que aparece ao passar o mouse por cima de um servidor na barra
-// lateral — mostra rapidinho quem está online ali dentro, sem precisar
-// abrir o servidor (igual o tooltip de servidor de apps de chat populares). Só é
-// montado enquanto o mouse está em cima do ícone (ver ServerBar.tsx),
-// então `useServerMembers` busca os membros na hora — sem precisar
-// manter esses dados carregados o tempo todo pra servidores que a
-// pessoa nem está olhando.
 export function ServerHoverCard({ server, anchorRect }: { server: Server; anchorRect: DOMRect }) {
   const { members, loading } = useServerMembers(server.id)
   const onlineIds = useOnlineIds()
-  // Mesmo critério de "online de verdade" usado em MemberList.tsx e
-  // FriendsPanel.tsx: status diferente de offline E presença em tempo
-  // real confirmada.
   const onlineMembers = members.filter((m) => m.profile.status !== 'offline' && onlineIds.has(m.profile.id))
 
-  // Alinha verticalmente com o ícone e aparece logo à direita da barra
-  // lateral (72px de largura) — clampado pra não vazar pra fora da tela
-  // em telas menores ou quando o servidor está perto do fim da lista.
   const top = Math.max(8, Math.min(anchorRect.top, window.innerHeight - 260))
   const left = anchorRect.right + 12
 
   return createPortal(
     <div
       style={{ position: 'fixed', top, left }}
-      // pointer-events-none: é só uma prévia, não precisa ser clicável
-      // — e assim o mouse "atravessa" o card sem disparar um
-      // mouseleave falso no ícone por causa de sobreposição.
       className="z-[190] w-64 surface-elevated rounded-xl p-3.5 pointer-events-none animate-pop-in"
     >
       <p className="font-display text-sm font-semibold text-white truncate">{server.name}</p>

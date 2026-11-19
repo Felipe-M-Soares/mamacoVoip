@@ -1,6 +1,4 @@
 export function MessageListSkeleton() {
-  // Larguras variadas pra não parecer um bloco uniforme e artificial —
-  // mais parecido com texto de verdade "carregando".
   const rows = [
     { avatar: true, lines: [72, 45] },
     { avatar: false, lines: [58] },

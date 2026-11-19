@@ -18,21 +18,13 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
   const { friends, incoming, outgoing, blocked, sendRequest, acceptRequest, declineRequest, removeFriend, unblockUser } =
     useFriends()
   const { openConversationWith } = useConversations()
-  // Abre em "Todos": antes abria em "Online" e parecia que os amigos
-  // offline tinham sumido.
   const [tab, setTab] = useState<Tab>('all')
   const [addUsername, setAddUsername] = useState('')
   const [addError, setAddError] = useState<string | null>(null)
   const [addSuccess, setAddSuccess] = useState<string | null>(null)
 
   const onlineIds = useOnlineIds()
-  // Mesmo cruzamento de MemberList.tsx: só conta como "online" quem não
-  // escolheu ficar invisível E está de fato conectado agora (ver
-  // usePresence.ts) — evita amigo desconectado ficando preso na aba
-  // "Online" pra sempre.
   const isOnline = (f: (typeof friends)[number]) => f.profile.status !== 'offline' && onlineIds.has(f.profile.id)
-  // Sem repetidos (amizade gravada nos dois sentidos aparecia duas vezes)
-  // e com quem está online primeiro, depois em ordem alfabética.
   const uniqueFriends = [...new Map(friends.map((f) => [f.profile.id, f])).values()]
   const sortedFriends = [...uniqueFriends].sort((a, b) => {
     const diff = Number(isOnline(b)) - Number(isOnline(a))
@@ -282,7 +274,6 @@ const STATUS_LABEL: Record<string, string> = {
   invisible: 'Offline',
 }
 
-// Ilustração simples (SVG inline) + título + dica, no lugar do texto cinza solto.
 function EmptyState({ kind, title, hint }: { kind: 'online' | 'friends' | 'pending' | 'blocked'; title: string; hint: string }) {
   return (
     <div className="flex flex-col items-center text-center py-14 px-4 animate-fade-in">
@@ -351,7 +342,6 @@ function FriendGrid({
     }
   }[]
   label: string
-  /** Quem está conectado agora (status salvo no perfil pode estar velho). */
   onlineIds: Set<string>
   empty: React.ReactNode
   onMessage: (userId: string) => void
@@ -364,16 +354,9 @@ function FriendGrid({
   const { menuState, openMenu, closeMenu } = useContextMenuState()
   const [contextFriendId, setContextFriendId] = useState<string | null>(null)
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null)
-  // Confirmação inline de "remover amigo" (antes removia num clique só)
   const [confirmingRemoveId, setConfirmingRemoveId] = useState<string | null>(null)
   const feedbackTimeoutRef = useRef<number | null>(null)
 
-  // Clicar com o botão direito num amigo online e chamá-lo direto pra um
-  // dos MEUS servidores — igual o "Chamar para" que um app de chat popular tem no
-  // menu de contexto de um amigo. Reusa exatamente a mesma lógica de
-  // convite (gerar código + mandar por DM) que InviteFriendsModal.tsx já
-  // usa, só que direcionada a UM amigo e UM servidor escolhidos aqui, em
-  // vez do fluxo em modal com checkboxes.
   async function handleInviteToServer(friendId: string, serverId: string, serverName: string) {
     if (!user) return
     if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current)
@@ -381,12 +364,6 @@ function FriendGrid({
     if (inviteError || !invite) {
       setInviteFeedback('Não foi possível gerar o convite.')
     } else {
-      // Se eu já estou numa call DE VOZ nesse mesmo servidor no momento
-      // de chamar, o convite carrega o canal — quem aceitar cai direto
-      // na chamada (ver MainLayout.tsx/InviteMessageCard.tsx), em vez de
-      // só entrar no servidor e ter que procurar a sala sozinho. Fora de
-      // uma call (ou numa call de OUTRO servidor), continua sendo um
-      // convite normal, sem canal nenhum.
       let channelId: string | undefined
       let channelName: string | undefined
       if (voice.connectedServerId === serverId && voice.connectedChannelId) {

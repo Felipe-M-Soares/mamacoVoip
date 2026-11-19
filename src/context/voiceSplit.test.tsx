@@ -8,11 +8,9 @@ function participant(userId: string, speaking = false): VoiceParticipant {
   return { userId, speaking, cameraStream: null, screenStream: null, micAudioStream: null, screenAudioStream: null }
 }
 
-// Estados do provider (useState) mantêm a identidade entre renders.
 const NO_QUALITY = {}
 const NO_PARTICIPANTS = {}
 
-// Valor "cru" como o VoiceProvider monta: objeto e funções novos a cada render.
 function raw(over: Partial<VoiceContextValue> = {}): VoiceContextValue {
   return {
     connectedChannelId: 'c1',
@@ -39,19 +37,16 @@ describe('useSplitVoiceValue', () => {
     const core1 = result.current.core
     const full1 = result.current.full
 
-    // re-render sem mudança nenhuma (funções recriadas): nada muda
     rerender({ v: raw({ participants: people }) })
     expect(result.current.core).toBe(core1)
     expect(result.current.full).toBe(full1)
 
-    // alguém começou a falar / eu comecei a falar / qualidade mudou
     rerender({ v: raw({ participants: { u2: { ...a, speaking: true } }, speaking: true, connectionQuality: { u2: 'good' } }) })
     expect(result.current.core).toBe(core1)
     expect(result.current.full).not.toBe(full1)
     expect(result.current.full.participants.u2.speaking).toBe(true)
     expect(result.current.full.speaking).toBe(true)
 
-    // mudança "de verdade" (mutou): core novo
     rerender({ v: raw({ participants: { u2: a }, muted: true }) })
     expect(result.current.core).not.toBe(core1)
     expect(result.current.core.muted).toBe(true)

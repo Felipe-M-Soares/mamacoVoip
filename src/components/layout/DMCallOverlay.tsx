@@ -5,13 +5,6 @@ import { Avatar } from '../ui/Avatar'
 import { VideoTile } from './CallMediaTiles'
 import type { Profile } from '../../types/database'
 
-// Barra flutuante da chamada de voz/vídeo quando ela é numa DM ou
-// grupo (não num canal de servidor — esses já têm a própria tela
-// cheia em VoiceChannelView.tsx). Fica montada globalmente
-// (MainLayout.tsx) porque a chamada em si continua mesmo navegando
-// pra outro lugar do app — só aparece quando de fato há uma chamada
-// de DM/grupo em andamento (connectedServerId null é o sinal disso,
-// ver join() em VoiceContext.tsx).
 export function DMCallOverlay({ profilesById }: { profilesById: Record<string, Profile> }) {
   const voice = useVoiceCore()
   const selfId = useAuth().user?.id ?? null
@@ -57,7 +50,6 @@ export function DMCallOverlay({ profilesById }: { profilesById: Record<string, P
 
       {!minimized && (
         <div className={`grid gap-2 p-2.5 ${hasAnyVideo ? 'grid-cols-2' : 'grid-cols-3'}`}>
-          {/* Prévia da própria câmera (espelhada) quando ligada. */}
           <ParticipantMiniTile
             key="local"
             isLocal
@@ -164,8 +156,6 @@ function ParticipantMiniTile({
   mirror?: boolean
   name: string
   avatarUrl?: string | null
-  // Quem é (pra acender a borda quando fala) — lido direto do store de
-  // atividade, sem re-renderizar a janela da chamada inteira.
   speakerId: string | null
   hasVideo: boolean
   stream: MediaStream | null
@@ -187,9 +177,6 @@ function ParticipantMiniTile({
           <Avatar name={name} avatarUrl={avatarUrl ?? null} size={34} />
         </div>
       )}
-      {/* O áudio da chamada NÃO toca mais aqui — ver VoiceCallAudio.tsx
-          (sempre montado): aqui dentro ele parava ao minimizar a barra e
-          ignorava volume/ensurdecer. */}
       {hasVideo && stream ? (
         <span className="glass absolute bottom-1 left-1 text-[10px] font-medium text-white px-1.5 py-px rounded-full truncate max-w-[90%]">
           {name}

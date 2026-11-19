@@ -1,8 +1,8 @@
 export const DESKTOP_DOWNLOAD_URL =
-  'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/MamacosVoip-Setup.exe'
+  'https://github.com/Felipe-M-Soares/mamacoVoip-releases/releases/latest/download/MamacosVoip-Setup.exe'
 
 export const ANDROID_DOWNLOAD_URL =
-  'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/MamacosVoip.apk'
+  'https://github.com/Felipe-M-Soares/mamacoVoip-releases/releases/latest/download/MamacosVoip.apk'
 
 export const PUBLIC_WEB_URL = 'https://mamaco-voip.vercel.app'
 

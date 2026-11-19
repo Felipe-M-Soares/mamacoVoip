@@ -114,6 +114,8 @@ jobs:
           name: mamacos-voip-microsoft-store
           path: release/*.appx
           if-no-files-found: error
+          retention-days: 3
+        continue-on-error: true
 
   android:
     needs: prepare
@@ -213,6 +215,29 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Copiar a versão para o repositório de instaladores
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          SRC_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASES_REPO: Felipe-M-Soares/mamacoVoip-releases
+          TAG: v${{ needs.prepare.outputs.version }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Falta o secret RELEASES_TOKEN — a versão $TAG fica como rascunho e ninguém recebe atualização."
+            exit 1
+          fi
+          mkdir -p rel
+          GH_TOKEN="$SRC_TOKEN" gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir rel
+          ls -l rel
+          for f in latest.yml MamacosVoip-Setup.exe; do
+            if [ ! -f "rel/$f" ]; then
+              echo "::error::$f não está no release $TAG — nada foi copiado."
+              exit 1
+            fi
+          done
+          gh release delete "$TAG" --repo "$RELEASES_REPO" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" rel/* --repo "$RELEASES_REPO" --title "$TAG" --notes "Mamacos Voip $TAG" --latest
+
       - name: Publicar o release (sai de rascunho e vira o "latest")
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

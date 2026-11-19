@@ -16,20 +16,6 @@ export function ResetPassword() {
   const [success, setSuccess] = useState(false)
 
   useEffect(() => {
-    // O link do e-mail traz a prova de que a pessoa é dona da conta.
-    // Formatos aceitos (ver ForgotPassword.tsx e supabase/README.md):
-    //  1) "?code=..." (PKCE, mesmo navegador que pediu): o cliente troca
-    //     sozinho (detectSessionInUrl) e avisa com PASSWORD_RECOVERY;
-    //  2) "?token_hash=...&type=recovery" (template de e-mail
-    //     recomendado): verifyOtp aqui — funciona em qualquer aparelho;
-    //  3) "#access_token=...&type=recovery" (template padrão, pedido no
-    //     fluxo implícito): o cliente principal (PKCE) recusa esse
-    //     formato, então a sessão é aplicada aqui com setSession.
-    //
-    // Antes, QUALQUER sessão servia: alguém com acesso a um app já
-    // logado (computador destravado) abria /redefinir-senha e trocava a
-    // senha da conta sem saber a atual. Agora o formulário só aparece
-    // quando a sessão veio de fato de um link de recuperação.
     let cancelled = false
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' && session && !cancelled) setReady(true)
@@ -68,8 +54,6 @@ export function ResetPassword() {
         data: { session },
       } = await supabase.auth.getSession()
       if (cancelled) return
-      // fromLink: formatos 2/3 acima. wasPasswordRecoveryDetected: formato
-      // 1, cuja troca pode ter acontecido antes desta tela montar.
       if (session && (fromLink || wasPasswordRecoveryDetected())) setReady(true)
       setChecking(false)
     })()
@@ -100,8 +84,6 @@ export function ResetPassword() {
       setError(traduzErro(error.message))
       return
     }
-    // Senha trocada por recuperação = pode ser que alguém tenha a senha
-    // antiga. Derruba as outras sessões abertas (outros aparelhos).
     await supabase.auth.signOut({ scope: 'others' }).catch(() => {})
     setLoading(false)
     setSuccess(true)

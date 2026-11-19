@@ -30,7 +30,6 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   const otherLastReadAt = useDMSeenState(conversationId, otherProfile.id)
   const [replyingTo, setReplyingTo] = useState<DMMessage | null>(null)
   const [reportingMessageId, setReportingMessageId] = useState<string | null>(null)
-  // Confirmação de bloqueio inline no header (antes era um confirm() nativo)
   const [confirmingBlock, setConfirmingBlock] = useState(false)
 
   const isBlocked = blocked.some((b) => b.blocked_id === otherProfile.id)
@@ -54,8 +53,6 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
     [deleteMessage]
   )
 
-  // Agrupamento por autor pré-calculado (antes: vários `new Date()` por
-  // mensagem a cada render/tecla digitada).
   const showHeaders = useMemo(() => {
     let prevAuthor = ''
     let prevTime = 0
@@ -68,8 +65,6 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
     })
   }, [messages])
 
-  // Última mensagem MINHA que a outra pessoa já leu — só essa mostra
-  // "Visto", igual o WhatsApp fazem.
   const myLastSeenMessageId = useMemo(() => {
     if (!otherLastReadAt) return undefined
     const readAt = new Date(otherLastReadAt).getTime()
@@ -80,9 +75,6 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
     return undefined
   }, [messages, otherLastReadAt, user?.id])
 
-  // Mesmo bug do ChatArea.tsx: sem o `return`, o MessageComposer nunca
-  // recebia o erro de volta e sempre limpava a caixa como se tivesse
-  // dado certo, mesmo quando o envio falhava.
   async function handleSend(content: string, files: File[]) {
     const result = await sendMessage(content, replyingTo?.id ?? null, files)
     if (!result.error) {
@@ -150,7 +142,6 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
           </div>
         ) : (
           <button
-            // bloquear era um clique só, sem confirmação — agora confirma inline
             onClick={() => setConfirmingBlock(true)}
             title={`Bloquear ${otherProfile.display_name || otherProfile.username}`}
             className="h-9 px-3.5 rounded-[10px] text-sm font-medium text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
@@ -213,7 +204,6 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
                       showHeader={showHeaders[i]}
                       isOwn={message.author_id === user?.id}
                       replyToMessage={replyToMessage}
-                      // Antes, responder a uma mensagem SUA mostrava "alguém" como autor.
                       replyToAuthor={replyToMessage ? authorFor(replyToMessage.author_id) : undefined}
                       onEdit={editMessage}
                       onDelete={handleDelete}

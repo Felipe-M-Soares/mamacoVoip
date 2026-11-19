@@ -1,26 +1,3 @@
-// Catálogo de jogos detectados pelo app desktop (status "Jogando X",
-// sugestão "Compartilhar seu jogo" e preset automático de transmissão).
-//
-// Módulo PURO (sem Electron, sem Node além de `module.exports`) de
-// propósito: é carregado pelo electron/main.cjs e também testado pelo
-// Vitest (ver src/lib/gameCatalog.test.ts).
-//
-// Cada entrada:
-//   name      — nome exibido ("Jogando <name>")
-//   exes      — nomes de executável REAIS do processo do jogo (minúsculos,
-//               com .exe). Nunca colocar aqui o serviço do anti-cheat
-//               (ex.: rainbowsix_be.exe, EasyAntiCheat.exe) — esses ficam
-//               residentes depois de fechar o jogo e travariam o status.
-//               Também evitar o LAUNCHER quando ele fica aberto na bandeja.
-//   antiCheat — anti-cheat de kernel/proteção relevante, ou null. É só
-//               INFORMATIVO: o Mamacos Voip nunca injeta nada em processo
-//               de jogo (nem DLL, nem hook de DirectX). A captura usa só
-//               APIs oficiais do Windows (Windows Graphics Capture / DXGI),
-//               que os anti-cheats não bloqueiam, e a sobreposição é uma
-//               janela separada por cima do jogo. Usado pra explicar na UI
-//               por que a sobreposição exige "janela sem borda".
-//   category  — só organização.
-
 const ANTI_CHEAT_LABELS = {
   vanguard: 'Riot Vanguard',
   eac: 'Easy Anti-Cheat',
@@ -37,16 +14,10 @@ const ANTI_CHEAT_LABELS = {
   defense: 'Defense Matrix',
 }
 
-/** @type {{ name: string, exes: string[], antiCheat: keyof typeof ANTI_CHEAT_LABELS | null, category: string }[]} */
 const GAME_CATALOG = [
-  // --- Tiro competitivo ---------------------------------------------------
-  // Valorant: VALORANT.exe é só o "stub" que abre o jogo; o processo que
-  // fica rodando durante a partida é o -Win64-Shipping.
   { name: 'Valorant', exes: ['valorant-win64-shipping.exe', 'valorant.exe'], antiCheat: 'vanguard', category: 'fps' },
   { name: 'Counter-Strike 2', exes: ['cs2.exe'], antiCheat: 'vac', category: 'fps' },
   { name: 'Counter-Strike', exes: ['csgo.exe'], antiCheat: 'vac', category: 'fps' },
-  // Siege X (2025) manteve os mesmos executáveis. NÃO incluir
-  // rainbowsix_be.exe (serviço do BattlEye, fica residente).
   {
     name: 'Rainbow Six Siege X',
     exes: ['rainbowsix.exe', 'rainbowsix_vulkan.exe', 'rainbowsix_dx11.exe', 'rainbowsix_dx12.exe'],
@@ -56,7 +27,6 @@ const GAME_CATALOG = [
   { name: 'Apex Legends', exes: ['r5apex.exe', 'r5apex_dx12.exe'], antiCheat: 'eac', category: 'fps' },
   { name: 'Overwatch 2', exes: ['overwatch.exe'], antiCheat: 'defense', category: 'fps' },
   { name: 'Marvel Rivals', exes: ['marvel-win64-shipping.exe'], antiCheat: 'neac', category: 'fps' },
-  // Call of Duty HQ (Black Ops 6/7, Warzone) roda tudo num executável só.
   {
     name: 'Call of Duty',
     exes: ['cod.exe', 'cod25-cod.exe', 'cod24-cod.exe', 'cod23-cod.exe', 'cod22-cod.exe', 'blackops6.exe', 'blackops7.exe', 'modernwarfare.exe', 'blackopscoldwar.exe'],
@@ -75,8 +45,6 @@ const GAME_CATALOG = [
   { name: 'Halo Infinite', exes: ['haloinfinite.exe'], antiCheat: 'eac', category: 'fps' },
   { name: 'Vertigo', exes: ['itsvertigo.exe'], antiCheat: null, category: 'fps' },
 
-  // --- Battle royale / multiplayer casual -----------------------------
-  // Fortnite: variantes _EAC/_BE aparecem conforme o anti-cheat carregado.
   {
     name: 'Fortnite',
     exes: ['fortniteclient-win64-shipping.exe', 'fortniteclient-win64-shipping_eac_eos.exe', 'fortniteclient-win64-shipping_be.exe'],
@@ -92,9 +60,6 @@ const GAME_CATALOG = [
   { name: 'Lethal Company', exes: ['lethal company.exe', 'lethalcompany.exe'], antiCheat: null, category: 'casual' },
   { name: 'Phasmophobia', exes: ['phasmophobia.exe'], antiCheat: null, category: 'casual' },
 
-  // --- MOBA ---------------------------------------------------------------
-  // League: "League of Legends.exe" é a partida em si; o cliente
-  // (LeagueClientUx) também conta como "jogando" (fila/seleção de campeão).
   {
     name: 'League of Legends',
     exes: ['league of legends.exe', 'leagueclientux.exe', 'leagueclient.exe'],
@@ -106,7 +71,6 @@ const GAME_CATALOG = [
   { name: 'Smite 2', exes: ['hemingway-win64-shipping.exe'], antiCheat: 'eac', category: 'moba' },
   { name: 'Smite', exes: ['smite.exe'], antiCheat: 'eac', category: 'moba' },
 
-  // --- Mundo aberto / RPG / ação ------------------------------------------
   { name: 'GTA V', exes: ['gta5.exe', 'gta5_enhanced.exe'], antiCheat: 'battleye', category: 'mundo-aberto' },
   { name: 'Red Dead Redemption 2', exes: ['rdr2.exe', 'reddeadredemption2.exe'], antiCheat: null, category: 'mundo-aberto' },
   { name: 'Elden Ring', exes: ['eldenring.exe'], antiCheat: 'eac', category: 'rpg' },
@@ -132,10 +96,6 @@ const GAME_CATALOG = [
   { name: 'Hollow Knight: Silksong', exes: ['hollow knight silksong.exe'], antiCheat: null, category: 'acao' },
   { name: 'Warframe', exes: ['warframe.x64.exe'], antiCheat: null, category: 'acao' },
 
-  // --- Sandbox / sobrevivência --------------------------------------------
-  // javaw.exe é genérico (qualquer app Java), mas na prática quem tem
-  // javaw com JANELA grande aberta é quase sempre o Minecraft Java — e a
-  // detecção exige janela visível do processo (ver runGameCheckTick).
   { name: 'Minecraft', exes: ['minecraft.windows.exe', 'javaw.exe', 'minecraft.exe'], antiCheat: null, category: 'sandbox' },
   { name: 'Terraria', exes: ['terraria.exe'], antiCheat: null, category: 'sandbox' },
   { name: 'Rust', exes: ['rustclient.exe', 'rust.exe'], antiCheat: 'eac', category: 'sobrevivencia' },
@@ -149,7 +109,6 @@ const GAME_CATALOG = [
   { name: 'Schedule I', exes: ['schedule i.exe'], antiCheat: null, category: 'sandbox' },
   { name: 'Dune: Awakening', exes: ['dunesandbox-win64-shipping.exe'], antiCheat: 'eac', category: 'sobrevivencia' },
 
-  // --- Esportes / corrida -------------------------------------------------
   { name: 'Rocket League', exes: ['rocketleague.exe'], antiCheat: 'eac', category: 'esporte' },
   { name: 'EA Sports FC 26', exes: ['fc26.exe'], antiCheat: 'javelin', category: 'esporte' },
   { name: 'EA Sports FC 25', exes: ['fc25.exe'], antiCheat: 'javelin', category: 'esporte' },
@@ -160,7 +119,6 @@ const GAME_CATALOG = [
   { name: 'Assetto Corsa', exes: ['assettocorsa.exe', 'acs.exe'], antiCheat: null, category: 'corrida' },
   { name: 'F1 25', exes: ['f1_25.exe'], antiCheat: 'javelin', category: 'corrida' },
 
-  // --- MMO / outros -------------------------------------------------------
   { name: 'World of Warcraft', exes: ['wow.exe', 'wowclassic.exe'], antiCheat: null, category: 'mmo' },
   { name: 'Final Fantasy XIV', exes: ['ffxiv_dx11.exe'], antiCheat: null, category: 'mmo' },
   { name: 'Lost Ark', exes: ['lostark.exe'], antiCheat: 'eac', category: 'mmo' },
@@ -169,26 +127,20 @@ const GAME_CATALOG = [
   { name: 'Palia', exes: ['palia.exe'], antiCheat: null, category: 'mmo' },
   { name: 'Sea of Thieves', exes: ['sotgame.exe', 'sea of thieves.exe', 'seaofthieves.exe'], antiCheat: 'eac', category: 'mmo' },
 
-  // --- Jogos mobile no PC (Free Fire etc.) --------------------------------
-  // Não dá pra saber QUAL jogo roda dentro do emulador — mostra o emulador.
   { name: 'BlueStacks (jogo mobile)', exes: ['hd-player.exe'], antiCheat: null, category: 'mobile' },
   { name: 'Gameloop (jogo mobile)', exes: ['androidemulatoren.exe', 'androidemulatorex.exe', 'aow_exe.exe'], antiCheat: null, category: 'mobile' },
   { name: 'MuMu Player (jogo mobile)', exes: ['mumuplayer.exe', 'mumunxdevice.exe'], antiCheat: null, category: 'mobile' },
   { name: 'LDPlayer (jogo mobile)', exes: ['dnplayer.exe'], antiCheat: null, category: 'mobile' },
 ]
 
-// Nomes genéricos demais (muita coisa não-jogo usa) — nunca contam como
-// jogo, mesmo que alguém adicione por engano numa entrada acima.
 const EXCLUDED_GENERIC_EXES = new Set(['client.exe', 'game.exe', 'launcher.exe', 'java.exe'])
 
-/** Mapa exe (minúsculo, com .exe) → entrada do catálogo. */
 function buildExeIndex(catalog = GAME_CATALOG) {
   const index = new Map()
   for (const game of catalog) {
     for (const exe of game.exes) {
       const key = String(exe).toLowerCase()
       if (EXCLUDED_GENERIC_EXES.has(key)) continue
-      // Primeira entrada vence (lista acima está em ordem de prioridade).
       if (!index.has(key)) index.set(key, game)
     }
   }
@@ -197,7 +149,6 @@ function buildExeIndex(catalog = GAME_CATALOG) {
 
 const EXE_INDEX = buildExeIndex()
 
-/** Compatibilidade: o formato antigo { 'exe': 'Nome' } usado pelo main.cjs. */
 function buildKnownGamesMap() {
   const out = {}
   for (const [exe, game] of EXE_INDEX) out[exe] = game.name
@@ -211,7 +162,6 @@ function normalizeExeName(name) {
   return base.endsWith('.exe') ? base : `${base}.exe`
 }
 
-/** Entrada do catálogo pro nome de processo (com ou sem .exe / caminho), ou null. */
 function findGameByProcessName(name) {
   const key = normalizeExeName(name)
   return key ? EXE_INDEX.get(key) ?? null : null
@@ -222,7 +172,6 @@ function findGameByName(label) {
   return GAME_CATALOG.find((g) => g.name === label) ?? null
 }
 
-/** Nomes de processo SEM .exe (formato que o scanner/tasklist usa) de um jogo pelo nome exibido. */
 function processNamesForGame(label) {
   const game = findGameByName(label)
   if (!game) return []
@@ -236,16 +185,6 @@ function antiCheatLabel(key) {
   return key ? ANTI_CHEAT_LABELS[key] ?? null : null
 }
 
-// ---------------------------------------------------------------------------
-// Detecção GENÉRICA (fallback pra jogos fora do catálogo): se o executável
-// da janela em primeiro plano mora dentro da biblioteca de uma loja de
-// jogos (Steam, Epic, Riot, Xbox/Game Pass, GOG, Ubisoft, EA, Battle.net),
-// é quase certamente um jogo. O nome exibido vem da PASTA do jogo (ex.:
-// "...\steamapps\common\Hollow Knight Silksong\..." → "Hollow Knight
-// Silksong"), que é bem mais bonito que o nome do .exe.
-// Custo: zero processo a mais — o caminho vem na mesma consulta de
-// "janela em primeiro plano" que o app já faz a cada 3s.
-// ---------------------------------------------------------------------------
 const STORE_LIBRARY_PATTERNS = [
   { store: 'Steam', re: /[\\/]steamapps[\\/]common[\\/]([^\\/]+)[\\/]/i },
   { store: 'Epic Games', re: /[\\/]epic games[\\/]([^\\/]+)[\\/]/i },
@@ -257,7 +196,6 @@ const STORE_LIBRARY_PATTERNS = [
   { store: 'Battle.net', re: /[\\/](?:program files(?: \(x86\))?)[\\/](overwatch|diablo iv|call of duty|world of warcraft|hearthstone|starcraft ii)[\\/]/i },
 ]
 
-// Launchers/ferramentas que moram nessas pastas mas NÃO são jogo.
 const NON_GAME_EXES = new Set([
   'steam.exe',
   'steamwebhelper.exe',
@@ -285,13 +223,8 @@ const NON_GAME_EXES = new Set([
   'dxsetup.exe',
 ])
 
-// Pastas de loja que NÃO são um jogo (ex.: "Riot Games\Riot Client").
 const NON_GAME_FOLDERS = new Set(['riot client', 'launcher', 'directxredist', 'steamworks shared', 'epic online services'])
 
-/**
- * Se `exePath` for um executável de jogo dentro da biblioteca de uma loja,
- * devolve { label, store, processName }. Senão null.
- */
 function detectGenericGameFromPath(exePath) {
   if (!exePath || typeof exePath !== 'string') return null
   const exe = normalizeExeName(exePath)
@@ -313,7 +246,6 @@ function detectGenericGameFromPath(exePath) {
 }
 
 function prettifyFolderName(folder) {
-  // "HollowKnightSilksong" / "Hollow_Knight" → espaços legíveis.
   return folder
     .replace(/[_]+/g, ' ')
     .replace(/([a-z])([A-Z])/g, '$1 $2')

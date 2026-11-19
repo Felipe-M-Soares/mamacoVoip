@@ -28,26 +28,11 @@ export function ForgotPassword() {
       return
     }
     setLoading(true)
-    // Sempre manda pro site (não pro app://) — clicar num link de
-    // e-mail sempre abre o navegador do sistema, então a redefinição
-    // acontece lá. Depois é só entrar de novo no app (web ou desktop)
-    // com a senha nova.
-    //
-    // B3/PKCE: o cliente principal usa PKCE, que só funciona se o link
-    // for aberto no MESMO navegador que pediu (é lá que fica o
-    // code_verifier). Como o link quase sempre abre em outro lugar (o
-    // app desktop pede, o navegador abre; ou o e-mail é lido no
-    // celular), o pedido de recuperação sai de um cliente descartável no
-    // fluxo implícito. ResetPassword.tsx aceita os três formatos de volta
-    // (#access_token, ?code= e ?token_hash= — este último é o
-    // recomendado, ver supabase/README.md).
     const { error } = await createEphemeralAuthClient('implicit').auth.resetPasswordForEmail(normalizeEmail(email), {
       redirectTo: `${PUBLIC_WEB_URL}/redefinir-senha`,
     })
     setLoading(false)
     if (error) {
-      // Só mostra erro de limite/conexão — qualquer outro caso cai na
-      // mesma mensagem de sucesso, pra não revelar se o e-mail tem conta.
       const translated = traduzErro(error.message)
       if (/rate limit|segundos|Muitas|conexão|internet/i.test(error.message + translated)) {
         setError(translated)

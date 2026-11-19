@@ -9,27 +9,9 @@ export function UpdateStatusBadge() {
   const [applying, setApplying] = useState(false)
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // A janelinha nativa do Windows que aparece durante a instalação
-  // silenciosa ("Instalando, por favor aguarde...") não tem como ser
-  // customizada — é uma tela fixa do instalador NSIS, sem opção pra
-  // trocar a barra horizontal por um anel de carregamento (o
-  // electron-builder só deixa trocar o ÍCONE dela, que já é o nosso).
-  // Em vez de tentar reescrever o instalador nativo (arriscado e sem
-  // como testar direito), mostramos ANTES disso uma tela cheia com a
-  // cara do app — mesmo anel vermelho pulsante + spinner que já aparece
-  // ao abrir o app — pra pessoa ver algo com a nossa identidade primeiro.
-  // A janela nativa some rápido (só o tempo de copiar o instalador já
-  // baixado) e, logo depois, o app reabre sozinho já mostrando essa
-  // mesma tela de novo (é a splash normal de abertura) — na prática,
-  // o que a pessoa vê a maior parte do tempo é o visual do app, não o
-  // do Windows.
   function handleRestart() {
     if (applying) return
     setApplying(true)
-    // AUDITORIA: antes, se o reinício falhasse (ou não houvesse
-    // atualização baixada de fato), a tela cheia de "Aplicando
-    // atualização..." ficava travada pra sempre, cobrindo o app inteiro.
-    // Agora, se o processo principal recusar/falhar, a tela some.
     restartTimerRef.current = setTimeout(() => {
       restartTimerRef.current = null
       restart()
@@ -46,8 +28,6 @@ export function UpdateStatusBadge() {
     }
   }, [])
 
-  // Se o processo principal avisar erro enquanto a tela de "Aplicando"
-  // está aberta (ex.: quitAndInstall falhou), volta pro app normal.
   useEffect(() => {
     if (status?.status === 'error') setApplying(false)
   }, [status?.status])
@@ -57,9 +37,6 @@ export function UpdateStatusBadge() {
       setDismissedError(false)
       return
     }
-    // Não checar com sucesso (ex: sem internet) não é um problema
-    // grave o bastante pra ficar um alerta permanente na tela — some
-    // sozinho depois de alguns segundos.
     const timer = setTimeout(() => setDismissedError(true), 6000)
     return () => clearTimeout(timer)
   }, [status?.status])
@@ -69,8 +46,6 @@ export function UpdateStatusBadge() {
       setDismissedUpToDate(false)
       return
     }
-    // "Tudo certo" também não precisa ficar preso na tela pra sempre —
-    // confirma rapidinho e some sozinho.
     const timer = setTimeout(() => setDismissedUpToDate(true), 3000)
     return () => clearTimeout(timer)
   }, [status?.status])
@@ -154,7 +129,6 @@ export function UpdateStatusBadge() {
     )
   }
 
-  // status === 'error'
   return (
     <div role="alert" className="fixed bottom-4 right-4 z-[250] max-w-sm flex items-start gap-2.5 surface-elevated !border-rose-500/25 rounded-xl px-3.5 py-3 animate-pop-in">
       <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-rose-400 shrink-0 mt-0.5">
@@ -171,7 +145,6 @@ export function UpdateStatusBadge() {
               <button
                 onClick={() => {
                   copyText(status.message ?? '').catch(() => {
-                    // sem permissão de área de transferência — nada a fazer
                   })
                 }}
                 className="text-[11px] font-medium text-mv-accent hover:underline"

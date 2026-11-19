@@ -3,8 +3,6 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import type { Thread } from '../types/database'
 
-// Mapa mensagem-pai -> thread, pra saber rapidamente se uma mensagem
-// já tem uma thread e mostrar "N respostas" embaixo dela.
 export function useChannelThreads(channelId: string | null) {
   const { user } = useAuth()
   const [threadsByMessageId, setThreadsByMessageId] = useState<Record<string, Thread>>({})
@@ -16,9 +14,6 @@ export function useChannelThreads(channelId: string | null) {
 
   const refresh = useCallback(async () => {
     const seq = ++loadSeqRef.current
-    // Zera na hora ao trocar de canal — antes as threads do canal anterior
-    // ficavam "penduradas" em mensagens do canal novo até a busca voltar,
-    // e uma resposta atrasada do canal anterior podia sobrescrever a nova.
     if (loadedChannelRef.current !== channelId) {
       loadedChannelRef.current = channelId
       setThreadsByMessageId({})

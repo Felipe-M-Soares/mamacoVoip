@@ -15,7 +15,6 @@ import { copyText } from '../../lib/copyText'
 import { useVoiceRoster } from '../../lib/voiceRoster'
 import { useChannels } from '../../hooks/useChannels'
 
-// Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const ManageMemberModal = lazyModal(() => import('../modals/ManageMemberModal').then((m) => m.ManageMemberModal))
 const InviteFriendsModal = lazyModal(() => import('../modals/InviteFriendsModal').then((m) => m.InviteFriendsModal))
 
@@ -31,7 +30,6 @@ export function MemberList({
   onViewProfile: (profile: Profile) => void
   onMessageUser?: (userId: string) => void
   mobileOpen?: boolean
-  /** No computador a lista fica escondida até clicar no botão "Membros" */
   desktopOpen?: boolean
   onCloseMobile?: () => void
 }) {
@@ -48,10 +46,6 @@ export function MemberList({
   const canModerate = permissions.kick_members || permissions.ban_members || permissions.timeout_members || permissions.manage_roles
 
   const onlineIds = useOnlineIds()
-  // "Online" de verdade exige as duas coisas: a pessoa não escolheu
-  // aparecer offline/invisível E o socket dela está mesmo conectado agora
-  // (ver usePresence.ts) — sem isso, quem fechou o app de qualquer jeito
-  // continuava listado aqui em cima pra sempre.
   const isEffectivelyOnline = (p: Profile) => p.status !== 'offline' && onlineIds.has(p.id)
   const roster = useVoiceRoster()
   const { channels } = useChannels()
@@ -59,13 +53,10 @@ export function MemberList({
     const channelId = roster.get(userId)
     return channelId ? (channels.find((c) => c.id === channelId)?.name ?? 'sala de voz') : null
   }
-  // Você entra na contagem como online (mesmo invisível pra você mesmo ver).
   const isShownOnline = (p: Profile) => p.id === profile?.id || isEffectivelyOnline(p)
   const online = members.filter((m) => isShownOnline(m.profile))
   const offline = members.filter((m) => !isShownOnline(m.profile))
 
-  // Agrupa quem está online pelo cargo mais alto de cada um, com o nome e
-  // a cor do cargo como título. Sem cargo → "Disponível".
   const groupedOnline: { role: Role | null; members: typeof online }[] = []
   for (const role of [...roles].sort((a, b) => b.position - a.position)) {
     const inRole = online.filter((m) => rolesForUser(m.profile.id)[0]?.id === role.id)
@@ -74,7 +65,6 @@ export function MemberList({
   const noRole = online.filter((m) => !rolesForUser(m.profile.id)[0])
   if (noRole.length > 0) groupedOnline.push({ role: null, members: noRole })
 
-  // "Atividade": quem está jogando agora.
   const activity = online.filter((m) => m.profile.playing)
 
   function MemberRow({ member }: { member: (typeof members)[number] }) {
@@ -91,7 +81,6 @@ export function MemberList({
           openMenu(e)
         }}
       >
-        {/* Banner do perfil como fundo do cartão (quando a pessoa tem). */}
         {p.banner_url && online && (
           <>
             <img src={p.banner_url} alt="" aria-hidden className="absolute inset-0 w-full h-full object-cover opacity-70 pointer-events-none" />

@@ -26,7 +26,6 @@ import {
   VoiceConnectedIcon,
 } from '../ui/icons'
 
-// Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const EditProfileModal = lazyModal(() => import('../modals/EditProfileModal').then((m) => m.EditProfileModal))
 const SettingsModal = lazyModal(() => import('../modals/SettingsModal').then((m) => m.SettingsModal))
 import type { SettingsTab } from '../modals/SettingsModal'
@@ -39,11 +38,6 @@ const STATUS_OPTIONS: { value: ProfileStatus; label: string; dot: string }[] = [
   { value: 'offline', label: 'Invisível', dot: 'bg-gray-500' },
 ]
 
-// Ícone de barrinhas de sinal (tipo wifi/celular) — mesmos limiares de
-// cor de antes (verde <100ms, amarelo <250ms, vermelho acima disso).
-// Fica numa FAIXA PRÓPRIA acima do resto do painel (pedido explícito:
-// "o ping tem que ser acima") em vez de espremida ao lado do nome — com
-// texto "Xms" do lado, não só as barrinhas sozinhas.
 function WifiSignalIcon({ pingMs, size = 12 }: { pingMs: number | null; size?: number }) {
   const tier = pingMs === null ? 'none' : pingMs < 100 ? 'good' : pingMs < 250 ? 'ok' : 'bad'
   const color =
@@ -70,9 +64,6 @@ function WifiSignalIcon({ pingMs, size = 12 }: { pingMs: number | null; size?: n
   )
 }
 
-// Ícone de "transmissão"/sinal em arcos — usado na fileira "Voz
-// conectada", mesma ideia visual de referência que um app de chat popular usa ali
-// (um ícone de conexão, não só uma bolinha).
 function BroadcastIcon({ className }: { className?: string }) {
   return <VoiceConnectedIcon className={className} aria-hidden />
 }
@@ -113,9 +104,6 @@ function ChevronIcon({ className }: { className?: string }) {
   return <ChevronDownIcon className={className} strokeWidth={3} aria-hidden />
 }
 
-// Um dos 4 botões quadrados da fileira de atalhos da call (câmera,
-// compartilhar tela, soundboard, redução de ruído) — mesmo visual pra
-// todos, só muda o ícone/estado "ativo".
 function HudSquareButton({
   active,
   title,
@@ -143,11 +131,6 @@ function HudSquareButton({
   )
 }
 
-// Card de "jogando agora" — mostrado sempre que há um jogo detectado
-// (useGamePresence.ts), em qualquer tela (servidor ou Início/DMs). Quando
-// a pessoa também está numa chamada de voz, a legenda de baixo passa a
-// indicar se aquele jogo está sendo compartilhado com a call ou não —
-// mesma ideia da referência de apps de chat populares ("Não Compartilhando").
 function PlayingActivityCard() {
   const { profile } = useAuth()
   const voice = useVoiceCore()
@@ -170,17 +153,9 @@ function PlayingActivityCard() {
   )
 }
 
-// Card "Voz conectada" + fileira de atalhos da call — igual a referência
-// que a pessoa mandou (nome do canal + botão de desligar em cima,
-// câmera/tela/soundboard/redução de ruído embaixo). Vive AQUI (dentro do
-// UserPanel, que é universal) em vez de ficar preso à barra lateral de
-// um servidor específico — assim continua aparecendo mesmo navegando
-// pelo Início/DMs ou por outro servidor enquanto a call de outro
-// servidor continua rolando, igual o apps de chat populares faz.
 function VoiceHud() {
   const voice = useVoiceCore()
   const [showSoundboard, setShowSoundboard] = useState(false)
-  // Atalho "Abrir o soundboard" (KeybindsRunner).
   useEffect(() => {
     const open = () => setShowSoundboard(true)
     window.addEventListener('mv:open-soundboard', open)
@@ -198,7 +173,6 @@ function VoiceHud() {
   return (
     <div className="mx-2 mt-2 rounded-xl bg-mv-green/[0.07] border border-mv-green/20 overflow-hidden shrink-0">
       <div className="px-3 py-2.5 flex items-center gap-2.5">
-        {/* Clicar volta pra tela da sala (ex.: depois de abrir um canal de texto). */}
         <button
           type="button"
           onClick={() => {
@@ -242,7 +216,6 @@ function VoiceHud() {
         >
           <ScreenShareIcon className="w-4 h-4" />
         </HudSquareButton>
-        {/* Soundboard é do servidor — não existe em chamada de DM/grupo. */}
         {voice.connectedServerId && (
           <HudSquareButton title="Soundboard" onClick={() => setShowSoundboard(true)}>
             <GridIcon className="w-4 h-4" />
@@ -268,20 +241,7 @@ export function UserPanel() {
   const { profile, signOut, updateStatus } = useAuth()
   const voice = useVoiceCore()
   const apiPingMs = useConnectionPing()
-  // TRIGÉSIMA QUARTA RODADA — antes disso, a call era mesh (P2P direto
-  // entre cada dupla de pessoas), então "latência da chamada" fazia
-  // sentido como uma média das idas-e-voltas reais medidas com cada
-  // peer (via WebRTC getStats()). Com o LiveKit (SFU), todo mundo fala
-  // só com o servidor — não existe mais "latência até fulano", só a SUA
-  // latência até o servidor de voz. `localConnectionQuality` (uma
-  // classificação: ótima/boa/instável/perdida, não mais um número em
-  // ms) é o que o LiveKit entrega — mapeada aqui pra um valor em ms
-  // aproximado só pra reaproveitar o mesmo ícone de barrinhas
-  // (WifiSignalIcon) sem precisar reescrevê-lo.
   const localConnectionQuality = useLocalVoiceConnectionQuality()
-  // Durante a call: RTT REAL do WebRTC até o servidor de mídia (getStats,
-  // par de candidatos em uso — docs/PING.md). Enquanto a 1ª medição não
-  // chega, cai na classificação do LiveKit mapeada pra um ms aproximado.
   const mediaPath = useVoiceMediaRtt(Boolean(voice.connectedChannelId))
   const callQualityMs: number | null = !voice.connectedChannelId
     ? null
@@ -317,8 +277,6 @@ export function UserPanel() {
   const [micMenuOpen, setMicMenuOpen] = useState(false)
   const [headphoneMenuOpen, setHeadphoneMenuOpen] = useState(false)
 
-  // Clique fora fecha cada menu — ver comentário em useClickOutside.ts
-  // sobre por que o onMouseLeave antigo fechava o menu cedo demais.
   const menuRef = useClickOutside<HTMLDivElement>(menuOpen, useCallback(() => setMenuOpen(false), []))
   const micMenuRef = useClickOutside<HTMLDivElement>(micMenuOpen, useCallback(() => setMicMenuOpen(false), []))
   const headphoneMenuRef = useClickOutside<HTMLDivElement>(headphoneMenuOpen, useCallback(() => setHeadphoneMenuOpen(false), []))
@@ -328,9 +286,6 @@ export function UserPanel() {
   return (
     <div data-tour="user-panel" className="shrink-0 p-2 bg-mv-canvas">
       <div className="rounded-2xl bg-[var(--color-elevated)] border border-[var(--color-line)] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.7)]">
-      {/* Faixa de ping — ACIMA do painel principal (pedido explícito),
-          igual uma barra de status permanente. Sempre visível, não só
-          durante uma call, pra sempre dar uma noção de conexão. */}
       <div
         title={pingLabel}
         className="h-7 px-3 flex items-center gap-1.5 border-b border-[var(--color-line)]"
@@ -378,14 +333,6 @@ export function UserPanel() {
         </div>
       </button>
 
-      {/* Mic: clique muta/desmuta na hora. A setinha fica ENCOSTADA no
-          canto do próprio botão (não como um botão separado do lado) —
-          isso é o que faltava de espaço em telas mais estreitas: dois
-          botões lado a lado (ícone + seta) exigiam quase o dobro da
-          largura, e com avatar+nome+mic+fone+engrenagem tudo na mesma
-          fileira, não cabia numa sidebar de 240px — o layout quebrava e
-          empurrava tudo pra baixo torto. Como um selinho no canto, a
-          seta some do espaço da fileira mas continua clicável. */}
       <div className="relative shrink-0" ref={micMenuRef}>
         <button
           title={voice.muted ? 'Ativar microfone' : 'Mutar microfone'}
@@ -436,8 +383,6 @@ export function UserPanel() {
         )}
       </div>
 
-      {/* Fone: mesma ideia do mic acima — botão único, seta em selinho no
-          canto em vez de um segundo botão do lado. */}
       <div className="relative shrink-0" ref={headphoneMenuRef}>
         <button
           title={voice.deafened ? 'Reativar áudio' : 'Desativar áudio'}

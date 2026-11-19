@@ -14,14 +14,11 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!session) {
-    // Guarda pra onde a pessoa tentou ir (ex: um link de convite) —
-    // o Login usa isso pra mandar de volta pro lugar certo depois de entrar.
     if (location.pathname !== '/login' && location.pathname !== '/cadastro') {
       try {
         const target = safeRedirectPath(location.pathname + location.search)
         if (target !== '/') sessionStorage.setItem('mamacos-post-login-redirect', target)
       } catch {
-        // best-effort
       }
     }
     return <Navigate to="/login" replace />
@@ -31,6 +28,5 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <MfaChallengeScreen />
   }
 
-  // Aceite dos Termos + declaração 18+ (ver TermsGate.tsx).
   return <TermsGate>{children}</TermsGate>
 }

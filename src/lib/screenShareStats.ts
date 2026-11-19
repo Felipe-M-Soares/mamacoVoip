@@ -1,9 +1,3 @@
-// Leitura das estatísticas REAIS do vídeo da transmissão de tela (o que o
-// encoder está de fato mandando, via RTCRtpSender.getStats()) pra mostrar
-// um indicador discreto pra quem transmite — resolução, fps, bitrate e
-// codec. Funções puras (testadas em screenShareStats.test.ts); quem chama
-// guarda a amostra anterior pra calcular o bitrate pela diferença.
-
 export interface OutboundVideoSample {
   timestamp: number
   bytesSent: number
@@ -22,7 +16,6 @@ export interface ScreenShareStats {
   fps: number | null
   bitrateKbps: number | null
   codec: string | null
-  // 'bandwidth' | 'cpu' | 'other' | null (null = sem limitação)
   limitation: string | null
   hardwareEncoder: boolean | null
 }
@@ -33,7 +26,6 @@ function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
-/** Extrai a amostra outbound-rtp de vídeo (a com mais bytes, se houver mais de uma) de um RTCStatsReport. */
 export function pickOutboundVideo(report: Iterable<StatsEntry> | null | undefined): OutboundVideoSample | null {
   if (!report) return null
   const entries = Array.from(report)
@@ -61,7 +53,6 @@ export function pickOutboundVideo(report: Iterable<StatsEntry> | null | undefine
   }
 }
 
-/** Combina a amostra atual com a anterior (pro bitrate). */
 export function computeScreenShareStats(prev: OutboundVideoSample | null, cur: OutboundVideoSample): ScreenShareStats {
   let bitrateKbps: number | null = null
   if (prev && cur.timestamp > prev.timestamp && cur.bytesSent >= prev.bytesSent) {
@@ -69,9 +60,6 @@ export function computeScreenShareStats(prev: OutboundVideoSample | null, cur: O
     bitrateKbps = Math.round(((cur.bytesSent - prev.bytesSent) * 8) / 1000 / seconds)
   }
   const limitation = cur.qualityLimitationReason && cur.qualityLimitationReason !== 'none' ? cur.qualityLimitationReason : null
-  // powerEfficientEncoder (Chromium recente) diz direto se é encoder de
-  // hardware; senão, deduz pelo nome da implementação (OpenH264/libvpx =
-  // software; o resto — MediaFoundation, NVENC etc. — é hardware).
   let hardwareEncoder = cur.powerEfficientEncoder
   if (hardwareEncoder === null && cur.encoderImplementation) {
     hardwareEncoder = !/openh264|libvpx|libaom|software/i.test(cur.encoderImplementation)
@@ -85,26 +73,4 @@ export function computeScreenShareStats(prev: OutboundVideoSample | null, cur: O
     limitation,
     hardwareEncoder,
   }
-}
-
-const LIMITATION_LABELS: Record<string, string> = {
-  bandwidth: 'limitado pela rede',
-  cpu: 'limitado pelo processador',
-  other: 'limitado',
-}
-
-/** Texto curto pro indicador, ex.: "1080p · 60 fps · 6,8 Mbps · H264 (GPU)". */
-export function formatScreenShareStats(s: ScreenShareStats): string {
-  const parts: string[] = []
-  if (s.height) parts.push(`${s.height}p`)
-  if (s.fps !== null) parts.push(`${s.fps} fps`)
-  if (s.bitrateKbps !== null) {
-    parts.push(s.bitrateKbps >= 1000 ? `${(s.bitrateKbps / 1000).toFixed(1).replace('.', ',')} Mbps` : `${s.bitrateKbps} kbps`)
-  }
-  if (s.codec) parts.push(s.hardwareEncoder === null ? s.codec : `${s.codec} (${s.hardwareEncoder ? 'GPU' : 'CPU'})`)
-  return parts.join(' · ')
-}
-
-export function describeLimitation(s: ScreenShareStats): string | null {
-  return s.limitation ? LIMITATION_LABELS[s.limitation] ?? 'limitado' : null
 }

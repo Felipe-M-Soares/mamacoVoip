@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, act } from '@testing-library/react'
 
-// Só o que importa aqui: quais <RemoteAudio> são montados.
 vi.mock('./CallMediaTiles', () => ({
   RemoteAudio: ({ stream, volume }: { stream: { id: string }; volume: number }) => (
     <i data-testid="audio" data-id={stream.id} data-volume={volume} />

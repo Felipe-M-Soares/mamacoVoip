@@ -3,9 +3,6 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { isValidInviteCode } from '../lib/authValidation'
 
-// Mensagens que o próprio banco manda (join_server_via_invite) e que
-// podem ir direto pra tela; qualquer outro erro vira um texto genérico
-// (não mostra detalhe interno de SQL/RLS pra quem clicou no link).
 function friendlyInviteError(message: string | undefined): string {
   if (!message) return 'Convite inválido ou expirado.'
   if (/banido/i.test(message)) return 'Você foi banido deste servidor.'
@@ -21,9 +18,6 @@ export function InviteRedirect() {
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
 
-  // Em modo estrito (dev) o efeito roda duas vezes — sem essa trava, o
-  // convite era "gasto" em dobro (uses + 2), o que esgota convites de uso
-  // único/limitado.
   const startedRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -44,13 +38,10 @@ export function InviteRedirect() {
           return
         }
         const rawChannelId = searchParams.get('canal')
-        // Só aceita um UUID aqui — o valor vem da URL do link.
         const channelId =
           rawChannelId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawChannelId)
             ? rawChannelId
             : null
-        // Mesma lógica do InviteMessageCard.tsx — o MainLayout confere se
-        // o canal é de voz antes de entrar de verdade.
         navigate('/', {
           replace: true,
           state: { joinedServerId: server.id, joinedChannelId: channelId, autoJoinVoice: Boolean(channelId) },

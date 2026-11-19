@@ -146,7 +146,6 @@ export function ServerSettingsModal({
       }
     >
       <div className="space-y-5">
-        {/* Capa + ícone sobreposto, como aparece no topo do servidor */}
         <div>
           <button
             type="button"

@@ -29,12 +29,6 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-// Todas as callbacks recebem o id/mensagem como argumento (em vez de o
-// MessageList criar uma arrow function nova por mensagem a cada render) —
-// assim o React.memo lá embaixo consegue pular o re-render de TODAS as
-// mensagens que não mudaram quando chega uma mensagem nova, alguém
-// reage, digita, etc. Antes, cada evento desses re-renderizava (e
-// re-parseava o markdown de) todas as mensagens da tela.
 function MessageItemImpl({
   message,
   author,
@@ -107,15 +101,10 @@ function MessageItemImpl({
   const [editError, setEditError] = useState<string | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
   const [showReactionPicker, setShowReactionPicker] = useState(false)
-  // Confirmação de exclusão inline (antes era um confirm() nativo)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const { menuState, openMenu, closeMenu } = useContextMenuState()
   const { menuState: userMenuState, openMenu: openUserMenu, closeMenu: closeUserMenu } = useContextMenuState()
 
-  // Sempre começa a edição a partir do texto ATUAL — antes o campo
-  // guardava o conteúdo de quando a mensagem foi montada, então editar de
-  // novo (ou depois de uma edição vinda de outro dispositivo) mostrava o
-  // texto velho.
   function startEditing() {
     setEditValue(message.content)
     setEditError(null)
@@ -132,21 +121,15 @@ function MessageItemImpl({
     setSavingEdit(true)
     const { error } = await onEdit(message.id, next)
     setSavingEdit(false)
-    // Antes um erro aqui era engolido: a caixa ficava aberta sem nenhuma
-    // explicação.
     if (error) setEditError(error)
     else setEditing(false)
   }
 
   function handleDelete(e?: { shiftKey?: boolean }) {
-    // Shift+clique pula a confirmação (igual a apps de chat populares) — antes o botão
-    // da barra de ferramentas excluía direto, sem confirmar nada, enquanto
-    // o menu de contexto pedia confirmação.
     if (e?.shiftKey) onDelete(message.id)
     else setConfirmingDelete(true)
   }
 
-  // agrupa reações por emoji
   const reactionGroups = useMemo(
     () =>
       reactions.reduce<Record<string, MessageReaction[]>>((acc, r) => {
@@ -155,7 +138,6 @@ function MessageItemImpl({
       }, {}),
     [reactions]
   )
-  // Figurinha não tem texto pra editar — o botão de editar some nela.
   const isSticker = useMemo(() => parseStickerId(message.content) !== null, [message.content])
   const renderedContent = useMemo(
     () => parseMessageContent(message.content, members, emojis, roles),
@@ -163,7 +145,6 @@ function MessageItemImpl({
   )
   const firstUrl = useMemo(() => extractFirstUrl(message.content), [message.content])
   const pureMedia = useMemo(() => isPureMediaMessage(message.content), [message.content])
-  // Só visual: destaca a mensagem quando ela menciona você (ou @everyone/@here)
   const mentionsMe = useMemo(() => {
     if (!currentUserId || message.author_id === currentUserId) return false
     const me = members.find((m) => m.id === currentUserId)
@@ -215,7 +196,6 @@ function MessageItemImpl({
       onMouseLeave={() => setShowReactionPicker(false)}
       onContextMenu={openMenu}
     >
-      {/* barra de ferramentas no hover */}
       <div className="hidden group-hover:flex group-focus-within:flex absolute -top-4 right-4 surface-elevated !shadow-[0_8px_24px_-8px_rgb(0_0_0/0.6)] rounded-lg p-0.5 gap-0.5 z-10">
         <button
           title="Reagir"
@@ -287,7 +267,6 @@ function MessageItemImpl({
         </div>
       )}
 
-      {/* preview da mensagem respondida */}
       {message.reply_to_id && (
         <button
           onClick={() => replyToMessage && onJumpToMessage?.(replyToMessage.id)}
@@ -384,7 +363,6 @@ function MessageItemImpl({
                     handleSaveEdit()
                   }
                   if (e.key === 'Escape') {
-                    // não deixa o Esc "vazar" e fechar painel/modal em volta
                     e.stopPropagation()
                     setEditing(false)
                   }

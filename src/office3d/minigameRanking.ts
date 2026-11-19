@@ -1,9 +1,5 @@
 import { supabase } from '../lib/supabase'
 
-// Ranking dos minigames entre amigos (PARTE 32 da 007). Só manda pro banco
-// quando você bate o SEU recorde (guardado aqui no aparelho), então são
-// pouquíssimas chamadas. O banco guarda só o melhor de cada um.
-
 export const RANKED_GAMES = ['kart', 'banana3d', 'cobra', 'memoria', 'reflexo'] as const
 type Ranked = (typeof RANKED_GAMES)[number]
 const LOWER_IS_BETTER = new Set<Ranked>(['kart', 'memoria', 'reflexo'])
@@ -18,7 +14,6 @@ function sentBests(): Record<string, number> {
   }
 }
 
-/** resultado de uma partida → manda se for recorde pessoal */
 export async function submitMinigameResult(r: { game: string; score?: number }): Promise<void> {
   const game = r.game as Ranked
   if (!RANKED_GAMES.includes(game) || typeof r.score !== 'number' || !Number.isFinite(r.score)) return
@@ -27,12 +22,11 @@ export async function submitMinigameResult(r: { game: string; score?: number }):
   const prev = sent[game]
   if (prev !== undefined && (LOWER_IS_BETTER.has(game) ? value >= prev : value <= prev)) return
   const { data, error } = await supabase.rpc('submit_minigame_score', { p_game: game, p_value: value })
-  if (error || data === null || data === undefined) return // banco sem a PARTE 32 ou valor recusado
+  if (error || data === null || data === undefined) return
   sent[game] = data
   try {
     localStorage.setItem(KEY, JSON.stringify(sent))
   } catch {
-    // sem armazenamento: tenta de novo na próxima
   }
 }
 

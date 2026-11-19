@@ -1,23 +1,4 @@
 'use strict'
-// Consultas ao Windows feitas DIRETO do processo do app (via koffi, uma
-// ponte de chamada nativa), no lugar do PowerShell escondido que o app
-// usava antes. Motivos:
-//
-//  1. Antivírus: um powershell.exe oculto rodando um comando codificado
-//     (-EncodedCommand) e compilando C# na hora (Add-Type → csc.exe) é
-//     exatamente o padrão que heurísticas de malware procuram. Era isso
-//     que fazia antivírus barrarem o app.
-//  2. Anti-cheat (Vanguard, EAC, BattlEye...): TUDO aqui é leitura de
-//     informação pública do sistema — lista de processos (snapshot, sem
-//     abrir nenhum processo), janelas de nível superior, título e monitor.
-//     Nada lê ou escreve memória de outro processo, nada injeta, nada
-//     manda teclas/cliques. O único ponto que abre um processo
-//     (processImagePath, acesso mínimo "query limited", o mesmo do
-//     Gerenciador de Tarefas) é bloqueado pra QUALQUER jogo do catálogo e
-//     pra processos de anti-cheat — ver isProtectedProcessName.
-//
-// Tudo é best-effort: se o koffi não carregar, cada função devolve
-// null/vazio e o app segue sem as sugestões automáticas de jogo.
 
 let api = null
 let loadTried = false
@@ -80,8 +61,6 @@ function load() {
       GetWindowRect: user32.func('bool __stdcall GetWindowRect(intptr_t hWnd, _Out_ MV_RECT *lpRect)'),
       MonitorFromWindow: user32.func('intptr_t __stdcall MonitorFromWindow(intptr_t hWnd, uint32_t dwFlags)'),
       GetMonitorInfoW: user32.func('bool __stdcall GetMonitorInfoW(intptr_t hMonitor, _Inout_ MV_MONITORINFO *lpmi)'),
-      ShowWindowAsync: user32.func('bool __stdcall ShowWindowAsync(intptr_t hWnd, int nCmdShow)'),
-      SetForegroundWindow: user32.func('bool __stdcall SetForegroundWindow(intptr_t hWnd)'),
       CreateToolhelp32Snapshot: kernel32.func(
         'intptr_t __stdcall CreateToolhelp32Snapshot(uint32_t dwFlags, uint32_t th32ProcessID)'
       ),
@@ -106,21 +85,18 @@ const GA_ROOT = 2
 const MONITOR_DEFAULTTONEAREST = 2
 const TH32CS_SNAPPROCESS = 0x2
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-const SW_RESTORE = 9
 const MAX_WINDOWS = 4000
 
 function available() {
   return load() !== null
 }
 
-// Nome do .exe sem extensão, minúsculo ("valorant-win64-shipping").
 function baseProcessName(exe) {
   return String(exe || '')
     .toLowerCase()
     .replace(/\.exe$/, '')
 }
 
-/** Lista de processos: [{ pid, name }] (name minúsculo, SEM .exe) — ou null. Não abre nenhum processo. */
 function listProcesses() {
   const w = load()
   if (!w) return null
@@ -155,7 +131,6 @@ function windowTitle(w, hwnd) {
   return got > 0 ? buf.toString('utf16le', 0, got * 2) : ''
 }
 
-// Retângulo do monitor onde a janela está, em pixels FÍSICOS.
 function monitorRect(w, hwnd) {
   const mon = w.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
   if (!mon) return null
@@ -194,7 +169,6 @@ function placement(w, hwnd) {
   return wp
 }
 
-// Percorre as janelas de nível superior (ordem Z, de cima pra baixo).
 function forEachTopLevelWindow(w, fn) {
   let hwnd = w.GetTopWindow(0)
   let guard = 0
@@ -204,10 +178,6 @@ function forEachTopLevelWindow(w, fn) {
   }
 }
 
-/**
- * Maior janela visível de nível superior pertencente a um dos processos com
- * esses nomes (sem .exe). → { hwnd, pid, title, showCmd, monitor } | null
- */
 function findLargestWindowForProcessNames(names) {
   const w = load()
   if (!w) return null
@@ -225,10 +195,6 @@ function findLargestWindowForProcessNames(names) {
     if (!pids.has(pid)) return
     const wp = placement(w, hwnd)
     if (!wp) return
-    // Tamanho REAL da janela agora (GetWindowRect) e o "normal"
-    // (rcNormalPosition, o de quando não está maximizada). Jogo em TELA
-    // CHEIA costuma ter o "normal" minúsculo/zerado — só olhando ele, o jogo
-    // era descartado como "janela pequena demais" e não era reconhecido.
     const n = wp.rcNormalPosition
     const live = windowRect(w, hwnd)
     const width = Math.max(n.right - n.left, live ? live.right - live.left : 0)
@@ -247,7 +213,6 @@ function findLargestWindowForProcessNames(names) {
   }
 }
 
-/** Janela em primeiro plano: { hwnd, pid, title, processName, monitor } | null */
 function foregroundWindow() {
   const w = load()
   if (!w) return null
@@ -261,7 +226,6 @@ function foregroundWindow() {
   return { hwnd, pid, title: windowTitle(w, hwnd), processName: proc.name, monitor: monitorRect(w, hwnd) }
 }
 
-/** Só o nome do processo em primeiro plano (sem .exe) — barato, pro vigia de foco. */
 function foregroundProcessName() {
   const w = load()
   if (!w) return null
@@ -272,7 +236,6 @@ function foregroundProcessName() {
   return proc ? proc.name : ''
 }
 
-/** Map<hwnd, pid> pros handles ainda válidos. */
 function pidsForWindowHandles(hwnds) {
   const w = load()
   const map = new Map()
@@ -286,7 +249,6 @@ function pidsForWindowHandles(hwnds) {
   return map
 }
 
-/** Map<título, pid> das janelas visíveis de nível superior com título. */
 function titlePidMap() {
   const w = load()
   const map = new Map()
@@ -301,16 +263,6 @@ function titlePidMap() {
   return map
 }
 
-/** Restaura (desminimiza) uma janela e a traz pra frente — só a pedido da pessoa. */
-function restoreWindow(hwnd) {
-  const w = load()
-  if (!w || !Number.isSafeInteger(hwnd) || hwnd <= 0 || !w.IsWindow(hwnd)) return false
-  w.ShowWindowAsync(hwnd, SW_RESTORE)
-  w.SetForegroundWindow(hwnd)
-  return true
-}
-
-// Processos de anti-cheat conhecidos — nunca abrimos esses.
 const ANTI_CHEAT_PROCESSES = new Set([
   'vgc',
   'vgtray',
@@ -329,13 +281,6 @@ const ANTI_CHEAT_PROCESSES = new Set([
   'mhyprot',
 ])
 
-/**
- * Caminho do .exe (pra reconhecer jogos por pasta da loja). Usa o acesso
- * mínimo do Windows, e NUNCA em processos protegidos: `isProtected(name)`
- * (jogos do catálogo, que já são reconhecidos pelo nome) e anti-cheats.
- * Resultado em cache por PID, então cada processo é consultado no máximo
- * uma vez.
- */
 const imagePathCache = new Map()
 function processImagePath(pid, name, isProtected) {
   if (!pid || !name) return null
@@ -370,7 +315,6 @@ module.exports = {
   foregroundProcessName,
   pidsForWindowHandles,
   titlePidMap,
-  restoreWindow,
   processImagePath,
   ANTI_CHEAT_PROCESSES,
 }

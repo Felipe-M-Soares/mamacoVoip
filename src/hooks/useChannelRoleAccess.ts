@@ -23,9 +23,6 @@ export function useChannelRoleAccess(channelId: string | null) {
 
   async function setAllowedRoles(newRoleIds: string[]) {
     if (!channelId) return { error: 'Canal inválido' }
-    // Substitui a lista inteira — mais simples e seguro que calcular
-    // diffs, e o volume de dados aqui é sempre pequeno (poucos cargos
-    // por servidor).
     const { error: deleteError } = await supabase.from('channel_role_access').delete().eq('channel_id', channelId)
     if (deleteError) return { error: deleteError.message }
 

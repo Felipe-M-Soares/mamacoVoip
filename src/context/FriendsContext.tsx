@@ -26,17 +26,8 @@ interface FriendsContextValue {
 
 const FriendsContext = createContext<FriendsContextValue | undefined>(undefined)
 
-// Amigos/bloqueios são usados em vários lugares do app ao mesmo tempo
-// (barra de amigos, perfil de usuário, menu da call, etc.) — antes,
-// cada lugar chamava seu próprio hook, criando uma conexão de tempo
-// real DUPLICADA pra cada um (6 lugares = 6 conexões fazendo a mesma
-// coisa). Agora é um Provider só, no topo do app, e todo mundo
-// compartilha o mesmo dado — uma conexão só.
 export function FriendsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
-  // Depende só do ID (string estável): o objeto `user` muda de identidade
-  // a cada renovação do token (~1h), o que antes recriava a assinatura do
-  // tempo real e refazia todas as buscas sem necessidade.
   const userId = user?.id ?? null
   const loadSeqRef = useRef(0)
   const hasLoadedRef = useRef(false)
@@ -57,8 +48,6 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
       hasLoadedRef.current = false
       return
     }
-    // Spinner só na PRIMEIRA carga — antes todo evento do tempo real
-    // (qualquer pedido de amizade) fazia a lista de amigos piscar.
     if (!hasLoadedRef.current) setLoading(true)
 
     try {
@@ -78,7 +67,6 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
           ? await supabase.from('profiles').select('*').in('id', Array.from(otherIds))
           : { data: [] as Profile[] }
 
-      // Uma resposta mais nova já chegou (ou trocou de conta) — descarta.
       if (seq !== loadSeqRef.current) return
 
       const profileById = new Map((profiles ?? []).map((p) => [p.id, p]))
@@ -120,8 +108,6 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
     }
   }, [userId])
 
-  // Ids das amizades conhecidas — pra decidir se um DELETE (que não pode
-  // ser filtrado no Realtime) é nosso.
   const knownFriendshipIdsRef = useRef<Set<string>>(new Set())
   knownFriendshipIdsRef.current = new Set([...friends, ...incoming, ...outgoing].map((f) => f.id))
 
@@ -129,12 +115,6 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
     refresh()
   }, [refresh])
 
-  // Realtime: pedidos de amizade chegando/sendo aceitos
-  // Antes assinava a tabela `friendships` INTEIRA, sem filtro: toda
-  // amizade desfeita por QUALQUER pessoa do app (DELETE não passa por RLS
-  // no Realtime) fazia todo cliente online refazer 4 consultas. Agora:
-  // INSERT/UPDATE filtrados pelas duas colunas que me envolvem, e DELETE
-  // (que não aceita filtro) só recarrega se for uma amizade que eu conheço.
   useEffect(() => {
     if (!userId) return
     let active = true
@@ -165,13 +145,7 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
     }
   }, [userId, refresh])
 
-  // Ações estáveis (useCallback) + valor do contexto memoizado: antes o
-  // objeto `value` era recriado a cada render do provider, re-renderizando
-  // TODO consumidor de useFriends() no app inteiro sem necessidade.
   const sendRequest = useCallback(async (username: string, note?: string) => {
-    // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
-    // flood acidental — bem mais apertado que o de mensagem, já que
-    // mandar pedido de amizade é algo raro de fazer repetidamente rápido.
     const limited = rateLimitError(`friend-request:${userId ?? 'anon'}`, 5, 60_000, 'você está mandando pedido de amizade')
     if (limited) return { error: limited }
     const { error } = await supabase.rpc('send_friend_request', { p_username: username, p_note: note ?? null })

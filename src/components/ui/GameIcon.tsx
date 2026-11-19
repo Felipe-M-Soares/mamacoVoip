@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { gameIconSource } from '../../lib/gameIcons'
 
-// Ícone pequeno do jogo (ver src/lib/gameIcons.ts). Se nenhuma imagem
-// carregar, mostra a inicial do jogo num quadradinho colorido.
 export function GameIcon({
   game,
   playingApp,
@@ -13,7 +11,6 @@ export function GameIcon({
 }: {
   game: string
   playingApp?: string | null
-  // Imagem própria (ex.: PNG enviado pro ícone da categoria) — vem primeiro.
   imageUrl?: string | null
   size?: number
   className?: string
@@ -37,14 +34,10 @@ export function GameIcon({
         referrerPolicy="no-referrer"
         draggable={false}
         onError={() => setFailed({ key, n: n + 1 })}
-        // Imagem "vazia" (a loja às vezes devolve um quadradinho em branco
-        // em vez de erro) também conta como falha e passa pra próxima.
         onLoad={(e) => {
           if (e.currentTarget.naturalWidth < 8) setFailed({ key, n: n + 1 })
         }}
         style={box}
-        // Sem fundo: PNG transparente aparece limpo; imagem própria fica
-        // inteira (contain), capa de loja preenche o quadrado (cover).
         className={`shrink-0 rounded-[4px] ${imageUrl && n === 0 ? 'object-contain' : 'object-cover'} ${className}`}
       />
     )

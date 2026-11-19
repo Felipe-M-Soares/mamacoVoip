@@ -37,8 +37,6 @@ export function ReportModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
-  // Sem servidor (DM, grupo, usuário fora de servidor) não há moderação
-  // local — vai direto pra equipe do Mamacos Voip.
   const platformOnly = targetType === 'dm_message' || targetType === 'group_message' || !serverId
   const [escalate, setEscalate] = useState(false)
 

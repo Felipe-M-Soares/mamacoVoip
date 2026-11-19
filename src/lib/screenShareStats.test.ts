@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeScreenShareStats, describeLimitation, formatScreenShareStats, pickOutboundVideo } from './screenShareStats'
+import { computeScreenShareStats, pickOutboundVideo } from './screenShareStats'
 
 function report(bytesSent: number, timestamp: number, extra: Record<string, unknown> = {}) {
   return [
@@ -37,7 +37,6 @@ describe('estatísticas da transmissão', () => {
     expect(stats.fps).toBe(60)
     expect(stats.hardwareEncoder).toBe(true)
     expect(stats.limitation).toBeNull()
-    expect(formatScreenShareStats(stats)).toBe('1080p · 60 fps · 7,0 Mbps · H264 (GPU)')
   })
 
   it('sem amostra anterior não inventa bitrate', () => {
@@ -49,7 +48,7 @@ describe('estatísticas da transmissão', () => {
     const cur = pickOutboundVideo(report(10, 1, { encoderImplementation: 'OpenH264', qualityLimitationReason: 'bandwidth' }))!
     const stats = computeScreenShareStats(null, cur)
     expect(stats.hardwareEncoder).toBe(false)
-    expect(describeLimitation(stats)).toBe('limitado pela rede')
+    expect(stats.limitation).toBe('bandwidth')
   })
 
   it('devolve null quando não há vídeo', () => {

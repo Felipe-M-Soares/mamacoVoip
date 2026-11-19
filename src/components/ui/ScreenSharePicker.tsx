@@ -6,45 +6,10 @@ import { subscribeScreenSharePicker, resolveScreenSharePicker } from '../../lib/
 import { buildGamePreset, loadGameAutoPreset, loadQualityPreset } from '../../hooks/useScreenShareQuality'
 import { armScreenShareChoice } from '../../lib/chooseScreenShareSource'
 
-// Versão enxuta: só o essencial — as fontes agrupadas por categoria
-// (Jogo / Tela cheia / Janela). Sem parágrafo de explicação por card — a
-// categoria já diz o que é, e sem checkbox de áudio nenhum: o áudio agora
-// é escolhido SOZINHO conforme o tipo da fonte (pedido explícito — "se for
-// janela captura audio da janela se for tela cheia captura tela cheia
-// automatico"):
-//   - Janela (ou "Jogo" quando resolve pra uma janela de verdade) → tenta
-//     capturar o áudio só DAQUELE app (ver pidForChoice abaixo e a seção
-//     "Captura de áudio por processo" em electron/main.cjs). Se não der
-//     (fora do Windows, PID não resolvido, falha da API), a transmissão
-//     simplesmente segue sem áudio — nunca trava por causa disso.
-//   - Tela cheia (ou "Jogo" caindo no fallback de tela cheia) → áudio do
-//     sistema (loopback) ligado direto, sem precisar marcar nada (ver
-//     ipcMain.handle('screen-share:select', ...) em electron/main.cjs).
-//
-// A sugestão (`suggestion`, calculada no processo principal — ver
-// electron/main.cjs) sempre ganha a própria seção em destaque quando dá
-// pra resolver uma fonte pra ela — seja uma JANELA de verdade
-// (isExactGameWindow) seja o fallback de TELA CHEIA (isGameDisplay, pro
-// caso comum de jogo em modo exclusivo/sem janela própria capturável).
-// A seção chama "Jogo" quando é um processo CADASTRADO (KNOWN_GAMES,
-// `isKnownGame: true`); pra qualquer outro app/jogo detectado (a última
-// janela em primeiro plano antes de abrir esse seletor) chama "Sugestão"
-// — não dá pra saber com certeza que é um jogo, então não afirma isso na
-// cara da pessoa, mas ainda mostra em destaque (antes disso esse caso só
-// ganhava um contorno discreto dentro de "Janela"/"Tela cheia", fácil de
-// não notar — e o fallback de tela cheia sequer tinha esse contorno,
-// porque isGameDisplay nunca era usado aqui apesar de já vir calculado
-// do processo principal).
 export function ScreenSharePicker() {
   const [sources, setSources] = useState<ScreenShareSource[] | null>(null)
   const [suggestion, setSuggestion] = useState<ScreenShareSuggestion | null>(null)
 
-  // OITAVA RODADA: em vez de escutar um evento que chega sozinho, agora
-  // se inscreve na "caixa de correio" de screenSharePickerBridge.ts —
-  // VoiceContext.tsx busca a lista de fontes (getScreenShareSources) e
-  // "abre" o picker com ela; aqui só reage a isso. payload null fecha o
-  // picker de novo (usado logo depois de escolher/cancelar, ver choose
-  // abaixo).
   useEffect(() => {
     return subscribeScreenSharePicker((payload) => {
       setSources(payload?.sources ?? null)
@@ -52,9 +17,6 @@ export function ScreenSharePicker() {
     })
   }, [])
 
-  // Esc cancela o seletor (antes só dava pra cancelar clicando fora ou no
-  // botão) — cancelar resolve a Promise pendente em VoiceContext como
-  // "cancelado", sem deixar o botão de compartilhar preso em "Conectando".
   const isOpen = sources !== null
   useEffect(() => {
     if (!isOpen) return
@@ -70,16 +32,8 @@ export function ScreenSharePicker() {
   }, [isOpen])
 
   if (!sources) return null
-  // TypeScript não propaga o `if (!sources) return null` acima pra
-  // dentro de `choose` (uma função aninhada, fechamento separado) —
-  // essa constante com tipo explícito (não-nulo) resolve isso sem
-  // precisar de `!` no meio do código.
   const confirmedSources: ScreenShareSource[] = sources
 
-  // Prioriza uma JANELA exata quando existe; só cai pro fallback de TELA
-  // CHEIA (isGameDisplay) quando não tem janela capturável pro jogo —
-  // exatamente o caso mais comum de jogo em modo exclusivo/borderless
-  // sem título, que antes ficava sem destaque nenhum.
   const suggestedSource = sources.find((s) => s.isExactGameWindow) ?? sources.find((s) => s.isGameDisplay) ?? null
   const gameCard = suggestion ? suggestedSource : null
   const gameCardTitle = suggestion?.isKnownGame ? 'Jogo' : 'Sugestão'
@@ -87,47 +41,15 @@ export function ScreenSharePicker() {
   const windows = sources.filter((s) => s.type === 'window' && s !== gameCard)
 
   const currentQualityPreset = loadQualityPreset()
-  // Preset automático "Jogo" (1080p60 — ver buildGamePreset): aplicado só
-  // se a pessoa escolher o card do jogo detectado. A rede fraca é decidida
-  // na hora de transmitir (pode cair pra 720p60).
   const gamePresetLabel =
     suggestion?.isKnownGame && loadGameAutoPreset()
       ? buildGamePreset(currentQualityPreset, { weakNetwork: false }).label
       : null
 
-  // DÉCIMA QUARTA RODADA: a lógica de "qual PID usar pra essa escolha, e
-  // qual recado deixar pro fechamento automático" (antes vivia só aqui,
-  // duplicada em pidForChoice/pidExpected) agora é compartilhada com
-  // GameDetectedToast.tsx (o atalho "Compartilhar tela" do aviso
-  // "Jogando X!") via armScreenShareChoice — ver o comentário grande em
-  // src/lib/chooseScreenShareSource.ts pro porquê.
-  // DÉCIMA OITAVA RODADA: "compartilhamento de tela não reconhece tela
-  // minimizada" — Chromium exclui janelas minimizadas da lista de fontes
-  // (ver looksMinimized/hwnd, calculados em electron/main.cjs), não tem
-  // como listar ela pra escolher nesse estado. O que DÁ pra fazer:
-  // restaurar a janela primeiro (ShowWindowAsync + SetForegroundWindow,
-  // via o scanner persistente) e buscar a lista de fontes DE NOVO — sem
-  // reabrir o seletor nem mexer na Promise pendente do
-  // screenSharePickerBridge (VoiceContext.tsx continua esperando a MESMA
-  // escolha final), só atualiza o estado local aqui com o que veio de
-  // volta, já com a janela agora capturável de verdade.
-  // TRIGÉSIMA SEGUNDA RODADA — removido a pedido o card vermelho de
-  // "Fulano está minimizado / Restaure a janela pra poder compartilhar
-  // ela" que aparecia aqui (handleRestoreAndRefresh e o estado
-  // `restoring` que só existiam pra esse card também saíram, sem uso
-  // nenhum). O comportamento agora: quando `looksMinimized` é true, a
-  // seção "Jogo"/"Sugestão" simplesmente não aparece (gameCard fica
-  // null nesse caso, já que não existe fonte capturável de verdade pra
-  // apontar) — a pessoa só vê as listas normais de "Tela cheia"/"Janela"
-  // embaixo, do jeito que já eram exibidas antes de qualquer detecção
-  // especial de jogo existir.
   function choose(id: string | null, viaGameShortcut?: { processNames: string[]; label: string }) {
     if (id) {
       armScreenShareChoice(id, confirmedSources, gameCard, suggestion, viaGameShortcut)
     } else {
-      // Cancelou — limpa qualquer recado pendente de uma escolha
-      // anterior, defensivo, pra nunca "vazar" pra uma captura sem
-      // relação com ele.
       setPendingGameShareHint(null)
       setPendingAppAudioPid(null)
     }
@@ -172,20 +94,6 @@ export function ScreenSharePicker() {
           {gameCard && suggestion && (
             <SourceSection title={gameCardTitle}>
               <SourceCard
-                // TRIGÉSIMA QUINTA RODADA — bug relatado: esse card é
-                // exatamente o mesmo que o atalho da notificação usa,
-                // mas mostrava o nome genérico da fonte ("Tela cheia")
-                // e uma miniatura congelada/errada (o Windows não
-                // consegue gerar preview de verdade de um jogo em tela
-                // cheia exclusiva — é a mesma limitação de sempre) —
-                // sem NENHUMA pista visual de que aquilo representa o
-                // jogo, dava pra pessoa não confiar/não notar que já
-                // dava pra compartilhar por ali, achando que só a
-                // notificação automática funcionava. Sobrescrevendo o
-                // nome exibido pelo nome de verdade do jogo
-                // (suggestion.label, ex.: "Rainbow Six Siege") deixa
-                // claro o que aquele card é, mesmo com a miniatura
-                // ainda sendo só um placeholder.
                 source={{ ...gameCard, name: suggestion.label }}
                 highlighted
                 onClick={() =>
@@ -231,10 +139,6 @@ export function ScreenSharePicker() {
           )}
           {windows.length > 0 && (
             <SourceSection title="Janela">
-              {/* Sem prop "highlighted" aqui de propósito: quando existe
-                  uma sugestão, ela já vira sua própria seção acima
-                  ("Jogo"/"Sugestão") e é excluída desta lista — nunca
-                  sobra uma janela sugerida pra destacar aqui dentro. */}
               {windows.map((s) => (
                 <SourceCard key={s.id} source={s} onClick={() => choose(s.id)} />
               ))}
@@ -242,16 +146,6 @@ export function ScreenSharePicker() {
           )}
         </div>
 
-        {/* Dois lembretes cobrindo os dois motivos mais comuns de uma
-            janela não aparecer aqui: (1) jogo em modo tela cheia
-            EXCLUSIVA de verdade, sem janela nenhuma pro Windows listar —
-            resolve trocando pra "tela cheia sem bordas"; (2) qualquer
-            janela (navegador incluso) MINIMIZADA — o Windows não
-            consegue gerar uma miniatura de uma janela minimizada, então
-            NENHUM programa de captura (nem Zoom, OBS) lista
-            ela nesse estado — não é bug nosso, é limitação do próprio
-            Windows. Precisa estar pelo menos visível (pode estar atrás
-            de outra janela) na hora de abrir esse seletor. */}
         <div className="mt-4 flex gap-2.5 rounded-xl bg-white/[0.03] border border-[var(--color-line)] px-3 py-2.5">
           <svg
             viewBox="0 0 24 24"

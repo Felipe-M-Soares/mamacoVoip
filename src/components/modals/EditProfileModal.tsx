@@ -14,8 +14,6 @@ import {
   validateProfileAssetDeep,
 } from '../../lib/profileAssetLimits'
 
-// Libera a URL temporária (blob:) da prévia anterior — sem isso cada
-// arquivo escolhido ficava preso na memória até fechar o app.
 function revokeIfBlob(url: string | null) {
   if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
 }
@@ -27,10 +25,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'decoracao', label: 'Decoração' },
 ]
 
-// Mesmo truque de gradiente-por-nome usado em ProfileSidePanel.tsx e
-// ServerBar.tsx — é exatamente o que aparece no lugar do banner quando
-// a pessoa não enviou nenhum, então a prévia aqui usa o mesmo cálculo
-// pra mostrar de verdade o que vai aparecer.
 function gradientFor(seed: string) {
   let hash = 0
   for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash)
@@ -66,7 +60,6 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Libera as prévias temporárias ao fechar o modal.
   const previewsRef = useRef<(string | null)[]>([])
   previewsRef.current = [avatarPreview, bannerPreview, decorationPreview]
   useEffect(() => () => previewsRef.current.forEach(revokeIfBlob), [])
@@ -150,7 +143,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
   }
 
   async function handleSave() {
-    if (loading) return // evita duplo envio
+    if (loading) return
     setError(null)
     setLoading(true)
     const { error } = await updateProfile(
@@ -158,10 +151,6 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
         display_name: displayName.trim() || undefined,
         custom_status: customStatus.trim() || null,
         playing: playing.trim() || null,
-        // null só quando a pessoa pediu pra REMOVER e não escolheu um
-        // arquivo novo pra substituir — se escolheu um arquivo novo, a
-        // própria updateProfile já cuida de setar a URL depois do
-        // upload, então aqui não manda nada (undefined = não mexe).
         ...(removeBanner && !bannerFile ? { banner_url: null } : {}),
         ...(removeDecoration && !decorationFile ? { avatar_decoration_url: null } : {}),
       },
@@ -216,11 +205,6 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
       {tab === 'perfil' && (
         <div className="space-y-4">
           <div className="flex flex-col items-center gap-1.5">
-            {/* TRIGÉSIMA OITAVA RODADA — mesmo tratamento aplicado ao
-                ícone de servidor: sem foto, mostra um ícone de imagem
-                (em vez de "Enviar foto" espremido dentro do círculo) e
-                o rótulo fica fora, embaixo; com foto, hover mostra
-                overlay escuro com lápis + "Trocar". */}
             <button
               onClick={() => avatarInputRef.current?.click()}
               className="relative w-20 h-20 rounded-full bg-mv-canvas border-2 border-dashed border-white/[0.18] flex items-center justify-center overflow-hidden hover:border-mv-accent transition-colors group"
@@ -342,9 +326,6 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
       {tab === 'decoracao' && (
         <div className="space-y-3">
           <div className="flex justify-center py-2">
-            {/* Prévia composta — mesma técnica de "sangria" que Avatar.tsx
-                usa de verdade, só que fixa aqui num tamanho grande (96px)
-                pra dar pra ver o efeito direito. */}
             <div className="relative" style={{ width: 96 * 1.3, height: 96 * 1.3 }}>
               <div
                 className="absolute rounded-full overflow-hidden bg-mv-canvas"

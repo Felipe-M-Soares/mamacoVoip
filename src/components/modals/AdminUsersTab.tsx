@@ -5,10 +5,6 @@ import { copyText } from '../../lib/copyText'
 import { Avatar } from '../ui/Avatar'
 import { TabHeader, SettingsCard, InlineMessage } from './settingsUI'
 
-// "Usuários" — só pra quem administra a plataforma (app_admins + 2FA).
-// Privacidade: o banco devolve o e-mail MASCARADO; ver o completo é uma
-// ação à parte, registrada no log de auditoria. Nada de mensagens/DMs.
-
 type AdminUser = {
   id: string
   username: string | null
@@ -30,7 +26,6 @@ type Stats = { total: number; new_7d: number; new_30d: number; active_7d: number
 
 const PAGE = 50
 
-// Planos conhecidos (dá pra criar outros nomes no futuro sem mexer no banco).
 const PLANS: { id: string; label: string }[] = [
   { id: 'free', label: 'Grátis' },
   { id: 'premium', label: 'Premium' },
@@ -301,7 +296,6 @@ function PlanEditor({ user, onClose, onSaved }: { user: AdminUser; onClose: () =
     const { error: err } = await callRpc('admin_set_user_plan', {
       p_user_id: user.id,
       p_plan: plan,
-      // Fim do dia escolhido, no horário local.
       p_expires_at: plan !== 'free' && expires ? new Date(`${expires}T23:59:59`).toISOString() : null,
       p_note: plan !== 'free' ? note : null,
     })

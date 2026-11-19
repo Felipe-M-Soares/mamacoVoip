@@ -22,26 +22,11 @@ interface AvatarProps {
   name: string
   avatarUrl?: string | null
   status?: ProfileStatus
-  // Id do dono do avatar — opcional (nem todo lugar que usa Avatar tem um
-  // usuário por trás, ex.: preview de convite). Quando presente, cruza o
-  // `status` escolhido no perfil com a presença em tempo real (ver
-  // usePresence/PresenceContext): se a pessoa não estiver de fato
-  // conectada agora, mostra offline mesmo que o banco ainda diga
-  // "online" (caso de quem fechou o app sem dar logout).
   userId?: string | null
   size?: number
-  // Moldura/anel decorativo (profile.avatar_decoration_url) — pode ser
-  // uma imagem animada (GIF/WEBP). Só desenha em tamanhos grandes o
-  // bastante pra fazer sentido (ver DECORATION_MIN_SIZE abaixo): numa
-  // lista densa de 16-24px ela só viraria ruído visual em cima do
-  // avatar, então nesses lugares o Avatar simplesmente ignora a prop.
   decorationUrl?: string | null
 }
 
-// Abaixo disso a decoração não é desenhada — ela é pensada pra ter uns
-// 30% de "sangria" pra fora do avatar (ver estilo abaixo), o que fica
-// ilegível/quebrado em ícones pequenos de lista (barra de canais,
-// resultados de busca, etc.).
 const DECORATION_MIN_SIZE = 32
 
 export function Avatar({ name, avatarUrl, status, userId, size = 40, decorationUrl }: AvatarProps) {
@@ -49,9 +34,6 @@ export function Avatar({ name, avatarUrl, status, userId, size = 40, decorationU
   const isPresent = useIsPresent(userId)
   const effectiveStatus: ProfileStatus | undefined =
     status && status !== 'offline' && userId && !isPresent ? 'offline' : status
-  // Espaço extra ao redor do avatar pra decoração "vazar" pra fora sem
-  // ser cortada pelos elementos vizinhos (ver comentário acima) — só
-  // existe quando tem decoração de verdade pra mostrar.
   const showDecoration = Boolean(decorationUrl) && size >= DECORATION_MIN_SIZE
   const pad = showDecoration ? size * 0.15 : 0
 
@@ -99,10 +81,6 @@ export function Avatar({ name, avatarUrl, status, userId, size = 40, decorationU
   )
 }
 
-// Só lemos pixels (pra detectar PNG sem fundo) de imagens do próprio app
-// (Storage do Supabase) ou blob: da prévia local — ambos liberam CORS.
-// Fotos de outros domínios (ex.: foto do Google) carregam sem
-// crossOrigin, senão poderiam simplesmente não aparecer.
 function canInspectPixels(url: string): boolean {
   if (url.startsWith('blob:') || url.startsWith('data:')) return true
   try {
@@ -112,9 +90,6 @@ function canInspectPixels(url: string): boolean {
   }
 }
 
-// PNG/WebP/GIF sem fundo aparece "solto" (sem círculo, sem fundo e sem
-// sombra/contorno em volta) — ver lib/imageTransparency. `key` = URL no pai, então o
-// estado recomeça quando a foto muda.
 function AvatarImage({ url, name }: { url: string; name: string }) {
   const inspect = canInspectPixels(url)
   const [transparent, setTransparent] = useState(() => (inspect ? getCachedTransparency(url) ?? false : false))

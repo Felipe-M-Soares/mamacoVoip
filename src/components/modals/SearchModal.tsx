@@ -66,11 +66,6 @@ export function SearchModal({
   serverId: string
   channels: Channel[]
   onClose: () => void
-  // O segundo parâmetro (serverId de destino) só é passado quando o
-  // resultado clicado é de OUTRO servidor (busca em todos os
-  // servidores) — quem lida com isso (MainLayout) troca de servidor
-  // antes de abrir o canal. Pra um resultado do servidor atual, chega
-  // sem esse segundo parâmetro, igual sempre funcionou.
   onJumpToChannel: (channel: Channel, serverId?: string) => void
 }) {
   const { members } = useServerMembers(serverId)
@@ -82,10 +77,6 @@ export function SearchModal({
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
 
-  // Em modo "todos os servidores", esses dois mapas são reconstruídos
-  // a cada busca (não dá pra confiar só nos dados do servidor atual,
-  // já que os resultados podem vir de qualquer servidor que o usuário
-  // participa).
   const [extraProfilesById, setExtraProfilesById] = useState<Record<string, Profile>>({})
   const [extraChannelsById, setExtraChannelsById] = useState<Record<string, Channel>>({})
   const [serverById, setServerById] = useState<Record<string, Server>>({})
@@ -96,7 +87,6 @@ export function SearchModal({
   const [filterError, setFilterError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Atalhos de filtro clicáveis — só acrescentam o prefixo no campo.
   const FILTER_HINTS = ['de:', 'em:', 'com:arquivo', 'antes:', 'depois:']
   function addFilter(token: string) {
     setQuery((q) => (q.trim() ? `${q.trim()} ${token}` : token))
@@ -114,10 +104,6 @@ export function SearchModal({
 
     const serverIds = crossServer ? servers.map((s) => s.id) : [serverId]
 
-    // Em modo cross-server, os canais/perfis do servidor atual (vindos
-    // via props/hook) não bastam — busca canais de TODOS os servidores
-    // do usuário antes de rodar a busca em si, pra poder resolver nome
-    // de canal/autor nos resultados e aplicar o filtro em:canal.
     let searchableChannels = channels
     if (crossServer) {
       const { data: allChannels } = await supabase.from('channels').select('*').in('server_id', serverIds)
@@ -131,9 +117,6 @@ export function SearchModal({
     if (parsed.freeText.length >= 1) dbQuery = dbQuery.ilike('content', `%${parsed.freeText}%`)
 
     if (parsed.fromUsername) {
-      // Em modo cross-server não dá pra resolver "de:usuário" pela
-      // lista de membros de UM servidor só — filtra pelo texto
-      // diretamente na tabela profiles (username é único no app todo).
       const { data: authorRows } = await supabase
         .from('profiles')
         .select('id')
@@ -152,9 +135,6 @@ export function SearchModal({
     }
 
     if (parsed.inChannelName) {
-      // Nomes de canal podem se repetir entre servidores diferentes —
-      // em modo cross-server isso casa com QUALQUER canal com esse
-      // nome, não só um específico.
       const matches = searchableChannels.filter((c) => c.name.toLowerCase() === parsed.inChannelName!.toLowerCase())
       if (matches.length === 0) {
         setResults([])
@@ -191,9 +171,6 @@ export function SearchModal({
       setExtraProfilesById(Object.fromEntries((profileRows ?? []).map((p) => [p.id, p])))
     }
 
-    // Mensagens de canais +18 só aparecem na busca pra quem confirmou a
-    // idade e deixou "Mostrar conteúdo +18" ligado — senão a busca
-    // furaria o portão de idade do canal.
     if (!(adultContent.verified && adultContent.showAdult)) {
       const nsfwChannelIds = new Set(searchableChannels.filter((c) => c.is_nsfw).map((c) => c.id))
       if (nsfwChannelIds.size > 0) list = list.filter((m) => !nsfwChannelIds.has(m.channel_id))
@@ -216,8 +193,6 @@ export function SearchModal({
           placeholder="Buscar mensagens..."
           aria-label="Buscar mensagens (ex: de:fulano em:geral com:arquivo)"
           autoFocus
-          // O CSS global desenha um anel de foco em todo input; aqui o campo
-          // é "sem moldura" (a própria paleta é a moldura), então some com ele.
           style={{ boxShadow: 'none' }}
           className="flex-1 min-w-0 bg-transparent outline-none text-[17px] text-white placeholder:text-mv-muted"
         />

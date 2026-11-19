@@ -1,5 +1,3 @@
-// Troca entre o modo Clássico (lista de canais) e o Escritório (isométrico).
-// Mesmo botão nos dois lugares: na barra de canais e no topo do escritório.
 import type { ReactNode } from 'react'
 
 export type ViewMode = 'classico' | 'escritorio'

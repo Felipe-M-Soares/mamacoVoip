@@ -53,8 +53,6 @@ export function EditChannelModal({
       slowmode_seconds: channel.type === 'text' ? slowmodeSeconds : channel.slowmode_seconds,
       is_spoiler: channel.type === 'text' ? isSpoiler : channel.is_spoiler,
       is_restricted: isRestricted,
-      // Só manda is_nsfw quando mudou: editar outros campos continua
-      // funcionando num banco que ainda não rodou a migration 015.
       ...(isNsfw !== !!channel.is_nsfw ? { is_nsfw: isNsfw } : {}),
     })
     if (!error && isRestricted) {

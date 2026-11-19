@@ -1,7 +1,5 @@
 import { useSyncExternalStore } from 'react'
 
-// "Onde você está" (servidor aberto, Início, conversa) — mostrado no
-// centro da barra de título do app e no título da janela/aba.
 export type WindowPlace = { label: string; iconUrl?: string | null } | null
 
 let current: WindowPlace = null
@@ -20,7 +18,6 @@ export function setWindowPlace(place: WindowPlace) {
   listeners.forEach((l) => l())
 }
 
-/** Conversas privadas não lidas — vira "(2) ..." no título da janela/aba. */
 export function setWindowUnreadCount(count: number) {
   if (count === unreadCount) return
   unreadCount = count

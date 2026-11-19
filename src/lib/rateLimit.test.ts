@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { checkRateLimit, rateLimitError } from './rateLimit'
 
-// checkRateLimit usa Date.now() internamente pra decidir a janela —
-// controla o relógio nos testes pra não depender de timing real (que
-// deixaria os testes lentos e ocasionalmente instáveis).
 beforeEach(() => {
   vi.useFakeTimers()
 })

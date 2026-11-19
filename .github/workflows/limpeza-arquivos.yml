@@ -1,18 +1,5 @@
 name: Limpeza de arquivos antigos
 
-# O plano grátis do Supabase tem ~1 GB pra TODOS os arquivos (anexos do
-# chat, avatares, sons...). Este workflow roda todo dia e SÓ age se o
-# total passar de 800 MB: aí apaga os anexos de chat mais antigos (com
-# mais de 30 dias) até voltar pra 650 MB. Avatares, ícones, emojis e sons
-# nunca são apagados. No chat, o anexo apagado aparece como "indisponível".
-#
-# Configuração (uma vez só) — Settings > Secrets and variables > Actions:
-#   - SUPABASE_DB_URL (o mesmo do backup)
-#   - SUPABASE_URL (já existe, do "Manter Supabase ativo")
-#   - SUPABASE_SERVICE_ROLE_KEY: Supabase > Project Settings > API Keys >
-#       "service_role" (secret). Essa chave é poderosa — só aqui nos
-#       Secrets, NUNCA no código.
-
 on:
   schedule:
     - cron: '41 5 * * *' # todo dia, 05:41 UTC
@@ -44,9 +31,6 @@ jobs:
             echo "::warning::Limpeza não configurada (faltam secrets — ver o topo deste arquivo)."
             exit 0
           fi
-          # A URL e a consulta vão por variável de ambiente e são lidas DENTRO
-          # do contêiner (aspas simples). Antes "$PGURL" era expandido aqui
-          # fora, onde não existe — com `set -u` o passo morria na hora.
           psql_q() {
             docker run --rm -e PGURL="$SUPABASE_DB_URL" -e Q="$1" postgres:17 \
               sh -c 'psql "$PGURL" -v ON_ERROR_STOP=1 -At -F "$(printf "\t")" -c "$Q"'

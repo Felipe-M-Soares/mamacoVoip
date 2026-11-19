@@ -1,8 +1,3 @@
-// Seletor de dispositivo de áudio usado nos menus rápidos (painel e barra
-// da chamada). Sempre tem "Padrão do sistema" (segue o Windows), e mostra
-// o dispositivo salvo que não está conectado agora como "(desconectado)"
-// — antes o seletor mostrava outro aparelho como se fosse o escolhido.
-// As entradas "default"/"communications" do Chrome viram só o "Padrão".
 type Opt = { deviceId: string; label: string }
 
 export function DeviceSelect({

@@ -1,6 +1,3 @@
-// Interruptor em pílula (role="switch") — substitui o checkbox quadrado
-// padrão do navegador nas telas de configuração. Acessível: anuncia o
-// estado via aria-checked e responde a Espaço/Enter por ser um <button>.
 export function Toggle({
   checked,
   onChange,
@@ -12,7 +9,6 @@ export function Toggle({
   checked: boolean
   onChange: (checked: boolean) => void
   disabled?: boolean
-  /** Rótulo pra leitor de tela quando não há <label> visível associado. */
   label?: string
   id?: string
   size?: 'sm' | 'md'

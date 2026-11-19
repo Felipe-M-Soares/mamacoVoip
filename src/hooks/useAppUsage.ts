@@ -1,18 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-// Tempo de uso do app (telão do modo 3D). A cada 5 min com a janela à
-// vista, soma 5 min no dia (o banco limita: nunca mais que o tempo real
-// desde a última soma). Se o banco ainda não tem a PARTE 30 do SQL, para
-// em silêncio.
 const PING_MS = 5 * 60 * 1000
 
-export function useAppUsageHeartbeat(userId: string | null | undefined) {
+export function useAppUsageHeartbeat(userId: string | null | undefined, inCall = false) {
+  const inCallRef = useRef(inCall)
+  inCallRef.current = inCall
   useEffect(() => {
     if (!userId) return
     let stopped = false
     const id = window.setInterval(async () => {
-      if (stopped || document.hidden) return
+      if (stopped || (document.hidden && !inCallRef.current)) return
       const { error } = await supabase.rpc('track_app_usage', { p_seconds: 300 })
       if (error && (error.code === 'PGRST202' || /track_app_usage/.test(error.message))) {
         stopped = true
@@ -28,7 +26,6 @@ export function useAppUsageHeartbeat(userId: string | null | undefined) {
 
 export type UsageRow = { userId: string; name: string; avatarUrl: string | null; seconds: number }
 
-/** Ranking: você + amigos, últimos 7 dias. null = ainda carregando; 'erro' = indisponível. */
 export function useFriendsUsage(enabled: boolean): UsageRow[] | null | 'erro' {
   const [rows, setRows] = useState<UsageRow[] | null | 'erro'>(null)
   useEffect(() => {

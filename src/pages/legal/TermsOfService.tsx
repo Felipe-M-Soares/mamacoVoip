@@ -1,10 +1,6 @@
 import { Link } from 'react-router-dom'
 import { LegalPageLayout, LegalSection } from './LegalPageLayout'
 
-// Responsável e contato: os mesmos da Política de Privacidade. Texto de referência, não é parecer jurídico: vale uma
-// revisão por advogado, principalmente das seções 11 (responsabilidade)
-// e 14 (foro).
-
 export function TermsOfService() {
   return (
     <LegalPageLayout title="Termos de Uso" updatedAt="30 de setembro de 2026">

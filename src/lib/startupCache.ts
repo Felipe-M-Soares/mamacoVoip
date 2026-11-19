@@ -1,9 +1,3 @@
-// Cache da última lista de servidores/canais NESTE aparelho: ao abrir o
-// app, a barra lateral aparece na hora com o que tinha da última vez e
-// é atualizada por trás quando o servidor responde (antes ficava um
-// esqueleto carregando a cada abertura). Separado por conta, apagado ao
-// sair da conta e com validade de 7 dias.
-
 const PREFIX = 'mv-cache:'
 const VERSION = 1
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
@@ -29,7 +23,6 @@ export function writeStartupCache<T>(key: string, data: T, now = Date.now()) {
     if (raw.length > MAX_BYTES) return
     localStorage.setItem(PREFIX + key, raw)
   } catch {
-    // sem espaço/bloqueado — só não guarda
   }
 }
 
@@ -42,7 +35,6 @@ export function clearStartupCache() {
     }
     keys.forEach((k) => localStorage.removeItem(k))
   } catch {
-    // best-effort
   }
 }
 

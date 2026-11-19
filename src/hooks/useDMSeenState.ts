@@ -2,9 +2,6 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { changesChannel } from '../lib/realtimeChannel'
 
-// Retorna até quando a OUTRA pessoa da conversa leu — usado pra
-// mostrar "Visto" embaixo da sua última mensagem quando ela já foi
-// lida por quem recebeu.
 export function useDMSeenState(conversationId: string | null, otherUserId: string | null) {
   const [otherLastReadAt, setOtherLastReadAt] = useState<string | null>(null)
 
@@ -33,9 +30,6 @@ export function useDMSeenState(conversationId: string | null, otherUserId: strin
         'postgres_changes',
         { event: '*', schema: 'public', table: 'dm_read_state', filter: `conversation_id=eq.${convoId}` },
         (payload) => {
-          // Usa a própria linha que chegou em vez de consultar de novo — e
-          // ignora as MINHAS leituras (antes cada vez que eu abria a conversa
-          // disparava uma consulta à toa).
           const row = payload.new as { user_id?: string; last_read_at?: string } | null
           if (row?.user_id && row.user_id !== otherId) return
           if (row?.user_id === otherId && row.last_read_at) {

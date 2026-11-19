@@ -56,8 +56,6 @@ export function ReportsPanel({ serverId, onClose }: { serverId: string; onClose:
     }
   }, [reports])
 
-  // Moderador manda a denúncia também pra equipe da plataforma (o banco
-  // só aceita escalated de false pra true).
   async function escalate(reportId: string) {
     const { error } = await supabase.from('reports').update({ escalated: true }).eq('id', reportId)
     if (error) alert('Não foi possível enviar para a equipe. Tente de novo.')

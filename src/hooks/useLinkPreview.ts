@@ -10,11 +10,7 @@ export interface LinkPreviewData {
   siteName: string
 }
 
-// Cache simples em memória, compartilhado pelo app inteiro — evita
-// buscar o preview de novo toda vez que a mensagem re-renderiza ou
-// aparece de novo na tela (ex: rolar pra cima e pra baixo no chat).
 const cache = new Map<string, LinkPreviewData | null>()
-// Limite pra o cache não crescer sem fim numa sessão longa.
 const MAX_CACHE_ENTRIES = 500
 
 function remember(url: string, value: LinkPreviewData | null) {
@@ -25,15 +21,10 @@ function remember(url: string, value: LinkPreviewData | null) {
   cache.set(url, value)
 }
 
-// Chamado no logout (AuthContext) — o cache é por aba, não por conta.
 export function clearLinkPreviewCache() {
   cache.clear()
 }
 
-// O resultado vem de uma página qualquer da internet (via Edge
-// Function) — nunca confia nele direto: o link e a imagem só passam se
-// forem http(s) (um "javascript:" no href do card executaria código no
-// app ao clicar), e os textos são limitados em tamanho.
 function sanitizeLinkPreview(raw: unknown): LinkPreviewData | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>

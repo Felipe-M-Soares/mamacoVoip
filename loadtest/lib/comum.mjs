@@ -1,4 +1,3 @@
-// Utilitários compartilhados pelos scripts de teste de carga.
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,11 +6,6 @@ export const PASTA_LOADTEST = resolve(dirname(fileURLToPath(import.meta.url)), '
 export const RAIZ_PROJETO = resolve(PASTA_LOADTEST, '..')
 export const ARQUIVO_USUARIOS_PADRAO = join(PASTA_LOADTEST, '.carga-usuarios.json')
 
-/**
- * Lê o .env da raiz do projeto (só pra pegar VITE_SUPABASE_URL /
- * VITE_SUPABASE_ANON_KEY se as variáveis próprias não forem passadas).
- * Variáveis de ambiente de verdade sempre têm prioridade.
- */
 export function carregarEnvDoProjeto() {
   const arquivo = join(RAIZ_PROJETO, '.env')
   if (!existsSync(arquivo)) return
@@ -43,7 +37,6 @@ export function exigir(nome, valor) {
 
 export const dormir = (ms) => new Promise((r) => setTimeout(r, ms))
 
-/** Percentil (0–100) de uma lista de números (interpolação linear). */
 export function percentil(valores, p) {
   if (valores.length === 0) return null
   const ord = [...valores].sort((a, b) => a - b)

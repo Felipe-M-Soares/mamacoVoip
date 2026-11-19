@@ -78,7 +78,6 @@ export function QuickSwitcher({
     setSelectedIndex(0)
   }, [query])
 
-  // Mantém o item ativo visível ao navegar com as setas.
   useEffect(() => {
     const item = results[selectedIndex]
     if (item) document.getElementById(`qs-${item.kind}-${item.id}`)?.scrollIntoView({ block: 'nearest' })
@@ -111,9 +110,6 @@ export function QuickSwitcher({
 
   const KIND_LABEL = { channel: 'Canais', server: 'Servidores', conversation: 'Conversas diretas' } as const
 
-  // Portal no <body>: se algum ancestral tiver transform/filter, um
-  // "fixed" dentro dele passa a ser relativo a esse ancestral (e o
-  // overlay aparecia preso dentro da barra lateral).
   return createPortal(
     <div
       className="fixed inset-0 z-[350] bg-black/70 animate-fade-in flex items-start justify-center pt-[12vh] px-4"
@@ -142,8 +138,6 @@ export function QuickSwitcher({
             aria-expanded="true"
             aria-controls="quick-switcher-list"
             aria-activedescendant={results[selectedIndex] ? `qs-${results[selectedIndex].kind}-${results[selectedIndex].id}` : undefined}
-            // O CSS global desenha um anel de foco em todo input; aqui o campo
-            // é "sem moldura" (a própria paleta é a moldura), então some com ele.
             style={{ boxShadow: 'none' }}
             className="flex-1 min-w-0 bg-transparent outline-none text-[17px] text-white placeholder:text-mv-muted"
           />

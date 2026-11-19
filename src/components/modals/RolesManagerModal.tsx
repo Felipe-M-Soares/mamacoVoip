@@ -138,7 +138,7 @@ export function RolesManagerModal({ serverId, onClose }: { serverId: string; onC
       </div>
       {moveError && (
         <p className="text-[13px] text-rose-300 mt-3">
-          {/move_role|function/i.test(moveError) ? 'Rode o arquivo 007 atualizado no Supabase pra poder ordenar cargos.' : moveError}
+          {/move_role|function/i.test(moveError) ? 'Não foi possível reordenar os cargos agora. Tente de novo mais tarde.' : moveError}
         </p>
       )}
     </Modal>
@@ -359,7 +359,6 @@ function RoleEditor({
             <span className="chip mb-[0.45rem]">{permissions.size} ativas</span>
           </div>
           <div className="rounded-xl border border-[var(--color-line)] divide-y divide-[var(--color-line)] max-h-64 overflow-y-auto">
-            {/* "Gerenciar cargos" não aparece: só dono e Administrador mexem em cargos. */}
             {PERMISSIONS.filter((p) => p !== 'manage_roles').map((p) => (
               <div key={p} className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-white/[0.015]">
                 <span className={`text-[13.5px] ${p === 'administrator' ? 'text-amber-300' : 'text-mv-text'}`}>

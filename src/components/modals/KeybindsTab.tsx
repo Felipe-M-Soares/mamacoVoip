@@ -35,8 +35,6 @@ export function KeybindsTab() {
   const [notice, setNotice] = useState<string | null>(null)
   const isDesktop = Boolean(window.electronAPI?.isElectron)
 
-  // Gravando: a próxima combinação vira o atalho. Esc cancela,
-  // Backspace/Delete remove o atalho.
   useEffect(() => {
     if (!recordingId) return
     setKeybindRecording(true)
@@ -54,7 +52,7 @@ export function KeybindsTab() {
         return
       }
       const combo = comboFromEvent(e)
-      if (!combo) return // só modificador até agora
+      if (!combo) return
       if (!isUsableCombo(combo)) {
         setNotice('Use Ctrl, Alt ou Win junto (ou uma tecla F1–F24), senão atrapalharia digitar.')
         return

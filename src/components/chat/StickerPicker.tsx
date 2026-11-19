@@ -10,9 +10,6 @@ import {
 } from '../../lib/stickers'
 import { CloseIcon, SearchIcon, StickerIcon } from '../ui/icons'
 
-// Seletor de figurinhas dos pacotes originais do app (lib/stickers.ts),
-// com uma aba por pacote (e "Recentes").
-// Mesmo formato de popover do GifPicker, ancorado acima do botão.
 export function StickerPicker({ onSelect, onClose }: { onSelect: (sticker: Sticker) => void; onClose: () => void }) {
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)

@@ -2,10 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { openSharedChannel } from '../lib/realtimeChannel'
 
-// Cada "digitando" é um broadcast que o Supabase cobra como 1 + (quantos
-// estão no canal) mensagens de Realtime — é a maior fatia da cota em
-// canal movimentado (ver loadtest/CAPACIDADE.md). 1 aviso a cada 3s (era
-// 2s) corta ~1/3 disso; o indicador do outro lado dura 5s, então não pisca.
 const TYPING_TIMEOUT_MS = 5000
 const SEND_THROTTLE_MS = 3000
 const EMPTY: string[] = []
@@ -27,10 +23,6 @@ export function useTypingIndicator(channelId: string | null, userId: string | un
       setTyping((prev) => (prev.ids.includes(uid) ? { key: prev.key, ids: prev.ids.filter((id) => id !== uid) } : prev))
     }
 
-    // Tópico de broadcast precisa ser o MESMO em todos os clientes (é a
-    // "sala"), então não dá pra usar sufixo aleatório — openSharedChannel
-    // espera um canal antigo com o mesmo nome terminar de sair antes de
-    // criar o novo (ver lib/realtimeChannel.ts).
     const close = openSharedChannel(`typing:${channelId}`, { config: { broadcast: { self: false } } }, (rt) => {
       rt.on('broadcast', { event: 'typing' }, ({ payload }) => {
         const uid = payload?.userId as string | undefined
@@ -39,9 +31,6 @@ export function useTypingIndicator(channelId: string | null, userId: string | un
         clearTimeout(timeoutsRef.current[uid])
         timeoutsRef.current[uid] = setTimeout(() => removeUser(uid), TYPING_TIMEOUT_MS)
       })
-      // Quem enviou a mensagem avisa que parou de digitar — sem isso o
-      // "fulano está digitando..." ficava até 4s na tela DEPOIS da
-      // mensagem já ter chegado.
       rt.on('broadcast', { event: 'stop_typing' }, ({ payload }) => {
         const uid = payload?.userId as string | undefined
         if (uid) removeUser(uid)
@@ -62,8 +51,6 @@ export function useTypingIndicator(channelId: string | null, userId: string | un
   const notifyTyping = useCallback(() => {
     if (!channelRef.current || !userId) return
     const now = Date.now()
-    // Não manda um broadcast a cada tecla — no máximo 1 a cada 3s já é
-    // suficiente pra manter o indicador vivo do outro lado (1 a cada 3s).
     if (now - lastSentRef.current < SEND_THROTTLE_MS) return
     lastSentRef.current = now
     void channelRef.current.send({ type: 'broadcast', event: 'typing', payload: { userId } })
@@ -75,8 +62,6 @@ export function useTypingIndicator(channelId: string | null, userId: string | un
     void channelRef.current.send({ type: 'broadcast', event: 'stop_typing', payload: { userId } })
   }, [userId])
 
-  // Evita mostrar por um instante quem estava digitando no canal ANTERIOR
-  // logo depois de trocar de canal (antes do efeito acima limpar a lista).
   const typingUserIds = typing.key === channelId ? typing.ids : EMPTY
 
   return { typingUserIds, notifyTyping, stopTyping }

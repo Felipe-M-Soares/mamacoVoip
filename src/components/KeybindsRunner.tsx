@@ -10,9 +10,6 @@ import {
   type KeybindAction,
 } from '../lib/keybinds'
 
-// Faz os atalhos de teclado (lib/keybinds) funcionarem: dentro do app via
-// keydown e, no app de computador com "funcionar fora do app" ligado, via
-// atalhos globais do Electron (com o jogo em primeiro plano).
 export function KeybindsRunner() {
   const voice = useVoiceCore()
   const { bindings, global } = useKeybinds()
@@ -68,7 +65,6 @@ export function KeybindsRunner() {
   const runRef = useRef(run)
   runRef.current = run
 
-  // Dentro do app.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.repeat || isKeybindRecording()) return
@@ -83,7 +79,6 @@ export function KeybindsRunner() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [bindings])
 
-  // Fora do app (Electron).
   useEffect(() => {
     const api = window.electronAPI
     if (!api?.setGlobalKeybinds) return

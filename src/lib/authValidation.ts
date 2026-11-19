@@ -1,17 +1,4 @@
-// Validações puras do sistema de contas (cadastro, login, troca de
-// senha, redirecionamento pós-login). Ficam aqui, fora dos componentes,
-// pra poderem ser testadas e reaproveitadas em todas as telas — antes,
-// cada tela tinha sua própria regra (cadastro pedia 6 caracteres, a
-// redefinição também, a troca de senha nas configurações nenhuma).
-//
-// IMPORTANTE: isso é só a checagem do app (feedback rápido). A regra
-// que vale de verdade é a do Supabase Auth — configure a mesma coisa em
-// Authentication → Providers → Email → "Minimum password length" (8) e
-// "Password requirements" (letras e dígitos), e ligue "Leaked password
-// protection" (Authentication → Settings). Ver SECURITY_CHECKLIST.md.
-
 export const PASSWORD_MIN_LENGTH = 8
-// bcrypt (usado pelo Supabase Auth) ignora tudo depois do byte 72.
 const PASSWORD_MAX_LENGTH = 72
 const USERNAME_MIN_LENGTH = 3
 export const USERNAME_MAX_LENGTH = 32
@@ -41,7 +28,6 @@ export function validatePassword(password: string, context: { email?: string; us
   return null
 }
 
-// Força aproximada (0–4) só pra um indicador visual — não bloqueia nada.
 export function passwordStrength(password: string): 0 | 1 | 2 | 3 | 4 {
   if (!password) return 0
   let score = 0
@@ -82,10 +68,6 @@ export function validateEmail(email: string): string | null {
   return null
 }
 
-// Só aceita caminhos INTERNOS do app como destino pós-login (ex.:
-// "/convite/abc123"). Qualquer coisa que possa virar navegação pra outro
-// site — "//evil.com", "/\\evil.com", "https://...", "javascript:..." —
-// cai pra "/". Evita open redirect pelo valor salvo em sessionStorage.
 export function safeRedirectPath(path: string | null | undefined, fallback = '/'): string {
   if (typeof path !== 'string' || path.length === 0 || path.length > 2048) return fallback
   if (!path.startsWith('/')) return fallback
@@ -102,13 +84,10 @@ export function safeRedirectPath(path: string | null | undefined, fallback = '/'
   }
 }
 
-// Códigos de convite: os antigos têm 8 caracteres hexadecimais, os novos
-// (migration 013) têm 10 letras/números. Aceita os dois formatos.
 export function isValidInviteCode(code: string | null | undefined): code is string {
   return typeof code === 'string' && /^[a-zA-Z0-9]{6,32}$/.test(code)
 }
 
-// Código TOTP: exatamente 6 dígitos.
 export function normalizeTotpCode(code: string): string {
   return code.replace(/\D/g, '').slice(0, 6)
 }

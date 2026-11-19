@@ -39,21 +39,9 @@ interface ChannelsContextValue {
 
 export const ChannelsContext = createContext<ChannelsContextValue | undefined>(undefined)
 
-// Um Provider por servidor: o MainLayout monta este componente com
-// key={server.id}, então trocar de servidor naturalmente reinicia o
-// estado (sem vazar canais de um servidor pro outro) e, dentro do MESMO
-// servidor, toda a árvore (sidebar, modais, área de chat) compartilha
-// exatamente a mesma lista — igual ao ServersContext.
-// Última lista de canais/categorias vista de cada servidor (só em
-// memória). O provider é recriado a cada troca de servidor
-// (key={server.id}); sem isso, voltar pra um servidor já aberto mostrava
-// o skeleton e esperava a ida ao servidor de novo antes de qualquer canal
-// aparecer. Agora mostra na hora e revalida em segundo plano.
 const channelsCache = new Map<string, { categories: Category[]; channels: Channel[] }>()
 
 export function ChannelsProvider({ serverId, children }: { serverId: string; children: ReactNode }) {
-  // Chave inclui o usuário: outra conta no mesmo computador nunca vê a
-  // lista (com canais restritos) que a anterior tinha em cache.
   const cacheKey = `${useAuth().user?.id ?? ''}|${serverId}`
   const [initialCache] = useState(
     () =>
@@ -66,22 +54,10 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
   const [loading, setLoading] = useState(!initialCache)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Antes, uma falha de rede/RLS aqui (uma exceção lançada pelo fetch,
-  // por exemplo — diferente de um { error } retornado normalmente pelo
-  // supabase-js) derrubava a promise sem passar pelo resto da função:
-  // "loading" nunca voltava pra false e nada de erro era mostrado. Na
-  // prática isso trava a sidebar no skeleton pra sempre — parece "não
-  // aparece nenhum canal", sem nenhuma pista do motivo. Envolver em
-  // try/catch garante que loading sempre termina e que, se algo falhar
-  // de verdade, o motivo aparece pra quem está usando (e pra quem for
-  // depurar depois) em vez de falhar em silêncio.
   const loadSeqRef = useRef(0)
   const hasLoadedRef = useRef(Boolean(initialCache))
   const refresh = useCallback(async () => {
     const seq = ++loadSeqRef.current
-    // Skeleton só na PRIMEIRA carga (ou depois de um erro). Antes toda
-    // ação (criar/renomear/mover canal) trocava a barra lateral inteira
-    // pelo skeleton por um instante.
     if (!hasLoadedRef.current) setLoading(true)
     try {
       const [catsRes, chansRes] = await Promise.all([
@@ -90,8 +66,6 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
       ])
       if (catsRes.error) throw catsRes.error
       if (chansRes.error) throw chansRes.error
-      // Duas ações seguidas (ex.: mover canal duas vezes rápido) disparam
-      // dois refresh — só a resposta mais nova vale.
       if (seq !== loadSeqRef.current) return
       setCategories(catsRes.data ?? [])
       setChannels(chansRes.data ?? [])
@@ -111,11 +85,6 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     refresh()
   }, [refresh])
 
-  // Ponto central: se o insert falhar de um jeito que o supabase-js não
-  // resolve como { error } (rejeição de rede, por exemplo), esse
-  // try/catch garante que quem chamou SEMPRE recebe uma mensagem de
-  // erro de volta em vez de uma exceção não tratada — que no modal de
-  // criar canal virava "sem erro, mas o canal nunca aparece".
   async function createChannel(name: string, type: ChannelType, categoryId: string | null, isStage = false, userLimit = 0, isNsfw = false) {
     try {
       const siblings = channels.filter((c) => c.category_id === categoryId)
@@ -130,16 +99,12 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
         user_limit: number
         is_nsfw?: boolean
       }> = []
-      // Sala de voz (que não é palco) nasce junto com um chat de texto de
-      // mesmo nome na mesma categoria — se ainda não existir um.
       if (type === 'voice' && !isStage) {
         const textName = channelNameFor('text', name)
         if (!siblings.some((c) => c.type === 'text' && c.name === textName)) {
           rows.push({ server_id: serverId, name: textName, type: 'text', category_id: categoryId, position, is_stage: false, user_limit: 0 })
         }
       }
-      // is_nsfw só vai no insert quando ligado: assim criar canal comum
-      // continua funcionando mesmo num banco que ainda não rodou a 015.
       rows.push({ server_id: serverId, name, type, category_id: categoryId, position: position + rows.length, is_stage: isStage, user_limit: userLimit, ...(isNsfw ? { is_nsfw: true } : {}) })
       const { error } = await supabase.from('channels').insert(rows)
       if (error) return { error: describeError(error, 'Não foi possível criar o canal.') }
@@ -184,14 +149,12 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
-  // Ícone de jogo da categoria. Separado do nome: se o SQL da PARTE 26
-  // ainda não rodou (coluna não existe), o nome continua salvando.
   async function setCategoryGame(categoryId: string, game: string | null) {
     try {
       const { error } = await supabase.from('categories').update({ game }).eq('id', categoryId)
       if (error) {
         if (/game/i.test(error.message) && /column|schema/i.test(error.message)) {
-          return { error: 'Falta rodar o SQL atualizado (007, PARTE 26) no Supabase pra salvar o jogo da categoria.' }
+          return { error: 'Não foi possível salvar o jogo da categoria agora. Tente de novo mais tarde.' }
         }
         return { error: describeError(error, 'Não foi possível salvar o jogo da categoria.') }
       }
@@ -202,7 +165,6 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
-  // Imagem própria do ícone da categoria (PARTE 27). `null` = tira a imagem.
   async function setCategoryIcon(categoryId: string, file: File | null) {
     try {
       let url: string | null = null
@@ -216,7 +178,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
         if (upErr) {
           return {
             error: /row-level|policy|unauthorized|403/i.test(upErr.message)
-              ? 'Sem permissão pra enviar (ou falta rodar o SQL 007, PARTE 27, no Supabase).'
+              ? 'Você não tem permissão pra enviar a imagem.'
               : describeError(upErr, 'Não foi possível enviar a imagem.'),
           }
         }
@@ -225,7 +187,7 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
       const { error } = await supabase.from('categories').update({ icon_url: url }).eq('id', categoryId)
       if (error) {
         if (/icon_url/i.test(error.message) && /column|schema/i.test(error.message)) {
-          return { error: 'Falta rodar o SQL atualizado (007, PARTE 27) no Supabase.' }
+          return { error: 'Não foi possível salvar a imagem agora. Tente de novo mais tarde.' }
         }
         return { error: describeError(error, 'Não foi possível salvar a imagem da categoria.') }
       }
@@ -247,8 +209,6 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
-  // alsoChannels: exclui junto os canais que estão nela. Sem isso, os
-  // canais continuam no servidor, só que sem categoria.
   async function deleteCategory(categoryId: string, alsoChannels = false) {
     try {
       if (alsoChannels) {
@@ -269,8 +229,6 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
 
   async function moveChannel(channelId: string, categoryId: string | null, direction: 'up' | 'down') {
     try {
-      // Na lista os canais de texto vêm antes das salas de voz: só troca de
-      // lugar com um vizinho do MESMO tipo.
       const groups = orderChannels(channels.filter((c) => c.category_id === categoryId))
       const siblings = [...groups.text, ...groups.voice]
       const index = siblings.findIndex((c) => c.id === channelId)
@@ -295,9 +253,6 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
-  // Usado pelo arrastar-e-soltar: move um canal pra qualquer categoria
-  // (ou sem categoria) e, opcionalmente, insere antes de um canal
-  // específico dentro dela. Se não passar beforeChannelId, vai pro fim.
   async function moveChannelToCategory(channelId: string, categoryId: string | null, beforeChannelId?: string | null) {
     try {
       const targetGroups = orderChannels(channels.filter((c) => c.category_id === categoryId && c.id !== channelId))
@@ -352,10 +307,6 @@ export function ChannelsProvider({ serverId, children }: { serverId: string; chi
     }
   }
 
-  // Valor memoizado: antes era um objeto novo a cada render do provider,
-  // re-renderizando todo consumidor de useChannels() (sidebar, chat, modais)
-  // sem necessidade. As ações dependem só de channels/categories/serverId/
-  // refresh, que estão nas dependências.
   const value = useMemo(
     () => ({
       categories,

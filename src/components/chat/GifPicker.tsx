@@ -15,12 +15,6 @@ export function GifPicker({
 }: {
   onSelect: (gifUrl: string) => void
   onClose: () => void
-  /**
-   * Modo adulto: só em canal +18 com o portão de idade já confirmado
-   * (quem decide é o ChatArea). Libera a classificação `r` (o máximo do
-   * KLIPY — ele não serve pornografia explícita). Em todo o resto
-   * (canais comuns, DMs, grupos) continua `pg-13`.
-   */
   adult?: boolean
 }) {
   const [notConfigured, setNotConfigured] = useState(false)
@@ -49,10 +43,6 @@ export function GifPicker({
     }
   }, [])
 
-  // Antes havia DOIS efeitos buscando os GIFs "em alta" ao abrir (um no
-  // mount e outro pro `query` vazio 400ms depois) — duas requisições
-  // iguais. Agora é um só: a primeira busca sai na hora, as seguintes
-  // esperam a pessoa parar de digitar.
   useEffect(() => {
     const delay = firstLoadRef.current ? 0 : 400
     firstLoadRef.current = false
@@ -62,17 +52,12 @@ export function GifPicker({
   }, [query, adult])
 
   async function fetchGifs(q: string) {
-    // Cancela a busca anterior: sem isso, a resposta de "gat" podia chegar
-    // DEPOIS da de "gato" e sobrescrever o resultado certo.
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setLoading(true)
     setLoadError(false)
     try {
-      // KLIPY, pela Edge Function gif-search: a chave fica só no servidor
-      // e o KLIPY não recebe quem você é (ver supabase/functions/gif-search).
-      // Busca vazia = GIFs em alta.
       const { data, error } = await supabase.functions.invoke('gif-search', {
         body: { q: q.trim(), adult },
       })
@@ -102,15 +87,6 @@ export function GifPicker({
   }
 
   return (
-    // Antes usava `left-0 right-0` pra esticar a largura toda — isso
-    // funciona quando o elemento posicionado (ancestral mais próximo com
-    // position != static) é o composer inteiro, mas quem envolve o
-    // GifPicker é só o `<div className="relative shrink-0">` do próprio
-    // botão de GIF (~32px), então "esticar de ponta a ponta" desse
-    // wrapper deixava o painel inteiro espremido numa fatia minúscula,
-    // cortando todo o texto. Com largura fixa (w-80) ancorada em left-0,
-    // o painel abre pra direita a partir do botão em vez de tentar
-    // preencher a largura do próprio botão.
     <div className="absolute bottom-full left-0 mb-3 w-80 max-w-[90vw] max-sm:fixed max-sm:left-2 max-sm:right-2 max-sm:bottom-[84px] max-sm:mb-0 max-sm:w-auto max-sm:max-w-none surface-elevated rounded-2xl overflow-hidden z-20 animate-pop-in" role="dialog" aria-label="Escolher GIF">
       <div className="p-2.5 border-b border-[var(--color-line)] flex items-center gap-1.5">
         <input
@@ -170,8 +146,6 @@ export function GifPicker({
           ))
         )}
       </div>
-      {/* Atribuição pedida pelos termos do KLIPY ("Powered by KLIPY") —
-          selo em texto, sem baixar logo de fora. */}
       <div className="flex items-center justify-center gap-2 py-1.5 border-t border-[var(--color-line)]">
         <span
           aria-label="Powered by KLIPY"

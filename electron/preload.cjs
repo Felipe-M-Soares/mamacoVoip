@@ -5,8 +5,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getCurrentGame: () => ipcRenderer.invoke('app:getCurrentGame'),
-  // Privacidade: liga/desliga a detecção de jogos (lista de processos).
-  getGameDetectionEnabled: () => ipcRenderer.invoke('app:getGameDetectionEnabled'),
   setGameDetectionEnabled: (enabled) => ipcRenderer.invoke('app:setGameDetectionEnabled', !!enabled),
   onGameStatusChanged: (callback) => {
     const handler = (_event, game) => callback(game)
@@ -19,37 +17,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update-status', handler)
   },
   restartToUpdate: () => ipcRenderer.invoke('app:restartToUpdate'),
-  // AUDITORIA: último estado relevante do auto-updater (baixando/pronta),
-  // pra página poder se atualizar ao montar/recarregar — ver
-  // app:get-update-status em electron/main.cjs e useAppUpdater.ts.
   getUpdateStatus: () => ipcRenderer.invoke('app:get-update-status'),
-  // OITAVA RODADA: trocado de "evento que chega sozinho" (onScreenShareSources)
-  // pra "pedido ativo" (getScreenShareSources) — ver o comentário grande em
-  // electron/main.cjs perto de ipcMain.handle('screen-share:get-sources', ...)
-  // pro porquê da mudança de arquitetura (abandonar
-  // setDisplayMediaRequestHandler). ScreenSharePicker.tsx agora chama isso
-  // diretamente assim que abre, em vez de ficar esperando um evento.
   getScreenShareSources: () => ipcRenderer.invoke('screen-share:get-sources'),
   copyText: (text) => ipcRenderer.invoke('clipboard:write-text', text),
-  // Áudio agora é automático conforme o tipo da fonte escolhida (captura
-  // separada em VoiceContext.tsx via getUserMedia com
-  // chromeMediaSource: 'desktop') — esse invoke só dispara o efeito
-  // colateral de recuperar o foco da janela do app (ver electron/main.cjs).
   selectScreenShareSource: (sourceId) => ipcRenderer.invoke('screen-share:select', sourceId),
-  // NONA RODADA: plano B automático — "reserva" essa fonte pro caminho de
-  // captura ANTIGO (getDisplayMedia), usado só se o caminho principal
-  // (getUserMedia direto) falhar. Ver o comentário grande em
-  // electron/main.cjs perto de setDisplayMediaRequestHandler e
-  // captureScreenShareStream em VoiceContext.tsx.
   pinFallbackShareSource: (sourceId) => ipcRenderer.invoke('screen-share:pin-fallback-source', sourceId),
-  // DÉCIMA OITAVA RODADA: "Restaurar e compartilhar" — jogo cadastrado
-  // detectado rodando, mas minimizado (por isso não aparece na lista de
-  // janelas — ver looksMinimized em electron/main.cjs). Restaura a
-  // janela pelo HWND antes de buscar as fontes de novo.
-  restoreGameWindow: (hwnd) => ipcRenderer.invoke('screen-share:restore-window', hwnd),
   focusAppWindow: () => ipcRenderer.send('app:focus-window'),
-  // Mensagem privada chegando (MessageAlerts.tsx): notificação nativa,
-  // clique nela e piscar na barra de tarefas.
   showNotification: (payload) => ipcRenderer.invoke('notify:show', payload),
   onNotificationClick: (callback) => {
     const handler = (_event, target) => callback(target)
@@ -66,8 +39,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('ptt-state', handler)
   },
   sendVoiceStateToOverlay: (state) => ipcRenderer.send('overlay:update-state', state),
-  // Sobreposição (overlay) — ligar/desligar e canto da tela pela UI,
-  // além do atalho configurável (Configurações → Atalhos). Ver setOverlayVisible em main.cjs.
   getOverlaySettings: () => ipcRenderer.invoke('overlay:get-settings'),
   setOverlayVisible: (visible) => ipcRenderer.invoke('overlay:set-visible', visible),
   toggleOverlay: () => ipcRenderer.invoke('overlay:toggle'),
@@ -80,21 +51,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAutoStart: () => ipcRenderer.invoke('app:get-autostart'),
   setAutoStart: (enabled) => ipcRenderer.invoke('app:set-autostart', enabled),
   getSystemIdleSeconds: () => ipcRenderer.invoke('app:system-idle-seconds'),
-  getGpuStatus: () => ipcRenderer.invoke('video:gpu-status'),
-  setForceGpuEncode: (force) => ipcRenderer.invoke('video:set-force-gpu', force),
   onOverlayVisibilityChanged: (callback) => {
     const handler = (_event, visible) => callback(visible)
     ipcRenderer.on('overlay:visibility-changed', handler)
     return () => ipcRenderer.removeListener('overlay:visibility-changed', handler)
   },
-  // { label, antiCheat, generic } do jogo detectado agora (ou null).
   getCurrentGameInfo: () => ipcRenderer.invoke('app:getCurrentGameInfo'),
   checkForUpdatesNow: () => ipcRenderer.send('app:check-for-updates-now'),
-  // Vigia de foco do jogo (mitigação de vazamento em compartilhamento de
-  // tela inteira) — ver o bloco grande em electron/main.cjs pra entender
-  // o esquema completo. Recebe uma lista de nomes de processo (não mais
-  // um label do KNOWN_GAMES) — generalizado pra funcionar com qualquer
-  // jogo/app, não só os cadastrados.
   startForegroundWatch: (processNames) => ipcRenderer.invoke('game-foreground-watch:start', processNames),
   stopForegroundWatch: () => ipcRenderer.invoke('game-foreground-watch:stop'),
   onGameForegroundChanged: (callback) => {
@@ -102,9 +65,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('game-foreground-changed', handler)
     return () => ipcRenderer.removeListener('game-foreground-changed', handler)
   },
-  // Auto-parar o compartilhamento de tela cheia quando o processo
-  // compartilhado fecha de vez — ver electron/main.cjs.
-  // Atalhos globais (ver keybinds:set-global em main.cjs).
   setGlobalKeybinds: (list) => ipcRenderer.invoke('keybinds:set-global', list),
   onKeybind: (callback) => {
     const handler = (_e, id) => callback(id)
@@ -118,16 +78,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('watched-process-exited', handler)
     return () => ipcRenderer.removeListener('watched-process-exited', handler)
   },
-  // Captura de áudio por processo (EXPERIMENTAL) — ver o bloco grande em
-  // electron/main.cjs ("Captura de áudio por processo") e
-  // native/process-audio-capture/capture.cpp pra entender o esquema
-  // completo. `startProcessAudioCapture` devolve { ok: true } ou
-  // { ok: false, error } — nunca lança exceção, quem chama sempre trata
-  // os dois casos (ver VoiceContext.tsx).
   startProcessAudioCapture: (pid) => ipcRenderer.invoke('process-audio:start', pid),
-  // Áudio de TODO o sistema, EXCETO o do próprio app (a call) — evita que
-  // quem assiste a transmissão ouça a própria voz de volta (eco). Mesmos
-  // eventos (format/chunk/error) da captura por processo.
   startSystemAudioExcludingSelf: () => ipcRenderer.invoke('process-audio:start-excluding-self'),
   stopProcessAudioCapture: () => ipcRenderer.invoke('process-audio:stop'),
   onProcessAudioFormat: (callback) => {
@@ -145,17 +96,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('process-audio:error', handler)
     return () => ipcRenderer.removeListener('process-audio:error', handler)
   },
-  // Fallback de captura de tela via GDI puro (VIGÉSIMA TERCEIRA RODADA
-  // — ver o bloco grande em electron/main.cjs e
-  // native/screen-capture-gdi/capture.cpp pro esquema completo). Só
-  // usado como ÚLTIMO RECURSO, quando a captura normal de tela falha
-  // de verdade — ver useGdiScreenCaptureFallback em VoiceContext.tsx.
-  // Fallbacks de captura de tela nativos (WGC + GDI — VIGÉSIMA TERCEIRA
-  // e TRIGÉSIMA TERCEIRA RODADAS, ver os comentários grandes em
-  // electron/main.cjs e nos respectivos capture.cpp). WGC é tentado
-  // primeiro (melhor qualidade, funciona com jogo em tela cheia
-  // exclusiva); GDI é o último recurso final — ver
-  // captureNativeFallbackStream em VoiceContext.tsx.
   startScreenCaptureWgcFallback: (monitorIndex) => ipcRenderer.invoke('screen-capture-wgc:start', monitorIndex),
   stopScreenCaptureWgcFallback: () => ipcRenderer.invoke('screen-capture-wgc:stop'),
   onScreenCaptureWgcFormat: (callback) => {
@@ -190,26 +130,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('screen-capture-gdi:error', handler)
     return () => ipcRenderer.removeListener('screen-capture-gdi:error', handler)
   },
-  // Login com Google — o processo principal manda pra cá a URL de
-  // volta (mamacovoip://...) assim que o sistema operacional entrega o
-  // link de callback depois da pessoa aceitar no navegador. Ver o
-  // bloco grande no topo de electron/main.cjs pra entender o esquema
-  // completo.
   onGoogleAuthCallback: (callback) => {
     const handler = (_event, url) => callback(url)
     ipcRenderer.on('google-auth-callback', handler)
     return () => ipcRenderer.removeListener('google-auth-callback', handler)
   },
-  // DÉCIMA QUARTA RODADA: log em arquivo, sem depender do DevTools — ver
-  // o bloco grande perto do topo de electron/main.cjs (appendDebugLog) e
-  // os pontos de uso em VoiceContext.tsx. `send` (fire-and-forget) em
-  // vez de `invoke` de propósito — logar nunca deve fazer quem chama
-  // esperar nem falhar por causa disso.
   logDebug: (message) => ipcRenderer.send('debug:log', message),
-  // B7 — sessão do Supabase cifrada com o safeStorage do sistema (ver
-  // "secure-storage:*" em electron/main.cjs e src/lib/authStorage.ts).
-  // Só chaves com prefixo "sb-" e as notas privadas (mv-user-notes); o
-  // processo principal valida de novo.
   secureStorage: {
     getItem: (key) =>
       typeof key === 'string' && (key.startsWith('sb-') || key === 'mv-user-notes')

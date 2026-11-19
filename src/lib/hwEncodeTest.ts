@@ -1,10 +1,3 @@
-// Teste REAL de codificação, sem depender de ninguém assistindo: liga duas
-// conexões WebRTC dentro do próprio app (uma manda, a outra recebe), manda
-// um vídeo de teste de um canvas por ~2 s em cada formato e lê no getStats
-// QUAL codificador o Chromium usou de verdade (placa de vídeo ou
-// processador). É a mesma engrenagem da transmissão — então o resultado
-// vale pra qualquer placa, sem lista de modelos.
-
 export type EncodeTestResult = { hw: boolean | null; impl: string | null }
 export type EncodeCodecKey = 'h264' | 'vp9' | 'av1'
 
@@ -15,7 +8,6 @@ function pickCodecs(key: EncodeCodecKey): RTCRtpCodec[] | null {
   if (!caps) return null
   let list = caps.codecs.filter((c) => c.mimeType.toLowerCase() === MIME[key].toLowerCase())
   if (key === 'h264') {
-    // O que o LiveKit/WebRTC negocia pra transmissão: baseline, modo 1.
     const preferred = list.filter((c) => /packetization-mode=1/.test(c.sdpFmtpLine ?? '') && /42e01f/i.test(c.sdpFmtpLine ?? ''))
     if (preferred.length) list = preferred
   }
@@ -86,8 +78,6 @@ export async function testEncoder(key: EncodeCodecKey, timeoutMs = 6000): Promis
         const frames = typeof s.framesEncoded === 'number' ? s.framesEncoded : 0
         const impl = typeof s.encoderImplementation === 'string' ? s.encoderImplementation : null
         last = { hw: isHardware(s), impl }
-        // Depois de ~1 s codificando o Chromium já trocou pro software,
-        // se fosse trocar.
         if (frames > 40 && last.hw !== null) return last
       }
     }

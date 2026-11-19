@@ -1,14 +1,5 @@
 name: Criar chave do Android (uma vez só)
 
-# Gera a chave que assina o APK do Android. Rode UMA VEZ (Actions > este
-# workflow > Run workflow) e siga docs/ANDROID.md. Guarde bem: se a chave
-# mudar, quem já instalou o app precisa desinstalar pra instalar a nova
-# versão.
-#
-# Antes de rodar, crie o secret ANDROID_KEYSTORE_PASSWORD (uma senha forte,
-# 12+ caracteres). A chave sai protegida por essa senha — o arquivo gerado
-# fica disponível pra download só por 1 dia.
-
 on:
   workflow_dispatch: {}
 

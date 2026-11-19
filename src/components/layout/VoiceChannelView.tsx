@@ -24,22 +24,6 @@ import { AudioMixer } from './AudioMixer'
 import { useVoiceRosterChannel } from '../../lib/voiceRoster'
 import { REPLAY_SECONDS, replaySupported, saveReplayClip, startReplay, stopAllReplays, stopReplay, syncReplays, useReplayActive } from '../../lib/replayBuffer'
 
-// VideoTile mora em CallMediaTiles.tsx (arquivo pequeno, compartilhado
-// com DMCallOverlay.tsx) — ver o comentário lá pra saber por quê (tem
-// a ver com esse arquivo aqui ser lazy-loaded).
-//
-// TRIGÉSIMA NONA RODADA — o áudio da call inteira (voz de todo mundo +
-// som de toda transmissão de tela) saiu completamente deste arquivo e
-// foi pro VoiceCallAudio.tsx, montado direto em MainLayout.tsx fora do
-// ciclo de vida de "canal que você está olhando agora" — ver o
-// comentário grande lá pro motivo (navegar pra outro canal SEM sair da
-// call não pode mais parar o áudio). Este arquivo cuida só da parte
-// VISUAL (vídeo, botões, sliders de volume que ALTERAM o volume
-// guardado em VoiceContext, mas não tocam áudio nenhum sozinhos).
-
-// "Palco" de compartilhamentos de tela: divide o espaço certinho
-// dependendo de quantas pessoas estão compartilhando ao mesmo tempo.
-
 type StageShare = { key: string; name: string; stream: MediaStream; isLocal: boolean }
 
 function ScreenShareStage({
@@ -54,7 +38,6 @@ function ScreenShareStage({
   onHide: (key: string) => void
 }) {
   const focusedShare = focused ? (shares.find((s) => s.key === focused) ?? null) : null
-  // Destaque: uma grande + as outras em miniatura ao lado (clique troca).
   if (focusedShare && shares.length > 1) {
     const others = shares.filter((s) => s.key !== focusedShare.key)
     return (
@@ -79,8 +62,6 @@ function ScreenShareStage({
       className="grid gap-3 mb-4 w-full mx-auto animate-fade-in"
       style={{
         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-        // Só visual: limita a largura pra o palco (16:9) caber na altura
-        // disponível e sobrar espaço pra tira de participantes embaixo.
         maxWidth: `calc((100dvh - 330px) / ${Math.ceil(shares.length / cols)} * 16 / 9 * ${cols})`,
       }}
     >
@@ -148,15 +129,11 @@ function ShareTile({
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
-  // Tela cheia do QUADRO inteiro (não do <video>): assim continuam os
-  // MESMOS controles do app (mudo, volume) — sem os controles nativos do
-  // vídeo, que brigavam com o volume do app.
   async function toggleFullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen()
       else await tileRef.current?.requestFullscreen()
     } catch {
-      // recusado — sem problema
     }
   }
   async function goFloating() {
@@ -166,12 +143,9 @@ function ShareTile({
       if (document.pictureInPictureElement) await document.exitPictureInPicture()
       await el.requestPictureInPicture()
     } catch {
-      // sem suporte — sem problema
     }
   }
 
-  // Controles somem sozinhos depois de um tempo parado (em tela cheia
-  // também some o cursor) — igual player de vídeo.
   const [active, setActive] = useState(false)
   const idleTimer = useRef<number | null>(null)
   const menuOpen = showVolume || showQuality
@@ -213,9 +187,6 @@ function ShareTile({
       title={small ? `Destacar a transmissão de ${share.name}` : undefined}
     >
       {share.isLocal ? (
-        // A SUA transmissão não tem prévia ao vivo de propósito: se a
-        // captura for de tela cheia, ela pegaria esta janela mostrando a
-        // própria captura — o efeito de espelho infinito.
         <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-mv-muted bg-[radial-gradient(ellipse_at_center,rgb(255_255_255/0.05),transparent_70%)] bg-mv-canvas">
           {!small && (
             <div className="relative w-16 h-16 rounded-2xl bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/30 flex items-center justify-center mb-1">
@@ -232,7 +203,6 @@ function ShareTile({
         <VideoTile stream={share.stream} fit="contain" ref={videoRef} />
       )}
 
-      {/* Topo: AO VIVO + nome (sempre visível) */}
       <div
         className={`pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 ${
           small ? 'p-1.5' : 'p-2.5 bg-gradient-to-b from-black/60 via-black/20 to-transparent pb-8'
@@ -263,7 +233,6 @@ function ShareTile({
             </span>
           )}
         </div>
-        {/* Fechar: só pra você (vídeo e som) */}
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -287,7 +256,6 @@ function ShareTile({
         </div>
       )}
 
-      {/* Barra de controles (estilo player) */}
       {!small && (
         <div
           className={`absolute inset-x-0 bottom-0 px-2.5 pb-2.5 pt-14 bg-gradient-to-t from-black/85 via-black/45 to-transparent transition-all duration-200 ${
@@ -459,7 +427,6 @@ function ShareTile({
   )
 }
 
-// Ícones da barra da transmissão (traço, mesmo estilo).
 function VolumeLevelIcon({ level }: { level: number }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden>
@@ -557,8 +524,6 @@ function SlidersIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
   )
 }
 
-// Gerenciador de transmissões: uma pílula por pessoa ao vivo. Clique =
-// assistir em destaque; o olho fecha/reabre (fechada = sem vídeo e sem som).
 function StreamManagerBar({
   shares,
   hidden,
@@ -625,7 +590,6 @@ function StreamManagerBar({
   )
 }
 
-// Ícones pequenos de estado (mudo / ensurdecido) usados nos cartões.
 function MicOffIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
@@ -650,9 +614,6 @@ function HeadphonesIcon({ className = 'w-5 h-5' }: { className?: string }) {
   )
 }
 
-// Botão redondo grande da barra de controles da call. `tone` define o
-// estado visual: neutro, ativo (ligado, cor da marca) ou "desligado em
-// vermelho" (mudo / ensurdecido).
 function controlBtnClass(tone: 'neutral' | 'active' | 'off') {
   const base =
     'w-12 h-12 rounded-full flex items-center justify-center transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed'
@@ -706,32 +667,17 @@ function ParticipantTile({
   onToggleRole?: (userId: string, roleId: string) => void
   onAddFriend?: (username: string) => void
   onInvite?: () => void
-  /** Clique no quadro: abre o cartão de opções (VoiceMemberCard) */
   onOpenCard?: (userId: string, x: number, y: number) => void
-  // Só pro cartão local: o estado de mudo/ensurdecido é conhecido só do
-  // próprio usuário (o LiveKit não expõe isso dos outros aqui).
   selfMuted?: boolean
   selfDeafened?: boolean
 }) {
   const voice = useVoiceCore()
   const [videoHiddenLocally, setVideoHiddenLocally] = useState(false)
   const { menuState, openMenu, closeMenu } = useContextMenuState()
-  // Lidos direto do store de atividade: só ESTE tile re-renderiza quando
-  // a pessoa começa/para de falar (antes a tela da call inteira — e o app
-  // todo — era redesenhada a cada mudança).
   const speaking = useVoiceSpeaking(userId)
   const peerQuality = useVoiceConnectionQuality(isLocal ? null : userId)
   const cameraStream = isLocal ? voice.localCameraStream : data?.cameraStream ?? null
   const hasCameraVideo = isLocal ? Boolean(localVideoEnabled && cameraStream) : Boolean(data?.cameraStream?.getVideoTracks().length)
-
-  // O volume de cada pessoa fica no cartão que abre ao clicar no quadro
-  // (VoiceMemberCard) e no mixer "Volumes" da barra de controles — antes
-  // havia mais um slider escondido em cada quadro, que às vezes abria
-  // cortado e brigava com o clique do cartão.
-
-  // O áudio (mic/câmera) deste participante toca via VoiceCallAudio.tsx,
-  // montado fora daqui e sempre ativo — ver o comentário grande no topo
-  // do arquivo. Este componente só cuida do vídeo/controles visuais.
 
   const myRoleIds = new Set(userRoleIds ?? [])
   const menuItems = [
@@ -810,16 +756,8 @@ function ParticipantTile({
       onContextMenu={!isLocal ? openMenu : undefined}
     >
       {hasCameraVideo && cameraStream && !videoHiddenLocally ? (
-        // Prévia própria espelhada (como um espelho), padrão de apps de vídeo;
-        // quem assiste recebe a imagem normal.
         <VideoTile stream={cameraStream} sinkId={sinkId} mirror={isLocal} />
       ) : (
-        // Sem câmera, o ícone/avatar no centro é a única coisa "visível"
-        // pra indicar quem está falando — sem esse anel pulsando, só a
-        // borda fina do card mudava de cor, o que é fácil de não notar. O
-        // mesmo tratamento (ring + sombra + animate-pulse) já existe na
-        // listinha de participantes da sidebar (ChannelSidebar.tsx); aqui
-        // só reaplica o mesmo padrão no avatar grande.
         <div className="max-sm:scale-[0.6] transition-transform">
         <div className="relative flex items-center justify-center">
           {speaking && (
@@ -902,24 +840,12 @@ export function VoiceChannelView({
   const [showMicMenu, setShowMicMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showSettingsFromVoice, setShowSettingsFromVoice] = useState(false)
-  // Clique fora fecha — ver useClickOutside.ts sobre o bug do onMouseLeave
-  // antigo fechando o menu antes do mouse alcançar as opções.
   const micMenuRef = useClickOutside<HTMLDivElement>(showMicMenu, useCallback(() => setShowMicMenu(false), []))
   const moreMenuRef = useClickOutside<HTMLDivElement>(showMoreMenu, useCallback(() => setShowMoreMenu(false), []))
-  // "Desativar áudio" (deafen) agora mora no VoiceContext (voice.deafened
-  // / voice.toggleDeafen) — assim o UserPanel (sempre visível) e esta
-  // barra de controles enxergam e alternam o MESMO estado, em vez de
-  // cada um ter sua própria cópia desincronizada.
   const deafened = voice.deafened
   const toggleDeafen = voice.toggleDeafen
-  // Preferências só desta sessão de call (não persistem — reinicia toda
-  // vez que entra de novo, igual um "modo de exibição" temporário).
   const [showOwnTile, setShowOwnTile] = useState(true)
   const [hideNoVideoParticipants, setHideNoVideoParticipants] = useState(false)
-  // Transmissões que a própria pessoa fechou LOCALMENTE (ver
-  // ScreenShareStage) — só tira da SUA tela, não afeta quem está
-  // compartilhando nem quem mais está assistindo. Fica de fora da sala
-  // de voz o tempo todo, só não aparece mais o vídeo em si.
   const { hidden: hiddenShareKeys, focused: focusedShareKey } = useStreamView()
   const [showMixer, setShowMixer] = useState(false)
   const mixerRef = useClickOutside<HTMLDivElement>(showMixer, useCallback(() => setShowMixer(false), []))
@@ -934,16 +860,11 @@ export function VoiceChannelView({
     if (p) onViewProfile?.(p)
   }
 
-  // Em canal Palco, só quem modera pode falar — has_permission() já
-  // conta o dono do servidor como tendo qualquer permissão, então não
-  // precisa checar owner separado.
   const isSpeaker = !channel.is_stage || permissions.manage_channels
 
   const profileById = Object.fromEntries(members.map((m) => [m.user_id, m.profile]))
   const isConnectedHere = voice.connectedChannelId === channel.id
   const isConnectedElsewhere = voice.connectedChannelId !== null && !isConnectedHere
-  // Quem já está na sala (mesma lista da barra lateral) — aparece na tela
-  // de entrada em vez de "ninguém está aqui".
   const peopleHere = useVoiceRosterChannel(channel.id).filter((id) => id !== profile?.id)
 
   async function handleSwitchHere() {
@@ -973,7 +894,6 @@ export function VoiceChannelView({
     }
   })
   const visibleScreenShares = screenShares.filter((s) => !hiddenShareKeys.has(s.key))
-  // Replay só vale pra transmissão aberta: fechou/acabou → desliga.
   const replaySig = visibleScreenShares.map((s) => `${s.key}:${s.stream.id}:${s.stream.getTracks().length}`).join(',')
   useEffect(() => {
     syncReplays(new Map(visibleScreenShares.map((s) => [s.key, s.stream])))
@@ -983,8 +903,6 @@ export function VoiceChannelView({
   const hasScreenShares = visibleScreenShares.length > 0
   const hiddenCount = screenShares.length - visibleScreenShares.length
 
-  // Só visual: quantas colunas a grade de participantes usa, pra os
-  // cartões ficarem grandes com pouca gente e compactos com muita.
   const visibleTileCount =
     (profile && showOwnTile ? 1 : 0) +
     Object.values(voice.participants).filter(
@@ -1121,16 +1039,6 @@ export function VoiceChannelView({
         </div>
       ) : (
         <>
-          {/* Antes disso, voice.error só aparecia na tela de "ninguém no
-              canal ainda" (acima) — uma vez conectado, qualquer erro (ex:
-              falha na captura de áudio por processo experimental — ver
-              VoiceContext.tsx) ficava guardado no estado mas NUNCA
-              aparecia na tela pra ninguém ver, por mais que a mensagem
-              existisse de verdade. Esse aviso aqui é o que faltava pra
-              erros durante uma call em andamento serem visíveis de
-              verdade. */}
-          {/* Queda breve de rede: o LiveKit está tentando reconectar
-              sozinho (antes a call só "congelava" sem explicação). */}
           {voice.reconnecting && (
             <div
               role="status"
@@ -1160,7 +1068,6 @@ export function VoiceChannelView({
               <StreamManagerBar shares={screenShares} hidden={hiddenShareKeys} focused={focusedShareKey} />
             )}
             {!hasScreenShares && hiddenCount > 0 && (
-              // Transmissões fechadas: nada é baixado até clicar em Assistir.
               <div className="flex flex-wrap gap-3 justify-center mb-4">
                 {screenShares
                   .filter((s) => hiddenShareKeys.has(s.key))
@@ -1190,8 +1097,6 @@ export function VoiceChannelView({
             )}
 
             {hasScreenShares ? (
-              // Com tela(s) compartilhada(s) em foco, os participantes viram
-              // uma tira compacta embaixo do palco em vez do grid grande.
               <div className="flex flex-wrap gap-2.5 justify-center pt-1">
                 {profile && showOwnTile && (
                   <ParticipantTile
@@ -1342,12 +1247,6 @@ export function VoiceChannelView({
             aria-label="Controles da chamada"
             className="glass rounded-2xl px-2.5 py-2 flex flex-wrap items-center justify-center gap-2 shadow-[0_18px_44px_-18px_rgb(0_0_0/0.85)] max-w-full"
           >
-            {/* Mic + seta: clicar no mic muta/desmuta na hora igual antes;
-                a setinha ao lado abre um painel com escolha de
-                microfone/saída de áudio, "Desativar áudio" (deafen) e um
-                atalho pras configurações — mesma ideia de apps de chat populares de
-                anexar as opções extras no botão em vez de espalhar em
-                selects soltos pela barra. */}
             <div className="relative" ref={micMenuRef}>
               <div className="flex items-stretch rounded-full overflow-hidden ring-1 ring-inset ring-[var(--color-line)]">
                 {voice.pushToTalkEnabled ? (
@@ -1444,8 +1343,6 @@ export function VoiceChannelView({
                     </div>
                   )}
 
-                  {/* "Desativar áudio" fica no botão do fone, ao lado — sem repetir aqui. */}
-
                   <div className="h-px bg-[var(--color-line)] my-1.5" />
 
                   <button
@@ -1474,8 +1371,6 @@ export function VoiceChannelView({
               {deafened ? <HeadphonesOffIcon className="w-5 h-5" /> : <HeadphonesIcon />}
             </button>
 
-            {/* Mixer: todos os volumes (geral, efeitos, cada voz, cada
-                transmissão) num lugar só. */}
             <div className="relative" ref={mixerRef}>
               <button
                 onClick={() => setShowMixer((v) => !v)}
@@ -1529,11 +1424,6 @@ export function VoiceChannelView({
               className={`${controlBtnClass(voice.screenSharing ? 'active' : 'neutral')} disabled:cursor-wait`}
             >
               {voice.screenShareConnecting ? (
-                // VIGÉSIMA QUINTA RODADA — ver screenShareConnecting em
-                // VoiceContext.tsx: a cadeia de tentativas de captura
-                // (retry, HWND, plano B, fallback GDI) pode levar vários
-                // segundos no pior caso. Sem isso, o botão parecia
-                // travado/sem reação nesse tempo todo.
                 <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 animate-spin">
                   <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25" />
                   <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
@@ -1545,11 +1435,6 @@ export function VoiceChannelView({
               )}
             </button>
 
-            {/* Só aparece DURANTE uma transmissão — troca a janela/tela
-                sem precisar parar e compartilhar de novo do zero (abre o
-                mesmo seletor de novo e troca o conteúdo por baixo, sem
-                piscar pra quem está assistindo — ver switchScreenShareSource
-                em VoiceContext.tsx). */}
             {voice.screenSharing && (
               <button
                 onClick={voice.switchScreenShareSource}
@@ -1563,15 +1448,6 @@ export function VoiceChannelView({
               </button>
             )}
 
-            {/* Precisa ser escolhido ANTES de clicar em "compartilhar tela"
-                — a resolução/fps viram uma constraint que já vai junto no
-                próprio pedido de captura (getDisplayMedia), então depois
-                que a captura começa não dá mais pra trocar (por isso some
-                enquanto voice.screenSharing for true). Por isso mora aqui,
-                do lado do botão de compartilhar, com um texto visível de
-                verdade (não só um tooltip escondido) — antes era só um
-                <select> sem legenda nenhuma, fácil de nem notar que dava
-                pra escolher qualidade/fps. */}
             {!voice.screenSharing && (
               <div className="flex items-end gap-1.5 px-1 max-sm:hidden">
                 <div className="flex flex-col items-start gap-0.5">
@@ -1625,9 +1501,6 @@ export function VoiceChannelView({
               </svg>
             </button>
 
-            {/* "..." — o resto das opções que não precisam de um botão
-                dedicado o tempo todo, mesma ideia do menu de "mais opções"
-                de apps de chat populares na barra de chamada. */}
             <div className="relative" ref={moreMenuRef}>
               <button
                 onClick={() => setShowMoreMenu((v) => !v)}
@@ -1682,7 +1555,6 @@ export function VoiceChannelView({
                     Essas duas preferências valem só enquanto você estiver nesta chamada.
                   </p>
 
-                  {/* Só no app desktop: detecção de jogo e sobreposição dependem do Electron. */}
                   {Boolean(window.electronAPI) && (
                     <>
                       <div className="h-px bg-[var(--color-line)] my-1.5" />

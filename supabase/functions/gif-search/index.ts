@@ -1,14 +1,3 @@
-// Edge Function: gif-search
-//
-// Busca de GIFs do chat pela API do KLIPY (substituto gratuito do Tenor).
-// Passa por aqui (e não direto do app) por dois motivos:
-//   - a chave do KLIPY fica SÓ no servidor (secret KLIPY_API_KEY no
-//     Supabase) — antes a chave do GIPHY ia dentro do app, legível por
-//     qualquer um;
-//   - quem pesquisa não tem o IP nem o texto ligados à própria conta no
-//     KLIPY: o KLIPY recebe só um id anônimo (hash do usuário).
-// Só aceita usuário logado de verdade e limita as buscas por pessoa.
-
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const corsHeaders = {

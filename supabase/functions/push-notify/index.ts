@@ -1,20 +1,3 @@
-// Edge Function: push-notify
-//
-// Chamada pelo PRÓPRIO banco (gatilho da PARTE 29 do SQL 007) quando uma
-// mensagem nova é salva. Descobre quem deve ser avisado e manda a
-// notificação pro celular pelo Firebase Cloud Messaging (FCM).
-//
-// Segurança:
-//  - Só aceita chamadas com o segredo guardado em public.push_config
-//    (o banco manda no cabeçalho x-push-secret) — ninguém de fora consegue
-//    disparar notificações.
-//  - Quem recebe é calculado aqui, com as regras do app: DM (sem
-//    bloqueio), grupo (membros) e canal (só menção, respeitando "silenciar"
-//    e nunca em canal restrito).
-//
-// Configuração: secret FCM_SERVICE_ACCOUNT (JSON da conta de serviço do
-// Firebase) — ver docs/NOTIFICACOES.md. Publicar com --no-verify-jwt.
-
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
 type Json = Record<string, unknown>
@@ -29,7 +12,6 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
-// ---------- FCM (OAuth com a conta de serviço) ----------
 type ServiceAccount = { client_email: string; private_key: string; project_id: string }
 let cachedToken: { value: string; exp: number } | null = null
 
@@ -81,7 +63,6 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   })
 
-  // --- Segredo do banco ---
   const { data: cfg } = await supabase.from('push_config').select('secret, enabled').eq('id', 1).maybeSingle()
   const given = req.headers.get('x-push-secret') ?? ''
   if (!cfg?.secret || !cfg.enabled || !timingSafeEqual(given, cfg.secret)) return json({ error: 'proibido' }, 403)
@@ -159,8 +140,6 @@ Deno.serve(async (req) => {
     ])
     if (!ch || ch.is_restricted) return json({ skipped: 'canal' })
     const { data: profs } = await supabase.from('profiles').select('id, username').in('username', names)
-    // Comparação sem maiúsculas (o filtro "in" acima já pega o exato; isto
-    // cobre "@Fulano" vs "fulano").
     let ids = (profs ?? []).map((p) => p.id as string)
     if (ids.length < names.length) {
       const { data: more } = await supabase.from('profiles').select('id, username').or(names.map((n) => `username.ilike.${n}`).join(','))

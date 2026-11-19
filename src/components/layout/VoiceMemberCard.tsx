@@ -12,21 +12,14 @@ import { describeVoiceMoveError } from '../../lib/voiceMove'
 import { rememberVolume, toggleVolumeMute } from '../../lib/muteMemory'
 import type { Profile } from '../../types/database'
 
-// Cartão que abre ao CLICAR em alguém numa sala de voz (lista lateral ou
-// quadro da sala): volume só pra você, mensagem, perfil e — pra quem tem
-// permissão — mover de sala, cargos, expulsar e banir.
-
 export type VoiceMemberCardTarget = {
   userId: string
   serverId: string
-  /** Sala de voz onde a pessoa está agora */
   channelId: string
-  /** Posição do clique (o cartão abre ali, ajustado pra caber na tela) */
   x: number
   y: number
 }
 
-/** Abre o DM / o perfil pelo MainLayout (funciona de qualquer lugar). */
 export function requestMessageUser(userId: string) {
   window.dispatchEvent(new CustomEvent('mv:message-user', { detail: { userId } }))
 }
@@ -68,7 +61,6 @@ export function VoiceMemberCard({ target, onClose }: { target: VoiceMemberCardTa
     .sort((a, b) => a.position - b.position)
   const myRoleIds = new Set(rolesForUser(target.userId).map((r) => r.id))
 
-  // Fecha com clique fora / Esc.
   useEffect(() => {
     function onDown(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
@@ -84,7 +76,6 @@ export function VoiceMemberCard({ target, onClose }: { target: VoiceMemberCardTa
     }
   }, [onClose])
 
-  // Posição: perto do clique, sem sair da tela.
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return

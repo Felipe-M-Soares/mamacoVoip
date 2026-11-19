@@ -9,7 +9,6 @@ import { lazyModal } from '../modals/lazyModal'
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu'
 import { ConfirmDialog } from '../modals/ConfirmDialog'
 
-// Modais/painéis carregados só quando abertos (fora do pacote inicial).
 const CreateGroupModal = lazyModal(() => import('../modals/CreateGroupModal').then((m) => m.CreateGroupModal))
 
 export function HomeSidebar({
@@ -26,7 +25,6 @@ export function HomeSidebar({
   activeConversationId: string | null
   activeGroupId: string | null
   unreadConversationIds: Set<string>
-  /** grupos com mensagem nova (desde que o app abriu) */
   unreadGroupIds?: Set<string>
   onSelectFriends: () => void
   onSelectConversation: (conversationId: string) => void
@@ -35,8 +33,6 @@ export function HomeSidebar({
   const { user } = useAuth()
   const { conversations, loading, hideConversation } = useConversations()
 
-  // Confirmação de "apagar conversa" agora é inline, logo abaixo da linha
-  // (antes era um confirm() nativo).
   const [confirmingHide, setConfirmingHide] = useState<{ id: string; name: string } | null>(null)
   function handleDeleteConversation(e: React.MouseEvent, conversationId: string, otherName: string) {
     e.stopPropagation()
@@ -49,9 +45,6 @@ export function HomeSidebar({
   }
   const { groups, leaveGroup, deleteGroup } = useGroupConversations()
 
-  // Menu de contexto (botão direito) dos grupos: fixar, sair e — só pra
-  // quem criou — apagar o grupo inteiro. As duas ações destrutivas passam
-  // pelo ConfirmDialog.
   const [groupMenu, setGroupMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [groupAction, setGroupAction] = useState<{ kind: 'leave' | 'delete'; id: string; name: string } | null>(null)
   const [groupActionError, setGroupActionError] = useState<string | null>(null)

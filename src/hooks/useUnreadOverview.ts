@@ -4,33 +4,15 @@ import { useAuth } from './useAuth'
 
 const POLL_INTERVAL_MS = 20_000
 
-// Não é 100% realtime de propósito: em vez de assinar mudanças em todas
-// as tabelas de mensagens de todos os servidores do usuário (o que
-// custaria uma subscription por canal/DM só pra badges), fazemos uma
-// consulta agregada a cada 20s. Isso é um trade-off razoável pra um
-// indicador de "não lido" — troca precisão ao segundo por muito menos
-// conexões abertas.
-//
-// Desde a 007 (parte "não lidos numa consulta só") a consulta é UMA RPC,
-// `unread_overview()`, que devolve só os canais/DMs não lidos. Antes eram
-// 7 consultas e até 2.000 linhas baixadas a cada 20s por pessoa — a maior
-// fonte de egress do app (ver loadtest/CAPACIDADE.md). Se a função ainda
-// não existir no banco, cai no caminho antigo.
 function isMissingFunction(error: { code?: string; message?: string }) {
   return error.code === 'PGRST202' || error.code === '42883' || /could not find the function/i.test(error.message ?? '')
 }
 export function useUnreadOverview() {
   const { user } = useAuth()
-  // Só o ID — o objeto `user` muda a cada renovação do token, o que antes
-  // reiniciava o intervalo e disparava uma rodada extra de consultas.
   const userId = user?.id ?? null
   const [unreadChannelIds, setUnreadChannelIds] = useState<Set<string>>(EMPTY_SET)
   const [unreadServerIds, setUnreadServerIds] = useState<Set<string>>(EMPTY_SET)
   const [unreadConversationIds, setUnreadConversationIds] = useState<Set<string>>(EMPTY_SET)
-  // Leituras feitas localmente (ao abrir um canal/conversa). Uma consulta
-  // que já estava em andamento quando a pessoa abriu o canal voltava com o
-  // `last_read_at` antigo e fazia a bolinha de não lido REAPARECER num
-  // canal que ela acabou de ler. Com isso, vale sempre a leitura mais nova.
   const localReadsRef = useRef<Map<string, string>>(new Map())
   const inFlightRef = useRef(false)
   const rpcMissingRef = useRef(false)
@@ -68,11 +50,8 @@ export function useUnreadOverview() {
           return
         }
         if (error && isMissingFunction(error)) rpcMissingRef.current = true
-        // Outro erro (rede, etc.): tenta o caminho antigo desta vez.
       }
 
-      // Caminho antigo (banco sem a função). As duas metades (canais de
-      // servidor e DMs) não dependem uma da outra.
       const channelsPart = (async () => {
         const { data: memberRows } = await supabase.from('server_members').select('server_id').eq('user_id', userId)
         const serverIds = (memberRows ?? []).map((m) => m.server_id)
@@ -117,7 +96,6 @@ export function useUnreadOverview() {
       })()
 
       const dmsPart = (async () => {
-        // só o id é usado (antes era select('*'))
         const { data: convoRows } = await supabase
           .from('dm_conversations')
           .select('id')
@@ -154,8 +132,6 @@ export function useUnreadOverview() {
 
       const [{ unreadChannels, unreadServers }, unreadConvos] = await Promise.all([channelsPart, dmsPart])
 
-      // Só troca o Set quando o conteúdo mudou — um Set novo a cada 20s
-      // re-renderizava a barra de servidores, a de canais e a de DMs inteiras.
       setUnreadChannelIds((prev) => (sameSet(prev, unreadChannels) ? prev : unreadChannels))
       setUnreadServerIds((prev) => (sameSet(prev, unreadServers) ? prev : unreadServers))
       setUnreadConversationIds((prev) => (sameSet(prev, unreadConvos) ? prev : unreadConvos))
@@ -175,10 +151,6 @@ export function useUnreadOverview() {
       return
     }
     void refresh()
-    // Não consulta com a janela escondida/minimizada (economiza rede e
-    // bateria); ao voltar, atualiza na hora.
-    // Sem a função unread_overview no banco, cada consulta baixa centenas de
-    // linhas — nesse caso consulta 1 vez a cada 3 (a cada 60 s).
     let tick = 0
     const interval = setInterval(() => {
       tick++
@@ -231,8 +203,6 @@ export function useUnreadOverview() {
     [userId]
   )
 
-  // Mensagem privada chegando em tempo real (MessageAlerts): mostra a
-  // bolinha na hora, sem esperar a próxima consulta (até 20 s).
   const markConversationUnread = useCallback((conversationId: string) => {
     setUnreadConversationIds((prev) => {
       if (prev.has(conversationId)) return prev

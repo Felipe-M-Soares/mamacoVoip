@@ -7,7 +7,6 @@ import { PERMISSIONS, type Ban, type ModerationLog, type Permission, type Profil
 export type BanWithProfile = Ban & { profile: Profile }
 export type LogWithProfiles = ModerationLog & { actor: Profile | undefined; target: Profile | undefined }
 
-// Mesmo teto do banco (migration 013) e de apps de chat populares: 28 dias.
 const MAX_TIMEOUT_MINUTES = 28 * 24 * 60
 const MAX_REASON_LENGTH = 500
 
@@ -28,9 +27,6 @@ export function useModeration(serverId: string | null) {
     const perms: Permission[] = [...PERMISSIONS]
     const map = {} as Record<Permission, boolean>
 
-    // Uma chamada só (my_permissions, migration 013) em vez de 9
-    // chamadas de has_permission a cada abertura/atualização. Se a
-    // função ainda não existir no banco, cai pro jeito antigo.
     const rpcAny = supabase.rpc.bind(supabase) as unknown as (
       fn: string,
       args: Record<string, unknown>
@@ -39,8 +35,6 @@ export function useModeration(serverId: string | null) {
     if (!grantedError && Array.isArray(granted)) {
       const set = new Set(granted as string[])
       const isAdmin = set.has('administrator')
-      // Cargos (criar, editar e dar/tirar cargo de alguém) são só do dono
-      // e de quem é Administrador — o banco garante o mesmo.
       perms.forEach((p) => {
         map[p] = isAdmin || (p !== 'manage_roles' && set.has(p))
       })
@@ -56,9 +50,6 @@ export function useModeration(serverId: string | null) {
     return map
   }, [serverId, user])
 
-  // Evita que a resposta atrasada de um servidor anterior sobrescreva a
-  // do servidor atual (trocar de servidor rápido mostrava banidos/log do
-  // servidor errado por um instante).
   const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
@@ -123,7 +114,6 @@ export function useModeration(serverId: string | null) {
     if (!serverId) return { error: 'Nenhum servidor selecionado' }
     reason = cleanReason(reason)
     const { error } = await supabase.rpc('kick_member', { p_server_id: serverId, p_user_id: userId, p_reason: reason ?? null })
-    // Tira da voz também (best-effort, não segura a UI).
     if (!error) void moderateVoiceParticipant({ serverId, userId, action: 'kick' })
     if (!error) await refresh()
     return { error: error?.message ?? null }
@@ -133,7 +123,6 @@ export function useModeration(serverId: string | null) {
     if (!serverId) return { error: 'Nenhum servidor selecionado' }
     reason = cleanReason(reason)
     const { error } = await supabase.rpc('ban_member', { p_server_id: serverId, p_user_id: userId, p_reason: reason ?? null })
-    // Tira da voz também (best-effort, não segura a UI).
     if (!error) void moderateVoiceParticipant({ serverId, userId, action: 'ban' })
     if (!error) await refresh()
     return { error: error?.message ?? null }
@@ -158,7 +147,6 @@ export function useModeration(serverId: string | null) {
       p_minutes: minutes,
       p_reason: reason ?? null,
     })
-    // Tira da voz também (best-effort, não segura a UI).
     if (!error) void moderateVoiceParticipant({ serverId, userId, action: 'timeout' })
     if (!error) await refresh()
     return { error: error?.message ?? null }

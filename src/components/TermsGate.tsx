@@ -5,15 +5,6 @@ import { AuthAlert, AuthHeader, AuthShell } from '../pages/AuthShell'
 import { TERMS_VERSION } from '../lib/config'
 import { acceptCurrentTerms, fetchTermsStatus, takePendingTerms } from '../lib/termsAcceptance'
 
-// Tela bloqueante de aceite dos Termos/Privacidade + "Tenho 18 anos ou
-// mais" (ECA Digital / LGPD — o serviço é só para maiores de 18).
-// Aparece depois de qualquer login quando a conta ainda não aceitou a
-// versão atual (TERMS_VERSION) — em especial contas criadas pelo Google,
-// que não passam pelo formulário de cadastro.
-//
-// Tolerante: se o banco ainda não tem o recurso (coluna/RPC inexistente)
-// ou a consulta falhar, NÃO mostra nada — nunca trava o app.
-
 type Status = 'checking' | 'accepted' | 'needed' | 'underage'
 
 const okKey = (userId: string) => `mamacos-terms-ok:${userId}`
@@ -31,7 +22,6 @@ function markOk(userId: string) {
   try {
     localStorage.setItem(okKey(userId), TERMS_VERSION)
   } catch {
-    // ok — só evita uma consulta no próximo login
   }
 }
 
@@ -42,7 +32,6 @@ export function TermsGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>(() => (cachedOk(userId) ? 'accepted' : 'checking'))
   const [checkedFor, setCheckedFor] = useState<string | undefined>(userId)
 
-  // Troca de conta: recomeça a checagem (ajuste de estado durante o render).
   if (checkedFor !== userId) {
     setCheckedFor(userId)
     setStatus(cachedOk(userId) ? 'accepted' : 'checking')
@@ -60,11 +49,9 @@ export function TermsGate({ children }: { children: ReactNode }) {
         return
       }
       if (current === 'unsupported') {
-        // Banco sem o recurso (ou falha de rede): segue sem a tela.
         setStatus('accepted')
         return
       }
-      // Aceitou no formulário de cadastro deste aparelho → envia sozinho.
       if (takePendingTerms(email)) {
         const { error } = await acceptCurrentTerms()
         if (cancelled) return

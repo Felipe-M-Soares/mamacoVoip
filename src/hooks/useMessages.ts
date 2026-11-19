@@ -12,8 +12,6 @@ import { describeError } from '../lib/errors'
 import { rateLimitError } from '../lib/rateLimit'
 import type { Message, MessageAttachment, MessageReaction } from '../types/database'
 
-// Quantas mensagens buscar por "página" (carga inicial e cada "carregar
-// mais antigas" ao rolar pro topo).
 export const MESSAGE_PAGE_SIZE = 50
 
 const EMPTY_MESSAGES: Message[] = []
@@ -32,11 +30,6 @@ function sameReaction(a: MessageReaction, b: Pick<MessageReaction, 'message_id' 
   return a.message_id === b.message_id && a.user_id === b.user_id && a.emoji === b.emoji
 }
 
-// Cache em memória da última página vista de cada canal/thread. Voltar
-// pra um canal que já foi aberto mostra as mensagens NA HORA (em vez do
-// skeleton + 2 idas ao servidor: mensagens e depois anexos/reações) e
-// revalida em silêncio por trás — o que mudou enquanto a pessoa estava
-// em outro canal entra sem piscar a tela.
 type CacheEntry = { messages: Message[]; attachments: AttachmentMap; reactions: ReactionMap; hasMore: boolean }
 const MESSAGE_CACHE_LIMIT = 30
 const messageCache = new Map<string, CacheEntry>()
@@ -53,12 +46,6 @@ function writeCache(key: string, entry: CacheEntry) {
 const EMBEDDED_SELECT = '*, message_attachments(*), message_reactions(*)'
 type EmbeddedMessage = Message & { message_attachments?: MessageAttachment[] | null; message_reactions?: MessageReaction[] | null }
 
-/**
- * Busca uma página de mensagens JÁ com anexos e reações numa única
- * requisição. Se o embed falhar por qualquer motivo (ex.: relação não
- * exposta no cache de schema do PostgREST), cai no caminho antigo de
- * duas etapas — nunca fica sem mensagens por causa disso.
- */
 async function fetchPageWithExtras(
   run: (embed: boolean) => PromiseLike<{ data: unknown[] | null; error: unknown }>
 ): Promise<{ page: Message[]; attachments: AttachmentMap; reactions: ReactionMap }> {
@@ -72,7 +59,6 @@ async function fetchPageWithExtras(
       if (message_reactions?.length) reactions[m.id] = message_reactions
       return m as Message
     })
-    // Resposta sem as chaves embutidas (servidor ignorou o embed): busca à parte.
     if (rows.length > 0 && !('message_attachments' in rows[0])) {
       const extras = await fetchExtras(page.map((m) => m.id))
       return { page, ...extras }
@@ -105,19 +91,12 @@ export function useMessages(channelId: string | null, serverId: string | null, t
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [hasMore, setHasMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  // Qual visão (canal/thread) o estado atual realmente representa — usado
-  // pra nunca devolver, nem por um render, mensagens do canal ANTERIOR
-  // logo depois de trocar de canal.
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
 
   const messagesRef = useRef<Message[]>([])
   messagesRef.current = messages
   const reactionsRef = useRef<ReactionMap>({})
   reactionsRef.current = reactions
-  // Valores usados DENTRO dos callbacks do tempo real ficam em refs — antes
-  // o efeito de assinatura capturava o `profile`/`getLevel` do momento em
-  // que assinou e nunca mais via atualização (ex.: silenciar o canal não
-  // parava as notificações até trocar de canal).
   const userIdRef = useRef(user?.id)
   userIdRef.current = user?.id
   const usernameRef = useRef(profile?.username)
@@ -125,33 +104,16 @@ export function useMessages(channelId: string | null, serverId: string | null, t
   const getLevelRef = useRef(getLevel)
   getLevelRef.current = getLevel
 
-  // "Qual visão está ativa agora" — toda resposta de rede confere isso
-  // antes de mexer no estado. Antes, trocar de canal rápido deixava a
-  // resposta ATRASADA do canal anterior sobrescrever as mensagens do canal
-  // novo (e o `CLOSED` disparado pela limpeza da assinatura antiga ainda
-  // chamava um refresh do canal antigo).
   const viewKey = `${channelId ?? ''}|${threadId ?? ''}`
   const viewKeyRef = useRef(viewKey)
   viewKeyRef.current = viewKey
   const loadSeqRef = useRef(0)
 
   const buildQuery = useCallback((embedExtras = false) => {
-    // Com embedExtras, anexos e reações vêm JUNTO na mesma resposta
-    // (relação por chave estrangeira no PostgREST) — uma ida ao servidor
-    // a menos ao abrir um canal.
     const base = supabase.from('messages').select(embedExtras ? EMBEDDED_SELECT : '*')
-    // Mensagens de dentro de uma thread ficam separadas das mensagens
-    // "normais" do canal — sem esse filtro, elas apareceriam
-    // duplicadas na visão principal do canal.
     return threadId ? base.eq('thread_id', threadId) : base.eq('channel_id', channelId ?? '').is('thread_id', null)
   }, [channelId, threadId])
 
-  // Busca a página MAIS RECENTE. Antes a busca era `ascending: true` +
-  // `limit(100)`, o que trazia as 100 mensagens MAIS ANTIGAS do canal — em
-  // qualquer canal com mais de 100 mensagens, as recentes simplesmente não
-  // apareciam ao abrir.
-  // `silent` = ressincronização (reconexão do tempo real): não mostra
-  // skeleton e preserva as páginas antigas já carregadas.
   const load = useCallback(
     async (silent: boolean) => {
       const key = viewKey
@@ -178,7 +140,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           setAttachments((prev) => ({ ...prev, ...extras.attachments }))
           setReactions((prev) => {
             const next = { ...prev, ...extras.reactions }
-            // mensagens da página que ficaram SEM reação precisam ser limpas
             for (const m of page) if (!extras.reactions[m.id]) delete next[m.id]
             return next
           })
@@ -205,10 +166,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
   const cacheKeyRef = useRef(cacheKey)
   cacheKeyRef.current = cacheKey
 
-  // Troca de canal/thread: limpa na hora (sem mostrar as mensagens do canal
-  // anterior enquanto o novo carrega) e busca a página mais recente — ou,
-  // se esse canal já foi aberto antes, mostra o que estava em cache e só
-  // revalida em segundo plano.
   useEffect(() => {
     const cached = cacheKeyRef.current ? messageCache.get(cacheKeyRef.current) : undefined
     setLoadError(null)
@@ -229,8 +186,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     void load(false)
   }, [load])
 
-  // Mantém o cache em dia com o que está na tela (inclui o que chegou em
-  // tempo real, reações, páginas antigas carregadas etc.).
   useEffect(() => {
     if (!cacheKey || loadedKey !== viewKey || loading) return
     writeCache(cacheKey, { messages, attachments, reactions, hasMore })
@@ -238,8 +193,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
 
   const refresh = useCallback(() => load(false), [load])
 
-  // Rolagem infinita pra cima: busca a página anterior à mensagem mais
-  // antiga já carregada.
   const loadingOlderRef = useRef(false)
   const loadOlder = useCallback(async () => {
     const oldest = messagesRef.current[0]
@@ -267,8 +220,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     }
   }, [channelId, viewKey, buildQuery])
 
-  // Realtime: novas mensagens, edições e exclusões neste canal (ou
-  // nesta thread específica, se threadId estiver definido)
   useEffect(() => {
     if (!channelId) return
     let active = true
@@ -276,17 +227,12 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     const belongsHere = (m: Message) => m.channel_id === channelId && (threadId ? m.thread_id === threadId : m.thread_id === null)
     const isLoaded = (messageId: string) => messagesRef.current.some((m) => m.id === messageId)
 
-    // Nome único por montagem (canal privado `pgc:`): `supabase.channel(nome)`
-    // devolve um canal já existente com o mesmo nome (ver lib/realtimeChannel.ts).
     const channel = changesChannel(`messages:${channelId}${threadId ? `:${threadId}` : ''}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
         (payload) => {
           const newMessage = payload.new as Message
-          // Só aceita a mensagem se ela pertence à mesma "visão" que
-          // esse hook está mostrando — canal principal (sem thread) ou
-          // a thread específica que foi pedida.
           if (!belongsHere(newMessage)) return
           setMessages((prev) => (prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]))
           if (newMessage.author_id !== userIdRef.current) {
@@ -312,19 +258,11 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           setMessages((prev) => (prev.some((m) => m.id === updated.id) ? prev.map((m) => (m.id === updated.id ? updated : m)) : prev))
         }
       )
-      // DELETE sem filtro de propósito: o Supabase Realtime NÃO consegue
-      // filtrar eventos de exclusão por coluna (a linha antiga só traz a
-      // chave primária, a tabela não usa REPLICA IDENTITY FULL). Com o
-      // filtro `channel_id=eq.X`, exclusões feitas por OUTRA pessoa nunca
-      // chegavam — a mensagem só sumia depois de recarregar.
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
         const deletedId = (payload.old as { id?: string }).id
         if (!deletedId) return
         setMessages((prev) => (prev.some((m) => m.id === deletedId) ? prev.filter((m) => m.id !== deletedId) : prev))
       })
-      // Reações: antes QUALQUER reação em QUALQUER canal disparava uma nova
-      // busca de todos os anexos + reações de todas as mensagens carregadas.
-      // Agora aplica só a mudança recebida, direto no estado local.
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reactions' }, (payload) => {
         const row = payload.new as MessageReaction
         if (!isLoaded(row.message_id)) return
@@ -344,9 +282,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           return { ...prev, [target.message_id]: list.filter((r) => !sameReaction(r, target)) }
         })
       })
-      // Sem isso, um anexo (imagem, áudio, arquivo) só aparecia pra
-      // quem enviou — quem já estava com o canal aberto só via o anexo
-      // depois de trocar de canal ou recarregar a página.
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_attachments' }, (payload) => {
         const att = payload.new as MessageAttachment
         if (!isLoaded(att.message_id)) return
@@ -357,13 +292,8 @@ export function useMessages(channelId: string | null, serverId: string | null, t
         })
       })
       .subscribe((status, err) => {
-        // `CLOSED` também é disparado pela PRÓPRIA limpeza do efeito
-        // (removeChannel ao trocar de canal) — sem esse `active`, isso
-        // chamava um refresh do canal ANTIGO por cima do canal novo.
         if (!active) return
         if (status === 'SUBSCRIBED') {
-          // Voltou depois de uma queda: busca o que chegou enquanto a
-          // conexão estava fora, sem piscar a tela.
           if (hadProblem) void load(true)
           hadProblem = false
           return
@@ -381,17 +311,10 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     }
   }, [channelId, threadId, load])
 
-  // Antes, se qualquer chamada aqui dentro lançasse uma exceção (em vez
-  // de resolver normalmente com { error }), a promise de sendMessage()
-  // quebrava sem passar pelo `return { error ... }` e o composer ficava
-  // esperando pra sempre. O try/catch garante que sempre volta uma
-  // resposta, com o motivo real do problema.
   const sendMessage = useCallback(
     async (content: string, replyToId: string | null, files: File[] = []): Promise<{ error: string | null }> => {
       const userId = userIdRef.current
       if (!channelId || !serverId || !userId) return { error: 'Não foi possível enviar a mensagem' }
-      // DÉCIMA SÉTIMA RODADA: cooldown de UX (ver lib/rateLimit.ts) contra
-      // flood acidental — por CANAL, não global.
       const limited = rateLimitError(`message:channel:${channelId}`, 8, 10_000, 'você está mandando mensagem')
       if (limited) return { error: limited }
       const key = viewKey
@@ -412,8 +335,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
 
         if (error || !message) return { error: describeError(error, 'Erro ao enviar mensagem') }
 
-        // Mostra a mensagem na hora, sem esperar ela "voltar" pelo canal de
-        // tempo real.
         if (key === viewKeyRef.current) {
           setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
         }
@@ -432,8 +353,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
             continue
           }
 
-          // Bucket privado (migration 017): grava só o CAMINHO dentro do
-          // bucket; quem exibe gera uma URL assinada (useAttachmentUrl).
           const { data: att, error: attError } = await supabase
             .from('message_attachments')
             .insert({
@@ -449,8 +368,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
           else if (att) inserted.push(att)
         }
 
-        // Só os anexos DESTA mensagem entram no estado — antes isso buscava
-        // de novo os anexos + reações de todas as mensagens carregadas.
         if (inserted.length > 0 && key === viewKeyRef.current) {
           setAttachments((prev) => {
             const list = prev[message.id] ?? []
@@ -482,14 +399,10 @@ export function useMessages(channelId: string | null, serverId: string | null, t
 
   const deleteMessage = useCallback(async (messageId: string) => {
     try {
-      // Anexos lidos ANTES de apagar (o delete da mensagem leva as
-      // linhas de anexo junto, em cascata) — pra remover os arquivos do
-      // Storage depois.
       const { data: attRows } = await supabase.from('message_attachments').select('file_url').eq('message_id', messageId)
       const { error } = await supabase.from('messages').delete().eq('id', messageId)
       if (error) return { error: describeError(error, 'Não foi possível excluir a mensagem') }
       setMessages((prev) => prev.filter((m) => m.id !== messageId))
-      // Best-effort: não segura a UI nem transforma a exclusão em erro.
       if (attRows && attRows.length > 0) {
         void removeAttachmentObjects('attachments', attRows.map((r) => r.file_url))
       }
@@ -533,9 +446,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     }
   }, [])
 
-  // Busca as fixadas de verdade em vez de depender das mensagens já
-  // carregadas na tela — uma mensagem fixada pode ter sido enviada há
-  // muito tempo, fora da janela recente que normalmente é exibida.
   const fetchPinnedMessages = useCallback(async (): Promise<Message[]> => {
     if (!channelId) return []
     const { data, error } = await supabase
@@ -549,9 +459,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
     return (data as Message[] | null) ?? []
   }, [channelId])
 
-  // Otimista com rollback: a reação aparece/some na hora e, se o banco
-  // recusar, volta ao estado anterior. Antes cada clique esperava o banco
-  // E depois buscava de novo anexos + reações de TODAS as mensagens.
   const toggleReaction = useCallback(async (messageId: string, emoji: string) => {
     const userId = userIdRef.current
     if (!userId) return
@@ -589,8 +496,6 @@ export function useMessages(channelId: string | null, serverId: string | null, t
   }, [])
 
   const isCurrent = loadedKey === viewKey
-  // No PRIMEIRO render depois de trocar de canal (antes do efeito acima
-  // rodar), já devolve o cache — sem um frame de skeleton no meio.
   const cachedView = !isCurrent && cacheKey ? messageCache.get(cacheKey) : undefined
   return {
     messages: isCurrent ? messages : cachedView?.messages ?? EMPTY_MESSAGES,

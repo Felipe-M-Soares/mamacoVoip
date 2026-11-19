@@ -1,11 +1,5 @@
 import { useState } from 'react'
 
-// TRIGÉSIMA SÉTIMA RODADA — pedido explícito: "colocar todas opções de
-// gráfico e fps disponíveis pra transmissão", igual OBS deixam
-// escolher resolução e taxa de quadros de forma INDEPENDENTE uma da
-// outra (não só dois pacotes fechados "desempenho" ou "qualidade
-// máxima" como antes). Resolução e fps agora são dois controles
-// separados — qualquer combinação das duas listas abaixo é válida.
 export type ScreenShareResolution = '720p' | '1080p' | '1440p' | 'native'
 export type ScreenShareFrameRate = 15 | 30 | 60
 
@@ -19,32 +13,15 @@ interface ResolutionInfo {
   label: string
 }
 
-// TETO DE SEGURANÇA da captura de tela — bug relatado (Windows): compartilhar
-// a TELA INTEIRA (ou uma janela em tela cheia) derrubava o processo de
-// renderização ("processo travou — Motivo: crashed"), enquanto janelas
-// menores funcionavam. O que essas duas escolhas têm em comum (e as janelas
-// normais não) é o TAMANHO do quadro: sai do tamanho do monitor inteiro. Antes
-// "Fonte" usava 7680x4320 como teto (= sem limite) e a fonte "screen:" era
-// capturada sem limite nenhum; com isso quadros 4K / ultrawide / multi-monitor
-// iam direto pro encoder H.264 (forçado em VoiceContext.tsx), que roda DENTRO
-// do renderer quando cai no encoder por software (OpenH264) — e o H.264 nem
-// suporta quadros acima do nível 5.2 (4096x2304). Agora NENHUMA captura passa
-// de 2560x1440, qualquer que seja o preset ou o tipo de fonte.
 export const SAFE_MAX_CAPTURE_WIDTH = 2560
 export const SAFE_MAX_CAPTURE_HEIGHT = 1440
 
-// Limite de tamanho de quadro do H.264 (nível 5.2: 36864 macroblocos — na
-// prática 4096x2304). Acima disso encoders de hardware e o OpenH264 recusam
-// ou quebram; ver VoiceContext.tsx (troca pra VP8 se a redução falhar).
 export function exceedsH264FrameLimits(width: number, height: number): boolean {
   if (!width || !height) return false
   const macroblocks = Math.ceil(width / 16) * Math.ceil(height / 16)
   return width > 4096 || height > 4096 || macroblocks > 36864
 }
 
-// Encaixa (width x height) dentro de (maxWidth x maxHeight) mantendo a
-// proporção, sem nunca aumentar, e com dimensões PARES (encoders de vídeo
-// com subamostragem 4:2:0 exigem largura/altura pares).
 export function fitWithin(
   width: number,
   height: number,
@@ -57,9 +34,6 @@ export function fitWithin(
   return { width: even(width * scale), height: even(height * scale) }
 }
 
-// "native" (Fonte) = a resolução da própria tela, mas limitada ao teto de
-// segurança acima (monitores até 1440p saem nativos; 4K/ultrawide são
-// reduzidos mantendo a proporção).
 const RESOLUTIONS: Record<ScreenShareResolution, ResolutionInfo> = {
   '720p': { width: 1280, height: 720, label: '720p (HD)' },
   '1080p': { width: 1920, height: 1080, label: '1080p (Full HD)' },
@@ -73,19 +47,10 @@ const RESOLUTION_OPTIONS: { value: ScreenShareResolution; label: string }[] = (
 
 const FRAME_RATE_OPTIONS: ScreenShareFrameRate[] = [15, 30, 60]
 
-// Teto de bitrate por combinação resolução×fps — valores de referência
-// comuns de serviços de streaming pra cada combinação (Twitch/YouTube
-// publicam tabelas parecidas). É só um TETO: numa tela menor que a
-// escolhida, ou com pouco movimento na imagem, o encoder nem chega
-// perto de usar tudo isso — só importa (e ajuda de verdade) quando a
-// imagem tem bastante detalhe/movimento pra aproveitar.
 const BITRATE_TABLE: Record<ScreenShareResolution, Record<ScreenShareFrameRate, number>> = {
   '720p': { 15: 1_200_000, 30: 2_500_000, 60: 4_000_000 },
   '1080p': { 15: 2_500_000, 30: 4_000_000, 60: 6_000_000 },
   '1440p': { 15: 4_500_000, 30: 8_000_000, 60: 12_000_000 },
-  // Antes 35Mbps (calibrado pra 4K/60) — como "Fonte" agora nunca passa
-  // de 1440p (ver SAFE_MAX_CAPTURE_*), usa o mesmo patamar do 1440p com
-  // uma folga pequena.
   native: { 15: 5_000_000, 30: 9_000_000, 60: 14_000_000 },
 }
 
@@ -95,15 +60,9 @@ export interface QualityPreset {
   frameRate: number
   maxBitrate: number
   degradationPreference: 'maintain-framerate' | 'maintain-resolution'
-  // Se `true`, `width`/`height` são um TETO de verdade (constraint
-  // "max" no getDisplayMedia) — a tela é reduzida pra caber nesse
-  // limite mesmo que a resolução nativa seja maior. Hoje é SEMPRE `true`
-  // (ver SAFE_MAX_CAPTURE_* — "Fonte" deixou de ser "sem limite" porque
-  // quadros do tamanho de um monitor 4K derrubavam o renderer).
   capResolution: boolean
   label: string
   description: string
-  // true quando é o preset automático "Jogo" (ver buildGamePreset).
   isGamePreset?: boolean
 }
 
@@ -115,13 +74,7 @@ function buildPreset(resolution: ScreenShareResolution, frameRate: ScreenShareFr
     height: res.height,
     frameRate,
     maxBitrate: BITRATE_TABLE[resolution][frameRate],
-    // Resolução fixa se beneficia de sacrificar quadros quando a rede
-    // aperta (a imagem continua nítida, só menos fluida); "native" quase
-    // sempre é usada por quem tem internet de sobra e quer nitidez
-    // máxima, então prioriza manter a resolução em vez do fps.
     degradationPreference: isNative ? 'maintain-resolution' : 'maintain-framerate',
-    // Sempre um teto de verdade agora (ver SAFE_MAX_CAPTURE_*) — inclusive
-    // em "Fonte", que antes era "sem limite".
     capResolution: true,
     label: `${res.label} · ${frameRate}fps`,
     description: isNative
@@ -130,29 +83,10 @@ function buildPreset(resolution: ScreenShareResolution, frameRate: ScreenShareFr
   }
 }
 
-// Dica de conteúdo pro encoder (MediaStreamTrack.contentHint). Antes era
-// SEMPRE 'motion', inclusive em 15fps — que na prática é escolhido pra
-// compartilhar texto/código/planilha, justamente o caso em que 'motion'
-// borra letras miúdas pra manter fluidez que ninguém pediu. Regra:
-// 15fps → 'detail' (nitidez de texto); 30/60fps → 'motion' (jogo/vídeo).
 export function contentHintForPreset(preset: Pick<QualityPreset, 'frameRate'>): 'detail' | 'motion' {
   return preset.frameRate <= 15 ? 'detail' : 'motion'
 }
 
-// ---------------------------------------------------------------------------
-// Preset "Jogo" — aplicado AUTOMATICAMENTE quando a fonte escolhida é um
-// jogo detectado (card "Jogo" do seletor / atalho do aviso "Jogando X"),
-// se a opção "Qualidade automática para jogos" estiver ligada (padrão).
-//
-//  - 60fps sempre (jogo a 30fps parece travado pra quem assiste);
-//  - 1080p60 a 7 Mbps — faixa recomendada pra 1080p60 em H.264 (6–8 Mbps);
-//  - rede fraca (qualidade da SUA conexão "ruim"/"perdida") → 720p60 a
-//    3,5 Mbps, pra não picotar;
-//  - quem escolheu 1440p/"Fonte" nas configurações continua em 1440p60
-//    (teto de segurança SAFE_MAX_CAPTURE_* nunca é ultrapassado);
-//  - 'maintain-framerate': se a rede apertar, perde nitidez, não fluidez;
-//  - contentHint 'motion' (vem de contentHintForPreset, frameRate 60).
-// ---------------------------------------------------------------------------
 const GAME_PRESET_BITRATE_1080P60 = 7_000_000
 const GAME_PRESET_BITRATE_720P60 = 3_500_000
 
@@ -195,9 +129,6 @@ export function buildGamePreset(userPreset: Pick<QualityPreset, 'width' | 'heigh
   }
 }
 
-// Decide o preset EFETIVO de uma transmissão: o escolhido pela pessoa, ou
-// o preset "Jogo" quando a fonte é um jogo detectado e o modo automático
-// está ligado.
 export function resolveScreenSharePreset(
   userPreset: QualityPreset,
   ctx: { isGame: boolean; gameAuto: boolean; weakNetwork: boolean }
@@ -214,11 +145,6 @@ export function loadGameAutoPreset(): boolean {
   }
 }
 
-// Exportadas (não só internas ao hook) pra permitir uma LEITURA somente-
-// exibição do valor atual em lugares fora do VoiceProvider — ver
-// ScreenSharePicker.tsx, que mostra "qualidade selecionada" antes de
-// compartilhar mas não pode chamar useVoice() (ele existe fora do
-// VoiceProvider, que só monta dentro do MainLayout).
 function loadResolution(): ScreenShareResolution {
   try {
     const raw = localStorage.getItem(RESOLUTION_KEY)
@@ -251,7 +177,6 @@ export function useScreenShareQuality() {
     try {
       localStorage.setItem(GAME_AUTO_KEY, String(next))
     } catch {
-      // best-effort
     }
   }
 
@@ -260,7 +185,6 @@ export function useScreenShareQuality() {
     try {
       localStorage.setItem(RESOLUTION_KEY, next)
     } catch {
-      // best-effort
     }
   }
 
@@ -269,7 +193,6 @@ export function useScreenShareQuality() {
     try {
       localStorage.setItem(FRAMERATE_KEY, String(next))
     } catch {
-      // best-effort
     }
   }
 
@@ -280,7 +203,6 @@ export function useScreenShareQuality() {
     setFrameRate,
     resolutionOptions: RESOLUTION_OPTIONS,
     frameRateOptions: FRAME_RATE_OPTIONS,
-    // Qualidade automática para jogos (preset "Jogo", ver buildGamePreset).
     gameAuto,
     setGameAuto,
     preset: buildPreset(resolution, frameRate),

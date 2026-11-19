@@ -3,8 +3,6 @@ import { supabase } from '../lib/supabase'
 import type { Permission, Role, ServerMemberRole } from '../types/database'
 import { safeHexColor } from '../lib/messageFormatting'
 
-// Mesmas regras do banco (migration 013): nome 1–100 caracteres, cor
-// sempre hexadecimal.
 function validateRoleInput(name: string, color: string): { name: string; color: string } | { error: string } {
   const trimmed = name.trim()
   if (trimmed.length < 1 || trimmed.length > 100) return { error: 'O nome do cargo precisa ter de 1 a 100 caracteres.' }
@@ -30,7 +28,6 @@ export function useRoles(serverId: string | null) {
       supabase.from('roles').select('*').eq('server_id', serverId).order('position', { ascending: false }),
       supabase.from('server_member_roles').select('*').eq('server_id', serverId),
     ])
-    // Resposta de um servidor anterior (troca rápida) — descarta.
     if (requestId !== requestIdRef.current) return
     setRoles(roleRows ?? [])
     setMemberRoles(assignments ?? [])

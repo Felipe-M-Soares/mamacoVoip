@@ -1,8 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-// Texto integral dos avisos de terceiros (o mesmo arquivo vai no
-// instalador — ver build.extraResources no package.json). Esta aba é
-// carregada sob demanda (lazy em SettingsModal), então o texto só é
-// baixado quando alguém abre "Sobre → Licenças".
 import notices from '../../../THIRD_PARTY_NOTICES.md?raw'
 import { TabHeader, SettingsCard } from './settingsUI'
 
@@ -22,8 +18,6 @@ export function LicensesTab() {
   const version = desktopVersion || BUILD_VERSION
   const platform = window.electronAPI ? 'app para computador' : 'versão web'
 
-  // Filtro simples por seção (cabeçalhos "## "/"### ") — o arquivo tem
-  // milhares de linhas.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return notices

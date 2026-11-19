@@ -18,13 +18,6 @@ export function InviteMessageCard({ invite }: { invite: InvitePayload }) {
       return
     }
     setStatus('accepted')
-    // autoJoinVoice: true sempre que o convite trouxer um canal — o
-    // MainLayout do outro lado confere se esse canal é mesmo de VOZ
-    // antes de entrar de verdade (convite de canal de texto só navega
-    // até lá, sem tentar conectar em nada). Isso que faz "chamar pra
-    // sala" (VoiceChannelView/FriendsPanel) já cair direto na call ao
-    // aceitar, em vez de precisar clicar em "Entrar no canal de voz"
-    // depois.
     navigate('/', {
       state: { joinedServerId: server.id, joinedChannelId: invite.channelId ?? null, autoJoinVoice: Boolean(invite.channelId) },
     })

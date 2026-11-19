@@ -2,22 +2,12 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 
-// No app desktop os botões nativos de minimizar/maximizar/fechar ficam
-// SEMPRE por cima de tudo (o Windows desenha eles). Marcando o <html>,
-// as telas cheias (visualizador de imagem, modais, tour) começam abaixo
-// da barra de título e o "X" do app nunca fica em cima do "X" delas.
 if (window.electronAPI?.isElectron) {
   document.documentElement.classList.add('mv-electron')
 }
 
 const root = createRoot(document.getElementById('root')!)
 
-// Mostra QUALQUER erro que impeça o app de abrir direto na tela, em
-// texto simples — sem isso, uma falha de inicialização vira uma tela
-// preta muda, e a única forma de ver o motivo seria abrir as
-// ferramentas de desenvolvedor manualmente (chato de fazer e de
-// printar certinho). Fica registrado aqui uma única vez, antes de
-// qualquer outra coisa rodar.
 let errorShown = false
 function showFatalError(message: string) {
   if (errorShown) return
@@ -45,11 +35,6 @@ function handleUnhandledRejection(e: PromiseRejectionEvent) {
   showFatalError(reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason))
 }
 
-// Esses dois só existem pra pegar falhas durante a INICIALIZAÇÃO do
-// app (arquivo não carregou, configuração ausente, etc.) — uma vez que
-// o app abriu com sucesso, eles são removidos. Sem isso, qualquer erro
-// bobo acontecendo DEPOIS do app já estar funcionando (tipo cancelar
-// um compartilhamento de tela) derrubava a tela inteira de novo.
 window.addEventListener('error', handleWindowError)
 window.addEventListener('unhandledrejection', handleUnhandledRejection)
 
@@ -58,23 +43,10 @@ function detachStartupErrorHandlers() {
   window.removeEventListener('unhandledrejection', handleUnhandledRejection)
 }
 
-// DÉCIMA SÉTIMA RODADA — diferente dos dois handlers acima (que
-// mostram a tela de emergência e são removidos depois de 3s, DE
-// PROPÓSITO: um erro bobo do dia a dia não deveria derrubar a tela
-// inteira), estes aqui ficam ligados o tempo TODO que o app estiver
-// aberto, mas só REGISTRAM no arquivo de log (window.electronAPI.logDebug
-// — mesmo mecanismo já usado por VoiceContext.tsx, ver
-// electron/main.cjs) em vez de interromper qualquer coisa. A app inteira
-// dependeu, essa sessão inteira, de mandar log manualmente a partir de
-// pontos específicos do código pra diagnosticar problemas à distância —
-// isso cobre o caso genérico (qualquer erro não tratado em QUALQUER
-// lugar do app, não só nos pontos que alguém lembrou de instrumentar),
-// sem precisar reproduzir o problema de novo com mais logging.
 function logRuntimeErrorToFile(source: string, detail: string) {
   try {
     window.electronAPI?.logDebug?.(`[${source}] ${detail}`)
   } catch {
-    // best-effort — nunca deveria quebrar por causa disso
   }
 }
 window.addEventListener('error', (e) => {
@@ -85,11 +57,6 @@ window.addEventListener('unhandledrejection', (e) => {
   logRuntimeErrorToFile('window:unhandledrejection', reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason))
 })
 
-// Checa ANTES de importar o resto do app — se importássemos ./App.tsx
-// de forma estática lá em cima, o cliente do Supabase seria avaliado
-// (e travaria, se faltar configuração) antes mesmo dessa checagem
-// rodar. Com import() dinâmico, só carregamos o resto do app depois de
-// confirmar que a configuração existe.
 const hasSupabaseConfig = Boolean(import.meta.env.VITE_SUPABASE_URL) && Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY)
 
 if (!hasSupabaseConfig) {
@@ -104,9 +71,6 @@ if (!hasSupabaseConfig) {
           <App />
         </StrictMode>,
       )
-      // Dá um instante pro React terminar de montar antes de soltar a
-      // rede de segurança — depois disso, erros do dia a dia não usam
-      // mais essa tela de emergência.
       setTimeout(detachStartupErrorHandlers, 3000)
     })
     .catch((err) => {
@@ -114,11 +78,9 @@ if (!hasSupabaseConfig) {
     })
 }
 
-// Service worker só em produção — em dev ele atrapalha o hot reload do Vite
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {
-      // instalação do service worker é best-effort — não bloqueia o app
     })
   })
 }

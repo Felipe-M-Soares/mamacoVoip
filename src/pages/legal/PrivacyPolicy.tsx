@@ -1,12 +1,6 @@
 import { Link } from 'react-router-dom'
 import { LegalPageLayout, LegalSection } from './LegalPageLayout'
 
-// Controlador e contato (LGPD art. 9º, III): os mesmos de TermsOfService.tsx
-// e DeleteAccountInfo.tsx — se mudar, troque nos três.
-//
-// Este texto descreve o que o código faz em 11/10/2026. Se mudar o que o app
-// coleta (novo provedor, analytics, gravação, anúncios etc.), atualize aqui.
-
 export function PrivacyPolicy() {
   return (
     <LegalPageLayout title="Política de Privacidade" updatedAt="11 de outubro de 2026">

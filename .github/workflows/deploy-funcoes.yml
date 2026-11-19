@@ -1,17 +1,5 @@
 name: Publicar funções do Supabase (GIFs e notificações)
 
-# Publica as Edge Functions gif-search e push-notify sempre que mudarem
-# (ou manualmente pela aba Actions). Assim não precisa instalar nada no PC.
-#
-# Configuração (uma vez só) — Settings > Secrets and variables > Actions:
-#   - SUPABASE_ACCESS_TOKEN: supabase.com/dashboard/account/tokens >
-#       "Generate new token" (dá acesso à sua conta do Supabase — só aqui
-#       nos Secrets, nunca no código).
-#   - SUPABASE_PROJECT_REF: o código do projeto (aparece na URL do painel:
-#       supabase.com/dashboard/project/<ESTE-CÓDIGO>).
-# A chave do KLIPY NÃO vai aqui: ela fica nos secrets das Edge Functions
-# do próprio Supabase (KLIPY_API_KEY) — ver docs/GIFS.md.
-
 on:
   push:
     branches: [main]
@@ -56,8 +44,6 @@ jobs:
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: npx --yes supabase@2.118.0 functions deploy gif-search --project-ref "$SUPABASE_PROJECT_REF" --use-api
 
-      # Chamada pelo próprio banco (com segredo próprio, ver PARTE 29 do
-      # SQL 007) — por isso sem a checagem de login do Supabase.
       - name: Publicar push-notify
         if: steps.cfg.outputs.ok == 'true'
         env:

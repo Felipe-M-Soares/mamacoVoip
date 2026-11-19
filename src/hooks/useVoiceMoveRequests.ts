@@ -13,28 +13,14 @@ export type VoiceMoveNotice = {
   movedByAvatarUrl: string | null
 }
 
-// Escuta os pedidos de "mover para outro canal de voz" (migration 014)
-// feitos por um dono/moderador e troca de sala sozinho. A fonte é a
-// tabela voice_move_requests (só a RPC move_voice_member grava, depois
-// de validar permissão/hierarquia) — nunca um broadcast do Realtime, que
-// qualquer cliente conseguiria forjar.
-//
-// Montado UMA vez (VoiceMovedToast, no MainLayout). Fica fora do
-// VoiceContext de propósito: usa só join/leave públicos, igual ao
-// "canal AFK" (leave() e, logo depois, join() no destino).
 export function useVoiceMoveRequests() {
   const { user } = useAuth()
   const voice = useVoice()
   const [notices, setNotices] = useState<VoiceMoveNotice[]>([])
 
-  // Sempre a versão mais recente do contexto — o callback do Realtime é
-  // registrado uma vez só e não pode ficar com um estado velho.
   const voiceRef = useRef(voice)
   voiceRef.current = voice
   const handledIdsRef = useRef<Set<string>>(new Set())
-  // Mudo/ensurdecido de antes da troca, reaplicado quando a entrada no
-  // canal novo terminar (leave() zera os dois). Sem isso, quem estava
-  // mudo seria "desmutado" à força ao ser movido.
   const pendingRestoreRef = useRef<{ channelId: string; muted: boolean; deafened: boolean } | null>(null)
 
   const dismiss = useCallback((id: string) => {
@@ -65,19 +51,15 @@ export function useVoiceMoveRequests() {
       }
       const serverId = request.server_id
       current.leave()
-      // Mesmo intervalo do canal AFK (VoiceContext): dá tempo da presença
-      // antiga começar a sair antes de assinar a sala nova.
       setTimeout(() => {
         void voiceRef.current.join(request.to_channel_id, serverId).finally(() => {
-          // Se a entrada falhou, não deixa o "reaplicar mudo" pendurado
-          // pra uma próxima entrada manual nesse mesmo canal.
           setTimeout(() => {
             if (pendingRestoreRef.current?.channelId === request.to_channel_id) pendingRestoreRef.current = null
           }, 1500)
         })
       }, 300)
 
-      if (request.requested_by === myUserId) return // moveu a si mesmo: sem aviso
+      if (request.requested_by === myUserId) return
 
       const [{ data: channel }, { data: mover }] = await Promise.all([
         supabase.from('channels').select('name').eq('id', request.to_channel_id).maybeSingle(),
@@ -95,8 +77,6 @@ export function useVoiceMoveRequests() {
     [user?.id, dismiss]
   )
 
-  // Reaplica mudo/ensurdecido assim que a conexão no canal novo sobe.
-  // Usa as funções do render ATUAL (toggleDeafen lê o volume do estado).
   useEffect(() => {
     const pending = pendingRestoreRef.current
     if (!pending || voice.connectedChannelId !== pending.channelId) return

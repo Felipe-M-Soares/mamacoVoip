@@ -1,8 +1,5 @@
 import { useSyncExternalStore } from 'react'
 
-// Visualizador de imagem/vídeo dentro do próprio app (em vez de abrir uma
-// aba do navegador). Qualquer lugar chama openMedia(); o <MediaViewer />
-// montado uma vez no layout mostra.
 export type MediaItem = { src: string; kind: 'image' | 'video'; name?: string }
 
 let current: MediaItem | null = null

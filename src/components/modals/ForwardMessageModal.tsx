@@ -28,8 +28,6 @@ export function ForwardMessageModal({
     if (!user) return
     setSendingTo(channelId)
     const authorName = author?.display_name || author?.username || 'alguém'
-    // Figurinha: reenvia só o marcador (com o prefixo de texto ela deixaria
-    // de ser reconhecida como figurinha e apareceria como "[[sticker:…]]").
     const content = parseStickerId(message.content)
       ? message.content.trim()
       : `↪ Encaminhado de **${authorName}**:\n${message.content}`

@@ -1,78 +1,4 @@
-// screen-capture-wgc.exe
-//
-// TRIGÉSIMA QUARTA RODADA — corrigindo dois erros reais de compilação
-// (log do GitHub Actions):
-//
-// 1. "STL1011: The /await compiler option, <experimental/coroutine>...
-//    are deprecated". Motivo: os cabeçalhos do C++/WinRT (winrt/base.h)
-//    puxam <experimental/coroutine> pra dar suporte a `co_await` — só
-//    que este arquivo NUNCA usa `co_await` (todas as chamadas aqui são
-//    síncronas/bloqueantes de propósito, pra ficar parecido com o estilo
-//    do resto do projeto), e versões mais novas do compilador da
-//    Microsoft (a que rodou no runner) tratam esse cabeçalho antigo como
-//    erro definitivo, não só aviso. A macro abaixo — documentada pela
-//    própria Microsoft pra exatamente esse cenário — silencia isso sem
-//    precisar reescrever nada com coroutines de verdade.
 #define _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
-
-// Ferramenta de linha de comando standalone (mesmo padrão de
-// native/process-audio-capture/capture.cpp e
-// native/screen-capture-gdi/capture.cpp — ver o comentário grande no
-// topo de cada um pro raciocínio geral de "por que um .exe separado").
-//
-// TRIGÉSIMA TERCEIRA RODADA — pedido explícito depois de confirmar, com
-// prints, que nem a captura normal (DXGI/WebRTC) nem o fallback GDI
-// (native/screen-capture-gdi) conseguem ver de verdade um jogo em modo
-// de TELA CHEIA EXCLUSIVA — as duas mostram uma "foto congelada" do que
-// tinha na tela ANTES do jogo assumir o controle exclusivo dela (o
-// compositor do Windows, DWM, para de desenhar aquele monitor nesse
-// modo, e as duas técnicas anteriores dependem do DWM pra funcionar).
-// A pessoa recusou, com razão, depender do OBS rodando junto só pra
-// contornar isso — quer o app funcionando sozinho, nativamente.
-//
-// Windows Graphics Capture (WGC) é a resposta certa: diferente de DXGI
-// Desktop Duplication (a técnica por trás da captura normal E do
-// fallback GDI, ambas dependentes do DWM), o WGC pega o conteúdo direto
-// da GPU, sem depender do compositor estar ativo — é a mesma tecnologia
-// por trás do Xbox Game Bar, e do "compartilhar uma janela"/"tela
-// inteira" mais recente de apps de chat populares. Ela é pública, documentada,
-// suportada desde o Windows 10 versão 1903 — usar ela não tem nada a
-// ver com as técnicas de "hook" de gráficos (injeção de DLL no
-// processo do jogo) que o OBS usa no modo "Game Capture" e que
-// anti-cheats monitoram; aqui não existe injeção nenhuma no processo
-// do jogo, é uma API pública do sistema operacional pedindo pra ele
-// mesmo entregar os quadros de um monitor.
-//
-// Por que isto é mais arriscado (tecnicamente) que os outros dois .exe
-// deste projeto, dito com honestidade: usa C++/WinRT (interoperação
-// COM com a API moderna do Windows), uma parte da linguagem
-// significativamente mais complexa que Win32 puro (GDI/WASAPI, usados
-// nos outros dois arquivos) — nomes de interface, includes e a ordem
-// deles importam mais aqui, e um detalhe errado quebra a compilação
-// inteira de um jeito que só aparece rodando de verdade num compilador
-// Windows (o runner do GitHub Actions, ou uma máquina Windows com
-// Visual Studio) — não tem como eu confirmar isso de antemão neste
-// ambiente. Segui de perto a estrutura do exemplo oficial da própria
-// Microsoft pra captura de tela via WGC (o repositório público
-// "Win32CaptureSample") — o padrão mais usado e testado que existe pra
-// isso — pra minimizar esse risco o quanto der.
-//
-// Uso: screen-capture-wgc.exe [indiceDoMonitor]
-//   Mesmo esquema do screen-capture-gdi.exe: sem argumento (ou "0") =
-//   monitor PRINCIPAL. Índice N = o N-ésimo monitor NÃO-principal
-//   encontrado (best-effort, ordem não garantida bater com a do
-//   Electron em máquinas com vários monitores).
-//
-// Protocolo de saída (stdout): EXATAMENTE o mesmo protocolo binário do
-// screen-capture-gdi.exe (cabeçalho de 16 bytes com magic/width/height,
-// depois um fluxo de quadros [4 bytes de tamanho][JPEG]) — só o valor
-// do magic muda (pra dar pra distinguir nos logs qual dos dois gerou
-// qual quadro). Isso é DE PROPÓSITO: o lado do processo principal
-// (electron/main.cjs) já sabe ler esse formato genérico — ver
-// createNativeFrameCaptureChannel — então esse .exe novo se encaixa
-// nele sem duplicar nenhuma lógica de parsing.
-// stderr: mesmo esquema "STATUS "/"ERROR " linha a linha dos outros
-// dois .exe.
 
 #include <windows.h>
 #include <winrt/base.h>
@@ -120,7 +46,7 @@ using Gdiplus::Status;
 namespace {
 
 constexpr int kJpegQuality = 85;
-constexpr uint32_t kMagic = 0x4D435747;  // 'MCWG' — só pra diferenciar do GDI ('MCGF') nos logs
+constexpr uint32_t kMagic = 0x4D435747;
 
 std::atomic<bool> g_stopRequested{false};
 
@@ -141,22 +67,11 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) {
   return FALSE;
 }
 
-// AUDITORIA — "cão de guarda" do processo pai. O Electron cria este .exe
-// com o stdin ligado a um pipe (padrão do spawn do Node) e nunca escreve
-// nada nele. Se o app principal MORRER sem conseguir matar este processo
-// (travamento, "Finalizar tarefa", queda de energia do lado do Electron),
-// o Windows NÃO mata os processos filhos junto — e este .exe ficava
-// capturando e codificando pra sempre em segundo plano, gastando
-// CPU/GPU até reiniciar o PC. Quando o pai morre, o pipe do stdin fecha
-// e o ReadFile abaixo retorna — aí pedimos pra sair do laço principal.
-// Só é ativado quando o stdin é de fato um pipe (rodando à mão num
-// console, nada muda).
 DWORD WINAPI ParentWatchdogThread(LPVOID) {
   HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
   char buffer[256];
   DWORD bytesRead = 0;
   while (ReadFile(in, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) {
-    // ninguém deveria escrever aqui — só descarta
   }
   g_stopRequested.store(true);
   return 0;
@@ -170,10 +85,6 @@ void StartParentWatchdog() {
   if (thread) CloseHandle(thread);
 }
 
-// AUDITORIA: antes, o resultado de fwrite/fflush no stdout era ignorado —
-// se o pipe fechasse (app principal encerrou), o laço seguia capturando e
-// codificando quadros que ninguém mais ia ler. Agora qualquer falha de
-// escrita encerra a captura.
 bool WriteAllStdout(const void* data, size_t size) {
   if (size == 0) return true;
   return fwrite(data, 1, size, stdout) == size;
@@ -199,9 +110,6 @@ BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC, LPRECT, LPARAM lParam) {
   return TRUE;
 }
 
-// Mesmo raciocínio do ResolveTargetMonitorRect em screen-capture-gdi —
-// só que aqui precisamos do HMONITOR em si (não só o retângulo), porque
-// é isso que a API de captura pede.
 HMONITOR ResolveTargetMonitor(int monitorIndex) {
   HMONITOR primary = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
   if (monitorIndex <= 0) return primary;
@@ -215,9 +123,6 @@ HMONITOR ResolveTargetMonitor(int monitorIndex) {
   return primary;
 }
 
-// Padrão documentado da Microsoft (Win32CaptureSample) pra criar um
-// GraphicsCaptureItem a partir de um HMONITOR — não existe um
-// construtor comum pra isso, só via essa interface de interoperação.
 GraphicsCaptureItem CreateCaptureItemForMonitor(HMONITOR hmon) {
   auto interopFactory = get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
   GraphicsCaptureItem item{nullptr};
@@ -225,8 +130,6 @@ GraphicsCaptureItem CreateCaptureItemForMonitor(HMONITOR hmon) {
   return item;
 }
 
-// Idem, padrão documentado: envolve um ID3D11Device "cru" (Win32) num
-// IDirect3DDevice (WinRT), que é o tipo que as APIs de captura esperam.
 IDirect3DDevice CreateWinrtDevice(com_ptr<ID3D11Device> const& d3dDevice) {
   auto dxgiDevice = d3dDevice.as<IDXGIDevice>();
   com_ptr<::IInspectable> inspectable;
@@ -234,8 +137,6 @@ IDirect3DDevice CreateWinrtDevice(com_ptr<ID3D11Device> const& d3dDevice) {
   return inspectable.as<IDirect3DDevice>();
 }
 
-// Idem: o caminho inverso — de uma superfície WinRT (o que a captura
-// entrega) pra uma textura Direct3D "crua" que dá pra ler de verdade.
 com_ptr<ID3D11Texture2D> GetTextureFromSurface(IDirect3DSurface const& surface) {
   auto access = surface.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
   com_ptr<ID3D11Texture2D> texture;
@@ -270,19 +171,8 @@ bool WriteU32LE(uint32_t value) {
   return WriteAllStdout(bytes, 4);
 }
 
-// Codifica um retângulo cru de pixels BGRA (o formato que a captura
-// entrega, B8G8R8A8UIntNormalized) direto em JPEG — sem precisar
-// converter pra HBITMAP primeiro (diferente do screen-capture-gdi.exe,
-// que precisa disso porque BitBlt só entrega HBITMAP): o construtor do
-// GDI+ que recebe um ponteiro de memória crua (scan0) aceita esse
-// mesmo layout de bytes diretamente.
 bool EncodeBgraToJpeg(const uint8_t* data, int width, int height, int stride, const CLSID& jpegClsid,
                       std::vector<uint8_t>* outBytes) {
-  // AUDITORIA: PixelFormat32bppRGB (mesmo layout BGRA em memória, mas com
-  // o 4º byte IGNORADO) em vez de 32bppARGB — o canal alfa das texturas
-  // de captura não tem significado nenhum pra um JPEG (que não tem alfa);
-  // declarando o formato sem alfa, o GDI+ não precisa fazer nenhum
-  // tratamento de transparência na conversão pra 24 bits do encoder.
   Bitmap bitmap(width, height, stride, PixelFormat32bppRGB, const_cast<uint8_t*>(data));
   if (bitmap.GetLastStatus() != Status::Ok) return false;
 
@@ -314,7 +204,7 @@ bool EncodeBgraToJpeg(const uint8_t* data, int width, int height, int stride, co
   return ok;
 }
 
-}  // namespace
+}
 
 int wmain(int argc, wchar_t* argv[]) {
   int monitorIndex = 0;
@@ -324,11 +214,6 @@ int wmain(int argc, wchar_t* argv[]) {
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
   StartParentWatchdog();
 
-  // C++/WinRT precisa de um apartamento COM inicializado antes de
-  // qualquer chamada — multi_threaded porque o resto deste programa
-  // não usa nenhuma UI/mensagem do Win32 (não precisa de apartamento de
-  // thread único), e o callback de FrameArrived (mais abaixo) pode vir
-  // de uma thread diferente da main.
   winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
   Gdiplus::GdiplusStartupInput gdiplusStartupInput;
@@ -345,10 +230,6 @@ int wmain(int argc, wchar_t* argv[]) {
 
   try {
     if (!GraphicsCaptureSession::IsSupported()) {
-      // Windows mais antigo que a versão 1903 (2019) — WGC não existe
-      // nele. Praticamente ninguém deveria cair aqui hoje em dia, mas
-      // reporta um erro claro em vez de travar mais na frente de um
-      // jeito confuso.
       LogError("Windows Graphics Capture nao e suportado nesta versao do Windows");
       return 1;
     }
@@ -373,10 +254,6 @@ int wmain(int argc, wchar_t* argv[]) {
         winrtDevice, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, itemSize);
     auto session = framePool.CreateCaptureSession(captureItem);
 
-    // Evento sinalizado sempre que um quadro novo chega — mais eficiente
-    // que ficar checando (polling) num loop apertado, e não precisa de
-    // thread própria: o SDK do Windows já entrega esse callback numa
-    // thread de pool dele mesmo.
     HANDLE frameEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!frameEvent) {
       LogError("CreateEvent falhou");
@@ -385,14 +262,6 @@ int wmain(int argc, wchar_t* argv[]) {
     auto revoker = framePool.FrameArrived(
         winrt::auto_revoke,
         [frameEvent](Direct3D11CaptureFramePool const&, winrt::Windows::Foundation::IInspectable const&) {
-          // TRIGÉSIMA QUARTA RODADA: qualificado por completo
-          // (winrt::Windows::Foundation::IInspectable) — sem isso dava
-          // erro de compilação "'IInspectable': ambiguous symbol", porque
-          // o `using namespace winrt::Windows::Foundation;` (topo do
-          // arquivo) e o cabeçalho de interoperação do Windows SDK (que
-          // declara o ::IInspectable "cru", do COM clássico) definem
-          // dois tipos DIFERENTES com esse mesmo nome — sem dizer qual
-          // dos dois, o compilador não tem como adivinhar sozinho.
           SetEvent(frameEvent);
         });
 
@@ -406,13 +275,8 @@ int wmain(int argc, wchar_t* argv[]) {
 
     while (!g_stopRequested.load()) {
       DWORD waitResult = WaitForSingleObject(frameEvent, 500);
-      if (waitResult != WAIT_OBJECT_0) continue;  // sem quadro novo nesse meio tempo, só volta a esperar
+      if (waitResult != WAIT_OBJECT_0) continue;
 
-      // Drena TODOS os quadros que já chegaram, guardando só o mais
-      // recente — se o consumidor (esse loop) estiver um pouco mais
-      // lento que a taxa de quadros de verdade, processar cada quadro
-      // atrasado em fila só aumentaria o atraso cada vez mais; só o
-      // ÚLTIMO quadro disponível importa pra transmissão ao vivo.
       Direct3D11CaptureFrame latestFrame{nullptr};
       for (;;) {
         auto frame = framePool.TryGetNextFrame();
@@ -427,10 +291,6 @@ int wmain(int argc, wchar_t* argv[]) {
       D3D11_TEXTURE2D_DESC desc = {};
       texture->GetDesc(&desc);
 
-      // Recria a textura de staging (a que dá pra LER de verdade pela
-      // CPU) só quando o tamanho muda — recriar a cada quadro seria
-      // desperdício, já que o tamanho normalmente fica igual quadro
-      // após quadro.
       if (!stagingTexture || stagingDesc.Width != desc.Width || stagingDesc.Height != desc.Height) {
         stagingDesc = desc;
         stagingDesc.Usage = D3D11_USAGE_STAGING;
@@ -449,12 +309,6 @@ int wmain(int argc, wchar_t* argv[]) {
       D3D11_MAPPED_SUBRESOURCE mapped = {};
       bool writeFailed = false;
       if (SUCCEEDED(d3dContext->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-        // AUDITORIA — leitura fora da memória: logo depois de uma troca de
-        // resolução, o ContentSize do quadro pode ser MAIOR que a textura
-        // do pool (que só é recriada no fim desta volta do laço, mais
-        // abaixo). Usar o ContentSize direto fazia o GDI+ ler além do fim
-        // da região mapeada (crash ou lixo na imagem). Limita ao tamanho
-        // real da textura copiada.
         const UINT clampedWidth = (std::min)(static_cast<UINT>(frameContentSize.Width), stagingDesc.Width);
         const UINT clampedHeight = (std::min)(static_cast<UINT>(frameContentSize.Height), stagingDesc.Height);
         const int width = static_cast<int>(clampedWidth);
@@ -480,10 +334,6 @@ int wmain(int argc, wchar_t* argv[]) {
         break;
       }
 
-      // Recria o frame pool se o tamanho do CONTEÚDO capturado mudou
-      // (ex.: o jogo trocou de resolução em pleno voo, ou a pessoa
-      // mudou a resolução do monitor) — sem isso, quadros futuros
-      // viriam cortados/deformados contra o tamanho antigo do pool.
       if (frameContentSize.Width != itemSize.Width || frameContentSize.Height != itemSize.Height) {
         itemSize = frameContentSize;
         framePool.Recreate(winrtDevice, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, itemSize);
@@ -495,9 +345,6 @@ int wmain(int argc, wchar_t* argv[]) {
     CloseHandle(frameEvent);
     LogStatus("captura encerrada");
   } catch (winrt::hresult_error const& ex) {
-    // Mensagens de erro do WinRT já vêm em UTF-16 (winrt::hstring) —
-    // precisa converter pra UTF-8 pra caber no protocolo de stderr
-    // (que é sempre texto simples) sem virar caractere corrompido.
     char buffer[512];
     int len = WideCharToMultiByte(CP_UTF8, 0, ex.message().c_str(), -1, buffer, sizeof(buffer), nullptr, nullptr);
     LogError(len > 0 ? buffer : "erro WinRT desconhecido");

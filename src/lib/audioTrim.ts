@@ -1,37 +1,16 @@
-// Ferramenta de recorte de áudio pro soundboard: escolhe um trecho de
-// até MAX_SOUND_SECONDS de qualquer áudio, em vez de rejeitar arquivos
-// longos. Tudo roda no navegador/Electron via Web Audio API — não
-// precisa de nenhum serviço externo nem upload prévio só pra cortar.
-
 export const MAX_SOUND_SECONDS = 10
 
-// Decodifica o arquivo só pra descobrir a duração real (mais confiável
-// que a duração de um <audio>/<video>, que em alguns formatos fica
-// disponível só depois de carregar o arquivo inteiro, ou vem errada até
-// terminar o "seek" inicial em certos containers). Devolve também o
-// AudioBuffer decodificado, pra não precisar decodificar de novo na hora
-// de cortar de fato.
 export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
   const arrayBuffer = await file.arrayBuffer()
-  // Um AudioContext novo só pra decodificar — mais simples que reusar um
-  // já existente (que podia estar suspenso esperando interação do
-  // usuário) e barato o bastante pra criar sob demanda aqui.
   const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
   const ctx = new AudioContextCtor()
   try {
-    // Safari/versões antigas só aceitam o callback antigo — o try/catch
-    // cobre os dois jeitos sem precisar detectar navegador.
     return await ctx.decodeAudioData(arrayBuffer.slice(0))
   } finally {
     ctx.close().catch(() => {})
   }
 }
 
-// Corta [startSec, endSec) do AudioBuffer e devolve um novo Blob WAV
-// (16-bit PCM, mono) pronto pra upload. Mistura todos os canais originais
-// num só (mono) — reduz o tamanho do arquivo pela metade em fontes
-// estéreo, sem perda perceptível pra um efeito curto de soundboard, e
-// simplifica o encoder (não precisa entrelaçar N canais).
 export function trimAudioBufferToWav(buffer: AudioBuffer, startSec: number, endSec: number): Blob {
   const sampleRate = buffer.sampleRate
   const startSample = Math.max(0, Math.floor(startSec * sampleRate))
@@ -46,8 +25,6 @@ export function trimAudioBufferToWav(buffer: AudioBuffer, startSec: number, endS
     }
   }
 
-  // Rampa curtinha (8ms) no começo e no fim: cortar no meio de uma onda
-  // gera um "clique" audível.
   const fade = Math.min(Math.floor(sampleRate * 0.008), Math.floor(frameCount / 2))
   for (let i = 0; i < fade; i++) {
     const g = i / fade
@@ -55,8 +32,6 @@ export function trimAudioBufferToWav(buffer: AudioBuffer, startSec: number, endS
     mono[frameCount - 1 - i] *= g
   }
 
-  // Fontes de 88,2/96 kHz dobrariam o arquivo sem ganho audível num
-  // efeito curto — desce pra 48 kHz (mantém o limite de 2MB folgado).
   let rate = sampleRate
   if (rate > 48000) {
     const ratio = rate / 48000
@@ -76,7 +51,6 @@ export function trimAudioBufferToWav(buffer: AudioBuffer, startSec: number, endS
   return encodeWavMono16(mono, rate)
 }
 
-/** Picos (0..1) do áudio em `buckets` fatias — pra desenhar a forma de onda. */
 export function computePeaks(buffer: AudioBuffer, buckets: number): Float32Array {
   const peaks = new Float32Array(buckets)
   const step = Math.max(1, Math.floor(buffer.length / buckets))
@@ -99,16 +73,12 @@ export function computePeaks(buffer: AudioBuffer, buckets: number): Float32Array
   return peaks
 }
 
-/** Formatos que o bucket do soundboard aceita como estão. */
 export function isUploadReadyAudio(file: File): boolean {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
   const okType = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm'].includes(file.type)
   return okType && ['mp3', 'wav', 'ogg', 'webm'].includes(ext)
 }
 
-// Encoder WAV bem simples — cabeçalho RIFF/PCM padrão + amostras de
-// 16-bit assinado. Não depende de nenhuma lib externa (evita puxar mais
-// peso pro bundle só pra isso).
 function encodeWavMono16(samples: Float32Array, sampleRate: number): Blob {
   const bytesPerSample = 2
   const blockAlign = bytesPerSample
@@ -125,13 +95,13 @@ function encodeWavMono16(samples: Float32Array, sampleRate: number): Blob {
   view.setUint32(4, 36 + dataSize, true)
   writeString(8, 'WAVE')
   writeString(12, 'fmt ')
-  view.setUint32(16, 16, true) // tamanho do bloco fmt
-  view.setUint16(20, 1, true) // PCM
-  view.setUint16(22, 1, true) // 1 canal (mono)
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
   view.setUint32(24, sampleRate, true)
   view.setUint32(28, byteRate, true)
   view.setUint16(32, blockAlign, true)
-  view.setUint16(34, 16, true) // bits por amostra
+  view.setUint16(34, 16, true)
   writeString(36, 'data')
   view.setUint32(40, dataSize, true)
 
@@ -144,4 +114,3 @@ function encodeWavMono16(samples: Float32Array, sampleRate: number): Blob {
 
   return new Blob([buffer], { type: 'audio/wav' })
 }
-

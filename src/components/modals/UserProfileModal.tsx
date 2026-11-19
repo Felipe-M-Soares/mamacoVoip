@@ -11,7 +11,6 @@ import { getUserNote, setUserNote } from '../../lib/pinnedItems'
 import type { Profile } from '../../types/database'
 import { useAvatarTransparent } from '../../hooks/useAvatarTransparent'
 
-// Mesmo truque de gradiente-por-nome de ProfileSidePanel.tsx/ServerBar.tsx.
 function gradientFor(seed: string) {
   let hash = 0
   for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash)
@@ -37,16 +36,10 @@ export function UserProfileModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reporting, setReporting] = useState(false)
-  // Só leitura, pra mostrar os cargos da pessoa como chips (quando o
-  // perfil é aberto de dentro de um servidor).
   const { rolesForUser } = useRoles(serverId ?? null)
   const memberRoles = serverId ? rolesForUser(targetProfile.id) : []
   const avatarTransparent = useAvatarTransparent(targetProfile.avatar_url)
 
-  // "Jogando X" fica desatualizado assim que a pessoa fecha o app (o
-  // campo playing no perfil só é limpo na próxima vez que ela abrir um
-  // jogo, não quando ela sai) — por isso só mostra enquanto ela está
-  // efetivamente online agora (o mesmo critério usado em MemberList.tsx).
   const isPresent = useIsPresent(targetProfile.id)
   const isEffectivelyOnline = targetProfile.status !== 'offline' && isPresent
   const isSelf = targetProfile.id === user?.id
@@ -82,10 +75,6 @@ export function UserProfileModal({
 
   return (
     <Modal title={`Perfil de ${targetProfile.display_name || targetProfile.username}`} onClose={onClose} headerless>
-      {/* Mesmo fallback de gradiente-por-nome de ProfileSidePanel.tsx —
-          se a pessoa não enviou um banner de verdade, mostra a mesma cor
-          consistente que aparece em todo canto que o perfil dela é
-          exibido, em vez de um espaço genérico vazio aqui. */}
       <div
         className="h-28 bg-cover bg-center"
         style={

@@ -26,8 +26,6 @@ export function PinnedMessagesPanel({
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
 
-  // Antes: uma falha na busca virava uma promise rejeitada sem tratamento
-  // e o spinner girava pra sempre.
   useEffect(() => {
     let cancelled = false
     fetchPinnedMessages()
@@ -58,8 +56,6 @@ export function PinnedMessagesPanel({
   }, [])
 
   async function handleUnpin(messageId: string) {
-    // Some da lista na hora — antes continuava aparecendo até fechar e
-    // abrir o painel de novo.
     setPinned((prev) => prev?.filter((m) => m.id !== messageId) ?? prev)
     await onUnpin(messageId)
   }

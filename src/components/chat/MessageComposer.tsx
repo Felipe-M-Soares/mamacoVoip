@@ -6,7 +6,6 @@ import { getDraft, setDraft } from '../../lib/messageDrafts'
 import { pushRecentSticker, stickerMessage } from '../../lib/stickers'
 import { AudioFileIcon, StickerIcon, CheckIcon, CloseIcon, FileIcon, MicIcon, PlayIcon, PlusIcon, ReplyIcon, SendIcon, UploadIcon, WarningIcon } from '../ui/icons'
 
-// Só carrega o seletor de GIF quando alguém abre — fora do pacote inicial.
 const GifPicker = lazyComponent(() => import('./GifPicker').then((m) => m.GifPicker))
 const StickerPicker = lazyComponent(() => import('./StickerPicker').then((m) => m.StickerPicker))
 
@@ -37,7 +36,6 @@ export function MessageComposer({
   onCancelReply: () => void
   onSend: (content: string, files: File[]) => Promise<{ error: string | null } | void>
   onTyping?: () => void
-  /** GIFs com classificação R (só canal +18 confirmado — ver ChatArea). DMs nunca passam isso. */
   adultGifs?: boolean
 }) {
   const [value, setValueState] = useState(() => (draftKey ? getDraft(draftKey) : ''))
@@ -52,19 +50,11 @@ export function MessageComposer({
   const draftKeyRef = useRef(draftKey)
   draftKeyRef.current = draftKey
 
-  // Salva o rascunho junto com cada mudança do texto (e não num efeito
-  // separado): antes, no render da troca de canal o efeito de "salvar"
-  // rodava com a chave NOVA e o texto do canal ANTIGO, gravando por um
-  // instante o rascunho de um canal no outro.
   function setValue(next: string) {
     setValueState(next)
     if (draftKeyRef.current) setDraft(draftKeyRef.current, next)
   }
 
-  // Troca de canal/thread/conversa — carrega o rascunho salvo daquele
-  // lugar e descarta o que era do lugar anterior. Antes os ANEXOS
-  // selecionados, o erro e as sugestões de @menção continuavam na tela
-  // (dava pra mandar sem querer no canal B um arquivo escolhido no A).
   const [stateDraftKey, setStateDraftKey] = useState(draftKey)
   if (stateDraftKey !== draftKey) {
     setStateDraftKey(draftKey)
@@ -75,9 +65,6 @@ export function MessageComposer({
     setEmojiQuery(null)
   }
 
-  // Ajusta a altura da caixa ao texto também quando ele muda "por fora"
-  // (rascunho carregado, envio que limpa a caixa) — antes a caixa ficava
-  // alta depois de mandar uma mensagem de várias linhas.
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -137,8 +124,6 @@ export function MessageComposer({
   }
 
   async function handleSend() {
-    // Enter apertado duas vezes rápido mandava a mensagem em dobro (o
-    // botão ficava desabilitado, mas o atalho do teclado não).
     if (sendingRef.current) return
     const trimmed = value.trim()
     if (trimmed.length === 0 && files.length === 0) return
@@ -161,7 +146,6 @@ export function MessageComposer({
       setSending(false)
     }
 
-    // Trocou de canal enquanto enviava: não mexe no rascunho do canal novo.
     if (sentFromKey !== draftKeyRef.current) {
       if (sentFromKey && !(result && result.error)) setDraft(sentFromKey, '')
       return
@@ -179,9 +163,6 @@ export function MessageComposer({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    // Com a lista de sugestões aberta, Enter/Tab escolhem a primeira
-    // sugestão (antes o Enter mandava a mensagem com o "@fu" pela metade)
-    // e Esc só fecha a lista.
     const firstMention = specialMentionMatches[0] ?? roleMatches[0]?.name ?? mentionMatches[0]?.username
     const firstEmoji = emojiMatches[0]?.name
     if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
@@ -213,9 +194,6 @@ export function MessageComposer({
     }
   }
 
-  // Ctrl+V com imagem/arquivo na área de transferência (print da tela,
-  // imagem copiada, arquivo copiado no Explorer) vira anexo, igual
-  // apps de chat. Texto continua colando normal.
   function filesFromClipboard(data: DataTransfer | null): File[] {
     if (!data) return []
     const out: File[] = []
@@ -237,8 +215,6 @@ export function MessageComposer({
     e.preventDefault()
     setFiles((prev) => [...prev, ...pasted])
   }
-  // Ctrl+V com o foco fora de qualquer campo (ex.: depois de clicar numa
-  // mensagem) também anexa — e já coloca o cursor na caixa de texto.
   useEffect(() => {
     function onDocPaste(e: ClipboardEvent) {
       const el = document.activeElement as HTMLElement | null
@@ -263,8 +239,6 @@ export function MessageComposer({
   const [isDraggingFile, setIsDraggingFile] = useState(false)
   const dragCounterRef = useRef(0)
 
-  // Gravação de mensagem de voz — usa a mesma via de upload de arquivo
-  // que já existe (o áudio vira um File comum, mandado junto com o resto)
   const [recording, setRecording] = useState(false)
   const [showGifPicker, setShowGifPicker] = useState(false)
   const [showStickerPicker, setShowStickerPicker] = useState(false)
@@ -273,8 +247,6 @@ export function MessageComposer({
   const recordedChunksRef = useRef<Blob[]>([])
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Sair do canal/fechar a tela no meio de uma gravação deixava o
-  // microfone ligado (luz de gravação acesa) e o timer rodando pra sempre.
   useEffect(() => {
     return () => {
       const recorder = mediaRecorderRef.current
@@ -311,7 +283,6 @@ export function MessageComposer({
       if (recordTimerRef.current) clearInterval(recordTimerRef.current)
       recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000)
     } catch {
-      // Antes falhava em silêncio — o botão simplesmente "não fazia nada".
       setSendError('Não foi possível acessar o microfone para gravar a mensagem de voz.')
     }
   }
@@ -324,9 +295,6 @@ export function MessageComposer({
   }
 
   function cancelRecording() {
-    // Guarda o recorder numa variável local: antes o onstop lia
-    // `mediaRecorderRef.current`, que já tinha virado null na linha
-    // seguinte — as trilhas nunca eram paradas e o microfone ficava ligado.
     const recorder = mediaRecorderRef.current
     if (recorder) {
       recorder.onstop = () => {
@@ -521,7 +489,6 @@ export function MessageComposer({
               <GifPicker
                 onSelect={async (gifUrl) => {
                   setShowGifPicker(false)
-                  // Antes o erro de envio do GIF era descartado em silêncio.
                   try {
                     const result = await onSend(gifUrl, [])
                     if (result && result.error) setSendError(result.error)
@@ -578,7 +545,6 @@ export function MessageComposer({
           aria-label={placeholder ?? `Conversar em #${channelName}`}
           rows={1}
           maxLength={MAX_LENGTH}
-          // Placeholder numa linha só, com "…" (no celular ele quebrava em 2 linhas).
           className="flex-1 min-w-0 bg-transparent outline-none !shadow-none text-[15px] leading-6 text-mv-text resize-none py-1.5 px-1.5 max-h-48 placeholder:whitespace-nowrap placeholder:overflow-hidden placeholder:text-ellipsis"
         />
 
@@ -659,7 +625,6 @@ function FileAttachmentPreview({ file, onRemove }: { file: File; onRemove: () =>
     )
   }
 
-  // Áudio ou qualquer outro tipo de arquivo — cartão com ícone + nome + tamanho
   return (
     <div className="relative group/file flex items-center gap-2.5 bg-mv-canvas border border-[var(--color-line)] rounded-xl pl-2 pr-8 py-2 max-w-[240px]">
       <span className="shrink-0 w-9 h-9 rounded-lg bg-mv-accent/10 text-mv-accent flex items-center justify-center">

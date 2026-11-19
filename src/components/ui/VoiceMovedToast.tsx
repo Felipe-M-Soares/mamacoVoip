@@ -2,9 +2,6 @@ import { useOverlayOpen } from '../../hooks/useOverlayOpen'
 import { Avatar } from './Avatar'
 import { useVoiceMoveRequests } from '../../hooks/useVoiceMoveRequests'
 
-// Aviso "Você foi movido para #canal por X" — e, mais importante, é quem
-// monta o useVoiceMoveRequests (uma vez só, no MainLayout), que escuta os
-// pedidos de mover e troca de sala de voz sozinho.
 export function VoiceMovedToast() {
   const { notices, dismiss } = useVoiceMoveRequests()
 

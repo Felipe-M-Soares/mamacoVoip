@@ -72,13 +72,10 @@ export type SettingsTab =
   | 'admin-users'
 type Tab = SettingsTab
 
-// Abas pesadas/raras, carregadas só quando abertas (a de licenças traz o
-// texto inteiro do THIRD_PARTY_NOTICES.md).
 const LicensesTab = lazy(() => import('./LicensesTab').then((m) => ({ default: m.LicensesTab })))
 const AdminReportsTab = lazy(() => import('./AdminReportsTab').then((m) => ({ default: m.AdminReportsTab })))
 const AdminUsersTab = lazy(() => import('./AdminUsersTab').then((m) => ({ default: m.AdminUsersTab })))
 
-// Ícones do menu lateral (Lucide, via ui/icons) — herdam a cor.
 const TAB_ICONS: Record<Tab, AppIcon> = {
   account: UserIcon,
   security: ShieldCheckIcon,
@@ -116,7 +113,6 @@ const TAB_GROUPS: { label: string; tabs: { id: Tab; label: string }[] }[] = [
   },
 ]
 
-// Só pra equipe do Mamacos Voip (is_app_admin()).
 const ADMIN_GROUP: (typeof TAB_GROUPS)[number] = {
   label: 'Administração',
   tabs: [
@@ -149,29 +145,22 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
     return () => window.removeEventListener('keydown', handleKey)
   }, [onClose])
 
-  // Trocar de aba volta a rolagem pro topo (senão abre no meio da aba nova).
   useEffect(() => {
     contentRef.current?.scrollTo({ top: 0 })
   }, [tab])
 
   return createPortal(
-    // Mesmo z-[500] do Modal.tsx — ver comentário lá. Configurações é uma
-    // tela cheia que também deve ficar acima de qualquer painel lateral
-    // (thread, mensagens fixadas) aberto antes dela.
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Configurações"
       className="fixed inset-0 z-[500] bg-mv-main flex flex-col md:flex-row animate-fade-in"
     >
-      {/* Navegação — coluna à esquerda no desktop; no celular vira uma
-          faixa de abas roláveis no topo. */}
       <nav
         aria-label="Seções das configurações"
         className="shrink-0 bg-mv-side border-b md:border-b-0 md:border-r border-[var(--color-line)] md:flex-[1_0_250px] md:h-full md:overflow-y-auto flex flex-col"
       >
         <div className="md:ml-auto w-full md:max-w-[232px] px-3 md:px-3 pt-3 md:pt-14 md:pb-8">
-          {/* Topo mobile: título + fechar */}
           <div className="flex md:hidden items-center justify-between px-1 pb-2">
             <p className="font-display text-[17px] font-semibold text-white">Configurações</p>
             <button onClick={onClose} className="icon-btn w-9 h-9" aria-label="Fechar" title="Fechar (Esc)">
@@ -244,7 +233,6 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
         </div>
       </nav>
 
-      {/* Conteúdo */}
       <div ref={contentRef} className="flex-1 md:flex-[1_1_800px] min-w-0 overflow-y-auto">
         <div className="flex">
           <div key={tab} className="flex-1 min-w-0 max-w-[680px] px-4 sm:px-8 lg:px-10 py-6 md:py-14 animate-fade-slide-in">
@@ -262,16 +250,6 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
             )}
           </div>
 
-          {/* Fechar estilo apps de chat: círculo + "ESC" embaixo. Fica na coluna
-              ao lado do conteúdo e acompanha a rolagem (sticky).
-              top-14 (não top-6) — essa tela cobre a janela inteira (fixed
-              inset-0) desde y=0, mas os botões NATIVOS de
-              minimizar/maximizar/fechar do Windows ficam desenhados por
-              cima dos primeiros 40px (ver titleBarOverlay em
-              electron/main.cjs). Com top-6 (24px) esse botão ficava bem
-              embaixo dessa faixa, cortado/"vazando" por trás dos botões
-              nativos — descendo pra depois dos 40px (com uma folga) ele
-              para de disputar esse espaço com o sistema. */}
           <div className="hidden md:block shrink-0 w-24 pl-2">
             <div className="sticky top-14 flex flex-col items-center gap-1.5">
               <button
@@ -303,8 +281,6 @@ function AppVersionInfo() {
     window.electronAPI?.getVersion().then(setVersion)
   }, [])
 
-  // Só existe dentro do app desktop — no site não faz sentido mostrar
-  // versão de instalador nenhuma.
   if (!version) return null
 
   return (
@@ -338,9 +314,6 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
   const avatarTransparent = useAvatarTransparent(profile?.avatar_url)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  // Conta sem senha (entrou com Google) ou esqueceu a atual: confirma a
-  // identidade com o código que o Supabase manda por e-mail
-  // (reauthenticate + nonce) em vez da senha atual.
   const [useEmailCode, setUseEmailCode] = useState(false)
   const [emailCode, setEmailCode] = useState('')
   const [codeSent, setCodeSent] = useState(false)
@@ -367,9 +340,6 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
     setCodeSent(true)
   }
 
-  // M4 — confere a senha atual SEM mexer na sessão desta janela: o
-  // login de conferência roda num cliente descartável (não substitui a
-  // sessão atual nem derruba o 2FA dela) e é encerrado logo em seguida.
   async function verifyCurrentPassword(): Promise<string | null> {
     if (!email) return 'Não foi possível identificar o e-mail da conta.'
     if (!currentPassword) return 'Digite a sua senha atual.'
@@ -401,8 +371,6 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
       setError(codeSent ? 'Digite o código que chegou no seu e-mail.' : 'Peça o código por e-mail primeiro.')
       return
     }
-    // Freio local contra tentativa e erro da senha atual (o Supabase
-    // também limita por IP no servidor).
     const limit = checkRateLimit('password-change', 5, 10 * 60_000)
     if (!limit.allowed) {
       setError(`Muitas tentativas. Espere ${limit.retryAfterSeconds}s e tente de novo.`)
@@ -426,8 +394,6 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
         if (useEmailCode) {
           setError('Código inválido ou expirado. Peça um novo código.')
         } else {
-          // "Secure password change" ligado no Supabase e a sessão não é
-          // recente: o servidor exige o código por e-mail.
           setUseEmailCode(true)
           setError('Por segurança, confirme com o código enviado por e-mail (botão "Enviar código").')
         }
@@ -436,8 +402,6 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
       setError(traduzErro(error.message))
       return
     }
-    // Senha trocada = derruba as sessões dos outros aparelhos (quem
-    // tinha a senha antiga não continua logado). Esta fica.
     await supabase.auth.signOut({ scope: 'others' }).catch(() => {})
     setLoading(false)
     setCurrentPassword('')
@@ -452,7 +416,6 @@ function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut
     <div className="space-y-5">
       <TabHeader title="Minha conta" description="Seus dados de acesso e o que acontece com a sua conta." />
 
-      {/* Cartão de identidade */}
       <section className="rounded-2xl border border-[var(--color-line)] bg-white/[0.02] overflow-hidden">
         <div
           className="h-20 bg-cover bg-center"
@@ -628,8 +591,6 @@ function DeleteAccountSection() {
     if (confirmText.trim().toLowerCase() !== 'excluir') return
     setLoading(true)
     setError(null)
-    // Imagens de perfil (avatar/banner/decoração) ficam no Storage, fora
-    // do alcance do delete_own_account — apaga antes (best-effort).
     if (user) {
       await deleteOwnProfileFiles(user.id, [profile?.avatar_url, profile?.banner_url, profile?.avatar_decoration_url])
     }
@@ -752,9 +713,6 @@ function NotificationsTab() {
   )
 }
 
-// Sons do app: liga/desliga, volume dos efeitos e prévia de cada som da
-// identidade sonora (lib/sounds.ts). A prévia toca mesmo com os sons
-// desligados — é um clique explícito da pessoa.
 function SoundEffectsCard() {
   const [soundsOn, setSoundsOn] = useState(() => isSoundEnabled())
   const [volume, setVolume] = useState(() => getSoundVolume())
@@ -773,7 +731,6 @@ function SoundEffectsCard() {
   function handleVolume(next: number) {
     setVolume(next)
     setSoundVolume(next)
-    // Toca uma amostra quando a pessoa para de arrastar.
     if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current)
     volumeTimerRef.current = setTimeout(() => previewUiSound('message'), 250)
   }
@@ -838,11 +795,6 @@ function SoundEffectsCard() {
   )
 }
 
-// Os valores do tema padrão (vermelho) moram no @theme do index.css, que
-// vale pro :root — não existe um bloco [data-theme='vermelho'] pra
-// "reaplicar" dentro da prévia quando outro tema está ativo. Por isso a
-// prévia dele recebe as mesmas variáveis explicitamente (espelho do
-// @theme; se mudar lá, mudar aqui).
 const VERMELHO_PREVIEW_VARS = {
   '--color-mv-canvas': '#07070a',
   '--color-mv-main': '#121218',
@@ -940,43 +892,21 @@ function AppearanceTab() {
 }
 
 function AudioTab() {
-  // Antes esse componente chamava useAudioSettings() direto, criando uma
-  // SEGUNDA instância independente do estado — separada da que o
-  // VoiceContext usa de verdade pra call em andamento (voice.audioSettings).
-  // As duas liam o mesmo localStorage só na hora de montar, então
-  // funcionavam bem na primeira vez que a pessoa abria o app, mas
-  // qualquer mudança feita aqui dentro (trocar microfone, ligar/desligar
-  // redutor de ruído, trocar alto-falante) nunca chegava na call já
-  // conectada nem no restante do app (ex.: o ícone de redutor de ruído
-  // ao lado do perfil) — só valia depois de fechar e abrir o app de
-  // novo. Usando a MESMA instância do VoiceContext, qualquer alteração
-  // aqui já é a fonte da verdade em todo lugar.
   const voice = useVoiceCore()
   const audio = voice.audioSettings
   const [testing, setTesting] = useState(false)
   const [echoing, setEchoing] = useState(false)
   const [level, setLevel] = useState(0)
-  // Nível do mic em dB (antes do corte da sensibilidade), pro medidor.
   const [inputDb, setInputDb] = useState<number | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const rafRef = useRef<number | null>(null)
   const echoAudioRef = useRef<HTMLAudioElement>(null)
-  // Reforço de redução de ruído (RNNoise) pro teste de mic/eco — usa a
-  // mesma lógica de VoiceContext.tsx, pra o que a pessoa OUVE/VÊ aqui
-  // bater com o que realmente sai na call de verdade.
   const noiseSuppressorTestRef = useRef<NoiseSuppressor | null>(null)
-  // Arrastar o slider de sensibilidade dispara um onChange por PIXEL —
-  // chamar voice.refreshAudioConstraints (que recaptura o microfone e
-  // reconstrói o gráfico do RNNoise) a cada um desses seria pesado
-  // demais numa call em andamento. Espera 400ms sem nenhuma mudança nova
-  // antes de aplicar de verdade na call — a pessoa só ouve/vê o efeito
-  // quando solta o slider (ou para de arrastar por um instante).
   const sensitivityDebounceRef = useRef<number | null>(null)
 
   function handleSensitivityChange(value: number) {
     audio.setMicSensitivity(value)
-    // No teste o efeito é na hora (sem reiniciar o microfone).
     noiseSuppressorTestRef.current?.setSensitivity(value)
     if (sensitivityDebounceRef.current) window.clearTimeout(sensitivityDebounceRef.current)
     sensitivityDebounceRef.current = window.setTimeout(() => {
@@ -999,13 +929,6 @@ function AudioTab() {
     }
   }
 
-  // Réplica, só pro teste/eco daqui do modal (que usa seu próprio
-  // NoiseSuppressor local em vez do da call de verdade), do mesmo loop
-  // de auto-ajuste de sensibilidade que roda em VoiceContext.tsx — ver o
-  // comentário grande no useEffect "Sensibilidade automática do
-  // microfone" lá pra entender a lógica da média móvel assimétrica.
-  // Mantido em sincronia de propósito: assim o que a pessoa vê/ouve
-  // testando aqui bate com o que acontece numa call de verdade.
   const testAutoRef = useRef(createAutoSensitivity())
   const testAutoIntervalRef = useRef<number | null>(null)
 
@@ -1027,11 +950,7 @@ function AudioTab() {
     }, AUTO_SENSITIVITY_TICK_MS)
   }
 
-  // Aplica o RNNoise na track crua, se a redução de ruído estiver ligada
-  // — devolve a stream já tratada (ou a crua sem alteração, se estiver
-  // desligada ou o WASM falhar ao carregar).
   async function applyTestNoiseSuppression(rawStream: MediaStream): Promise<MediaStream> {
-    // Sempre monta o gráfico (com ou sem RNNoise): a sensibilidade mora nele.
     try {
       const suppressor = await createNoiseSuppressor()
       noiseSuppressorTestRef.current = suppressor
@@ -1042,13 +961,10 @@ function AudioTab() {
       if (isAuto) startTestAutoSensitivity(suppressor)
       return new MediaStream([processedTrack])
     } catch {
-      // segue só com o cancelamento nativo do navegador
       return rawStream
     }
   }
 
-  // Microfone escolhido desconectado → testa no padrão do sistema (antes o
-  // botão simplesmente não fazia nada).
   async function getTestMicStream(): Promise<MediaStream> {
     try {
       return await navigator.mediaDevices.getUserMedia({ audio: audio.getAudioConstraints() })
@@ -1086,7 +1002,6 @@ function AudioTab() {
       tick()
       setTesting(true)
     } catch {
-      // sem permissão/dispositivo — o botão simplesmente não faz nada
     }
   }
 
@@ -1104,11 +1019,6 @@ function AudioTab() {
     setInputDb(null)
   }
 
-  // Eco de áudio: pega o microfone, atrasa um pouco (150ms) e toca de
-  // volta pelo alto-falante escolhido. É o jeito mais direto de
-  // confirmar que o fone/headset inteiro funciona (mic + saída), sem
-  // precisar de outra pessoa online — o pequeno atraso evita a
-  // microfonia (efeito Larsen) que aconteceria com um loopback instantâneo.
   async function startEcho() {
     try {
       const stream = await getTestMicStream()
@@ -1119,10 +1029,6 @@ function AudioTab() {
       const source = ctx.createMediaStreamSource(echoStream)
       const delay = ctx.createDelay(1)
       delay.delayTime.value = 0.15
-      // Duplica explicitamente pros dois canais (ver o mesmo truque em
-      // noiseSuppression.ts) — sem isso, o eco às vezes só saía pelo
-      // lado esquerdo do fone quando a captura do microfone é mono
-      // (praticamente sempre é, ver getAudioConstraints).
       const merger = ctx.createChannelMerger(2)
       const dest = ctx.createMediaStreamDestination()
       source.connect(delay)
@@ -1137,7 +1043,6 @@ function AudioTab() {
       }
       setEchoing(true)
     } catch {
-      // sem permissão/dispositivo — o botão simplesmente não faz nada
     }
   }
 
@@ -1163,15 +1068,6 @@ function AudioTab() {
     []
   )
 
-  // Igual o app de chat popular faz na tela de configurações: se o teste de
-  // microfone já está rodando, ligar/desligar redução de ruído (ou eco,
-  // ou ganho automático) reinicia o teste na hora com a config nova —
-  // assim dá pra OUVIR/VER a diferença na barra de nível imediatamente,
-  // em vez de ter que parar e começar o teste nas mãos toda vez. Não
-  // depende de `testing` de propósito: só deve disparar quando uma
-  // dessas configs muda enquanto o teste já está ativo, não quando o
-  // teste começa (senão dispararia duas vezes ao clicar em "Testar
-  // microfone").
   useEffect(() => {
     if (!testing) return
     stopTest()
@@ -1182,13 +1078,7 @@ function AudioTab() {
     audio.noiseSuppression,
     audio.autoGainControl,
     audio.micId,
-    // Sensibilidade NÃO reinicia o teste: é aplicada ao vivo
-    // (handleSensitivityChange / handleSensitivityModeChange).
   ])
-
-
-  // "Sons de interface" era um checkbox não controlado (defaultChecked) —
-  // agora é um Toggle, que precisa de estado pra desenhar a posição.
 
   const selectClass = 'w-full px-3 py-2.5 bg-mv-canvas text-mv-text outline-none text-sm disabled:opacity-50'
 
@@ -1458,9 +1348,6 @@ function PushToTalkSection() {
 
   useEffect(() => {
     if (!capturing || voice.globalPushToTalkAvailable) return
-    // Reserva: só usada quando o modo global não está disponível
-    // nesse sistema — captura via teclado normal do navegador/app,
-    // que só funciona com o app em foco.
     function handleKey(e: KeyboardEvent) {
       e.preventDefault()
       voice.setPushToTalkKey(e.code)
@@ -1636,7 +1523,6 @@ function PrivacyTab() {
   )
 }
 
-// "Jogando X" — ver lib/gamePrivacy.ts e useGamePresence.ts.
 function GameActivityCard() {
   const showPlaying = useSyncExternalStore(subscribeShowPlaying, getShowPlaying, () => true)
   return (
@@ -1656,8 +1542,6 @@ function GameActivityCard() {
   )
 }
 
-// Conteúdo +18 (canais com restrição de idade — migration 015): a
-// preferência de mostrar direto e o estado da confirmação de idade.
 function AdultContentCard() {
   const { verified, verifiedAt, showAdult, setShowAdult, revokeAdult } = useAdultContent()
   const [revoking, setRevoking] = useState(false)
@@ -1709,9 +1593,6 @@ function AdultContentCard() {
   )
 }
 
-// Prévia da câmera escolhida, sem precisar entrar numa call — pra
-// conferir sozinho que a imagem está chegando. A câmera só abre quando a
-// pessoa clica, e é solta ao parar, trocar de câmera ou fechar a tela.
 function CameraTest({ cameraId }: { cameraId: string | null }) {
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1721,7 +1602,6 @@ function CameraTest({ cameraId }: { cameraId: string | null }) {
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream
   }, [stream])
-  // Solta a câmera ao desmontar e ao trocar de dispositivo.
   useEffect(() => () => stream?.getTracks().forEach((t) => t.stop()), [stream])
   useEffect(() => {
     setStream(null)
@@ -1775,11 +1655,6 @@ function CameraTest({ cameraId }: { cameraId: string | null }) {
   )
 }
 
-// Medidor + controle de sensibilidade (estilo "a barra mostra sua voz e
-// a alça marca o corte"). Escala em dB: esquerda = -80 dB (capta tudo),
-// direita = -20 dB (só som bem alto). O valor salvo continua sendo a
-// sensibilidade 0-100 (100 = mais sensível), só a tela é que mostra na
-// ordem intuitiva.
 function SensitivityMeter({
   manual,
   sensitivity,
@@ -1795,7 +1670,7 @@ function SensitivityMeter({
   testing: boolean
   onStartTest: () => void
 }) {
-  const cutPos = MAX_MIC_SENSITIVITY - sensitivity // 0..100, mesma escala do dB abaixo
+  const cutPos = MAX_MIC_SENSITIVITY - sensitivity
   const levelPos = inputDb === null ? 0 : Math.max(0, Math.min(100, ((inputDb + 80) / 60) * 100))
   const passing = inputDb !== null && (!manual || levelPos >= cutPos)
   return (
@@ -1861,8 +1736,6 @@ function SensitivityMeter({
   )
 }
 
-// "Usar a placa de vídeo na transmissão" (app de computador). Vale ao
-// reabrir o app — o motor do Chromium só lê isso na inicialização.
 function GpuEncodeRow() {
   const [state, setState] = useState<{ preferGpu: boolean; activeNow: boolean; autoDisabled?: boolean } | null>(null)
   useEffect(() => {
@@ -1901,7 +1774,6 @@ function GpuEncodeRow() {
   )
 }
 
-// "Abrir com o Windows" (app de computador): abre minimizado na bandeja.
 function AutoStartCard() {
   const [state, setState] = useState<{ enabled: boolean; supported: boolean } | null>(null)
   useEffect(() => {

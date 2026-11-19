@@ -4,18 +4,9 @@ import { useAuth } from './useAuth'
 import { decodeAudioFile, MAX_SOUND_SECONDS } from '../lib/audioTrim'
 import type { SoundboardSound } from '../types/database'
 
-const MAX_SOUND_BYTES = 2 * 1024 * 1024 // precisa bater com o file_size_limit do bucket 'soundboard' (ver 006_soundboard.sql)
-// Pequena tolerância pra não rejeitar um arquivo de "10.02s" já cortado
-// pela própria ferramenta de recorte (SoundboardPanel.tsx) por causa de
-// arredondamento de amostras — a intenção do limite é "efeito curto",
-// não uma trava cirúrgica no milissegundo.
+const MAX_SOUND_BYTES = 2 * 1024 * 1024
 const MAX_SOUND_SECONDS_TOLERANCE = MAX_SOUND_SECONDS + 0.2
 
-// Sons do soundboard de UM servidor — busca, envio e remoção. A
-// reprodução em si (tocar pra todo mundo na call) mora em
-// VoiceContext.tsx (playSoundboardSound), porque depende do canal
-// Realtime de voz já conectado; este hook só cuida do catálogo de sons
-// em si (a lista, quem pode subir/apagar o quê).
 export function useSoundboard(serverId: string | null) {
   const { user } = useAuth()
   const [sounds, setSounds] = useState<SoundboardSound[]>([])
@@ -48,29 +39,18 @@ export function useSoundboard(serverId: string | null) {
     if (trimmed.length > 32) return { error: 'Nome muito longo (máximo 32 caracteres).' }
     if (file.size > MAX_SOUND_BYTES) return { error: 'Arquivo muito grande (máximo 2MB — um efeito curto de alguns segundos).' }
 
-    // Segunda trava (além da ferramenta de recorte na tela de envio) —
-    // confere a duração de verdade antes de subir, pra nenhum caminho
-    // (bug na UI, chamada direta ao hook, etc.) acabar deixando passar
-    // um som mais longo que o limite pedido.
     try {
       const decoded = await decodeAudioFile(file)
       if (decoded.duration > MAX_SOUND_SECONDS_TOLERANCE) {
         return { error: `Esse áudio tem ${decoded.duration.toFixed(1)}s — o soundboard aceita até ${MAX_SOUND_SECONDS}s. Use a ferramenta de recorte.` }
       }
     } catch {
-      // Não foi possível decodificar pra checar duração (formato
-      // incomum) — segue sem essa checagem extra em vez de bloquear um
-      // arquivo que talvez seja perfeitamente válido.
     }
 
     const soundId = crypto.randomUUID()
     const ext = file.name.split('.').pop()?.toLowerCase() || 'mp3'
     const path = `${serverId}/${soundId}.${ext}`
 
-    // Ordem: primeiro a LINHA, depois o arquivo. Desde a migration 007
-    // (parte 19) o Storage só aceita upload no soundboard se o caminho
-    // for o storage_path de uma linha sua — e o banco aplica os limites
-    // de sons por servidor/pessoa já na criação da linha.
     const { error: insertError } = await supabase
       .from('soundboard_sounds')
       .insert({ id: soundId, server_id: serverId, name: trimmed, storage_path: path, uploaded_by: user.id })
@@ -91,8 +71,6 @@ export function useSoundboard(serverId: string | null) {
       upsert: false,
     })
     if (uploadError) {
-      // A linha já existe mas o arquivo não subiu — desfaz a linha pra
-      // não sobrar um som "mudo" na lista (best-effort).
       await supabase.rpc('delete_soundboard_sound', { p_sound_id: soundId })
       const detail = (uploadError.message ?? '').toLowerCase()
       return {
@@ -115,12 +93,6 @@ export function useSoundboard(serverId: string | null) {
     return { error: null }
   }
 
-  // Atualiza local de forma otimista — não vale a pena esperar um
-  // refetch completo da lista só pra refletir "+1 uso", e a ordenação
-  // de "usados com frequência" (ver SoundboardPanel.tsx) já se beneficia
-  // do valor novo na hora.
-  // `localOnly`: a RPC play_soundboard_sound (migration 016) já contou o
-  // uso no banco — só atualiza a lista local.
   function bumpPlayCount(soundId: string, opts?: { localOnly?: boolean }) {
     if (!opts?.localOnly) {
       supabase.rpc('bump_soundboard_play_count', { p_sound_id: soundId }).then(

@@ -27,7 +27,6 @@ export function useServerWelcomeScreen(server: Server | null, userId: string | u
       try {
         localStorage.setItem(seenKey(server.id, userId), '1')
       } catch {
-        // best-effort
       }
     }
     setShow(false)
@@ -38,9 +37,6 @@ export function useServerWelcomeScreen(server: Server | null, userId: string | u
 
 export function ServerWelcomeModal({ server, onDismiss }: { server: Server; onDismiss: () => void }) {
   const hasBanner = Boolean(server.banner_url)
-  // Portal no <body>: se algum ancestral tiver transform/filter, um
-  // "fixed" dentro dele passa a ser relativo a esse ancestral (e o
-  // overlay aparecia preso dentro da barra lateral).
   return createPortal(
     <div className="fixed inset-0 z-[400] bg-black/70 animate-fade-in flex items-center justify-center p-4">
       <div
@@ -49,10 +45,6 @@ export function ServerWelcomeModal({ server, onDismiss }: { server: Server; onDi
         aria-labelledby="server-welcome-title"
         className="w-full max-w-md surface-elevated rounded-2xl overflow-hidden animate-pop-in"
       >
-        {/* Com banner, mostra a capa do servidor; sem banner, uma faixa
-            com o gradiente da marca — assim o ícone sempre tem onde
-            "sentar" por cima (antes, sem banner, a margem negativa
-            empurrava o ícone pra fora do cartão e ele aparecia cortado). */}
         {hasBanner ? (
           <img src={server.banner_url!} alt="" className="w-full h-32 object-cover" />
         ) : (

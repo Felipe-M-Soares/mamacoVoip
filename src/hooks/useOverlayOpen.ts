@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react'
 
-// Tem algo aberto POR CIMA do app agora (modal, tour, menu lateral do
-// celular)? Avisos flutuantes usam isso pra sair da frente em vez de
-// ficar sobrepostos (no celular cobriam o tour, o menu e os modais).
 const SELECTOR = '[aria-modal="true"], [data-overlay-open]'
 
 export function useOverlayOpen(): boolean {

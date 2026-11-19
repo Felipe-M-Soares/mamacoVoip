@@ -2,16 +2,9 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <!-- AUDITORIA: política de conteúdo restrita — a sobreposição só
-       precisa do próprio script/estilo embutidos e das fotos de perfil
-       (https/data). Nada de rede, fontes externas, iframes etc. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; base-uri 'none'; form-action 'none'" />
   <title>Mamacos Voip — Overlay</title>
   <style>
-    /* Visual minimalista: cada participante é uma bolha solta (avatar
-       circular + nome numa etiqueta escura), sem painel/fundo por trás —
-       só aparece o que precisa aparecer por cima do jogo. Quem está
-       falando ganha um anel verde; mudo/ensurdecido ganha um selo. */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
       background: transparent;
@@ -21,12 +14,6 @@
       -webkit-user-select: none;
       user-select: none;
     }
-    /* Leve de propósito: roda POR CIMA de um jogo, então nada de
-       animação infinita, blur (backdrop-filter numa janela transparente
-       força composição extra da GPU a cada quadro) ou sombra pesada. O
-       indicador de "falando" é só um anel estático que liga/desliga. */
-    /* Translúcida: quem NÃO está falando fica na transparência escolhida
-       (padrão 60%) e quem fala "acende" por completo. */
     #panel {
       display: none;
       flex-direction: column;
@@ -89,9 +76,6 @@
       box-shadow: 0 0 0 2.5px var(--speaking, #22c55e);
     }
     .avatar img { width: 100%; height: 100%; object-fit: cover; }
-    /* Com foto: sem o fundo colorido nem o contorno escuro — PNG com fundo
-       transparente aparece recortado, igual no app. O anel de "falando"
-       continua aparecendo. */
     .avatar.has-img { background: transparent; box-shadow: none; }
     .participant.speaking .avatar.has-img { box-shadow: 0 0 0 2.5px var(--speaking, #22c55e); }
     .badge {
@@ -126,7 +110,6 @@
       border-color: var(--speaking, rgba(34, 197, 94, 0.7));
     }
     .participant.silenced .name-tag { color: #a1a1aa; }
-    /* Aviso curto ao ligar a sobreposição (some sozinho). */
     #notice {
       position: fixed;
       left: 6px;
@@ -154,12 +137,8 @@
     const panel = document.getElementById('panel')
 
     const MIC_OFF_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 11a1 1 0 0 0-1 1 6 6 0 0 1-9.8 4.66l-1.43 1.43A8 8 0 0 0 12 20a8 8 0 0 0 8-8 1 1 0 0 0-1-1zM4.41 2.86 2.86 4.41l4.2 4.2V11a5 5 0 0 0 8.4 3.67l1.49 1.49A7 7 0 0 1 5 11a1 1 0 0 0-2 0 9 9 0 0 0 8 8.94V22h2v-2.06a8.96 8.96 0 0 0 3.32-1.2l2.27 2.27 1.55-1.55L4.41 2.86zM12 15a3 3 0 0 0 2.83-2L9.17 7.34A3 3 0 0 0 9 8v4a3 3 0 0 0 3 3zM12 2a3 3 0 0 0-3 3v.28l6 6V5a3 3 0 0 0-3-3z"/></svg>`
-    // Fone cortado (ensurdecido).
     const DEAF_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3.3 2.3 2 3.6l3.1 3.1A8.9 8.9 0 0 0 3 12v6a3 3 0 0 0 3 3h1a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2H5v-1c0-1.4.4-2.7 1.1-3.8l11.5 11.5-.1.1V19h-.1l2.9 2.9 1.3-1.3L3.3 2.3zM12 3c-1.7 0-3.3.5-4.6 1.3l1.5 1.5A7 7 0 0 1 19 12v1h-2c-.3 0-.6.1-.9.2l4.6 4.6c.2-.4.3-.8.3-1.3V12a9 9 0 0 0-9-9z"/></svg>`
 
-    // Última assinatura desenhada — o estado chega várias vezes por
-    // segundo (indicador de "falando"), mas só redesenha o DOM quando
-    // algo visível mudou de fato.
     let lastSignature = ''
     let connected = false
     let noticeTimer = null
@@ -185,7 +164,6 @@
         return
       }
       const participants = state.participants || []
-      // Cor de "falando" do tema escolhido no app (só aceita rgb()/#hex).
       if (typeof state.speakingColor === 'string' && /^(rgb\([\d.,\s]+\)|#[0-9a-fA-F]{3,8})$/.test(state.speakingColor)) {
         document.documentElement.style.setProperty('--speaking', state.speakingColor)
       }
@@ -216,7 +194,6 @@
           const img = document.createElement('img')
           img.src = p.avatarUrl
           avatar.classList.add('has-img')
-          // Se a foto não carregar, volta pra inicial com fundo colorido.
           img.onerror = () => {
             avatar.classList.remove('has-img')
             avatar.textContent = (p.name || '?').slice(0, 1).toUpperCase()
@@ -255,26 +232,21 @@
     applySettings(null)
 
     if (window.overlayAPI) {
-      // Agrupa várias atualizações seguidas (o
-      // indicador de "falando" muda várias vezes por segundo) num único
-      // redesenho por quadro, em vez de recriar a lista inteira a cada uma.
       let pendingState = null
       let frameScheduled = false
       window.overlayAPI.onVoiceState((state) => {
         pendingState = state
         if (frameScheduled) return
         frameScheduled = true
-        // setTimeout em vez de requestAnimationFrame: numa janela que
-        // nunca recebe foco, por cima de um jogo, o rAF pode não rodar.
         setTimeout(() => {
           frameScheduled = false
           render(pendingState)
         }, 16)
       })
       if (window.overlayAPI.onSettings) window.overlayAPI.onSettings(applySettings)
-      // Espera o estado da call que chega junto ser aplicado primeiro.
       if (window.overlayAPI.onShown) window.overlayAPI.onShown(() => setTimeout(showNotice, 60))
     }
+  
   </script>
 </body>
 </html>

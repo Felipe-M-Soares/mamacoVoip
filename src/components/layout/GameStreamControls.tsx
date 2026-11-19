@@ -3,10 +3,6 @@ import { useVoiceCore } from '../../hooks/useVoice'
 import { overlayShortcutText, useKeybinds } from '../../lib/keybinds'
 import type { OverlayCorner } from '../../hooks/useGamePresence'
 
-// Controles de "transmissão para jogos" da tela da call:
-//  - GameStreamMenuSection: no menu "..." da call — qualidade automática
-//    para jogos e a sobreposição (ligar/desligar, canto da tela).
-
 const CORNER_OPTIONS: { value: OverlayCorner; label: string }[] = [
   { value: 'top-left', label: 'Superior esquerdo' },
   { value: 'top-right', label: 'Superior direito' },

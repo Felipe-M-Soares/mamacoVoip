@@ -1,10 +1,3 @@
-// Figurinhas originais do Mamacos Voip (desenhadas pra este app, em SVG
-// — src/assets/stickers/). Não mexem no banco: uma figurinha é enviada
-// como uma mensagem de texto comum no formato `[[sticker:<id>]]`, e quem
-// renderiza a mensagem (parseMessageContent) troca o texto pela imagem.
-// Se o id não existir (versão antiga do app, pacote removido), a
-// mensagem cai num texto de fallback em vez de sumir.
-
 const files = import.meta.glob('../assets/stickers/*.svg', { eager: true, query: '?no-inline', import: 'default' }) as Record<
   string,
   string
@@ -15,7 +8,6 @@ export type StickerPackId = 'mamacos' | 'reacoes' | 'zoeira' | 'gamer' | 'bichos
 export interface StickerPack {
   id: StickerPackId
   label: string
-  /** Figurinha que representa o pacote na aba */
   coverId: string
 }
 
@@ -31,7 +23,6 @@ export interface Sticker {
   id: string
   pack: StickerPackId
   label: string
-  /** Palavras extras pra busca (além do nome) */
   tags: string[]
   url: string
 }
@@ -150,22 +141,15 @@ export function getSticker(id: string): Sticker | undefined {
 
 const STICKER_RE = /^\s*\[\[sticker:([a-z0-9-]{1,40})\]\]\s*$/
 
-/** Texto que vai no banco pra uma figurinha. */
 export function stickerMessage(id: string): string {
   return `[[sticker:${id}]]`
 }
 
-/**
- * Se a mensagem INTEIRA é uma figurinha, devolve o id (mesmo que não
- * exista no pacote atual — quem chama decide o fallback). Texto com a
- * marcação no meio de outras palavras não conta como figurinha.
- */
 export function parseStickerId(content: string): string | null {
   const m = STICKER_RE.exec(content)
   return m ? m[1] : null
 }
 
-/** Versão curta pra notificações, respostas e pré-visualizações. */
 export function describeMessageContent(content: string): string {
   const id = parseStickerId(content)
   if (!id) return content
@@ -185,8 +169,6 @@ export function searchStickers(query: string): Sticker[] {
   if (!q) return STICKERS
   return STICKERS.filter((s) => [s.id, s.label, ...s.tags].some((t) => normalize(t).includes(q)))
 }
-
-// ------------------------------------------------------------ recentes
 
 const RECENT_KEY = 'mamacos-recent-stickers'
 const MAX_RECENT = 8
@@ -210,6 +192,5 @@ export function pushRecentSticker(id: string) {
     const current = getRecentStickers().map((s) => s.id).filter((x) => x !== id)
     localStorage.setItem(RECENT_KEY, JSON.stringify([id, ...current].slice(0, MAX_RECENT)))
   } catch {
-    // best-effort
   }
 }

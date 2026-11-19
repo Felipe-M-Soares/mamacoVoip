@@ -1,35 +1,9 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { VoiceConnectionQuality, VoiceContextValue, VoiceParticipant } from './VoiceContext'
 
-// ---------------------------------------------------------------------------
-// Por que este arquivo existe (lentidão geral relatada: "todo botão demora
-// pra responder", principalmente numa call):
-//
-// Antes, o VoiceProvider entregava UM objeto novo a cada render — e ele
-// re-renderiza a cada mudança de "quem está falando" (várias vezes por
-// segundo numa call com conversa), de qualidade de conexão etc. Todo
-// componente que chamava useVoice() re-renderizava junto — inclusive o
-// MainLayout (que só usa `voice.join`), ou seja, o app INTEIRO (barra de
-// servidores, lista de canais, chat com todas as mensagens) era
-// redesenhado várias vezes por segundo enquanto alguém falava. Cliques
-// ficavam na fila atrás desses renders.
-//
-// Agora o valor é dividido em:
-//  - "core" (useVoiceCore): tudo que muda raramente (canal conectado,
-//    mudo, câmera, funções...) — objeto estável, só muda quando algo dele
-//    muda de verdade; os participantes vêm SEM o campo `speaking`;
-//  - "atividade" (useVoiceSpeaking / useVoiceConnectionQuality /
-//    useLocalVoiceConnectionQuality): os estados de alta frequência, lidos
-//    via useSyncExternalStore com seletor — só o avatar/tile daquela
-//    pessoa re-renderiza quando ela começa/para de falar.
-//  - useVoice() continua existindo e devolvendo TUDO (compatível), agora
-//    memoizado — quem ainda usa só re-renderiza quando algo muda de fato.
-// ---------------------------------------------------------------------------
-
 export type VoiceParticipantInfo = Omit<VoiceParticipant, 'speaking'>
 
 export type VoiceCoreValue = Omit<VoiceContextValue, 'speaking' | 'connectionQuality' | 'localConnectionQuality' | 'participants'> & {
-  /** Participantes da call SEM o estado de "falando" (que muda o tempo todo) — use useVoiceSpeaking(userId). */
   participants: Record<string, VoiceParticipantInfo>
 }
 
@@ -96,7 +70,6 @@ function useActivity<T>(selector: (s: ActivitySnapshot) => T): T {
   )
 }
 
-/** `true` enquanto `userId` está falando (você mesmo: detecção local, instantânea). */
 export function useVoiceSpeaking(userId: string | null | undefined): boolean {
   return useActivity((s) => {
     if (!userId) return false
@@ -105,10 +78,6 @@ export function useVoiceSpeaking(userId: string | null | undefined): boolean {
   })
 }
 
-/**
- * Quem está falando agora na sua call (ids, separados por vírgula — string
- * pra não re-renderizar à toa). Usado pelo modo 3D.
- */
 export function useVoiceSpeakingKey(): string {
   return useActivity((s) => {
     const ids: string[] = []
@@ -118,17 +87,13 @@ export function useVoiceSpeakingKey(): string {
   })
 }
 
-/** Qualidade da conexão de OUTRO participante com o servidor de voz. */
 export function useVoiceConnectionQuality(userId: string | null | undefined): VoiceConnectionQuality | undefined {
   return useActivity((s) => (userId ? s.connectionQuality[userId] : undefined))
 }
 
-/** Qualidade da SUA conexão com o servidor de voz (`null` fora de call). */
 export function useLocalVoiceConnectionQuality(): VoiceConnectionQuality | null {
   return useActivity((s) => s.localConnectionQuality)
 }
-
-// --- helpers de estabilidade ----------------------------------------------
 
 type AnyFn = (...args: unknown[]) => unknown
 
@@ -142,13 +107,6 @@ function shallowEqual(a: Record<string, unknown>, b: Record<string, unknown>) {
   return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && Object.is(a[k], b[k]))
 }
 
-/**
- * Devolve o MESMO objeto enquanto nenhum valor dele mudou. Funções (que o
- * provider recria a cada render) viram "procuradores" estáveis que sempre
- * chamam a versão mais recente — então não contam como mudança.
- * `version` força um objeto novo (pra funções "get" que leem estado que
- * não está exposto como campo, ex.: volume por participante).
- */
 function useStableObject<T extends object>(obj: T, version: unknown = null): T {
   const latestRef = useRef(obj)
   latestRef.current = obj
@@ -187,7 +145,6 @@ function useStableObject<T extends object>(obj: T, version: unknown = null): T {
   return value
 }
 
-/** Mesma lista de participantes, ignorando mudanças SÓ em `speaking`. */
 function useParticipantsWithoutSpeaking(participants: Record<string, VoiceParticipant>): Record<string, VoiceParticipantInfo> {
   const prevRef = useRef(participants)
   const prev = prevRef.current
@@ -212,11 +169,6 @@ function useParticipantsWithoutSpeaking(participants: Record<string, VoicePartic
   return participants
 }
 
-/**
- * Usado só pelo VoiceProvider: recebe o valor "cru" (objeto novo a cada
- * render) e devolve o valor completo memoizado (useVoice), o "core"
- * estável (useVoiceCore) e o store de atividade.
- */
 export function useSplitVoiceValue(raw: VoiceContextValue, selfId: string | null, version: unknown) {
   const { speaking, connectionQuality, localConnectionQuality, participants, audioSettings, screenShareQuality, ...rest } = raw
   const stableAudioSettings = useStableObject(audioSettings)

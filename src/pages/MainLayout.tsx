@@ -39,13 +39,11 @@ import { MediaViewer } from '../components/ui/MediaViewer'
 import { KeybindsRunner } from '../components/KeybindsRunner'
 import { useAppUsageHeartbeat } from '../hooks/useAppUsage'
 import { canUseOffice3d } from '../lib/platform'
-// Modo 3D (beta): só baixa quando alguém abre (o app clássico não fica mais pesado).
 const Office3DView = lazy(() => import('../office3d/Office3DView').then((m) => ({ default: m.Office3DView })))
 
 const VoiceChannelView = lazyComponent(() =>
   import('../components/layout/VoiceChannelView').then((m) => m.VoiceChannelView)
 )
-// Modais que só abrem sob demanda — fora do pacote inicial.
 const UserProfileModal = lazyComponent(() => import('../components/modals/UserProfileModal').then((m) => m.UserProfileModal))
 const EditProfileModal = lazyComponent(() => import('../components/modals/EditProfileModal').then((m) => m.EditProfileModal))
 const QuickSwitcher = lazyComponent(() => import('../components/modals/QuickSwitcher').then((m) => m.QuickSwitcher))
@@ -53,10 +51,6 @@ const KeyboardShortcutsModal = lazyComponent(() =>
   import('../components/modals/KeyboardShortcutsModal').then((m) => m.KeyboardShortcutsModal)
 )
 
-// Fica DENTRO do ChannelsProvider, então tem acesso à lista de canais
-// já carregada — é aqui que a seleção automática do primeiro canal de
-// texto acontece quando você entra num servidor ou o canal atual deixa
-// de existir (foi excluído por outra pessoa, por exemplo).
 function ActiveServerBody({
   server,
   activeChannel,
@@ -77,9 +71,6 @@ function ActiveServerBody({
   membersOpen?: boolean
 }) {
   const { channels, loading: loadingChannels } = useChannels()
-  // O canal ativo guardado lá em cima é uma CÓPIA de quando foi clicado —
-  // renomear, mudar o tópico, ligar modo lento/spoiler etc. não aparecia no
-  // chat até trocar de canal e voltar. Usa sempre a versão atual da lista.
   const liveChannel = activeChannel ? channels.find((c) => c.id === activeChannel.id) ?? activeChannel : null
 
   useEffect(() => {
@@ -136,10 +127,6 @@ function ActiveServerBody({
   )
 }
 
-// Tudo que depende da lista de canais de UM servidor específico fica
-// dentro do ChannelsProvider. key={server.id} garante que trocar de
-// servidor reinicia o estado do zero, sem vazar canal de um servidor
-// pro outro.
 function ActiveServerContent({
   server,
   activeChannel,
@@ -160,7 +147,6 @@ function ActiveServerContent({
   server: Server
   activeChannel: Channel | null
   pendingChannelId?: string | null
-  /** DM aberta por cima do servidor (a lateral do servidor continua) */
   dmConversation?: { id: string; otherProfile: Profile } | null
   unreadChannelIds: Set<string>
   drawerOpen: boolean
@@ -175,16 +161,12 @@ function ActiveServerContent({
   onMessageUser?: (userId: string) => void
 }) {
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false)
-  // Modo 3D: por cima do clássico, que continua montado por baixo.
   const [office3d, setOffice3d] = useState(false)
   useEffect(() => {
-    // celular não tem o Escritório (ver canUseOffice3d)
     const open = () => { if (canUseOffice3d()) setOffice3d(true) }
     window.addEventListener('mv:open-3d', open)
     return () => window.removeEventListener('mv:open-3d', open)
   }, [])
-  // No computador a lista de membros começa escondida; o botão "Membros"
-  // do topo do chat mostra/esconde (lembra a escolha).
   const [desktopMembersOpen, setDesktopMembersOpen] = useState(() => {
     try {
       return localStorage.getItem('mv-members-open') === '1'
@@ -205,7 +187,6 @@ function ActiveServerContent({
         try {
           localStorage.setItem('mv-members-open', v ? '0' : '1')
         } catch {
-          // sem armazenamento — só não lembra
         }
         return !v
       })
@@ -214,15 +195,6 @@ function ActiveServerContent({
 
   return (
     <ChannelsProvider serverId={server.id} key={server.id}>
-      {/* Coluna esquerda inteira (barra de servidores + lista de canais)
-          empilhada em cima do rodapé compartilhado (UserPanel) — igual o
-          apps de chat populares: aquele rodapé (ping, "jogando agora", "voz
-          conectada", microfone/fone/config) cobre a LARGURA TOTAL dessa
-          coluna, por baixo da barra de servidores E da lista de canais
-          juntas, não só embaixo da lista de canais sozinha. Por isso o
-          ServerBar mora AQUI dentro (não mais lá fora, ao lado) — só
-          assim o rodapé consegue ficar largo o bastante pra cobrir os
-          dois ao mesmo tempo. */}
       <div
         className={
           isElectronApp
@@ -287,31 +259,19 @@ function ActiveServerContent({
 function MainLayoutInner() {
   useGamePresence()
   const { profile: ownProfile } = useAuth()
-  useAppUsageHeartbeat(ownProfile?.id)
   const voice = useVoiceCore()
+  useAppUsageHeartbeat(ownProfile?.id, !!voice.connectedChannelId)
   const { servers, loading: loadingServers } = useServers()
   const location = useLocation()
   const navigate = useNavigate()
-  // Guarda só o ID e deriva o servidor da lista atual: antes era uma cópia
-  // do objeto, então renomear/trocar ícone do servidor não aparecia até
-  // selecionar de novo, e ser removido/expulso de um servidor deixava a
-  // tela dele aberta com tudo falhando.
   const [activeServerId, setActiveServerId] = useState<string | null>(null)
   const activeServer = useMemo(() => servers.find((s) => s.id === activeServerId) ?? null, [servers, activeServerId])
   const setActiveServer = useCallback((server: Server | null) => setActiveServerId(server?.id ?? null), [])
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null)
   const [pendingChannelId, setPendingChannelId] = useState<string | null>(null)
-  // Marca "assim que o canal-alvo do convite for selecionado, entra na
-  // call sozinho" — só quando o convite trouxe um canal (ver
-  // InviteMessageCard.tsx/InviteRedirect.tsx). Ref (não state) porque é
-  // só um flag de "ainda não consumido", não precisa re-renderizar nada
-  // sozinho, e não pode disparar de novo depois de usado uma vez (por
-  // isso não reaproveita pendingChannelId, que fica setado no state
-  // "pra sempre" depois de um convite).
   const pendingAutoJoinVoiceRef = useRef(false)
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
   const onboarding = useOnboarding(ownProfile?.id)
-  // Tour guiado (primeiro uso ou "Fazer o tour guiado" nas Configurações).
   const [tourOpen, setTourOpen] = useState(false)
   useEffect(() => {
     const start = () => setTourOpen(true)
@@ -320,37 +280,17 @@ function MainLayoutInner() {
   }, [])
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  // O tour guiado abre/fecha o menu lateral no celular pra mostrar o que
-  // fica lá dentro (servidores, canais, seu painel).
   useEffect(() => {
     const onDrawer = (e: Event) => setMobileSidebarOpen(Boolean((e as CustomEvent<{ open: boolean }>).detail?.open))
     window.addEventListener('mv:mobile-drawer', onDrawer)
     return () => window.removeEventListener('mv:mobile-drawer', onDrawer)
   }, [])
-  // O drawer "mobile" (ServerBar virando um overlay fixed por cima de
-  // tudo, escondido/mostrado com um botão de hambúrguer) usa o
-  // breakpoint `lg:` do Tailwind (1024px) pra saber quando NÃO é mais
-  // "mobile". Mas a janela do app desktop pode ficar bem mais estreita
-  // que isso (minWidth: 900 no electron/main.cjs) — nesse meio-termo
-  // (900px–1023px), o Tailwind ainda achava que era "mobile" e deixava
-  // o ServerBar com `position: fixed` flutuando por cima (z-40) do
-  // resto do layout, inclusive cobrindo a PARTE DE BAIXO da barra
-  // lateral de canais (ping, card de jogo, "Voz conectada", UserPanel)
-  // que fica logo depois dele no fluxo normal. Dentro do Electron a
-  // janela nunca é "mobile" de verdade (sempre tem pelo menos 900px de
-  // largura) — então aqui o app desktop sempre usa o layout estático
-  // normal, e o comportamento de gaveta/hambúrguer fica só pro site.
   const isElectronApp = Boolean(window.electronAPI?.isElectron)
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
 
-  // Baixa em segundo plano (em idle, um por vez) o código de todos os
-  // modais/painéis sob demanda — sem isso o PRIMEIRO clique em
-  // "Configurações", "Pesquisar", "Criar servidor" etc. esperava o arquivo
-  // do modal ser baixado/interpretado antes de qualquer coisa aparecer.
   useEffect(() => {
     const cancel = preloadLazyChunks()
-    // Também adianta o WASM do redutor de ruído usado ao entrar em call.
     const t = window.setTimeout(preloadNoiseSuppression, 3000)
     return () => {
       cancel()
@@ -358,8 +298,6 @@ function MainLayoutInner() {
     }
   }, [])
 
-  // Servidor aberto sumiu da lista (excluído, expulso, saiu por outro
-  // dispositivo): volta pra tela inicial em vez de ficar numa tela quebrada.
   useEffect(() => {
     if (!activeServerId || loadingServers) return
     if (!servers.some((s) => s.id === activeServerId)) {
@@ -369,7 +307,6 @@ function MainLayoutInner() {
   }, [activeServerId, servers, loadingServers])
 
   useEffect(() => {
-    // Atalhos configuráveis (ver KeybindsRunner / lib/keybinds).
     const toggleSwitcher = () => setShowQuickSwitcher((v) => !v)
     const toggleShortcuts = () => setShowShortcuts((v) => !v)
     window.addEventListener('mv:quick-switcher', toggleSwitcher)
@@ -380,10 +317,6 @@ function MainLayoutInner() {
     }
   }, [])
 
-  // Quem vem de um link de convite (/convite/CODIGO) chega aqui com o
-  // servidor (e opcionalmente o canal) que acabou de entrar guardado no
-  // state da navegação — a gente seleciona automaticamente assim que a
-  // lista de servidores carregar esse novo servidor.
   useEffect(() => {
     const state = location.state as
       | { joinedServerId?: string; joinedChannelId?: string | null; autoJoinVoice?: boolean }
@@ -399,14 +332,6 @@ function MainLayoutInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, servers, loadingServers])
 
-  // Assim que o canal-alvo do convite (pendingChannelId) vira de fato o
-  // canal ativo — o que acontece em ActiveServerBody, mais abaixo, ao
-  // carregar a lista de canais do servidor — entra na call sozinho, SE
-  // for mesmo um canal de voz (convite de canal de TEXTO só navega até
-  // lá, nunca tenta conectar nada — daí o `activeChannel.type ===
-  // 'voice'`). Dispara só uma vez por convite: a ref vira `false` assim
-  // que usada, então trocar de canal manualmente depois não entra em
-  // call de novo sozinho.
   useEffect(() => {
     if (!pendingAutoJoinVoiceRef.current) return
     if (!activeChannel || !activeServer) return
@@ -416,18 +341,14 @@ function MainLayoutInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeChannel?.id])
 
-  // estado da "home" (quando nenhum servidor está selecionado)
   const [homeView, setHomeView] = useState<'friends' | 'conversation' | 'group'>('friends')
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const { conversations, openConversationWith } = useConversations()
 
-  // Dentro de um servidor, a conversa privada abre no lugar do chat (a
-  // lateral do servidor continua); clicar num canal volta pro canal.
   const [serverDmId, setServerDmId] = useState<string | null>(null)
   async function handleMessageUser(userId: string) {
     const { conversation, error } = await openConversationWith(userId)
-    // antes um erro aqui era ignorado — o clique em "Mensagem" não fazia nada
     if (error) alert(error)
     else if (conversation) {
       if (activeServer) {
@@ -438,7 +359,6 @@ function MainLayoutInner() {
   }
   const { groups } = useGroupConversations()
   const unread = useUnreadOverview()
-  // Modo Escritório: o chat aberto lá marca o canal como lido
   const markChannelReadRef = useRef(unread.markChannelRead)
   markChannelReadRef.current = unread.markChannelRead
   useEffect(() => {
@@ -450,15 +370,8 @@ function MainLayoutInner() {
     return () => window.removeEventListener('mv:mark-channel-read', onRead)
   }, [])
 
-  // Marca como lido ao abrir E sempre que o canal/conversa aberto aparecer
-  // como "não lido" de novo (mensagem nova chegando enquanto você está
-  // olhando pra ele) — antes a bolinha de não lido aparecia no próprio
-  // canal que estava aberto na tela.
   const activeTextChannelId = activeServer && activeChannel?.type === 'text' ? activeChannel.id : null
   const activeTextChannelUnread = activeTextChannelId ? unread.unreadChannelIds.has(activeTextChannelId) : false
-  // Último canal/conversa marcado: ao abrir um não lido, o efeito rodava
-  // de novo quando o "não lido" virava false (2 gravações por abertura).
-  // Agora grava ao ABRIR, e depois só quando voltar a ficar não lido.
   const lastMarkedChannelRef = useRef<string | null>(null)
   useEffect(() => {
     if (!activeTextChannelId) {
@@ -471,7 +384,6 @@ function MainLayoutInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTextChannelId, activeTextChannelUnread])
 
-  // DM aberta: na home OU por cima de um servidor (serverDmId).
   const openConversationId = activeServer ? serverDmId : homeView === 'conversation' ? activeConversationId : null
   const openConversationUnread = openConversationId ? unread.unreadConversationIds.has(openConversationId) : false
   const lastMarkedConversationRef = useRef<string | null>(null)
@@ -486,8 +398,6 @@ function MainLayoutInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openConversationId, openConversationUnread])
 
-  // Grupos não têm "lido" salvo no banco: o não lido deles vale pra sessão
-  // (some ao abrir o grupo).
   const [unreadGroupIds, setUnreadGroupIds] = useState<Set<string>>(() => new Set())
   const openGroupId = !activeServer && homeView === 'group' ? activeGroupId : null
   useEffect(() => {
@@ -508,7 +418,6 @@ function MainLayoutInner() {
     [unread.markConversationUnread]
   )
   const homeUnreadCount = unread.unreadConversationIds.size + unreadGroupIds.size
-  // Contador no título da janela/aba: "(2) Mamacos Voip".
   useEffect(() => setWindowUnreadCount(homeUnreadCount), [homeUnreadCount])
   useEffect(() => () => setWindowUnreadCount(0), [])
 
@@ -525,13 +434,6 @@ function MainLayoutInner() {
   }
 
   function handleSelectChannel(channel: Channel, targetServerId?: string) {
-    // Chamado com um targetServerId quando o canal vem de um resultado
-    // de busca "em todos os servidores" (ver SearchModal.tsx) que
-    // aponta pra um servidor diferente do atualmente aberto — troca de
-    // servidor primeiro (o que remonta o ChannelsProvider pra ele, via
-    // key={server.id} em ActiveServerContent) e deixa o canal-alvo
-    // marcado como pendente, do mesmo jeito que o fluxo de convite
-    // (pendingChannelId) já fazia.
     if (targetServerId && targetServerId !== activeServer?.id) {
       const target = servers.find((s) => s.id === targetServerId)
       if (target) {
@@ -546,7 +448,6 @@ function MainLayoutInner() {
     setMobileSidebarOpen(false)
   }
 
-  // Nome de onde você está, no centro da barra de título (e no título da janela).
   const placeConversation = activeServer ? null : conversations.find((c) => c.id === activeConversationId)
   const placeGroupName = activeServer || homeView !== 'group' ? null : (groups.find((g) => g.id === activeGroupId)?.name ?? null)
   useEffect(() => {
@@ -561,7 +462,6 @@ function MainLayoutInner() {
   }, [activeServer, homeView, placeConversation, placeGroupName])
   useEffect(() => () => setWindowPlace(null), [])
 
-  // Cartão de usuário da sala de voz (VoiceMemberCard) pede DM / perfil.
   useEffect(() => {
     function onMessage(e: Event) {
       const userId = (e as CustomEvent<{ userId: string }>).detail?.userId
@@ -579,8 +479,6 @@ function MainLayoutInner() {
     }
   })
 
-  // "Voz conectada" (UserPanel) clicado: volta pra tela da sala de voz,
-  // mesmo navegando por um canal de texto, outro servidor ou DMs.
   useEffect(() => {
     function onOpenVoiceRoom(e: Event) {
       const detail = (e as CustomEvent<{ serverId: string; channelId: string }>).detail
@@ -597,7 +495,6 @@ function MainLayoutInner() {
     return () => window.removeEventListener('mv:open-voice-room', onOpenVoiceRoom)
   }, [servers, activeServer?.id])
 
-  // Notificação do celular tocada → abre a conversa/grupo/canal dela.
   useEffect(() => {
     void initPushNotifications()
   }, [])
@@ -654,9 +551,6 @@ function MainLayoutInner() {
   const activeConversation = conversations.find((c) => c.id === activeConversationId)
   const activeGroup = groups.find((g) => g.id === activeGroupId)
 
-  // Antes esses dois eram recriados a cada render do layout (qualquer
-  // tecla, qualquer mudança de estado), refazendo o merge de todos os
-  // perfis e forçando re-render do overlay de chamada.
   const callProfilesById = useMemo(
     () => ({
       ...Object.fromEntries(conversations.map((c) => [c.otherProfile.id, c.otherProfile])),
@@ -671,8 +565,6 @@ function MainLayoutInner() {
 
   return (
     <div className="h-full w-full flex overflow-hidden bg-mv-canvas relative">
-      {/* Botão de menu — só aparece em telas pequenas (nunca no app
-          desktop, que não tem esse "modo mobile" — ver isElectronApp). */}
       {!isElectronApp && (
         <button
           onClick={() => setMobileSidebarOpen(true)}
@@ -686,7 +578,6 @@ function MainLayoutInner() {
         </button>
       )}
 
-      {/* Overlay escuro atrás do drawer, só em mobile */}
       {!isElectronApp && mobileSidebarOpen && (
         <div data-overlay-open className="lg:hidden fixed inset-0 bg-black/70 z-30 animate-fade-in" onClick={() => setMobileSidebarOpen(false)} />
       )}
@@ -711,10 +602,6 @@ function MainLayoutInner() {
         />
       ) : (
         <>
-          {/* Mesma ideia da coluna esquerda de ActiveServerContent: barra
-              de servidores + lista de conversas empilhada em cima do
-              rodapé (UserPanel) compartilhado, cobrindo a largura total
-              dos dois juntos — não só embaixo da lista de conversas. */}
           <div
             className={
               isElectronApp
@@ -761,8 +648,6 @@ function MainLayoutInner() {
               <div role="status" aria-label="Carregando" className="w-7 h-7 border-2 border-mv-accent border-t-transparent rounded-full animate-spin" />
             </div>
           ) : homeView === 'conversation' && activeConversation ? (
-            // key: cada conversa/grupo começa com estado limpo — antes o
-            // "respondendo a…" de uma conversa passava pra outra.
             <DMChatArea key={activeConversation.id} conversationId={activeConversation.id} otherProfile={activeConversation.otherProfile} />
           ) : homeView === 'group' && activeGroup ? (
             <GroupChatArea key={activeGroup.id} group={activeGroup} onLeave={handleSelectHome} />
@@ -772,11 +657,6 @@ function MainLayoutInner() {
         </>
       )}
 
-      {/* Card de perfil fixo do lado direito da tela inicial — mostra o
-          perfil de quem faz sentido pra visão atual: a própria pessoa
-          nas telas de Amigos/Grupo, ou quem está do outro lado numa
-          conversa direta. Só aparece fora de um servidor (lá quem cumpre
-          esse papel já é o MemberList). */}
       {!activeServer && !loadingServers && ownProfile && (
         <ProfileSidePanel
           profile={homeView === 'conversation' && activeConversation ? activeConversation.otherProfile : ownProfile}

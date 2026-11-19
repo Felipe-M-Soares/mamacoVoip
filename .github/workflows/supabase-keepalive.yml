@@ -1,32 +1,10 @@
 name: Manter Supabase ativo
 
-# Alternativa ao esquema de pg_cron/pg_net (ver supabase/keepalive.sql)
-# pra quem preferir não habilitar extensões no banco, ou quer uma
-# segunda camada de segurança independente do próprio Supabase — roda
-# nos servidores do GitHub, então continua funcionando mesmo se o
-# projeto Supabase já tiver pausado (o pg_cron, por definição, para de
-# rodar junto com o resto do banco pausado; este workflow não).
-#
-# Configuração necessária (uma vez só):
-#   1. No repositório do GitHub: Settings > Secrets and variables >
-#      Actions > New repository secret
-#   2. Crie dois secrets:
-#      - SUPABASE_URL       (o mesmo valor de VITE_SUPABASE_URL do .env)
-#      - SUPABASE_ANON_KEY  (o mesmo valor de VITE_SUPABASE_ANON_KEY)
-#   3. Pronto — este workflow já roda sozinho a partir da próxima vez
-#      que o cron disparar. Pra testar sem esperar, vá em Actions >
-#      "Manter Supabase ativo" > Run workflow.
-
 on:
   schedule:
-    # A cada 3 dias às 04:00 UTC — bem dentro da janela de 7 dias de
-    # inatividade que causaria a pausa do plano grátis, com folga.
     - cron: '0 4 */3 * *'
   workflow_dispatch: {} # permite disparar manualmente pela aba Actions, pra testar
 
-# AUDITORIA: este workflow não precisa de NENHUMA permissão do token do
-# GitHub (só faz uma requisição HTTP pra fora) — sem essa linha ele
-# herdava as permissões padrão do repositório.
 permissions: {}
 
 jobs:
@@ -34,10 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # AUDITORIA: segredos passados por variável de ambiente em vez de
-      # interpolados direto no script (evita que um valor com caracteres
-      # especiais quebre/injete comandos no shell), e --retry pra uma
-      # falha passageira de rede não perder o "ping" daquela rodada.
       - name: Pingar a API REST do Supabase
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

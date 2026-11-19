@@ -1,33 +1,18 @@
 name: Build e publicar app desktop
 
-# Roda sempre que algo é enviado pra main — o mesmo push que a Vercel
-# usa pra atualizar o site também dispara isso aqui, então o app
-# instalado no PC das pessoas recebe a atualização automaticamente na
-# próxima vez que o electron-updater checar (ele checa toda vez que o
-# app abre). Também pode ser disparado manualmente pela aba Actions.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# AUDITORIA: permissões mínimas por padrão — cada job pede só o que usa.
 permissions:
   contents: read
 
-# AUDITORIA: dois pushes seguidos na main disparavam dois fluxos em
-# paralelo, disputando o mesmo "releases/latest". Agora eles entram em
-# fila (o segundo espera o primeiro terminar, sem cancelar nenhum).
 concurrency:
   group: release-desktop
   cancel-in-progress: false
 
 jobs:
-  # Cria e envia a tag da versão ANTES de qualquer build começar. Sem
-  # isso, cada uma das 3 plataformas tentava criar o release já
-  # "publicado" referenciando uma tag que ainda não existia de verdade
-  # no repositório — o GitHub rejeita isso ("must have a valid tag").
-  # Criando a tag aqui primeiro, ela já existe de verdade quando os
-  # builds tentam publicar nela.
   prepare:
     runs-on: ubuntu-latest
     permissions:
@@ -50,14 +35,6 @@ jobs:
           git tag "v$VERSION"
           git push origin "v$VERSION"
 
-      # AUDITORIA: o release agora nasce como RASCUNHO (--draft). Antes ele
-      # já nascia publicado e virava o "releases/latest" na hora — mas
-      # ainda SEM nenhum arquivo (os builds levam vários minutos). Todo app
-      # aberto nesse intervalo recebia 404 no latest.yml (a causa real dos
-      # 404 que o main.cjs tenta contornar com novas tentativas) e, pior,
-      # o botão "Baixar" do site apontava pra um release vazio. O job
-      # "publish" no final só publica depois que o instalador do Windows
-      # e o latest.yml já estão lá.
       - name: Criar o release no GitHub como rascunho (antes dos builds, evita disputa entre as 3 plataformas)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -68,9 +45,6 @@ jobs:
     permissions:
       contents: write # enviar os instaladores pro release
     strategy:
-      # AUDITORIA: sem isso, uma falha no build do macOS/Linux CANCELAVA
-      # o do Windows no meio (e vice-versa) — a maior parte de quem usa o
-      # app está no Windows e ficava sem atualização por causa das outras.
       fail-fast: false
       matrix:
         include:
@@ -89,10 +63,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # AUDITORIA: Node 20 chegou ao fim do suporte (abril/2026) e o Vite 8
-      # exige 20.19+/22.12+ — 22 é LTS. `cache: npm` reaproveita o cache de
-      # pacotes do npm entre execuções (a chave usa o package-lock.json, que
-      # ainda existe neste ponto — só é apagado no passo seguinte).
       - name: Configurar Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -101,27 +71,12 @@ jobs:
 
       - name: Instalar dependências (lock file completo, multiplataforma)
         shell: bash
-        # O package-lock.json agora é gerado do zero e já traz os
-        # binários nativos de TODAS as plataformas (rolldown,
-        # lightningcss, tailwind oxide pra win32/darwin/linux) — o que
-        # resolve o npm/cli#4828 sem precisar apagar o lock. Apagar o lock
-        # fazia o npm resolver tudo do registro a cada build (versões
-        # diferentes a cada release) e, desde set/2026, quebrava com
-        # "Cannot read properties of null (reading 'edgesOut')" (bug do
-        # npm 10 na resolução de peers). `npm ci` é reproduzível e rápido.
         run: npm ci --no-audit --no-fund
 
       - name: Definir a versão (mesma calculada no job "prepare")
         shell: bash
         run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version --allow-same-version
 
-      # Compila os 3 .exe nativos do Windows (captura de áudio por processo,
-      # captura de tela via GDI e via Windows Graphics Capture — ver o topo
-      # de cada native/*/capture.cpp). O compilador (cl.exe, do Visual
-      # Studio que já vem no runner) é ativado direto pelo vcvars64.bat —
-      # antes usava a ação ilammy/msvc-dev-cmd, que roda em Node 20
-      # (aposentado pelo GitHub). Só no Windows: o resto do app funciona
-      # sem esses .exe nas outras plataformas.
       - name: Compilar os executáveis nativos (só Windows)
         if: matrix.os == 'windows-latest'
         shell: cmd
@@ -136,13 +91,6 @@ jobs:
       - name: Build do app desktop (tsc + vite, caminhos relativos)
         run: npm run build:electron
         env:
-          # Sem isso, o app abre com tela preta — o cliente do Supabase
-          # trava o app inteiro se essas variáveis não existirem no
-          # momento do build (o Vite "grava" elas dentro dos arquivos
-          # gerados, não dá pra configurar depois). Use os MESMOS
-          # valores que você já colocou nas Environment Variables da
-          # Vercel. Configure em: Settings > Secrets and variables >
-          # Actions > New repository secret, no seu repositório GitHub.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_TURN_URL: ${{ secrets.VITE_TURN_URL }}
@@ -152,18 +100,8 @@ jobs:
       - name: Empacotar + publicar release (${{ matrix.os }})
         run: npx electron-builder ${{ matrix.platform_flag }} --publish always
         env:
-          # Token automático do GitHub Actions — já tem permissão de
-          # publicar releases neste mesmo repositório, não precisa
-          # configurar nada extra.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Pacote para a Microsoft Store (MSIX/APPX) — o único jeito GRÁTIS de
-      # acabar com o aviso "O Windows protegeu o computador" (SmartScreen):
-      # a Microsoft assina o pacote depois de aprovar na Store. A
-      # identidade (Package/Identity/Name, Publisher e nome de exibição do
-      # editor) vem do Partner Center e está em package.json > build.appx.
-      # O arquivo sai como artefato do workflow — você envia ele no
-      # Partner Center. Não vai pro release (não é pra instalar direto).
       - name: Empacotar para a Microsoft Store (só Windows, opcional)
         if: matrix.os == 'windows-latest'
         shell: bash
@@ -177,11 +115,6 @@ jobs:
           path: release/*.appx
           if-no-files-found: error
 
-  # App Android (APK) — vai pro MESMO release, com o nome fixo
-  # MamacosVoip.apk (o botão "Baixar para Android" do site aponta pra
-  # releases/latest/download/MamacosVoip.apk). Só roda se a chave de
-  # assinatura estiver nos Secrets (ver docs/ANDROID.md); sem ela, pula
-  # com um aviso e o resto do release segue normal.
   android:
     needs: prepare
     runs-on: ubuntu-latest
@@ -220,9 +153,6 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # Notificações no celular (Firebase) — opcional: sem o secret
-      # GOOGLE_SERVICES_JSON o APK sai igual, só sem notificações
-      # (ver docs/NOTIFICACOES.md).
       - name: Configurar Firebase (notificações)
         if: steps.cfg.outputs.ok == 'true'
         env:
@@ -260,7 +190,6 @@ jobs:
           KS_FILE="$RUNNER_TEMP/mamacos-release.p12"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KS_FILE"
           export ANDROID_KEYSTORE_FILE="$KS_FILE"
-          # versionCode precisa sempre subir: usa o mesmo número da versão.
           export ANDROID_VERSION_CODE="${ANDROID_VERSION_NAME##*.}"
           cd android
           chmod +x gradlew
@@ -277,11 +206,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: gh release upload "v${{ needs.prepare.outputs.version }}" MamacosVoip.apk --clobber
 
-  # AUDITORIA: publica o rascunho criado em "prepare" — só depois que os
-  # builds terminaram E o instalador do Windows + latest.yml (o manifesto
-  # que o auto-updater lê) já estão anexados. Roda mesmo se o build de
-  # macOS/Linux falhar (o Windows não fica refém dos outros), mas nunca
-  # publica um release sem o latest.yml.
   publish:
     needs: [prepare, build, android]
     if: ${{ !cancelled() && needs.prepare.result == 'success' }}

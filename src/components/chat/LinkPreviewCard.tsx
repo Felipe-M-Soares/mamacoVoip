@@ -15,13 +15,6 @@ function isDirectImageUrl(url: string): boolean {
   return IMAGE_EXTENSION_REGEX.test(url)
 }
 
-// Mensagem que é SÓ um link de imagem/GIF (nada mais digitado junto —
-// é exatamente o que o seletor de GIF manda: `onSend(gifUrl, [])`, sem
-// nenhum texto além do link). Nesse caso o link em si não deveria
-// aparecer como texto normal, só a prévia da imagem embaixo — igual o
-// apps de chat populares faz. Se a pessoa colar um link de imagem NO MEIO
-// de uma frase, isso continua false e o texto aparece normal, com a
-// prévia por baixo (mesmo comportamento de antes).
 export function isPureMediaMessage(content: string): boolean {
   return isDirectImageUrl(content.trim())
 }

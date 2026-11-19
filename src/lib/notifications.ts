@@ -1,14 +1,3 @@
-// Notificações do navegador. Só disparam se o usuário concedeu permissão
-// E a aba está em segundo plano — não interrompe quem já está olhando
-// a conversa.
-//
-// Limitação de escopo: como não há um servidor de push dedicado, só
-// notificamos eventos de canais/DMs que já estão com uma subscription
-// de realtime ativa no navegador (ou seja, a conversa/canal precisa
-// estar aberta na aba pra a notificação disparar quando ela perde o
-// foco). Push de verdade pra canais fechados exigiria Web Push +
-// Service Worker com VAPID keys, fora do escopo deste clone.
-
 export async function requestNotificationPermission(): Promise<NotificationPermission | 'unsupported'> {
   if (!('Notification' in window)) return 'unsupported'
   if (Notification.permission === 'granted' || Notification.permission === 'denied') {
@@ -29,19 +18,11 @@ export function notify(title: string, body: string) {
   try {
     new Notification(title, { body, icon: '/logo-192.png' })
   } catch {
-    // alguns navegadores restringem Notification fora de um gesto do
-    // usuário ou contexto seguro — falha silenciosa é aceitável aqui
   }
 }
 
 export type NotificationTarget = { kind: 'dm' | 'group' | 'channel'; id: string; serverId?: string }
 
-/**
- * Notificação de mensagem privada (app em segundo plano). No app de PC usa
- * a notificação nativa do Windows (clique traz a janela e abre a conversa);
- * no navegador, a do navegador. Clique → evento "mv:open-target" (o
- * MainLayout abre a conversa — o mesmo caminho da notificação do celular).
- */
 export function showMessageNotification(title: string, body: string, target: NotificationTarget, icon?: string | null) {
   const api = window.electronAPI
   if (api?.showNotification) {
@@ -58,6 +39,5 @@ export function showMessageNotification(title: string, body: string, target: Not
       n.close()
     }
   } catch {
-    // navegador recusou (contexto sem permissão etc.)
   }
 }

@@ -1,44 +1,5 @@
 import { useCallback, useState } from 'react'
 
-function readSet(key: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? new Set(JSON.parse(raw)) : new Set()
-  } catch {
-    return new Set()
-  }
-}
-
-function writeSet(key: string, value: Set<string>) {
-  try {
-    localStorage.setItem(key, JSON.stringify(Array.from(value)))
-  } catch {
-    // best-effort
-  }
-}
-
-// Categorias recolhidas/expandidas — guardado globalmente (o id da
-// categoria já é único), então a preferência vale em qualquer servidor.
-export function useCollapsedCategories() {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => readSet('mamacos-collapsed-categories'))
-
-  function toggle(categoryId: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(categoryId)) next.delete(categoryId)
-      else next.add(categoryId)
-      writeSet('mamacos-collapsed-categories', next)
-      return next
-    })
-  }
-
-  return { collapsed, toggle }
-}
-
-// Ordem customizada dos servidores na barra lateral — arrastar pra
-// reorganizar. Guardado só neste navegador (não sincroniza entre
-// dispositivos), mas evita precisar de uma coluna nova no banco só
-// pra uma preferência de interface.
 export function useServerOrder() {
   const [order, setOrderState] = useState<string[]>(() => {
     try {
@@ -54,7 +15,6 @@ export function useServerOrder() {
     try {
       localStorage.setItem('mamacos-server-order', JSON.stringify(ids))
     } catch {
-      // best-effort
     }
   }, [])
 
@@ -78,8 +38,6 @@ export function useServerOrder() {
       insertIndex === -1
         ? [...withoutDragged, draggedId]
         : [...withoutDragged.slice(0, insertIndex), draggedId, ...withoutDragged.slice(insertIndex)]
-    // garante que todo servidor atual apareça na lista, mesmo que tenha
-    // sido criado depois da última vez que a ordem foi salva
     const missing = allIds.filter((id) => !next.includes(id))
     setOrder([...next, ...missing])
   }

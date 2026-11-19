@@ -7,7 +7,7 @@ export interface ContextMenuItem {
   onClick: () => void
   danger?: boolean
   disabled?: boolean
-  divider?: boolean // se true, desenha uma linha ANTES deste item
+  divider?: boolean
 }
 
 export function ContextMenu({
@@ -39,8 +39,6 @@ export function ContextMenu({
     }
   }, [onClose])
 
-  // Depois do primeiro render, ajusta a posição pra não vazar pra fora
-  // da tela (ex: clicou perto da borda direita/inferior)
   useEffect(() => {
     if (!ref.current) return
     const rect = ref.current.getBoundingClientRect()
@@ -51,16 +49,11 @@ export function ContextMenu({
     setPosition({ top, left: Math.max(8, left), visibility: 'visible' })
   }, [x, y])
 
-  // Foca o primeiro item ao abrir — permite navegar com as setas logo de
-  // cara (e o leitor de tela anuncia o menu).
   useEffect(() => {
     const node = ref.current
     const previouslyFocused = document.activeElement as HTMLElement | null
     const first = node?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])')
     first?.focus({ preventScroll: true })
-    // Devolve o foco pra onde estava (ex.: o campo de mensagem) ao fechar —
-    // mas só se ele ainda estiver "perdido" no menu (ou no body): se a ação
-    // escolhida já focou outra coisa (ex.: caixa de edição), não rouba.
     return () => {
       const active = document.activeElement
       const focusLost = !active || active === document.body || (node?.contains(active) ?? false)
@@ -127,9 +120,6 @@ export function ContextMenu({
   )
 }
 
-// Hook auxiliar: gerencia a posição/estado aberto-fechado do menu.
-// Usa-se com onContextMenu={openMenu} num elemento, e renderiza
-// {menuState && <ContextMenu x={menuState.x} y={menuState.y} items={...} onClose={closeMenu} />}
 export function useContextMenuState() {
   const [state, setState] = useState<{ x: number; y: number } | null>(null)
 

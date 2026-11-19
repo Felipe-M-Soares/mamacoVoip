@@ -16,8 +16,6 @@ export function Login() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [confirmedBanner, setConfirmedBanner] = useState(false)
-  // Login com Google no app de PC/celular: a sessão chega sem recarregar.
-  // (Durante o login por senha quem navega é o handleSubmit.)
   useRedirectWhenSignedIn(!loading)
 
   useEffect(() => {
@@ -27,13 +25,12 @@ export function Login() {
         sessionStorage.removeItem('mamacos-email-confirmed')
       }
     } catch {
-      // sem acesso a sessionStorage — sem problema, só não mostra o aviso
     }
   }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (loading) return // evita duplo envio (Enter + clique)
+    if (loading) return
     setError(null)
 
     const emailError = validateEmail(email)
@@ -45,8 +42,6 @@ export function Login() {
       setError('Informe sua senha.')
       return
     }
-    // Só uma trava de UX contra tentativas em sequência — o limite de
-    // verdade é o do Supabase Auth, no servidor.
     const limit = checkRateLimit('login', 5, 60_000)
     if (!limit.allowed) {
       setError(`Muitas tentativas seguidas. Espere ${limit.retryAfterSeconds}s e tente de novo.`)
@@ -63,11 +58,9 @@ export function Login() {
     }
     let redirectTo = '/'
     try {
-      // Só caminhos internos do app — nunca outro site (open redirect).
       redirectTo = safeRedirectPath(sessionStorage.getItem('mamacos-post-login-redirect'))
       sessionStorage.removeItem('mamacos-post-login-redirect')
     } catch {
-      // best-effort
     }
     navigate(redirectTo, { replace: true })
   }

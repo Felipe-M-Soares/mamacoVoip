@@ -6,17 +6,8 @@ import { describeError } from '../lib/errors'
 import { isMissingDbObject } from '../lib/rpcCompat'
 import type { Report, ReportStatus, ReportTargetType } from '../types/database'
 
-// Coluna que marca a denúncia como enviada também pra equipe da
-// plataforma (migration 007).
 export const REPORT_ESCALATION_COLUMN = 'escalated'
 
-// Denunciar uma mensagem (de servidor, DM ou grupo) ou um usuário.
-// server_id/reported_user_id reais são recalculados no servidor (ver
-// set_report_context no banco) — o que mandamos daqui é só a intenção.
-//
-// Denúncias de DM/grupo e as sem servidor vão pra equipe do Mamacos Voip
-// (não existe moderação de servidor pra elas); numa denúncia de
-// servidor, `escalate` pede que a equipe também veja.
 export type SubmitReportTarget = ReportTargetType | 'dm_message' | 'group_message'
 
 export function useSubmitReport() {
@@ -55,8 +46,6 @@ export function useSubmitReport() {
       const escalate = isPlatformTarget || !!params.escalate
       if (escalate) row[REPORT_ESCALATION_COLUMN] = true
       let { error } = await supabase.from('reports').insert(row as never)
-      // Banco ainda sem a coluna de escalonamento: denúncia de servidor
-      // segue sem ela (a moderação do servidor ainda recebe).
       if (error && escalate && !isPlatformTarget && isMissingDbObject(error)) {
         delete row[REPORT_ESCALATION_COLUMN]
         ;({ error } = await supabase.from('reports').insert(row as never))
@@ -75,9 +64,6 @@ export function useSubmitReport() {
   return { submitReport }
 }
 
-// Lista de denúncias de UM servidor, pra quem modera aquele servidor
-// (dono, ou quem tem a permissão manage_messages — a policy de SELECT
-// no banco já garante isso, aqui só refletimos o que voltar).
 export function useServerReports(serverId: string | null) {
   const [reports, setReports] = useState<Report[]>([])
   const [loading, setLoading] = useState(true)

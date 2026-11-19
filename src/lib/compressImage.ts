@@ -1,15 +1,3 @@
-// Diminui fotos antes de enviar no chat — o plano grátis do Supabase tem
-// ~1 GB pra todos os arquivos, e foto de celular/print em 4K costuma ter
-// 3–8 MB sem nenhum ganho visível no chat.
-//
-// Regras:
-//  - Só JPEG/PNG/WebP (GIF animado, SVG, vídeo, áudio etc. vão como estão).
-//  - Só mexe se o arquivo for grande (> 400 KB) ou a imagem passar de 2560 px.
-//  - Lado maior limitado a 2560 px, salvo em WebP qualidade 0.85 (mantém
-//    transparência de PNG).
-//  - Se o resultado não ficar menor, manda o original.
-//  - Qualquer falha → manda o original (nunca impede o envio).
-
 const COMPRESSIBLE = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const MIN_BYTES = 400 * 1024
 const MAX_SIDE = 2560

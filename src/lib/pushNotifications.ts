@@ -1,13 +1,6 @@
 import { supabase } from './supabase'
 import { isNativeMobileApp } from './platform'
 
-// Notificações no celular (Firebase Cloud Messaging). O app registra o
-// "endereço" do aparelho na conta (register_push_token) e o servidor
-// manda a notificação quando chega mensagem (ver supabase/functions/
-// push-notify e docs/NOTIFICACOES.md). Só liga quando o APK foi gerado
-// com o Firebase configurado (VITE_PUSH_ENABLED) — sem isso, nem tenta
-// (chamar o Firebase sem configuração fecha o app no Android).
-
 export type PushTarget = { kind: 'dm' | 'group' | 'channel'; id: string; serverId?: string }
 
 let currentToken: string | null = null
@@ -34,7 +27,6 @@ function openTarget(t: PushTarget) {
   window.dispatchEvent(new CustomEvent('mv:open-target', { detail: t }))
 }
 
-/** Notificação tocada com o app fechado: o layout pega quando montar. */
 export function consumePendingPushTarget(): PushTarget | null {
   const t = pending
   pending = null
@@ -77,7 +69,6 @@ export async function initPushNotifications(): Promise<void> {
   }
 }
 
-/** Ao sair da conta: este aparelho para de receber as notificações dela. */
 export async function unregisterPushToken(): Promise<void> {
   if (!pushEnabled() || !currentToken) return
   const token = currentToken
@@ -89,6 +80,5 @@ export async function unregisterPushToken(): Promise<void> {
       new Promise((r) => setTimeout(r, 2500)),
     ])
   } catch {
-    // best-effort
   }
 }

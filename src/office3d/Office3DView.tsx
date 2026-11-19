@@ -52,23 +52,11 @@ const ManageMemberModal = lazyModal(() => import('../components/modals/ManageMem
 const SoundboardPanel = lazyModal(() => import('../components/ui/SoundboardPanel').then((m) => m.SoundboardPanel))
 const EventsModal = lazyModal(() => import('../components/modals/EventsModal').then((m) => m.EventsModal))
 
-// Modo Escritório. Abre por cima do app — o clássico continua montado por
-// baixo (lista de canais, presença das salas, call), então fechar volta
-// exatamente pro mesmo lugar.
-//
-// Custo: ZERO a mais no servidor de voz. Tudo aqui usa dados que o app já
-// tem (canais, membros, status, quem está em cada sala, mensagens). Ninguém
-// transmite posição de boneco: cada pessoa aparece onde o estado real dela
-// manda. Os únicos extras são o visual do mamaco no perfil (1 coluna) e os
-// emotes por broadcast do Realtime (PARTE 31 da 007).
-
 const PALETTE = ['#3b82f6', '#22c55e', '#ec4899', '#a78bfa', '#eab308', '#06b6d4', '#f97316', '#84cc16', '#e11d48']
-// v2: mamaco novo (skins da ficha). Visual antigo salvo é ignorado.
 const SKIN_KEY = 'mamacos-3d-skin-v2'
 const FUR = ['#7a4529', '#a8683f', '#8a5a3c', '#5d5a63', '#2f2724', '#c99a45', '#e6ddd2']
 const SKIN_FIELDS = ['fur', 'top', 'outfit', 'headset', 'glasses', 'hat', 'hatColor', 'back', 'shades'] as const
 
-/** só os campos conhecidos, com o tipo certo (o que vem do perfil é de outra pessoa) */
 function cleanSkin(raw: unknown): OfficeSkin | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
@@ -93,10 +81,6 @@ const skinTime = (raw: unknown) => {
   const t = raw && typeof raw === 'object' ? Number((raw as { _at?: unknown })._at) : 0
   return Number.isFinite(t) ? t : 0
 }
-// O visual mais NOVO vence (o do aparelho ou o do perfil). Antes o do perfil
-// sempre ganhava — e o perfil carregado no login não sabe da troca que você
-// acabou de fazer: ao sair pro clássico e voltar, o mamaco "perdia" o fone,
-// o chapéu etc.
 function loadSkin(userId: string, fromProfile: unknown): OfficeSkin {
   let local: OfficeSkin | null = null, localAt = 0
   try {
@@ -105,15 +89,12 @@ function loadSkin(userId: string, fromProfile: unknown): OfficeSkin {
     local = cleanSkin(parsed)
     localAt = skinTime(parsed)
   } catch {
-    // sem armazenamento: fica com o do perfil
   }
   const p = cleanSkin(fromProfile)
   if (p && (!local || skinTime(fromProfile) > localAt)) return p
   return local ?? p ?? defaultSkin(userId)
 }
 
-// Onde você estava em cada servidor (pra voltar no mesmo lugar ao reabrir o
-// Escritório). Fica salvo no aparelho.
 const LAST_POS_KEY = 'mamacos-3d-pos-v1'
 function loadLastPos(serverId: string): { x: number; z: number; yaw: number } | null {
   try {
@@ -129,16 +110,12 @@ function saveLastPos(serverId: string, pos: { x: number; z: number; yaw: number 
     all[serverId] = pos
     localStorage.setItem(LAST_POS_KEY, JSON.stringify(all))
   } catch {
-    // sem armazenamento: volta pra recepção
   }
 }
 
-// "Minigames", "Mini games", "Fliperama", "Arcade"… (antes a busca pelo tema
-// achava "games" primeiro e o canal Minigames virava uma sala comum)
 const isMinigamesName = (name: string) =>
   /mini ?games?|fliperama|arcade/.test(name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase())
 
-// "plim" do convite de corrida (curtinho, sem arquivo)
 function SFX_PING() {
   try {
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
@@ -152,7 +129,6 @@ function SFX_PING() {
     }
     setTimeout(() => void c.close(), 800)
   } catch {
-    // sem som
   }
 }
 
@@ -185,20 +161,17 @@ export function Office3DView({
   const officeRef = useRef<Office | null>(null)
   const [zone, setZone] = useState<OfficeZone | null>(null)
   const [tv, setTv] = useState<OfficeTvInfo | null>(null)
-  const [boardOpen, setBoardOpen] = useState(false) // telão da recepção em tamanho grande
+  const [boardOpen, setBoardOpen] = useState(false)
   const [mySeat, setMySeat] = useState<{ kind: string; roomId: string | null; theme: string | null } | null>(null)
-  const [cinema, setCinema] = useState(false) // transmissão em tela cheia (sentado no cinema)
+  const [cinema, setCinema] = useState(false)
   const [drawer, setDrawer] = useState(false)
-  // estúdio aberto: pausa o escritório (economiza placa de vídeo)
   useEffect(() => { officeRef.current?.setPaused(drawer) }, [drawer])
   const [skin, setSkin] = useState<OfficeSkin>(() => loadSkin(user?.id ?? 'eu', profile?.office_skin))
   const [chatChannelId, setChatChannelId] = useState<string | null>(null)
   const [pinnedChat, setPinnedChat] = useState(false)
-  // chat: 'mini' (barrinha), 'open' (painel), 'big' (grande)
   const [chatMode, setChatMode] = useState<'mini' | 'open' | 'big'>('open')
   const chatBoxRef = useRef<HTMLDivElement>(null)
   const [memberCard, setMemberCard] = useState<VoiceMemberCardTarget | null>(null)
-  // clique num boneco: menu com mensagem privada, volume, perfil, acenar, moderar
   const [avatarMenu, setAvatarMenu] = useState<{ userId: string; x: number; y: number } | null>(null)
   const [dm, setDm] = useState<{ conversationId: string; profile: Profile } | null>(null)
   const [dmError, setDmError] = useState<string | null>(null)
@@ -209,7 +182,6 @@ export function Office3DView({
   const [moderate, setModerate] = useState<Profile | null>(null)
   const [eventsOpen, setEventsOpen] = useState(false)
   const [soundsOpen, setSoundsOpen] = useState(false)
-  // minigame aberto (kart etc.): a call continua e a barra dela fica por cima do jogo
   const [gameOpen, setGameOpen] = useState(false)
   const gameOpenRef = useRef(false)
   const { openConversationWith } = useConversations()
@@ -221,28 +193,20 @@ export function Office3DView({
   const canManageChannels = isOwner || !!permissions.manage_channels
   const canModerate = isOwner || !!(permissions.kick_members || permissions.ban_members || permissions.timeout_members || permissions.manage_roles)
 
-  // Sala de Minigames = um canal de voz do servidor com nome de jogos
-  // ("Minigames", "Fliperama", "Arcade"…). Ele vira a sala do fliperama/kart
-  // (com call) em vez de uma sala comum no setor dele.
   const minigamesChannel = useMemo(
     () => channels.find((c) => c.type === 'voice' && isMinigamesName(c.name)) ?? null,
     [channels]
   )
-  // Sem canal de Minigames ainda: quem pode gerenciar canais cria sozinho
-  // ao abrir o Escritório (1 vez por servidor). Assim a sala do fliperama
-  // já é uma call pra todo mundo: entrou, fala. Se apagarem o canal depois,
-  // não recria (fica o botão "Virar call").
   const mgTriedRef = useRef(false)
   useEffect(() => {
     if (minigamesChannel || !canManageChannelsEarly || mgTriedRef.current || channels.length === 0) return
     const key = `mamacos-mg-auto-${server.id}`
-    try { if (localStorage.getItem(key)) return } catch { /* segue */ }
+    try { if (localStorage.getItem(key)) return } catch {  }
     mgTriedRef.current = true
     void createChannelNow('Minigames', 'voice', null).then((res) => {
-      if (!(res as { error?: unknown } | undefined)?.error) try { localStorage.setItem(key, '1') } catch { /* ok */ }
+      if (!(res as { error?: unknown } | undefined)?.error) try { localStorage.setItem(key, '1') } catch {  }
     })
   }, [minigamesChannel, canManageChannelsEarly, channels.length, server.id, createChannelNow])
-  // canais organizados por categoria (igual a barra lateral)
   const layout = useMemo(() => {
     const cats = [...categories].sort((a, b) => a.position - b.position)
     const { text: orderedText, voice: orderedVoice } = orderChannels(channels)
@@ -255,7 +219,6 @@ export function Office3DView({
       ;(ch.type === 'voice' ? g.voice : g.text).push(ch)
     }
     if (loose.text.length || loose.voice.length) groups.unshift(loose)
-    // salas por setor: até 6 (o resto ainda funciona no clássico)
     return groups.filter((g) => g.text.length || g.voice.length).map((g) => ({ ...g, voice: g.voice.slice(0, 6) }))
   }, [categories, channels, minigamesChannel])
 
@@ -282,22 +245,13 @@ export function Office3DView({
         id: m.user_id,
         name: m.nickname || p.display_name || p.username,
         status: present && p.status !== 'offline' ? st : isMe ? 'online' : 'offline',
-        // Só conta como "na sala" quem está conectado de verdade agora:
-        // quem deslogou/fechou o app some da sala na hora (a lista da call
-        // pode levar alguns segundos pra perceber a queda).
         voiceChannelId: isMe ? myVoice : present ? (roster.get(m.user_id) ?? null) : null,
         avatarUrl: p.avatar_url,
-        // visual salvo no perfil (PARTE 31); sem ele, o motor sorteia um pelo id
         skin: isMe ? undefined : (cleanSkin(p.office_skin) ?? undefined),
       }
     })
   }, [members, onlineIds, roster, voice.connectedChannelId, voice.connectedServerId, server.id, user?.id])
 
-  // ---------- TV da sala: transmissão de tela da SUA call ----------
-  // Só a call em que você está (das outras salas o app nem recebe nada).
-  // A TV mostra "AO VIVO" de graça; o vídeo só começa a chegar quando você
-  // aperta F / clica na TV (igual "Assistir" no clássico), em qualidade
-  // baixa — a TV é pequena. Desligou a TV ou saiu da sala: para de receber.
   const myRoom = voice.connectedServerId === server.id ? voice.connectedChannelId : null
   const sharers = useMemo(() => {
     const list: { key: string; stream: MediaStream }[] = []
@@ -307,7 +261,7 @@ export function Office3DView({
   }, [voice.participants, voice.screenSharing, voice.localScreenStream])
   const remoteWatched = sharers.find((x) => x.key !== 'local' && !hidden.has(x.key)) ?? null
   const shown = remoteWatched ?? sharers.find((x) => x.key === 'local') ?? null
-  const tvOpened = useRef(new Map<string, StreamQuality>()) // o que a TV abriu → qualidade de antes
+  const tvOpened = useRef(new Map<string, StreamQuality>())
 
   const hiddenRef = useRef(hidden)
   hiddenRef.current = hidden
@@ -330,9 +284,6 @@ export function Office3DView({
     showStream(first.key)
   }
 
-  // ---------- cinema: sentado na sala de filmes, a transmissão em tela cheia ----------
-  // Usa a mesma transmissão da TV (nada novo é baixado além dela); em tela
-  // cheia volta pra qualidade normal, e ao sair a TV volta pra qualidade baixa.
   const canCinema = !!mySeat && mySeat.theme === 'cinema' && !!myRoom && mySeat.roomId === myRoom && sharers.length > 0
   function openCinema() {
     const first = remoteWatched ?? sharers.find((x) => x.key !== 'local')
@@ -357,7 +308,6 @@ export function Office3DView({
     if (cinema && !canCinema) closeCinema()
   }, [cinema, canCinema, closeCinema])
 
-  // ---------- conquistas (só no aparelho) ----------
   const [stats, setStats] = useState(() => loadStats())
   const celebrate = useCallback((list: Achievement[]) => {
     for (const a of list) officeRef.current?.toast(`🏆 Conquista: ${a.icon} ${a.name}`)
@@ -371,7 +321,6 @@ export function Office3DView({
     void submitMinigameResult(r)
   }, [celebrate])
 
-  // ---------- emotes e aceno (broadcast do Realtime) ----------
   const nameOfId = useCallback((id: string) => {
     const m = members.find((x) => x.user_id === id)
     return m ? m.nickname || m.profile.display_name || m.profile.username : 'Alguém'
@@ -398,14 +347,11 @@ export function Office3DView({
   const doEmoteRef = useRef(doEmote)
   doEmoteRef.current = doEmote
 
-  // callbacks do motor sempre com os dados atuais
   const shareRef = useRef<(text: string) => Promise<void>>(async () => {})
   const latest = useRef({ channels, voice, layout, onSelectChannel, myRoom, live: sharers.length > 0, toggleTv, roster, members, share: (text: string) => void shareRef.current(text), onStat, onGameResult })
   latest.current = { channels, voice, layout, onSelectChannel, myRoom, live: sharers.length > 0, toggleTv, roster, members, share: (text: string) => void shareRef.current(text), onStat, onGameResult }
 
   function openGames(game: string | null, kartNet?: KartNetOpts | null, onDone?: () => void) {
-    // kart com gente na mesma call: pergunta se é sozinho ou com a sala
-    // kart com gente na mesma call: todo mundo da sala entra (bots completam até 6)
     if (game === 'kart' && kartNet === undefined && roomPeers.length > 0 && !kartLobbyRef.current) { hostKartRace(); return }
     officeRef.current?.setPaused(true)
     gameOpenRef.current = true; setGameOpen(true)
@@ -422,10 +368,6 @@ export function Office3DView({
   const openGamesRef = useRef(openGames)
   openGamesRef.current = openGames
 
-  // ---------- Corrida de kart com a sala ----------
-  // Quem está na MESMA call (sala) que você e com o Escritório aberto
-  // recebe o convite; até 4 pilotos. O convite/entrada/largada vai pelo
-  // canal do Escritório; as posições, por um canal só dos pilotos.
   type KartLobby = { race: string; host: string; hostName: string; room: string; racers: KartRacer[]; role: 'host' | 'guest' | 'invited'; until: number }
   const [kartChoice, setKartChoice] = useState(false)
   const [kartLobby, setKartLobby] = useState<KartLobby | null>(null)
@@ -458,7 +400,6 @@ export function Office3DView({
     const race = typeof d.race === 'string' ? d.race : ''
     if (type === 'invite') {
       if (L || d.room !== myRoomRef.current || !race) return
-      // entra sozinho na corrida da sala (dá pra sair no "Não quero")
       setKartLobby({ race, host: from, hostName: String(d.name || nameOfIdRef.current(from)).slice(0, 40), room: String(d.room), racers: [], role: 'guest', until: Date.now() + 10000 })
       sendKart('join', { race, name: myName, skin: meRacer().skin })
       SFX_PING()
@@ -492,7 +433,6 @@ export function Office3DView({
     sendKart('start', { race: L.race, racers: L.racers })
     startKartRace(L)
   }
-  // contagem do convite: o anfitrião larga sozinho no fim (se tiver gente)
   useEffect(() => {
     if (!kartLobby) return
     const iv = setInterval(() => {
@@ -501,13 +441,12 @@ export function Office3DView({
       if (!L || Date.now() < L.until) return
       if (L.role === 'host') {
         if (L.racers.length >= 2) launchKart()
-        else { sendKart('cancel', { race: L.race }); setKartLobby(null); openGames('kart', null) } // ninguém entrou: corre com os bots
-      } else if (Date.now() > L.until + 15000) setKartLobby(null) // anfitrião sumiu
+        else { sendKart('cancel', { race: L.race }); setKartLobby(null); openGames('kart', null) }
+      } else if (Date.now() > L.until + 15000) setKartLobby(null)
     }, 500)
     return () => clearInterval(iv)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kartLobby?.race])
-  // saiu da sala da call: o convite/lobby some
   useEffect(() => {
     const L = kartLobbyRef.current
     if (L && L.room !== myRoom) {
@@ -525,7 +464,6 @@ export function Office3DView({
   const focusChatRef = useRef(focusChat)
   focusChatRef.current = focusChat
 
-  // cria o motor uma vez
   useEffect(() => {
     if (!hostRef.current || !user) return
     const office = createOffice({
@@ -539,7 +477,7 @@ export function Office3DView({
         if (roomId && ch) {
           if (v.connectedChannelId !== roomId) void v.join(roomId, server.id)
           select(ch)
-        } else if (!roomId && !gameOpenRef.current && v.connectedChannelId && v.connectedServerId === server.id) v.leave() // jogando: nunca sai da call
+        } else if (!roomId && !gameOpenRef.current && v.connectedChannelId && v.connectedServerId === server.id) v.leave()
       },
       onZoneChange: (z) => setZone(z),
       onUseTv: (info) => {
@@ -565,11 +503,10 @@ export function Office3DView({
     })
     officeRef.current = office
     return () => {
-      try { saveLastPos(server.id, office.getPlayerState()) } catch { /* ok */ }
+      try { saveLastPos(server.id, office.getPlayerState()) } catch {  }
       office.dispose()
       officeRef.current = null
     }
-    // o motor lê o resto pelos efeitos abaixo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
 
@@ -582,7 +519,6 @@ export function Office3DView({
     })
   }, [server.name, officeCats, officeMembers, minigamesChannel])
 
-  // desenha a TV da sala da call (AO VIVO / a tela que você está assistindo)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const screenRoomRef = useRef<string | null>(null)
   const shownName = shown ? (shown.key === 'local' ? 'Você' : nameOfId(shown.key)) : ''
@@ -598,7 +534,7 @@ export function Office3DView({
       let v = videoRef.current
       if (!v) {
         v = document.createElement('video')
-        v.muted = true // o som da transmissão já toca pelo app (VoiceCallAudio)
+        v.muted = true
         v.playsInline = true
         v.autoplay = true
         videoRef.current = v
@@ -613,7 +549,6 @@ export function Office3DView({
     }
   }, [myRoom, sharers, shown, shownName, firstName])
 
-  // fechou o escritório: desliga o que a TV abriu e solta o vídeo
   useEffect(
     () => () => {
       for (const [key, q] of tvOpened.current) {
@@ -626,9 +561,6 @@ export function Office3DView({
     []
   )
 
-  // ---------- câmera da call em cima do boneco ----------
-  // Só quem está NA SUA call (o app já recebe esse vídeo pra tela da call);
-  // ninguém baixa vídeo a mais por causa do escritório.
   const camKeys = useRef(new Set<string>())
   useEffect(() => {
     const office = officeRef.current
@@ -643,7 +575,6 @@ export function Office3DView({
     camKeys.current = new Set(next.keys())
   }, [myRoom, voice.participants, voice.localCameraStream, user])
 
-  // ---------- jogo / som do soundboard embaixo do nome ----------
   const soundRef = useRef(new Map<string, { name: string; until: number }>())
   const [soundTick, setSoundTick] = useState(0)
   useEffect(() => {
@@ -674,7 +605,6 @@ export function Office3DView({
     officeRef.current?.setSpeaking(new Set(speakingKey ? speakingKey.split(',') : []))
   }, [speakingKey])
 
-  // ---------- visual: no aparelho na hora, no perfil com calma ----------
   const skinSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const firstSkinRef = useRef(true)
   useEffect(() => {
@@ -682,11 +612,9 @@ export function Office3DView({
     try {
       localStorage.setItem(SKIN_KEY, JSON.stringify({ ...skin, _at: Date.now() }))
     } catch {
-      // sem armazenamento
     }
     if (firstSkinRef.current) {
       firstSkinRef.current = false
-      // perfil ainda sem visual: sobe o que está no aparelho (1 vez)
       if (profile && !cleanSkin(profile.office_skin) && user) {
         void supabase.from('profiles').update({ office_skin: { ...skin, _at: Date.now() } }).eq('id', user.id)
       }
@@ -703,7 +631,6 @@ export function Office3DView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skin])
 
-  // pausa quando a janela some (economiza bateria)
   useEffect(() => {
     const onVis = () => officeRef.current?.setPaused(document.hidden)
     document.addEventListener('visibilitychange', onVis)
@@ -711,7 +638,6 @@ export function Office3DView({
   }, [])
 
   const overlayOpen = Boolean(tv || drawer || avatarMenu || dm || dmError || memberCard || createChannel || editChannel || moderate || eventsOpen || soundsOpen)
-  // Esc fecha o escritório; Enter abre o chat; 1–9 mandam emotes
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector('.o3d .bigmap:not([hidden]), .mg, .k3d, .b3d')) return
@@ -732,7 +658,6 @@ export function Office3DView({
     return () => removeEventListener('keydown', onKey)
   }, [overlayOpen, emoteOpen, peopleOpen, onClose])
 
-  // ---------- chat: canal de texto do setor onde você está ----------
   const sectorGroup = layout.find((g) => g.id === zone?.sector) ?? null
   useEffect(() => {
     if (pinnedChat) return
@@ -741,10 +666,8 @@ export function Office3DView({
   }, [sectorGroup, layout, pinnedChat, chatChannelId])
   const chatChannel = channels.find((c) => c.id === chatChannelId) ?? null
   const chatGroup = layout.find((g) => g.text.some((c) => c.id === chatChannelId)) ?? sectorGroup
-  // só pros balões e pro "Desafiar no chat" (o chat completo é o ChatArea)
   const { messages, sendMessage } = useMessages(chatChannelId, server.id)
 
-  // mensagem nova vira balão em cima de quem mandou
   const lastMsgId = useRef<string | null>(null)
   useEffect(() => {
     const last = messages[messages.length - 1]
@@ -755,14 +678,12 @@ export function Office3DView({
     lastMsgId.current = last.id
   }, [messages])
 
-  // chat aberto = canal lido (a bolinha some na placa e no clássico)
   const chatUnread = chatChannelId ? Boolean(unreadChannelIds?.has(chatChannelId)) : false
   useEffect(() => {
     if (!chatChannelId || chatMode === 'mini') return
     window.dispatchEvent(new CustomEvent('mv:mark-channel-read', { detail: { channelId: chatChannelId } }))
   }, [chatChannelId, chatMode, chatUnread, messages.length])
 
-  // bolinhas vermelhas nas placas dos setores
   useEffect(() => {
     const map: Record<string, number> = {}
     if (unreadChannelIds) for (const g of layout) {
@@ -772,13 +693,11 @@ export function Office3DView({
     officeRef.current?.setUnread(map)
   }, [unreadChannelIds, layout, chatChannelId, chatMode])
 
-  // resultado dos minigames → chat aberto (desafio pra galera)
   shareRef.current = async (text: string) => {
     if (!chatChannelId) return
     await sendMessage(text, null)
   }
 
-  // telão da recepção: você + amigos, últimos 7 dias
   useEffect(() => {
     const office = officeRef.current
     if (!office || usage === null) return
@@ -790,7 +709,6 @@ export function Office3DView({
     })
   }, [usage, user?.id])
 
-  // eventos do servidor no telão (alterna com o ranking)
   useEffect(() => {
     const now = Date.now()
     const list = events
@@ -868,7 +786,6 @@ export function Office3DView({
           <button onClick={voice.toggleMute} className={`h-8 px-3 rounded-lg text-[12.5px] font-semibold border ${voice.muted ? 'bg-rose-500/20 border-rose-400/50 text-rose-200' : 'bg-white/10 border-white/10 text-white'}`}>
             {voice.muted ? 'Mudo' : 'Mic'}
           </button>
-          {/* soundboard do servidor (os sons tocam pra todo mundo da call) */}
           <button onClick={() => setSoundsOpen(true)} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold border bg-white/10 border-white/10 text-white" title="Soundboard">
             🎵 Sons
           </button>
@@ -883,7 +800,6 @@ export function Office3DView({
           )}
           <button
             onClick={() => {
-              // sai da call na hora (não espera o boneco passar pela porta)
               voice.leave()
               officeRef.current?.leaveRoom()
             }}
@@ -909,7 +825,6 @@ export function Office3DView({
         </button>
       </div>
 
-      {/* emotes: botão + teclas 1–9 (R abre a roda) */}
       <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[31] flex flex-col items-center gap-2 max-sm:bottom-[calc(52%+1.5rem)]">
         {emoteOpen && (
           <div className="grid grid-cols-7 gap-1 p-1.5 rounded-2xl bg-black/75 border border-white/10 backdrop-blur" role="menu" aria-label="Emotes">
@@ -926,7 +841,6 @@ export function Office3DView({
         </button>
       </div>
 
-      {/* chat do setor: o mesmo chat do clássico (respostas, reações, anexos, GIF, figurinhas, menções…) */}
       {chatMode === 'mini' ? (
         <button
           onClick={() => setChatMode('open')}
@@ -994,7 +908,6 @@ export function Office3DView({
         />
       )}
 
-      {/* controles do clássico: microfone, fone, compartilhar tela, sair, configurações */}
       <div className="absolute right-4 bottom-4 z-[30] w-[300px] max-sm:hidden rounded-2xl bg-[#121016]/95 border border-white/10 backdrop-blur overflow-hidden flex flex-col">
         <UserPanel />
       </div>
@@ -1041,7 +954,6 @@ export function Office3DView({
         )
       })()}
 
-      {/* conversa privada sem sair do escritório */}
       {(dm || dmError) && (
         <div className="absolute right-4 top-16 z-[55] w-[420px] max-w-[calc(100%-2rem)] h-[min(560px,calc(100%-6rem))] rounded-2xl overflow-hidden border border-white/10 shadow-2xl flex flex-col bg-mv-main">
           <button onClick={() => { setDm(null); setDmError(null) }} className="absolute top-3 right-3 z-10 w-8 h-8 rounded-lg bg-black/50 text-white text-lg leading-none" aria-label="Fechar conversa">×</button>
@@ -1173,7 +1085,6 @@ function MenuBtn({ onClick, children }: { onClick: () => void; children: ReactNo
     </button>
   )
 }
-// transmissão em tela cheia (cinema). O som já toca pelo app; o vídeo vai mudo.
 function CinemaView({ stream, label, onClose }: { stream: MediaStream | null; label: string; onClose: () => void }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const vidRef = useRef<HTMLVideoElement>(null)
@@ -1191,7 +1102,6 @@ function CinemaView({ stream, label, onClose }: { stream: MediaStream | null; la
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
-  // a barra de cima some sozinha; mexeu o mouse, volta
   useEffect(() => {
     if (!bar) return
     const t = setTimeout(() => setBar(false), 2500)
@@ -1216,7 +1126,6 @@ const fmtHours = (sec: number) => {
   return h ? `${h}h ${String(m % 60).padStart(2, '0')}min` : `${m}min`
 }
 
-// telão da recepção em tamanho grande: ranking completo + eventos
 function BoardModal({ usage, meId, events, onClose }: {
   usage: UsageRow[] | null | 'erro'
   meId: string | null
@@ -1317,7 +1226,6 @@ function TvScreen({ image }: { image: HTMLCanvasElement | null }) {
   }, [image])
   return <canvas ref={ref} className="w-full aspect-[16/10] rounded-lg border-[6px] border-[#141317] bg-black" />
 }
-// ---------- Estúdio "Meu mamaco" ----------
 type StudioTab = 'skins' | 'cabeca' | 'costas' | 'pelo' | 'conquistas'
 const HEAD_ITEMS: { id: string; label: string; kind: 'hat' | 'glasses' | 'headset' | 'shades' }[] = [
   ...Object.entries(HAT_LABELS).map(([id, label]) => ({ id, label, kind: 'hat' as const })),
@@ -1403,7 +1311,6 @@ export function SkinStudio({ skin, name, stats = {}, onChange, onClose }: { skin
                   {HEAD_ITEMS.map((it) => {
                     const on = it.kind === 'hat' ? skin.hat === it.id || (it.id === 'cap' && skin.hat === 'capBack') : it.kind === 'shades' ? skin.shades === it.id : !!skin[it.kind]
                     const preview: OfficeSkin = it.kind === 'hat' ? { ...skin, hat: it.id } : it.kind === 'shades' ? { ...skin, shades: it.id, glasses: false } : { ...skin, [it.kind]: true, ...(it.kind === 'glasses' ? { shades: null } : {}) }
-                    // óculos de grau e óculos escuros/máscara não vão juntos
                     const toggle = () => onChange((s) => (it.kind === 'hat' ? { ...s, hat: on ? null : it.id } : it.kind === 'shades' ? { ...s, shades: on ? null : it.id, glasses: false } : { ...s, [it.kind]: !on, ...(it.kind === 'glasses' && !on ? { shades: null } : {}) }))
                     return card(it.id, it.label, on, preview, toggle, it.kind === 'hat' && !!current?.coversHead)
                   })}
@@ -1461,4 +1368,3 @@ export function SkinStudio({ skin, name, stats = {}, onChange, onClose }: { skin
     </div>
   )
 }
-

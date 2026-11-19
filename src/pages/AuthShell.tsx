@@ -2,10 +2,6 @@ import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react
 import { ANDROID_DOWNLOAD_URL, DESKTOP_DOWNLOAD_URL } from '../lib/config'
 import { isNativeMobileApp } from '../lib/platform'
 
-// Peças visuais compartilhadas pelas telas de entrada (login, cadastro,
-// esqueci/redefinir senha, 2FA, convite). Só apresentação — toda a lógica
-// (validação, rate limit, chamadas ao Supabase) continua em cada página.
-
 const HIGHLIGHTS: { title: string; text: string; icon: ReactNode }[] = [
   {
     title: 'Voz em alta qualidade',
@@ -39,7 +35,6 @@ const HIGHLIGHTS: { title: string; text: string; icon: ReactNode }[] = [
   },
 ]
 
-/** Moldura das telas de entrada: painel de marca à esquerda (desktop) e o cartão do formulário à direita. */
 export function AuthShell({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
     <div className="auth-backdrop relative flex min-h-full flex-col overflow-hidden">
@@ -79,7 +74,6 @@ export function AuthShell({ children, wide = false }: { children: ReactNode; wid
   )
 }
 
-/** Cabeçalho do cartão: logo (no mobile), título e subtítulo. */
 export function AuthHeader({ title, subtitle, icon }: { title: string; subtitle?: ReactNode; icon?: ReactNode }) {
   return (
     <div className="text-center lg:text-left">
@@ -198,11 +192,9 @@ type AuthFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'className'> &
   icon: ReactNode
   hint?: ReactNode
   labelAside?: ReactNode
-  /** Mostra o botão de mostrar/ocultar (só para type="password"). */
   revealable?: boolean
 }
 
-/** Campo com rótulo, ícone à esquerda e (opcional) botão de mostrar/ocultar senha. */
 export function AuthField({ label, icon, hint, labelAside, revealable, type = 'text', id, ...rest }: AuthFieldProps) {
   const autoId = useId()
   const inputId = id ?? autoId

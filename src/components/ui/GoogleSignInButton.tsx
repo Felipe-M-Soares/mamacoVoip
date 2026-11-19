@@ -3,34 +3,23 @@ import { useAuth } from '../../hooks/useAuth'
 import { GOOGLE_AUTH_RESULT_EVENT } from '../../context/AuthContext'
 import { isNativeMobileApp } from '../../lib/platform'
 
-// Botão compartilhado entre Login.tsx e Register.tsx — o mesmo fluxo do
-// Google serve tanto pra entrar quanto pra criar conta (se a pessoa
-// nunca tinha logado antes com aquele e-mail do Google, o Supabase cria
-// a conta na hora, sem precisar de confirmação por e-mail nenhuma —
-// é assim que esse botão também resolve o problema do limite de e-mail
-// do Supabase pra quem usar ele em vez do formulário de senha).
 export function GoogleSignInButton({
   label = 'Continuar com Google',
   beforeStart,
 }: {
   label?: string
-  // Checagem opcional antes de abrir o Google (ex.: no cadastro, exigir
-  // o aceite dos Termos também pra quem cria conta pelo Google). Devolve
-  // uma mensagem de erro pra barrar, ou null pra seguir.
   beforeStart?: () => string | null
 }) {
   const { signInWithGoogle } = useAuth()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // "aguardando" = o navegador já abriu e o app espera o retorno do Google
   const [waiting, setWaiting] = useState(false)
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => {
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
   }, [])
 
-  // Retorno do Google (app de PC/celular): para de girar e mostra o erro, se houver.
   useEffect(() => {
     function onResult(e: Event) {
       const err = (e as CustomEvent<{ error: string | null }>).detail?.error ?? null
@@ -58,18 +47,10 @@ export function GoogleSignInButton({
       return
     }
     setLoading(true)
-    // No app desktop, se a pessoa fechar o navegador sem terminar o
-    // login, nada volta pro app — sem isso o botão ficava travado em
-    // "Abrindo o Google..." até reiniciar o app.
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
     resetTimerRef.current = setTimeout(cancel, 180_000)
     const { error } = await signInWithGoogle()
     if (!error && (window.electronAPI || isNativeMobileApp())) setWaiting(true)
-    // No app desktop, um sucesso aqui só significa "o navegador abriu" —
-    // a sessão de verdade chega minutos depois pelo link de volta (ver
-    // AuthContext.tsx), então não tem "loading" pra desligar num sucesso
-    // real. No navegador, um sucesso já REDIRECIONA a página inteira, então
-    // esse setLoading(false) só roda mesmo se der erro.
     if (error) {
       setError(error)
       setLoading(false)

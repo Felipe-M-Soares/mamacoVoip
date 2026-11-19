@@ -25,7 +25,7 @@ function readAuthRedirectType(): string | null {
 export const AUTH_REDIRECT_TYPE = readAuthRedirectType()
 
 const authStorage = Capacitor.isNativePlatform()
-  ? createNativeAuthStorage(() => import('@capacitor/preferences').then((m) => m.Preferences))
+  ? createNativeAuthStorage(() => import('@capacitor/preferences').then((m) => ({ prefs: m.Preferences })))
   : createAuthStorage(typeof window !== 'undefined' ? (window.electronAPI?.secureStorage ?? null) : null)
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {

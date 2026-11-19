@@ -102,15 +102,17 @@ export interface NativePrefs {
   remove: (o: { key: string }) => Promise<void>
 }
 
-export function createNativeAuthStorage(load: () => Promise<NativePrefs>): AsyncAuthStorage {
-  let prefsPromise: Promise<NativePrefs | null> | null = null
-  const prefs = () => {
-    if (!prefsPromise) prefsPromise = load().catch(() => null)
-    return prefsPromise
+export function createNativeAuthStorage(load: () => Promise<{ prefs: NativePrefs }>): AsyncAuthStorage {
+  let boxPromise: Promise<{ prefs: NativePrefs } | null> | null = null
+  const prefs = async (): Promise<{ prefs: NativePrefs } | null> => {
+    if (!boxPromise) boxPromise = load().catch(() => null)
+    const box = await boxPromise
+    return box?.prefs ? box : null
   }
   return {
     async getItem(key) {
-      const p = await prefs()
+      const box = await prefs()
+      const p = box?.prefs
       if (!p) return localGet(key)
       try {
         const { value } = await p.get({ key })
@@ -129,7 +131,8 @@ export function createNativeAuthStorage(load: () => Promise<NativePrefs>): Async
       return legacy
     },
     async setItem(key, value) {
-      const p = await prefs()
+      const box = await prefs()
+      const p = box?.prefs
       if (!p) return localSet(key, value)
       try {
         await p.set({ key, value })
@@ -140,7 +143,8 @@ export function createNativeAuthStorage(load: () => Promise<NativePrefs>): Async
     },
     async removeItem(key) {
       localRemove(key)
-      const p = await prefs()
+      const box = await prefs()
+      const p = box?.prefs
       if (!p) return
       try {
         await p.remove({ key })

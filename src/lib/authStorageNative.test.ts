@@ -15,7 +15,7 @@ describe('createNativeAuthStorage', () => {
   beforeEach(() => localStorage.clear())
   it('grava e lê no armazenamento nativo', async () => {
     const p = fakePrefs()
-    const s = createNativeAuthStorage(async () => p)
+    const s = createNativeAuthStorage(async () => ({ prefs: p }))
     await s.setItem('sb-x-auth-token', 'sessao')
     expect(p.data.get('sb-x-auth-token')).toBe('sessao')
     expect(await s.getItem('sb-x-auth-token')).toBe('sessao')
@@ -25,10 +25,22 @@ describe('createNativeAuthStorage', () => {
   it('migra a sessão antiga do localStorage sem deslogar', async () => {
     localStorage.setItem('sb-x-auth-token', 'antiga')
     const p = fakePrefs()
-    const s = createNativeAuthStorage(async () => p)
+    const s = createNativeAuthStorage(async () => ({ prefs: p }))
     expect(await s.getItem('sb-x-auth-token')).toBe('antiga')
     expect(p.data.get('sb-x-auth-token')).toBe('antiga')
     expect(localStorage.getItem('sb-x-auth-token')).toBeNull()
+  })
+  it('aceita plugin que recusa .then() como os do Capacitor', async () => {
+    const p = fakePrefs()
+    const proxy = new Proxy(p, {
+      get(target, prop) {
+        if (prop === 'then') return () => Promise.reject(new Error('"Preferences.then()" is not implemented on android'))
+        return Reflect.get(target, prop)
+      },
+    })
+    const s = createNativeAuthStorage(() => Promise.resolve({ prefs: proxy }))
+    await s.setItem('sb-x-auth-token', 'ok')
+    expect(await s.getItem('sb-x-auth-token')).toBe('ok')
   })
   it('sem plugin cai no localStorage', async () => {
     const s = createNativeAuthStorage(async () => {

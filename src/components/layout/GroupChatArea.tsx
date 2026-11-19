@@ -16,6 +16,7 @@ import type { GroupMessage } from '../../types/database'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { MoreIcon, ReportIcon } from '../ui/icons'
 import { lazyComponent } from '../modals/lazyModal'
+import { useStartCall } from '../../hooks/useStartCall'
 import { ChatImage, ChatVideo } from '../chat/ChatMedia'
 
 const ReportModal = lazyComponent(() => import('../modals/ReportModal').then((m) => m.ReportModal))
@@ -57,6 +58,7 @@ export function GroupChatArea({
   const title = group.name || otherMembers.map((m) => m.display_name || m.username).join(', ')
   const isThisCall = voice.connectedChannelId === group.id
   const isInAnotherCall = Boolean(voice.connectedChannelId) && !isThisCall
+  const startCall = useStartCall(group.id, title, user?.id, sendMessage)
 
   const lastMessage = messages[messages.length - 1]
   const { containerRef, contentRef, onScroll, showJumpToLatest, scrollToBottom } = useChatScroll({
@@ -141,7 +143,7 @@ export function GroupChatArea({
           </button>
         ) : (
           <button
-            onClick={() => voice.join(group.id, null, { displayName: title })}
+            onClick={() => void startCall()}
             disabled={isInAnotherCall || voice.connecting}
             title={isInAnotherCall ? 'Você já está em outra chamada' : 'Iniciar chamada de voz'}
             className="h-9 px-3.5 rounded-[10px] text-sm font-semibold bg-mv-green/15 text-mv-green border border-mv-green/25 hover:bg-mv-green hover:text-white transition-colors disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 shrink-0"

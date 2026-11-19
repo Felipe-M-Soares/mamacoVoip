@@ -86,6 +86,8 @@ Deno.serve(async (req) => {
   let text = ''
   let data: Record<string, string> = {}
   let tag = ''
+  let isCall = false
+  const CALL_PREFIX = '📞 Iniciou uma chamada'
 
   const authorName = async (authorId: string) => {
     const { data: p } = await supabase.from('profiles').select('display_name, username').eq('id', authorId).maybeSingle()
@@ -112,6 +114,11 @@ Deno.serve(async (req) => {
     recipients = blocked.has(other) ? [] : [other]
     title = await authorName(m.author_id)
     text = preview(m.content)
+    if ((m.content ?? '').startsWith(CALL_PREFIX)) {
+      isCall = true
+      title = `📞 Chamada de ${title}`
+      text = 'Toque para abrir a conversa e atender'
+    }
     data = { kind: 'dm', id: m.conversation_id }
     tag = `dm-${m.conversation_id}`
   } else if (table === 'group_messages') {
@@ -127,6 +134,11 @@ Deno.serve(async (req) => {
     const who = await authorName(m.author_id)
     title = (g?.name as string) || 'Grupo'
     text = `${who}: ${preview(m.content)}`
+    if ((m.content ?? '').startsWith(CALL_PREFIX)) {
+      isCall = true
+      title = `📞 Chamada em ${title}`
+      text = `${who} iniciou uma chamada. Toque para atender`
+    }
     data = { kind: 'group', id: m.group_id }
     tag = `group-${m.group_id}`
   } else {
@@ -166,8 +178,14 @@ Deno.serve(async (req) => {
   const { data: tokens } = await supabase.from('push_tokens').select('token').in('user_id', recipients)
   if (!tokens?.length) return json({ sent: 0 })
 
-  const bearer = await accessToken(sa)
+  let bearer: string
+  try {
+    bearer = await accessToken(sa)
+  } catch (e) {
+    return json({ error: `login no Firebase falhou: ${e instanceof Error ? e.message : String(e)}` }, 500)
+  }
   let sent = 0
+  let firstError = ''
   const dead: string[] = []
   await Promise.all(
     tokens.map(async ({ token }) => {
@@ -181,7 +199,7 @@ Deno.serve(async (req) => {
             data,
             android: {
               priority: 'HIGH',
-              notification: { channel_id: 'mensagens', tag, icon: 'ic_stat_mamaco', color: '#E11D48' },
+              notification: { channel_id: isCall ? 'chamadas' : 'mensagens', tag, icon: 'ic_stat_mamaco', color: '#E11D48' },
             },
           },
         }),
@@ -193,9 +211,12 @@ Deno.serve(async (req) => {
       const err = (await res.json().catch(() => ({}))) as Json
       const code = JSON.stringify(err)
       if (res.status === 404 || code.includes('UNREGISTERED') || code.includes('INVALID_ARGUMENT')) dead.push(token as string)
-      else console.error('FCM falhou', res.status, code.slice(0, 300))
+      else {
+        console.error('FCM falhou', res.status, code.slice(0, 300))
+        if (!firstError) firstError = `${res.status} ${code.slice(0, 200)}`
+      }
     })
   )
   if (dead.length) await supabase.from('push_tokens').delete().in('token', dead)
-  return json({ sent, removed: dead.length })
+  return json({ sent, removed: dead.length, ...(firstError ? { error: firstError } : {}) })
 })

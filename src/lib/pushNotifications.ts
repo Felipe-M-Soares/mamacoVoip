@@ -46,6 +46,14 @@ export async function initPushNotifications(): Promise<void> {
       visibility: 0,
       vibration: true,
     }).catch(() => {})
+    await PushNotifications.createChannel({
+      id: 'chamadas',
+      name: 'Chamadas',
+      description: 'Quando alguém te liga',
+      importance: 5,
+      visibility: 1,
+      vibration: true,
+    }).catch(() => {})
 
     await PushNotifications.addListener('registration', ({ value }) => {
       currentToken = value

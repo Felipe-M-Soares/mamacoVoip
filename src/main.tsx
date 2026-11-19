@@ -59,7 +59,9 @@ window.addEventListener('unhandledrejection', (e) => {
 
 const hasSupabaseConfig = Boolean(import.meta.env.VITE_SUPABASE_URL) && Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY)
 
-if (!hasSupabaseConfig) {
+if ((window as { __mvOldWebView?: boolean }).__mvOldWebView) {
+  detachStartupErrorHandlers()
+} else if (!hasSupabaseConfig) {
   showFatalError(
     'Configuração ausente: as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY não foram definidas na hora de gerar este build.',
   )

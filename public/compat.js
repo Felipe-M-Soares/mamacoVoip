@@ -1,4 +1,15 @@
 (function () {
+  try {
+    var cap = window.Capacitor
+    var native = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform())
+    if (native) {
+      document.documentElement.classList.add('mv-native')
+      var vp = document.querySelector('meta[name=viewport]')
+      if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1.0')
+    }
+  } catch {
+    void 0
+  }
   var MIN_CHROME = 111
   var ua = navigator.userAgent || ''
   var isAndroid = /Android/i.test(ua)

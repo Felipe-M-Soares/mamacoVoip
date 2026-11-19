@@ -194,13 +194,10 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
                       aria-current={active ? 'page' : undefined}
                       className={`relative shrink-0 flex items-center gap-2.5 whitespace-nowrap text-left px-2.5 py-[7px] rounded-lg text-[14px] font-medium transition-colors ${
                         active
-                          ? 'bg-white/[0.08] text-white'
+                          ? 'mv-row-active'
                           : 'text-mv-muted hover:bg-white/[0.04] hover:text-mv-text'
                       }`}
                     >
-                      {active && (
-                        <span aria-hidden="true" className="hidden md:block absolute -left-3 top-1.5 bottom-1.5 w-1 rounded-r-full bg-brand-gradient" />
-                      )}
                       <span className={active ? 'text-mv-accent' : ''}>
                         <NavIcon tab={t.id} />
                       </span>
@@ -306,7 +303,7 @@ function gradientFor(seed: string) {
   let hash = 0
   for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash)
   const hue = Math.abs(hash) % 360
-  return `linear-gradient(135deg, hsl(${hue} 70% 40%), hsl(${(hue + 45) % 360} 65% 22%))`
+  return `linear-gradient(135deg, hsl(${hue} 55% 24%), hsl(${(hue + 45) % 360} 45% 10%))`
 }
 
 function AccountTab({ email, onSignOut }: { email: string | undefined; onSignOut: () => void }) {

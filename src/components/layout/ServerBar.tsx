@@ -1,4 +1,4 @@
-import { identityGradient } from '../../lib/identityColor'
+import { identityTint } from '../../lib/identityColor'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useServers } from '../../hooks/useServers'
@@ -58,7 +58,7 @@ function ServerIcon({
     .join('')
     .toUpperCase()
 
-  const gradient = identityGradient(name)
+  const tint = identityTint(name)
 
   return (
     <div
@@ -74,20 +74,19 @@ function ServerIcon({
     >
       <span
         className={`absolute -left-3 top-1/2 -translate-y-1/2 w-1 rounded-r-full transition-all duration-150 ${
-          active ? 'h-9 bg-brand-gradient' : unread ? 'h-2 bg-mv-text' : 'h-0 bg-mv-text group-hover:h-4'
+          active ? 'h-9 bg-mv-accent shadow-[0_0_10px_var(--color-mv-accent)]' : unread ? 'h-2 bg-mv-text' : 'h-0 bg-mv-text group-hover:h-4'
         }`}
       />
+      <span className={`mv-tile-frame ${active ? 'is-active' : ''} ${isDragOver ? 'is-drag' : ''} ${variant === 'add' ? 'is-add' : ''}`}>
       <button
         onClick={onClick}
         title={name}
-        style={!iconUrl && variant === 'server' ? { background: gradient } : undefined}
+        style={!iconUrl && variant === 'server' ? tint : undefined}
         aria-label={name}
         aria-current={active ? 'page' : undefined}
-        className={`w-12 h-12 flex items-center justify-center font-display font-semibold text-white text-[15px] transition-all duration-150 overflow-hidden
-          ${active ? 'rounded-[16px] ring-2 ring-mv-accent/70 ring-offset-2 ring-offset-mv-canvas' : 'rounded-[18px] hover:rounded-[14px] hover:-translate-y-px'}
-          ${variant === 'server' && !iconUrl ? (active ? '' : 'saturate-[.85] hover:saturate-100') : variant === 'add' ? '' : active ? 'bg-mv-raised' : 'bg-mv-raised/70 hover:bg-mv-raised'}
-          ${variant === 'add' ? 'text-2xl font-light text-mv-muted border border-dashed border-white/15 hover:border-mv-green hover:text-mv-green hover:bg-mv-green/10' : ''}
-          ${isDragOver ? 'ring-2 ring-mv-accent' : ''}
+        className={`mv-tile w-[46px] h-[46px] flex items-center justify-center font-display font-bold text-[15px] transition-all duration-150 overflow-hidden
+          ${variant === 'server' && !iconUrl ? '' : variant === 'add' ? 'bg-mv-canvas' : 'bg-mv-dark'}
+          ${variant === 'add' ? 'text-2xl font-light text-mv-muted hover:text-mv-accent' : ''}
           ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}
         `}
       >
@@ -101,6 +100,7 @@ function ServerIcon({
           initials
         )}
       </button>
+      </span>
       {badge ? (
         <span
           className="absolute -bottom-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-rose-500 text-white text-[11px] font-bold leading-none flex items-center justify-center ring-[3px] ring-mv-canvas pointer-events-none animate-pop-in"

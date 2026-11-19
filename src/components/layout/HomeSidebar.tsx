@@ -101,7 +101,7 @@ export function HomeSidebar({
   const rowClass = (active: boolean, unread = false) =>
     `group relative w-full flex items-center gap-2.5 px-2 py-[6px] rounded-lg text-[14px] transition-colors ${
       active
-        ? 'bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]'
+        ? 'mv-row-active'
         : unread
           ? 'text-white hover:bg-white/[0.04]'
           : 'text-mv-muted hover:bg-white/[0.04] hover:text-mv-text'

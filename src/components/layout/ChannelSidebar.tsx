@@ -378,8 +378,8 @@ function ChannelRow({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onContextMenu={onContextMenu}
-      className={`group relative flex items-center gap-2 px-2.5 py-[7px] rounded-lg text-[14px] font-medium transition-colors ${isOwner ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
-        ${active ? 'bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]' : unread ? 'text-white hover:bg-white/[0.04]' : 'text-mv-muted hover:bg-white/[0.04] hover:text-mv-text'}
+      className={`group relative flex items-center gap-2 px-2.5 py-[7px] rounded-lg text-[14px] font-medium transition-colors ${isVoice && voice.connectedChannelId === channel.id ? 'mv-voice-live' : ''} ${isOwner ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
+        ${active ? 'mv-row-active' : unread ? 'text-white hover:bg-white/[0.04]' : 'text-mv-muted hover:bg-white/[0.04] hover:text-mv-text'}
         ${isDragOver ? 'ring-2 ring-mv-accent' : ''}
       `}
       onClick={onSelect}

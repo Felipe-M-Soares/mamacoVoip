@@ -21,3 +21,12 @@ export function identityGradient(seed: string): string {
   const [a, b] = PALETTE[hashString(seed) % PALETTE.length]
   return `linear-gradient(135deg, ${a}, ${b})`
 }
+
+export function identityTint(seed: string): { background: string; color: string; boxShadow: string } {
+  const [a, b] = PALETTE[hashString(seed) % PALETTE.length]
+  return {
+    background: `linear-gradient(145deg, color-mix(in oklab, ${a} 34%, #0b0b10), color-mix(in oklab, ${b} 16%, #0b0b10))`,
+    color: `color-mix(in oklab, ${b} 70%, white)`,
+    boxShadow: `inset 0 0 0 1.5px color-mix(in oklab, ${a} 55%, transparent)`,
+  }
+}

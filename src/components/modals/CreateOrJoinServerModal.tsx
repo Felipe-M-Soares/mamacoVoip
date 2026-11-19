@@ -88,7 +88,7 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
 
   const tabClass = (active: boolean) =>
     `flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
-      active ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]' : 'text-mv-muted hover:text-mv-text'
+      active ? 'mv-seg-active' : 'text-mv-muted hover:text-mv-text'
     }`
 
   return (

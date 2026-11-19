@@ -142,7 +142,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={`flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
             value === o.value
-              ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
+              ? 'mv-seg-active'
               : 'text-mv-muted hover:text-mv-text'
           }`}
         >

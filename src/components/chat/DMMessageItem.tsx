@@ -68,7 +68,7 @@ function DMMessageItemImpl({
   }
 
   return (
-    <div className={`group relative px-4 py-0.5 hover:bg-white/[0.025] transition-colors ${showHeader ? 'mt-3 pt-1.5' : ''}`}>
+    <div className={`group relative px-4 py-0.5 mv-msg transition-colors ${showHeader ? 'mt-3 pt-1.5' : ''}`}>
       <div className="hidden group-hover:flex group-focus-within:flex absolute -top-4 right-4 surface-elevated !shadow-[0_8px_24px_-8px_rgb(0_0_0/0.6)] rounded-lg p-0.5 gap-0.5 z-10">
         <button
           title="Responder"

@@ -657,14 +657,11 @@ function MainLayoutInner() {
         </>
       )}
 
-      {!activeServer && !loadingServers && ownProfile && (
+      {!activeServer && !loadingServers && ownProfile && homeView === 'conversation' && activeConversation && (
         <ProfileSidePanel
-          profile={homeView === 'conversation' && activeConversation ? activeConversation.otherProfile : ownProfile}
-          isSelf={!(homeView === 'conversation' && activeConversation)}
-          onViewFullProfile={() => {
-            if (homeView === 'conversation' && activeConversation) setViewingProfile(activeConversation.otherProfile)
-            else setShowEditProfile(true)
-          }}
+          profile={activeConversation.otherProfile}
+          isSelf={false}
+          onViewFullProfile={() => setViewingProfile(activeConversation.otherProfile)}
         />
       )}
 

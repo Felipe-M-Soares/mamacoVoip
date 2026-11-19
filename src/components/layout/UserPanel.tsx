@@ -285,7 +285,7 @@ export function UserPanel() {
 
   return (
     <div data-tour="user-panel" className="shrink-0 p-2 bg-mv-canvas">
-      <div className="rounded-2xl bg-[var(--color-elevated)] border border-[var(--color-line)] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.7)]">
+      <div className="mv-brackets rounded-2xl bg-[var(--color-elevated)] border border-[var(--color-line)] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.7)]">
       <div
         title={pingLabel}
         className="h-7 px-3 flex items-center gap-1.5 border-b border-[var(--color-line)]"

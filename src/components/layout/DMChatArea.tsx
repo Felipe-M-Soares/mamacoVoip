@@ -88,7 +88,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
 
   return (
     <section className="flex-1 flex flex-col min-w-0 bg-mv-main border-t border-l border-[var(--color-line)]">
-      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-2 border-b border-[var(--color-line)] shrink-0">
+      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-2 border-b border-[var(--color-line)] shrink-0 mv-hud-header">
         <Avatar name={otherProfile.username} avatarUrl={otherProfile.avatar_url} status={otherProfile.status} userId={otherProfile.id} size={32} />
         <div className="min-w-0 flex flex-col leading-tight ml-0.5">
           <h2 className="font-display font-semibold text-[15px] text-white truncate">{otherProfile.display_name || otherProfile.username}</h2>

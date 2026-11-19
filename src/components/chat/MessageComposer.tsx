@@ -410,7 +410,7 @@ export function MessageComposer({
         </div>
       )}
 
-      <div className="rounded-2xl bg-mv-raised/60 border border-[var(--color-line)] transition-[border-color,box-shadow] focus-within:border-mv-accent/50 focus-within:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-mv-accent)_14%,transparent)]">
+      <div className="mv-brackets rounded-2xl bg-mv-raised/60 border border-[var(--color-line)] transition-[border-color,box-shadow] focus-within:border-mv-accent/50 focus-within:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-mv-accent)_14%,transparent)]">
       {replyingTo && (
         <div className="flex items-center justify-between gap-2 border-b border-[var(--color-line)] pl-4 pr-2 py-1.5 text-xs">
           <span className="flex items-center gap-1.5 text-mv-muted min-w-0">

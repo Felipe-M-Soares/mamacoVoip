@@ -61,7 +61,7 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
 
   return (
     <section className="flex-1 flex flex-col min-w-0 bg-mv-main border-t border-l border-[var(--color-line)]">
-      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-4 border-b border-[var(--color-line)] shrink-0 min-w-0">
+      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-4 border-b border-[var(--color-line)] shrink-0 mv-hud-header min-w-0">
         <div className="max-sm:hidden flex items-center gap-2.5 text-white shrink-0">
           <span className="w-8 h-8 rounded-lg bg-white/[0.05] border border-[var(--color-line)] flex items-center justify-center" aria-hidden="true">
             <MembersIcon className="w-[18px] h-[18px] text-mv-muted" aria-hidden />
@@ -82,7 +82,7 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
               onClick={() => setTab(t.id)}
               className={`h-7 px-3 max-sm:px-2.5 rounded-lg text-[13px] max-sm:text-[12.5px] font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
                 tab === t.id
-                  ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
+                  ? 'mv-seg-active'
                   : 'text-mv-muted hover:text-mv-text hover:bg-white/[0.04]'
               }`}
             >
@@ -95,7 +95,7 @@ export function FriendsPanel({ onOpenConversation }: { onOpenConversation: (conv
 
       <div className="flex-1 overflow-y-auto">
       <div className="p-4 sm:p-6 max-w-4xl">
-        <div className="rounded-2xl border border-[var(--color-line)] bg-white/[0.02] p-4 sm:p-5 mb-6">
+        <div className="mv-brackets rounded-2xl border border-[var(--color-line)] bg-white/[0.02] p-4 sm:p-5 mb-6">
           <div className="flex items-start gap-3 mb-3">
             <span className="w-9 h-9 rounded-xl bg-brand-gradient flex items-center justify-center shrink-0" aria-hidden="true">
               <AddFriendIcon className="w-[18px] h-[18px] text-white" aria-hidden />

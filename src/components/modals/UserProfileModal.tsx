@@ -15,7 +15,7 @@ function gradientFor(seed: string) {
   let hash = 0
   for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash)
   const hue = Math.abs(hash) % 360
-  return `linear-gradient(135deg, hsl(${hue} 70% 40%), hsl(${(hue + 45) % 360} 65% 22%))`
+  return `linear-gradient(135deg, hsl(${hue} 55% 24%), hsl(${(hue + 45) % 360} 45% 10%))`
 }
 
 export function UserProfileModal({

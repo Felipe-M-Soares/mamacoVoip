@@ -179,7 +179,7 @@ export function ChatArea({
 
   return (
     <section className="flex-1 flex flex-col min-w-0 bg-mv-main border-t border-l border-[var(--color-line)]">
-      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-2 border-b border-[var(--color-line)] shrink-0">
+      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-2 border-b border-[var(--color-line)] shrink-0 mv-hud-header">
         <span className="w-8 h-8 rounded-lg bg-white/[0.05] border border-[var(--color-line)] flex items-center justify-center shrink-0 text-mv-muted" aria-hidden="true">
           <TextChannelIcon className="w-[18px] h-[18px]" aria-hidden />
         </span>

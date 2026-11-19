@@ -1,64 +1,38 @@
 import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { ANDROID_DOWNLOAD_URL, DESKTOP_DOWNLOAD_URL } from '../lib/config'
 import { isNativeMobileApp } from '../lib/platform'
+import { GamepadIcon, MicIcon, ScreenShareIcon } from '../components/ui/hudIcons'
 
 const HIGHLIGHTS: { title: string; text: string; icon: ReactNode }[] = [
-  {
-    title: 'Voz em alta qualidade',
-    text: 'Áudio limpo, com supressão de ruído e baixa latência.',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-        <rect x="9" y="2" width="6" height="12" rx="3" />
-        <path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Compartilhamento de tela',
-    text: 'Mostre o jogo ou a tela inteira pra galera, com áudio.',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-        <rect x="2" y="4" width="20" height="13" rx="2" />
-        <path d="M8 21h8M12 17v4M12 8v5M9.5 10.5 12 8l2.5 2.5" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Servidores e amigos',
-    text: 'Canais de texto e voz, mensagens diretas e chamadas.',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-        <circle cx="9" cy="8" r="3.5" />
-        <path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5" />
-      </svg>
-    ),
-  },
+  { title: 'Voz em alta qualidade', text: 'Supressão de ruído e baixa latência', icon: <MicIcon className="h-5 w-5" aria-hidden /> },
+  { title: 'Transmita seu jogo', text: 'Tela inteira ou só a janela, com áudio', icon: <ScreenShareIcon className="h-5 w-5" aria-hidden /> },
+  { title: 'Escritório 3D e minigames', text: 'Sua galera num lugar só', icon: <GamepadIcon className="h-5 w-5" aria-hidden /> },
 ]
 
 export function AuthShell({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
-    <div className="auth-backdrop relative flex min-h-full flex-col overflow-hidden">
-      <div aria-hidden className="auth-grid pointer-events-none absolute inset-0" />
-      <div className="relative mx-auto flex w-full max-w-6xl flex-1 items-center justify-center gap-12 px-4 py-8 sm:px-6 lg:justify-between lg:px-10">
-        <section className="hidden max-w-md flex-1 lg:block animate-fade-slide-in" aria-label="Sobre o Mamacos Voip">
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="" className="h-12 w-12 rounded-2xl object-cover ring-1 ring-[var(--color-line-strong)]" />
-            <span className="font-display text-lg font-semibold text-white">Mamacos Voip</span>
+    <div className="mv-auth relative flex min-h-full flex-col overflow-hidden">
+      <div aria-hidden className="mv-auth-floor pointer-events-none absolute inset-x-0 bottom-0" />
+      <div aria-hidden className="mv-auth-glow pointer-events-none absolute inset-0" />
+      <div className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center gap-8 px-4 py-8 sm:px-6 lg:flex-row lg:justify-between lg:gap-12 lg:px-10">
+        <section className="flex w-full max-w-md flex-col items-center text-center lg:items-start lg:text-left animate-fade-slide-in" aria-label="Sobre o Mamacos Voip">
+          <div className="mv-auth-logo">
+            <img src="/logo.png" alt="" className="h-full w-full object-cover" />
           </div>
-          <h2 className="mt-8 font-display text-[40px] font-bold leading-[1.1] text-white">
-            Sua galera, <span className="text-gradient">sempre a um clique.</span>
+          <p className="mt-6 hidden font-display text-[12px] font-semibold uppercase tracking-[0.3em] text-mv-muted lg:block">Lobby</p>
+          <h2 className="mv-auth-title mt-2 font-display font-bold leading-[0.95] text-white">
+            MAMACOS
+            <span className="block">VOIP</span>
           </h2>
-          <p className="mt-4 text-[15px] leading-relaxed text-mv-muted">
-            Converse por voz, compartilhe a tela e organize seus grupos em servidores — tudo num lugar só.
+          <p className="mt-4 max-w-sm text-[15px] leading-relaxed text-mv-muted max-lg:hidden">
+            Voz, tela e a galera inteira no mesmo lobby. Entra que a partida já vai começar.
           </p>
-          <ul className="mt-8 space-y-3">
+          <ul className="mt-8 hidden w-full space-y-2.5 lg:block">
             {HIGHLIGHTS.map((h) => (
-              <li key={h.title} className="flex items-start gap-3.5 rounded-xl border border-[var(--color-line)] bg-white/[0.03] p-3.5">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25">
-                  {h.icon}
-                </span>
+              <li key={h.title} className="mv-auth-perk">
+                <span className="mv-auth-perk-icon">{h.icon}</span>
                 <span className="min-w-0">
-                  <span className="block text-[14px] font-semibold text-white">{h.title}</span>
+                  <span className="block font-display text-[14px] font-semibold tracking-wide text-white">{h.title}</span>
                   <span className="mt-0.5 block text-[13px] text-mv-muted">{h.text}</span>
                 </span>
               </li>
@@ -67,7 +41,9 @@ export function AuthShell({ children, wide = false }: { children: ReactNode; wid
         </section>
 
         <div className={`w-full ${wide ? 'max-w-[460px]' : 'max-w-[420px]'} shrink-0`}>
-          <div className="surface-elevated animate-pop-in rounded-2xl p-6 sm:p-8">{children}</div>
+          <div className="mv-auth-card animate-pop-in">
+            <div className="mv-auth-card-inner p-6 sm:p-8">{children}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -78,13 +54,11 @@ export function AuthHeader({ title, subtitle, icon }: { title: string; subtitle?
   return (
     <div className="text-center lg:text-left">
       {icon ? (
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 lg:mx-0 [&_svg]:h-6 [&_svg]:w-6">
+        <div className="mv-auth-perk-icon mx-auto mb-4 !h-12 !w-12 lg:mx-0 [&_svg]:h-6 [&_svg]:w-6">
           {icon}
         </div>
-      ) : (
-        <img src="/logo.png" alt="Mamacos Voip" className="mx-auto mb-4 h-14 w-14 rounded-2xl object-cover ring-1 ring-[var(--color-line-strong)] lg:hidden" />
-      )}
-      <h1 className="font-display text-2xl font-semibold text-white">{title}</h1>
+      ) : null}
+      <h1 className="font-display text-[26px] font-bold tracking-wide text-white">{title}</h1>
       {subtitle && <p className="mt-1.5 text-[14px] text-mv-muted">{subtitle}</p>}
     </div>
   )
@@ -127,28 +101,27 @@ export function AuthDivider() {
 export function DesktopDownloadChip() {
   if (window.electronAPI?.isElectron || isNativeMobileApp()) return null
   return (
-    <div className="mt-6 flex justify-center gap-2 flex-wrap">
-      <a
-        href={DESKTOP_DOWNLOAD_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="chip !px-3 !py-1.5 !text-[12px] transition-colors hover:border-[var(--color-line-strong)] hover:bg-white/[0.08] hover:text-white"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden>
-          <path d="M12 3v12M7 10l5 5 5-5M4 20h16" />
+    <div className="mt-6 flex flex-wrap justify-center gap-2.5">
+      <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="mv-dl">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="2.5" y="3.5" width="19" height="13" rx="1.8" fill="currentColor" fillOpacity="0.15" />
+          <path d="M8 20.5h8M12 16.5v4M12 6.8v6M9.4 10.4 12 13l2.6-2.6" />
         </svg>
-        Baixar o app pra PC
+        <span className="text-left">
+          <small>Baixar para</small>
+          <strong>Windows</strong>
+        </span>
       </a>
-      <a
-        href={ANDROID_DOWNLOAD_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="chip !px-3 !py-1.5 !text-[12px] transition-colors hover:border-[var(--color-line-strong)] hover:bg-white/[0.08] hover:text-white"
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5" aria-hidden>
-          <path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.66-.38l-1.86 3.22a11.4 11.4 0 0 0-9.84 0L5.22 5.92a.38.38 0 0 0-.66.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z" />
+      <a href={ANDROID_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="mv-dl">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M5 16.5a7 7 0 0 1 14 0v1.8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z" fill="currentColor" fillOpacity="0.15" />
+          <path d="M5 16.5a7 7 0 0 1 14 0v1.8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1zM7.6 7.6 6 5M16.4 7.6 18 5" />
+          <path d="M9.2 13.2h.01M14.8 13.2h.01" strokeWidth="2.6" />
         </svg>
-        Android
+        <span className="text-left">
+          <small>Baixar para</small>
+          <strong>Android</strong>
+        </span>
       </a>
     </div>
   )
@@ -218,7 +191,7 @@ export function AuthField({ label, icon, hint, labelAside, revealable, type = 't
           id={inputId}
           type={effectiveType}
           aria-describedby={hintId}
-          className={`h-11 w-full bg-mv-canvas pl-10 ${revealable ? 'pr-11' : 'pr-3'} text-[15px] text-mv-text outline-none`}
+          className={`mv-auth-input h-12 w-full pl-10 ${revealable ? 'pr-11' : 'pr-3'} text-[15px] text-mv-text outline-none`}
           {...rest}
         />
         {revealable && type === 'password' && (

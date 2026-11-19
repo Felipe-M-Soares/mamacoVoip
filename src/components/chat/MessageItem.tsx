@@ -191,7 +191,7 @@ function MessageItemImpl({
       className={`group relative px-4 py-0.5 transition-colors animate-fade-slide-in ${showHeader ? 'mt-3 pt-1.5' : ''} ${
         mentionsMe
           ? 'bg-mv-accent/[0.07] hover:bg-mv-accent/[0.1] shadow-[inset_2px_0_0_0_var(--color-mv-accent)]'
-          : 'hover:bg-white/[0.025]'
+          : 'mv-msg'
       }`}
       onMouseLeave={() => setShowReactionPicker(false)}
       onContextMenu={openMenu}

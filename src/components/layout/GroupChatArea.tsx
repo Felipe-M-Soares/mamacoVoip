@@ -121,7 +121,7 @@ export function GroupChatArea({
 
   return (
     <section className="flex-1 flex flex-col min-w-0 bg-mv-main border-t border-l border-[var(--color-line)]">
-      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-2 border-b border-[var(--color-line)] shrink-0">
+      <header className="h-14 px-4 max-lg:pl-14 flex items-center gap-2 border-b border-[var(--color-line)] shrink-0 mv-hud-header">
         <div className="flex -space-x-2 shrink-0 [&>*]:ring-2 [&>*]:ring-mv-main [&>*]:rounded-full">
           {otherMembers.slice(0, 3).map((m) => (
             <Avatar key={m.id} name={m.username} avatarUrl={m.avatar_url} size={28} />

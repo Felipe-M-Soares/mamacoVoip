@@ -29,7 +29,7 @@ function gradientFor(seed: string) {
   let hash = 0
   for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash)
   const hue = Math.abs(hash) % 360
-  return `linear-gradient(135deg, hsl(${hue} 70% 40%), hsl(${(hue + 45) % 360} 65% 22%))`
+  return `linear-gradient(135deg, hsl(${hue} 55% 24%), hsl(${(hue + 45) % 360} 45% 10%))`
 }
 
 export function EditProfileModal({ onClose }: { onClose: () => void }) {
@@ -193,7 +193,7 @@ export function EditProfileModal({ onClose }: { onClose: () => void }) {
             onClick={() => setTab(t.id)}
             className={`flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors ${
               tab === t.id
-                ? 'bg-mv-raised text-white shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
+                ? 'mv-seg-active'
                 : 'text-mv-muted hover:text-mv-text'
             }`}
           >

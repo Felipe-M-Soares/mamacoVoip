@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { detectTransparency, getCachedTransparency, mayHaveTransparency } from '../../lib/imageTransparency'
-import { identityGradient } from '../../lib/identityColor'
+import { identityTint } from '../../lib/identityColor'
 import type { ProfileStatus } from '../../types/database'
 import { useIsPresent } from '../../hooks/usePresence'
 
 const STATUS_COLOR: Record<ProfileStatus, string> = {
-  online: 'bg-mv-green',
+  online: 'bg-mv-green shadow-[0_0_6px_var(--color-mv-green)]',
   idle: 'bg-amber-400',
   dnd: 'bg-rose-500',
   offline: 'bg-zinc-500',
@@ -47,8 +47,8 @@ export function Avatar({ name, avatarUrl, status, userId, size = 40, decorationU
           <AvatarImage key={avatarUrl} url={avatarUrl} name={name} />
         ) : (
           <div
-            className="w-full h-full rounded-full flex items-center justify-center text-white font-semibold select-none"
-            style={{ fontSize: size * 0.42, background: identityGradient(userId || name), textShadow: '0 1px 2px rgb(0 0 0 / 0.25)' }}
+            className="w-full h-full rounded-full flex items-center justify-center font-display font-bold select-none"
+            style={{ fontSize: size * 0.42, ...identityTint(userId || name) }}
           >
             {initial}
           </div>

@@ -753,3 +753,179 @@ nav .uppercase[class*='tracking-']::before {
   transform: rotate(45deg);
   box-shadow: 0 0 6px var(--color-mv-accent);
 }
+
+.mv-auth {
+  background:
+    radial-gradient(1100px 600px at 20% 20%, color-mix(in oklab, var(--color-mv-accent) 16%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 90% 90%, color-mix(in oklab, var(--color-mv-accent) 9%, transparent), transparent 60%),
+    var(--color-mv-canvas);
+}
+.mv-auth-glow {
+  background: radial-gradient(60% 40% at 50% 100%, color-mix(in oklab, var(--color-mv-accent) 14%, transparent), transparent 70%);
+}
+.mv-auth-floor {
+  height: 46%;
+  perspective: 520px;
+  -webkit-mask-image: linear-gradient(to top, black 10%, transparent 95%);
+  mask-image: linear-gradient(to top, black 10%, transparent 95%);
+}
+.mv-auth-floor::before {
+  content: '';
+  position: absolute;
+  inset: 0 -50% -60%;
+  transform: rotateX(62deg);
+  transform-origin: 50% 0;
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--color-mv-accent) 38%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--color-mv-accent) 38%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  animation: mv-floor 3.2s linear infinite;
+}
+@keyframes mv-floor {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 56px;
+  }
+}
+.mv-auth-logo {
+  width: 132px;
+  height: 132px;
+  filter: drop-shadow(0 0 14px color-mix(in oklab, var(--color-mv-accent) 45%, transparent));
+  animation: mv-pulse 3.6s ease-in-out infinite;
+}
+@keyframes mv-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 12px color-mix(in oklab, var(--color-mv-accent) 45%, transparent));
+  }
+  50% {
+    filter: drop-shadow(0 0 24px color-mix(in oklab, var(--color-mv-accent) 70%, transparent));
+  }
+}
+.mv-auth-title {
+  font-size: clamp(42px, 7vw, 76px);
+  letter-spacing: 0.04em;
+}
+.mv-auth-title span {
+  color: transparent;
+  -webkit-text-stroke: 1.5px color-mix(in oklab, var(--color-neon) 70%, white);
+  text-shadow: 0 0 22px color-mix(in oklab, var(--color-mv-accent) 55%, transparent);
+}
+.mv-auth-perk {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.035), transparent);
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--color-mv-accent) 70%, transparent);
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
+}
+.mv-auth-perk:hover {
+  background: linear-gradient(90deg, color-mix(in oklab, var(--color-mv-accent) 10%, transparent), transparent);
+  box-shadow: inset 3px 0 0 var(--color-mv-accent);
+}
+.mv-auth-perk-icon {
+  --cut: 8px;
+  display: flex;
+  height: 40px;
+  width: 40px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  background: color-mix(in oklab, var(--color-mv-accent) 16%, transparent);
+  color: color-mix(in oklab, var(--color-neon) 60%, white);
+}
+.mv-auth-card {
+  --cut: 22px;
+  padding: 1px;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  background: linear-gradient(160deg, color-mix(in oklab, var(--color-mv-accent) 70%, transparent), rgb(255 255 255 / 0.08) 35%, rgb(255 255 255 / 0.05) 65%, color-mix(in oklab, var(--color-mv-accent) 55%, transparent));
+  filter: drop-shadow(0 30px 60px rgb(0 0 0 / 0.6));
+}
+.mv-auth-card-inner {
+  --cut: 21.3px;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--color-mv-accent) 7%, transparent), transparent 30%),
+    color-mix(in oklab, var(--color-elevated) 92%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.mv-auth-input {
+  background: rgb(0 0 0 / 0.35);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--color-line-strong), inset 0 -2px 0 rgb(255 255 255 / 0.04);
+  transition: box-shadow 0.16s ease, background-color 0.16s ease;
+}
+.mv-auth-input:hover:not(:focus) {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-mv-accent) 35%, transparent);
+}
+.mv-auth-input:focus {
+  background: rgb(0 0 0 / 0.5);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--color-mv-accent) 80%, transparent),
+    inset 0 -2px 0 var(--color-mv-accent),
+    0 0 16px color-mix(in oklab, var(--color-mv-accent) 22%, transparent);
+}
+.mv-auth .btn-primary {
+  position: relative;
+  overflow: hidden;
+  letter-spacing: 0.06em;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+}
+.mv-auth .btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.35) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 0.6s ease;
+}
+.mv-auth .btn-primary:hover:not(:disabled)::after {
+  transform: translateX(120%);
+}
+
+.mv-dl {
+  --cut: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px 9px 10px;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  background: rgb(255 255 255 / 0.04);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-mv-text);
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
+}
+.mv-dl:hover {
+  background: color-mix(in oklab, var(--color-mv-accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-mv-accent) 60%, transparent);
+}
+.mv-dl svg {
+  width: 22px;
+  height: 22px;
+  color: color-mix(in oklab, var(--color-neon) 60%, white);
+  transition: filter 0.16s ease;
+}
+.mv-dl:hover svg {
+  filter: drop-shadow(0 0 5px var(--color-mv-accent));
+}
+.mv-dl small {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-mv-muted);
+  font-family: var(--font-display);
+}
+.mv-dl strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-display);
+  letter-spacing: 0.03em;
+}

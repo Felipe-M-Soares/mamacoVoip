@@ -7,9 +7,46 @@ let currentToken: string | null = null
 let started = false
 let pending: PushTarget | null = null
 
+export type PushStatus =
+  | { kind: 'off' }
+  | { kind: 'starting' }
+  | { kind: 'denied' }
+  | { kind: 'error'; detail: string }
+  | { kind: 'ok' }
+
+let status: PushStatus = { kind: 'off' }
+const statusListeners = new Set<() => void>()
+
+function setStatus(next: PushStatus) {
+  status = next
+  for (const l of statusListeners) l()
+}
+
+export function getPushStatus(): PushStatus {
+  return status
+}
+
+export function subscribePushStatus(listener: () => void): () => void {
+  statusListeners.add(listener)
+  return () => statusListeners.delete(listener)
+}
+
+export function pushAvailable(): boolean {
+  return isNativeMobileApp()
+}
+
 function pushEnabled(): boolean {
   return isNativeMobileApp() && import.meta.env.VITE_PUSH_ENABLED === '1'
 }
+
+async function saveToken(value: string) {
+  currentToken = value
+  const { error } = await supabase.rpc('register_push_token', { p_token: value, p_platform: 'android' })
+  if (error) setStatus({ kind: 'error', detail: `Não foi possível salvar o registro: ${error.message}` })
+  else setStatus({ kind: 'ok' })
+}
+
+let listenersAdded = false
 
 export function parsePushTarget(data: unknown): PushTarget | null {
   if (!data || typeof data !== 'object') return null
@@ -34,8 +71,13 @@ export function consumePendingPushTarget(): PushTarget | null {
 }
 
 export async function initPushNotifications(): Promise<void> {
+  if (isNativeMobileApp() && import.meta.env.VITE_PUSH_ENABLED !== '1') {
+    setStatus({ kind: 'error', detail: 'Esta versão do app foi gerada sem o Firebase. Atualize o app.' })
+    return
+  }
   if (!pushEnabled() || started) return
   started = true
+  setStatus({ kind: 'starting' })
   try {
     const { PushNotifications } = await import('@capacitor/push-notifications')
     await PushNotifications.createChannel({
@@ -46,27 +88,46 @@ export async function initPushNotifications(): Promise<void> {
       visibility: 0,
       vibration: true,
     }).catch(() => {})
+    await PushNotifications.createChannel({
+      id: 'chamadas',
+      name: 'Chamadas',
+      description: 'Quando alguém te liga',
+      importance: 5,
+      visibility: 1,
+      vibration: true,
+    }).catch(() => {})
 
-    await PushNotifications.addListener('registration', ({ value }) => {
-      currentToken = value
-      void supabase.rpc('register_push_token', { p_token: value, p_platform: 'android' })
-    })
-    await PushNotifications.addListener('registrationError', (e) => {
-      console.warn('[push] registro falhou', e?.error)
-    })
-    await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-      const t = parsePushTarget(action.notification?.data)
-      if (t) openTarget(t)
-    })
+    if (!listenersAdded) {
+      listenersAdded = true
+      await PushNotifications.addListener('registration', ({ value }) => {
+        void saveToken(value)
+      })
+      await PushNotifications.addListener('registrationError', (e) => {
+        setStatus({ kind: 'error', detail: `O Firebase recusou o registro: ${e?.error ?? 'erro desconhecido'}` })
+      })
+      await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+        const t = parsePushTarget(action.notification?.data)
+        if (t) openTarget(t)
+      })
+    }
 
     let perm = await PushNotifications.checkPermissions()
     if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') perm = await PushNotifications.requestPermissions()
-    if (perm.receive !== 'granted') return
+    if (perm.receive !== 'granted') {
+      started = false
+      setStatus({ kind: 'denied' })
+      return
+    }
     await PushNotifications.register()
   } catch (err) {
     started = false
-    console.warn('[push] não iniciou', err)
+    setStatus({ kind: 'error', detail: err instanceof Error ? err.message : String(err) })
   }
+}
+
+export async function retryPushNotifications(): Promise<void> {
+  started = false
+  await initPushNotifications()
 }
 
 export async function unregisterPushToken(): Promise<void> {

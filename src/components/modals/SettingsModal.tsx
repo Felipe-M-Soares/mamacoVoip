@@ -9,6 +9,7 @@ import { useAppUpdater } from '../../hooks/useAppUpdater'
 import { useTheme } from '../../hooks/useTheme'
 import { THEMES, type ThemeId } from '../../context/ThemeContext'
 import { getNotificationPermission, requestNotificationPermission } from '../../lib/notifications'
+import { getPushStatus, pushAvailable, retryPushNotifications, subscribePushStatus } from '../../lib/pushNotifications'
 import {
   SOUND_CATALOG,
   getSoundVolume,
@@ -659,6 +660,51 @@ function DeleteAccountSection() {
   )
 }
 
+function MobilePushCard() {
+  const status = useSyncExternalStore(subscribePushStatus, getPushStatus, getPushStatus)
+  const [busy, setBusy] = useState(false)
+  const view =
+    status.kind === 'ok'
+      ? { chip: 'Ativadas', chipClass: '!text-mv-green !border-mv-green/30 !bg-mv-green/10', text: 'Este celular está registrado e vai receber mensagens, menções e chamadas.' }
+      : status.kind === 'denied'
+        ? {
+            chip: 'Bloqueadas',
+            chipClass: '!text-rose-300 !border-rose-500/30 !bg-rose-500/10',
+            text: 'A permissão foi negada. Libere em Configurações do Android → Apps → Mamacos Voip → Notificações e toque em Tentar de novo.',
+          }
+        : status.kind === 'error'
+          ? { chip: 'Com erro', chipClass: '!text-rose-300 !border-rose-500/30 !bg-rose-500/10', text: status.detail }
+          : status.kind === 'starting'
+            ? { chip: 'Registrando', chipClass: '', text: 'Registrando este celular para receber notificações...' }
+            : { chip: 'Desativadas', chipClass: '', text: 'Toque em Ativar para receber notificações neste celular.' }
+
+  async function retry() {
+    setBusy(true)
+    try {
+      await retryPushNotifications()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <SettingsCard>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <p className="text-[14px] font-medium text-white">Notificações no celular</p>
+          <span className={`chip ${view.chipClass}`}>{view.chip}</span>
+        </div>
+        <p className="text-[13px] text-mv-muted break-words">{view.text}</p>
+        {status.kind !== 'ok' && (
+          <button onClick={() => void retry()} disabled={busy} className="btn-primary h-9 px-4 text-sm self-start">
+            {status.kind === 'off' ? 'Ativar' : 'Tentar de novo'}
+          </button>
+        )}
+      </div>
+    </SettingsCard>
+  )
+}
+
 function NotificationsTab() {
   const [permission, setPermission] = useState(getNotificationPermission())
 
@@ -683,6 +729,15 @@ function NotificationsTab() {
               text: 'Notificações bloqueadas. Habilite manualmente nas configurações do navegador pra este site.',
             }
           : { chip: 'Desativadas', chipClass: '', text: 'Ative pra ser avisado quando chegar mensagem.' }
+
+  if (pushAvailable()) {
+    return (
+      <div className="space-y-5">
+        <TabHeader title="Notificações" description="Avisos de mensagens diretas, grupos, menções e chamadas, mesmo com o app fechado." />
+        <MobilePushCard />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">

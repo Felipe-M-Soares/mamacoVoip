@@ -8,6 +8,7 @@ import { useFriends } from '../../context/FriendsContext'
 import { useTypingIndicator } from '../../hooks/useTypingIndicator'
 import { useDMSeenState } from '../../hooks/useDMSeenState'
 import { useVoiceCore } from '../../hooks/useVoice'
+import { useStartCall } from '../../hooks/useStartCall'
 import { useChatScroll } from '../../hooks/useChatScroll'
 import { MessageListSkeleton } from '../chat/MessageListSkeleton'
 import type { DMMessage, Profile } from '../../types/database'
@@ -26,6 +27,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
   const voice = useVoiceCore()
   const isThisCall = voice.connectedChannelId === conversationId
   const isInAnotherCall = Boolean(voice.connectedChannelId) && !isThisCall
+  const startCall = useStartCall(conversationId, otherProfile.display_name || otherProfile.username, user?.id, sendMessage)
   const { typingUserIds, notifyTyping, stopTyping } = useTypingIndicator(conversationId, user?.id)
   const otherLastReadAt = useDMSeenState(conversationId, otherProfile.id)
   const [replyingTo, setReplyingTo] = useState<DMMessage | null>(null)
@@ -104,11 +106,7 @@ export function DMChatArea({ conversationId, otherProfile }: { conversationId: s
             </button>
           ) : (
             <button
-              onClick={() =>
-                voice.join(conversationId, null, {
-                  displayName: otherProfile.display_name || otherProfile.username,
-                })
-              }
+              onClick={() => void startCall()}
               disabled={isInAnotherCall || voice.connecting}
               title={isInAnotherCall ? 'Você já está em outra chamada' : 'Iniciar chamada de voz'}
               className="h-9 px-3.5 rounded-[10px] text-sm font-semibold bg-mv-green/15 text-mv-green border border-mv-green/25 hover:bg-mv-green hover:text-white transition-colors disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 shrink-0"

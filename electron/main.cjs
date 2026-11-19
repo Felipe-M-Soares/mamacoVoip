@@ -2154,7 +2154,7 @@ app.whenReady().then(() => {
   handleTrusted('app:get-update-status', () => lastUpdateStatus)
 
   if (!isDev) {
-    const UPDATE_DOWNLOAD_PAGE = 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest'
+    const UPDATE_DOWNLOAD_PAGE = 'https://github.com/Felipe-M-Soares/mamacoVoip-releases/releases/latest'
     const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
     const NETWORK_RETRY_DELAYS_MS = [60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000]
 
@@ -2373,7 +2373,7 @@ app.whenReady().then(() => {
 
     autoUpdater.setFeedURL({
       provider: 'generic',
-      url: 'https://github.com/Felipe-M-Soares/mamacoVoip/releases/latest/download/',
+      url: 'https://github.com/Felipe-M-Soares/mamacoVoip-releases/releases/latest/download/',
     })
 
     if (process.windowsStore || process.platform !== 'win32') {

@@ -9,7 +9,7 @@ export interface ApkUpdaterPlugin {
 
 export const ApkUpdater = registerPlugin<ApkUpdaterPlugin>('ApkUpdater')
 
-const LATEST_API = 'https://api.github.com/repos/Felipe-M-Soares/mamacoVoip/releases/latest'
+const LATEST_API = 'https://api.github.com/repos/Felipe-M-Soares/mamacoVoip-releases/releases/latest'
 
 export function isNewerVersion(latest: string, current: string): boolean {
   const parse = (v: string) =>

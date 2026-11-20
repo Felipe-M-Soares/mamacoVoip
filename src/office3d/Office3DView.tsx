@@ -1,4 +1,20 @@
 import { ViewModeToggle } from '../components/layout/ViewModeToggle'
+import {
+  AddChannelIcon,
+  ArcadeIcon,
+  CalendarIcon,
+  EmoteIcon,
+  GamepadIcon,
+  LeaveCallIcon,
+  MapIcon,
+  MembersIcon,
+  MessageIcon,
+  MicIcon,
+  MicOffIcon,
+  MonkeyIcon,
+  SoundboardIcon,
+  TvIcon,
+} from '../components/ui/hudIcons'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Channel, Profile, Server } from '../types/database'
 import { supabase } from '../lib/supabase'
@@ -752,24 +768,25 @@ export function Office3DView({
         <div className="rounded-xl bg-black/50 backdrop-blur">
           <ViewModeToggle mode="escritorio" onChange={onClose} />
         </div>
-        <span className="h-9 px-3 rounded-xl bg-black/50 border border-white/10 text-[13px] font-semibold flex items-center gap-2 backdrop-blur">
-          {server.name}
-          <span className="text-[10px] font-bold uppercase tracking-wider text-mv-accent">beta</span>
+        <span className="mv-hud h-9 px-3 text-[13px] font-semibold flex items-center gap-2">
+          <span className="font-display tracking-wide">{server.name}</span>
+          <span className="mv-tag !text-[9.5px] !px-1.5 !py-px">beta</span>
         </span>
         {zone && (
-          <span className="h-9 pl-3 pr-1.5 rounded-xl bg-black/50 border border-white/10 text-[13px] font-semibold flex items-center gap-1.5 backdrop-blur">
-            {zone.name}
+          <span className="mv-hud h-9 pl-2.5 pr-1.5 text-[13px] font-semibold flex items-center gap-1.5">
+            <MapIcon className="w-4 h-4 text-[color-mix(in_oklab,var(--color-neon)_60%,white)]" aria-hidden />
+            <span className="max-w-[180px] truncate">{zone.name}</span>
             {zone.id === 'special:minigames' && !minigamesChannel && canManageChannels && (
               <button
                 onClick={() => void createChannelNow("Minigames", "voice", null)}
-                className="h-7 px-2 rounded-lg text-[12px] font-semibold text-mv-accent hover:bg-white/10"
+                className="btn-secondary h-7 px-2 text-[12px] font-semibold text-mv-accent"
                 title="Cria o canal de voz Minigames: quem entrar nesta sala entra na call"
               >
                 Virar call
               </button>
             )}
             {zoneChannel && canManageChannels && (
-              <button onClick={() => setEditChannel(zoneChannel)} className="h-7 px-2 rounded-lg text-[12px] text-mv-muted hover:text-white hover:bg-white/10" title="Editar ou apagar esta sala">
+              <button onClick={() => setEditChannel(zoneChannel)} className="btn-secondary h-7 px-2 text-[12px] text-mv-muted hover:text-white" title="Editar ou apagar esta sala">
                 Editar
               </button>
             )}
@@ -778,24 +795,36 @@ export function Office3DView({
       </div>
 
       {connectedHere && (
-        <div className={`absolute left-1/2 -translate-x-1/2 ${gameOpen ? 'z-[80] bottom-16 max-sm:bottom-28' : 'z-[30] top-3 max-sm:top-14 max-sm:left-4 max-sm:translate-x-0'} flex items-center gap-2 px-3 py-2 rounded-2xl bg-black/70 border border-emerald-400/40 backdrop-blur max-w-[calc(100%-2rem)]`}>
-          <div className="leading-tight min-w-0">
-            <p className="text-[10.5px] font-bold uppercase tracking-wider text-emerald-400">Em call</p>
-            <p className="text-[13.5px] font-semibold text-white truncate">{connectedName}</p>
+        <div className={`absolute left-1/2 -translate-x-1/2 ${gameOpen ? 'z-[80] bottom-16 max-sm:bottom-28' : 'z-[30] top-3 max-sm:top-14 max-sm:left-4 max-sm:translate-x-0'} glass mv-ctl-bar flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 max-w-[calc(100%-2rem)]`}>
+          <div className="leading-tight min-w-0 mr-1.5">
+            <p className="flex items-center gap-1.5 font-display text-[10.5px] font-bold uppercase tracking-[0.14em] text-mv-green">
+              <span className="mv-live-dot" aria-hidden />
+              Em call
+            </p>
+            <p className="text-[13.5px] font-semibold text-white truncate max-w-[160px]">{connectedName}</p>
           </div>
-          <button onClick={voice.toggleMute} className={`h-8 px-3 rounded-lg text-[12.5px] font-semibold border ${voice.muted ? 'bg-rose-500/20 border-rose-400/50 text-rose-200' : 'bg-white/10 border-white/10 text-white'}`}>
-            {voice.muted ? 'Mudo' : 'Mic'}
+          <button
+            onClick={voice.toggleMute}
+            aria-pressed={!voice.muted}
+            className={`mv-hud-btn !h-9 !px-2.5 ${voice.muted ? 'is-off' : ''}`}
+            title={voice.muted ? 'Ativar microfone' : 'Silenciar microfone'}
+          >
+            {voice.muted ? <MicOffIcon /> : <MicIcon />}
+            <span className="max-sm:hidden">{voice.muted ? 'Mudo' : 'Mic'}</span>
           </button>
-          <button onClick={() => setSoundsOpen(true)} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold border bg-white/10 border-white/10 text-white" title="Soundboard">
-            🎵 Sons
+          <button onClick={() => setSoundsOpen(true)} className="mv-hud-btn !h-9 !px-2.5" title="Soundboard">
+            <SoundboardIcon />
+            <span className="max-sm:hidden">Sons</span>
           </button>
           {sharers.some((x) => x.key !== 'local') && (
             <button
               onClick={toggleTv}
-              className={`h-8 px-3 rounded-lg text-[12.5px] font-semibold border ${remoteWatched ? 'bg-white/10 border-white/10 text-white' : 'bg-rose-500/20 border-rose-400/50 text-rose-100'}`}
+              aria-pressed={!!remoteWatched}
+              className="mv-hud-btn !h-9 !px-2.5"
               title={remoteWatched ? 'Para de receber a transmissão' : 'Passa a tela compartilhada na TV da sala'}
             >
-              {remoteWatched ? 'Desligar TV' : '● Ver na TV'}
+              <TvIcon />
+              {remoteWatched ? 'Desligar TV' : 'Ver na TV'}
             </button>
           )}
           <button
@@ -803,76 +832,100 @@ export function Office3DView({
               voice.leave()
               officeRef.current?.leaveRoom()
             }}
-            className="h-8 px-3 rounded-lg text-[12.5px] font-semibold bg-rose-600 text-white"
+            className="mv-hud-btn is-danger !h-9 !px-2.5"
+            title="Sair da call"
           >
-            Sair
+            <LeaveCallIcon />
+            <span className="max-sm:hidden">Sair</span>
           </button>
         </div>
       )}
 
-      <div className="absolute right-4 top-[172px] max-sm:top-[160px] z-[30] w-[240px] max-sm:w-[150px] grid grid-cols-2 max-sm:grid-cols-1 gap-1.5">
-        <button onClick={() => officeRef.current?.openMap()} className="h-9 rounded-xl bg-black/60 border border-white/10 text-[13px] font-semibold text-white backdrop-blur">Mapa (M)</button>
-        <button onClick={() => setDrawer((v) => !v)} aria-pressed={drawer} className="h-9 rounded-xl bg-black/60 border border-white/10 text-[13px] font-semibold text-white backdrop-blur aria-pressed:border-mv-accent">Meu mamaco</button>
-        <button onClick={() => setPeopleOpen((v) => !v)} aria-pressed={peopleOpen} className="h-9 rounded-xl bg-black/60 border border-white/10 text-[13px] font-semibold text-white backdrop-blur aria-pressed:border-mv-accent">Pessoas</button>
-        <button onClick={() => setEventsOpen(true)} className="h-9 rounded-xl bg-black/60 border border-white/10 text-[13px] font-semibold text-white backdrop-blur">Eventos</button>
+      <nav className="absolute right-4 top-[182px] max-sm:top-[160px] z-[30] w-[256px] max-sm:w-[150px] flex flex-col gap-1.5" aria-label="Ações do escritório">
+        <div className="grid grid-cols-2 max-sm:grid-cols-1 gap-1.5">
+          <button onClick={() => officeRef.current?.openMap()} className="mv-hud-btn w-full !px-2.5 !gap-2 !text-[12.5px]" title="Mapa (M)">
+            <MapIcon />
+            <span className="flex-1 text-left">Mapa</span>
+            <kbd className="mv-kbd max-sm:hidden">M</kbd>
+          </button>
+          <button onClick={() => setDrawer((v) => !v)} aria-pressed={drawer} className="mv-hud-btn w-full !px-2.5 !gap-2 !text-[12.5px]">
+            <MonkeyIcon />
+            <span className="flex-1 text-left whitespace-nowrap">Meu mamaco</span>
+          </button>
+          <button onClick={() => setPeopleOpen((v) => !v)} aria-pressed={peopleOpen} className="mv-hud-btn w-full !px-2.5 !gap-2 !text-[12.5px]">
+            <MembersIcon />
+            <span className="flex-1 text-left">Pessoas</span>
+          </button>
+          <button onClick={() => setEventsOpen(true)} className="mv-hud-btn w-full !px-2.5 !gap-2 !text-[12.5px]">
+            <CalendarIcon />
+            <span className="flex-1 text-left">Eventos</span>
+          </button>
+        </div>
         {canManageChannels && (
-          <button onClick={() => setCreateChannel({ categoryId: zone?.sector && categories.some((c) => c.id === zone.sector) ? zone.sector : null })} className="col-span-2 max-sm:col-span-1 h-9 rounded-xl bg-black/60 border border-white/10 text-[13px] font-semibold text-white backdrop-blur">
-            + Criar canal
+          <button onClick={() => setCreateChannel({ categoryId: zone?.sector && categories.some((c) => c.id === zone.sector) ? zone.sector : null })} className="mv-hud-btn w-full justify-center">
+            <AddChannelIcon />
+            Criar canal
           </button>
         )}
-        <button onClick={() => openGames(null)} className="col-span-2 max-sm:col-span-1 h-9 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-rose-500 to-mv-accent">
+        <button onClick={() => openGames(null)} className="mv-hud-cta w-full">
+          <ArcadeIcon />
           Minigames
         </button>
-      </div>
+      </nav>
 
       <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[31] flex flex-col items-center gap-2 max-sm:bottom-[calc(52%+1.5rem)]">
         {emoteOpen && (
-          <div className="grid grid-cols-7 gap-1 p-1.5 rounded-2xl bg-black/75 border border-white/10 backdrop-blur" role="menu" aria-label="Emotes">
+          <div className="mv-hud grid grid-cols-7 gap-1 p-1.5 [--cut:10px]" role="menu" aria-label="Emotes">
             {OFFICE_EMOTES.map((e, i) => (
-              <button key={e} role="menuitem" onClick={() => doEmote(e)} className="relative w-10 h-10 rounded-xl text-[22px] hover:bg-white/10" title={i < 9 ? `Tecla ${i + 1}` : undefined}>
+              <button key={e} role="menuitem" onClick={() => doEmote(e)} className="mv-pad relative w-10 h-10 text-[22px] [--cut:6px]" title={i < 9 ? `Tecla ${i + 1}` : undefined}>
                 {e}
-                {i < 9 && <span className="absolute right-0.5 bottom-0 text-[9px] font-bold text-white/40">{i + 1}</span>}
+                {i < 9 && <span className="absolute right-1 bottom-0.5 font-display text-[9px] font-bold text-white/45">{i + 1}</span>}
               </button>
             ))}
           </div>
         )}
-        <button onClick={() => setEmoteOpen((v) => !v)} aria-pressed={emoteOpen} className="h-9 px-3 rounded-xl bg-black/60 border border-white/10 text-[13px] font-semibold text-white backdrop-blur aria-pressed:border-mv-accent" title="Emotes (R)">
-          😀 Emotes
+        <button onClick={() => setEmoteOpen((v) => !v)} aria-pressed={emoteOpen} className="mv-hud-btn" title="Emotes (R)">
+          <EmoteIcon />
+          Emotes
+          <kbd className="mv-kbd">R</kbd>
         </button>
       </div>
 
       {chatMode === 'mini' ? (
-        <button
-          onClick={() => setChatMode('open')}
-          className="absolute left-4 bottom-4 z-[30] h-10 px-3.5 rounded-xl bg-black/70 border border-white/10 backdrop-blur text-[13px] font-semibold text-white flex items-center gap-2"
-        >
-          💬 {chatChannel ? `#${chatChannel.name}` : 'Chat'}
-          {layout.some((g) => g.text.some((c) => unreadChannelIds?.has(c.id))) && <span className="w-2 h-2 rounded-full bg-rose-500" aria-label="mensagens novas" />}
+        <button onClick={() => setChatMode('open')} className="mv-hud-btn absolute left-4 bottom-4 z-[30] !h-10">
+          <MessageIcon />
+          {chatChannel ? `#${chatChannel.name}` : 'Chat'}
+          {layout.some((g) => g.text.some((c) => unreadChannelIds?.has(c.id))) && <span className="w-2 h-2 rounded-full bg-mv-accent shadow-[0_0_8px_var(--color-mv-accent)]" aria-label="mensagens novas" />}
+          <kbd className="mv-kbd max-sm:hidden">Enter</kbd>
         </button>
       ) : (
-        <section ref={chatBoxRef} className={`absolute z-[30] flex flex-col rounded-2xl overflow-hidden bg-mv-main border border-white/10 shadow-2xl ${chatBox}`} aria-label="Chat do setor">
-          <header className="flex items-center gap-1 px-2 py-1.5 bg-black/40 border-b border-white/10">
+        <section ref={chatBoxRef} className={`surface-elevated absolute z-[30] flex flex-col overflow-hidden ${chatBox}`} aria-label="Chat do setor">
+          <header className="mv-hud-header flex items-center gap-1 px-2 py-1.5 border-b border-[var(--color-line)]">
             <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto">
               {(chatGroup?.text ?? []).map((c) => (
                 <button
                   key={c.id}
                   onClick={() => { setChatChannelId(c.id); setPinnedChat(true) }}
-                  className={`shrink-0 px-2 py-0.5 rounded-md text-[12.5px] font-bold flex items-center gap-1 ${c.id === chatChannelId ? 'bg-white/10 text-white' : 'text-mv-muted hover:text-white'}`}
+                  className={`shrink-0 h-7 px-2.5 rounded text-[12.5px] font-semibold flex items-center gap-1 transition-colors ${c.id === chatChannelId ? 'mv-seg-active' : 'text-mv-muted hover:text-white hover:bg-white/[0.05]'}`}
                 >
-                  # {c.name}
-                  {c.id !== chatChannelId && unreadChannelIds?.has(c.id) && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
+                  <span className="opacity-60">#</span>{c.name}
+                  {c.id !== chatChannelId && unreadChannelIds?.has(c.id) && <span className="w-1.5 h-1.5 rounded-full bg-mv-accent shadow-[0_0_6px_var(--color-mv-accent)]" />}
                 </button>
               ))}
               {pinnedChat && (
-                <button onClick={() => setPinnedChat(false)} className="shrink-0 px-1.5 text-[11px] text-mv-muted hover:text-white" title="Voltar a seguir o setor onde você está">
-                  seguir setor
+                <button onClick={() => setPinnedChat(false)} className="shrink-0 h-7 px-2 rounded text-[11px] font-semibold text-mv-muted hover:text-white hover:bg-white/[0.05]" title="Voltar a seguir o setor onde você está">
+                  Seguir setor
                 </button>
               )}
             </div>
-            <button onClick={() => setChatMode(chatMode === 'big' ? 'open' : 'big')} className="w-7 h-7 rounded-lg text-mv-muted hover:text-white hover:bg-white/10 text-[13px]" aria-label={chatMode === 'big' ? 'Diminuir chat' : 'Aumentar chat'}>
-              {chatMode === 'big' ? '⤡' : '⤢'}
+            <button onClick={() => setChatMode(chatMode === 'big' ? 'open' : 'big')} className="mv-close !w-7 !h-7" aria-label={chatMode === 'big' ? 'Diminuir chat' : 'Aumentar chat'} title={chatMode === 'big' ? 'Diminuir' : 'Aumentar'}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden>
+                {chatMode === 'big' ? <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /> : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}
+              </svg>
             </button>
-            <button onClick={() => setChatMode('mini')} className="w-7 h-7 rounded-lg text-mv-muted hover:text-white hover:bg-white/10 text-[15px] leading-none" aria-label="Minimizar chat">–</button>
+            <button onClick={() => setChatMode('mini')} className="mv-close !w-7 !h-7" aria-label="Minimizar chat" title="Minimizar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="w-3.5 h-3.5" aria-hidden><path d="M5 12h14" /></svg>
+            </button>
           </header>
           <div className="flex-1 min-h-0 flex [&>section]:border-0">
             {chatChannel ? (
@@ -885,8 +938,10 @@ export function Office3DView({
       )}
 
       {peopleOpen && (
-        <div className="absolute right-4 top-16 bottom-4 z-[52] w-64 max-w-[calc(100%-2rem)] rounded-2xl overflow-hidden border border-white/10 shadow-2xl flex bg-mv-side">
-          <button onClick={() => setPeopleOpen(false)} className="absolute top-2 right-2 z-10 w-7 h-7 rounded-lg bg-black/40 text-white leading-none max-lg:hidden" aria-label="Fechar pessoas">×</button>
+        <div className="surface-elevated absolute right-4 top-16 bottom-4 z-[52] w-64 max-w-[calc(100%-2rem)] overflow-hidden flex">
+          <button onClick={() => setPeopleOpen(false)} className="mv-close absolute top-2 right-2 z-10 !w-7 !h-7 max-lg:hidden" aria-label="Fechar pessoas">
+            <CloseGlyph />
+          </button>
           <MemberList
             serverId={server.id}
             onViewProfile={requestViewProfile}
@@ -908,7 +963,7 @@ export function Office3DView({
         />
       )}
 
-      <div className="absolute right-4 bottom-4 z-[30] w-[300px] max-sm:hidden rounded-2xl bg-[#121016]/95 border border-white/10 backdrop-blur overflow-hidden flex flex-col">
+      <div className="glass mv-ctl-bar absolute right-4 bottom-4 z-[30] w-[300px] max-sm:hidden overflow-hidden flex flex-col">
         <UserPanel />
       </div>
 
@@ -928,16 +983,16 @@ export function Office3DView({
         return (
           <div className="absolute inset-0 z-[60]" onClick={close}>
             <div
-              className="absolute w-[220px] rounded-2xl bg-[#16131c] border border-white/10 shadow-2xl p-2 flex flex-col gap-1"
+              className="surface-elevated absolute w-[220px] p-1.5 flex flex-col gap-0.5"
               style={{ left, top }}
               onClick={(e) => e.stopPropagation()}
               role="menu"
             >
-              <div className="flex items-center gap-2 px-2 py-1.5">
+              <div className="flex items-center gap-2 px-2 py-1.5 mb-0.5 border-b border-[var(--color-line)]">
                 {m.profile.avatar_url ? <img src={m.profile.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" /> : <span className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-[13px] font-bold">{name.slice(0, 1).toUpperCase()}</span>}
                 <div className="min-w-0">
                   <b className="block text-[13.5px] truncate">{name}</b>
-                  {playing && <span className="block text-[11px] text-violet-300 truncate">🎮 {playing}</span>}
+                  {playing && <span className="flex items-center gap-1 text-[11px] text-mv-green truncate"><GamepadIcon className="w-3 h-3 shrink-0" aria-hidden />{playing}</span>}
                 </div>
               </div>
               {!isMe && <MenuBtn onClick={() => { close(); void openDm(avatarMenu.userId) }}>Mensagem privada</MenuBtn>}
@@ -955,18 +1010,23 @@ export function Office3DView({
       })()}
 
       {(dm || dmError) && (
-        <div className="absolute right-4 top-16 z-[55] w-[420px] max-w-[calc(100%-2rem)] h-[min(560px,calc(100%-6rem))] rounded-2xl overflow-hidden border border-white/10 shadow-2xl flex flex-col bg-mv-main">
-          <button onClick={() => { setDm(null); setDmError(null) }} className="absolute top-3 right-3 z-10 w-8 h-8 rounded-lg bg-black/50 text-white text-lg leading-none" aria-label="Fechar conversa">×</button>
+        <div className="surface-elevated absolute right-4 top-16 z-[55] w-[420px] max-w-[calc(100%-2rem)] h-[min(560px,calc(100%-6rem))] overflow-hidden flex flex-col">
+          <button onClick={() => { setDm(null); setDmError(null) }} className="mv-close absolute top-3 right-3 z-10" aria-label="Fechar conversa">
+            <CloseGlyph />
+          </button>
           {dm ? <DMChatArea key={dm.conversationId} conversationId={dm.conversationId} otherProfile={dm.profile} /> : <p className="p-4 text-[13px] text-rose-200">{dmError}</p>}
         </div>
       )}
 
       {tv && (
         <div className="absolute inset-0 z-[45] bg-black/70 flex items-center justify-center p-4" onClick={() => { setTv(null); officeRef.current?.setPaused(false) }}>
-          <div className="w-[min(900px,100%)] rounded-2xl bg-[#0c0a10] border border-white/10 p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center">
-              <b className="font-display">{tv.room ? `TV · ${tv.room.name}` : 'TV'}</b>
-              <button className="ml-auto text-mv-muted text-2xl leading-none px-1" aria-label="Fechar TV" onClick={() => { setTv(null); officeRef.current?.setPaused(false) }}>×</button>
+          <div className="surface-elevated w-[min(900px,100%)] p-3 flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5">
+              <span className="mv-badge-ico !w-8 !h-8" aria-hidden><TvIcon className="w-4 h-4" /></span>
+              <b className="font-display text-[16px] tracking-wide">{tv.room ? `TV · ${tv.room.name}` : 'TV'}</b>
+              <button className="mv-close ml-auto" aria-label="Fechar TV" onClick={() => { setTv(null); officeRef.current?.setPaused(false) }}>
+                <CloseGlyph />
+              </button>
             </div>
             <TvScreen image={tv.image} />
             {tv.room?.voice && (
@@ -983,9 +1043,9 @@ export function Office3DView({
       {canCinema && !cinema && (
         <button
           onClick={openCinema}
-          className="absolute left-1/2 -translate-x-1/2 bottom-32 z-[60] h-11 px-5 rounded-full font-semibold text-white bg-gradient-to-r from-rose-600 to-mv-accent shadow-2xl border border-white/15 flex items-center gap-2"
+          className="mv-hud-cta absolute left-1/2 -translate-x-1/2 bottom-32 z-[60] !h-11 !px-5"
         >
-          <span aria-hidden>🎬</span> Assistir em tela cheia
+          <TvIcon /> Assistir em tela cheia
         </button>
       )}
 
@@ -1012,11 +1072,11 @@ export function Office3DView({
 
       {kartChoice && (
         <div className="absolute inset-0 z-[58] bg-black/55 flex items-center justify-center p-4" onClick={() => setKartChoice(false)}>
-          <div className="w-[min(380px,100%)] rounded-2xl bg-[#16131c] border border-white/10 p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
-            <b className="font-display text-[19px]">🏁 Kart 3D</b>
+          <div className="surface-elevated w-[min(380px,100%)] p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+            <b className="font-display text-[19px] tracking-wide">🏁 Kart 3D</b>
             <p className="text-[13px] text-mv-muted">Tem {roomPeers.length} pessoa{roomPeers.length === 1 ? '' : 's'} na call com você. Chame a sala pra correr junto (até 6 pilotos, bots completam) ou corra contra os bots.</p>
-            <button onClick={hostKartRace} className="h-11 rounded-xl font-semibold text-white bg-gradient-to-r from-rose-500 to-mv-accent">Chamar a sala pra correr</button>
-            <button onClick={() => { setKartChoice(false); openGames('kart', null) }} className="h-11 rounded-xl font-semibold bg-white/10 text-white">Correr sozinho (com bots)</button>
+            <button onClick={hostKartRace} className="btn-primary h-11">Chamar a sala pra correr</button>
+            <button onClick={() => { setKartChoice(false); openGames('kart', null) }} className="btn-secondary h-11">Correr sozinho (com bots)</button>
           </div>
         </div>
       )}
@@ -1026,7 +1086,7 @@ export function Office3DView({
         const secs = Math.max(0, Math.ceil((L.until - Date.now()) / 1000))
         void nowTick
         return (
-          <div className="absolute left-1/2 -translate-x-1/2 top-16 z-[57] w-[min(360px,calc(100%-2rem))] rounded-2xl bg-[#16131c]/95 border border-amber-300/30 shadow-2xl p-4 flex flex-col gap-2.5 backdrop-blur max-sm:top-28" role="status">
+          <div className="surface-elevated absolute left-1/2 -translate-x-1/2 top-16 z-[57] w-[min(360px,calc(100%-2rem))] p-4 flex flex-col gap-2.5 max-sm:top-28" role="status">
             {L.role === 'invited' ? (
               <>
                 <p className="text-[14px] font-semibold">🏁 {L.hostName} chamou a sala pra uma corrida de kart!</p>
@@ -1034,11 +1094,11 @@ export function Office3DView({
                 <div className="flex gap-2">
                   <button
                     onClick={() => { setKartLobby({ ...L, role: 'guest' }); sendKart('join', { race: L.race, name: myName, skin: meRacer().skin }) }}
-                    className="flex-1 h-10 rounded-xl font-semibold text-white bg-gradient-to-r from-rose-500 to-mv-accent"
+                    className="btn-primary flex-1 h-10"
                   >
                     Entrar na corrida
                   </button>
-                  <button onClick={() => setKartLobby(null)} className="h-10 px-3 rounded-xl font-semibold bg-white/10 text-white">Agora não</button>
+                  <button onClick={() => setKartLobby(null)} className="btn-secondary h-10 px-3">Agora não</button>
                 </div>
               </>
             ) : (
@@ -1052,11 +1112,11 @@ export function Office3DView({
                 </ul>
                 <div className="flex gap-2">
                   {L.role === 'host' && (
-                    <button onClick={launchKart} className="flex-1 h-10 rounded-xl font-semibold text-white bg-gradient-to-r from-rose-500 to-mv-accent">Largar agora</button>
+                    <button onClick={launchKart} className="btn-primary flex-1 h-10">Largar agora</button>
                   )}
                   <button
                     onClick={() => { sendKart(L.role === 'host' ? 'cancel' : 'leave', { race: L.race }); setKartLobby(null) }}
-                    className="h-10 px-3 rounded-xl font-semibold bg-white/10 text-white"
+                    className="btn-secondary h-10 px-3"
                   >
                     {L.role === 'host' ? 'Cancelar' : 'Não quero'}
                   </button>
@@ -1078,9 +1138,17 @@ export function Office3DView({
   )
 }
 
+function CloseGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="w-4 h-4" aria-hidden>
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  )
+}
+
 function MenuBtn({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (
-    <button role="menuitem" onClick={onClick} className="h-9 px-2.5 rounded-lg text-left text-[13px] font-semibold text-mv-text hover:bg-white/10">
+    <button role="menuitem" onClick={onClick} className="h-9 px-2.5 rounded text-left text-[13px] font-semibold text-mv-text hover:text-white hover:bg-[color-mix(in_oklab,var(--color-mv-accent)_14%,transparent)] hover:shadow-[inset_2px_0_0_var(--color-mv-accent)] transition-colors">
       {children}
     </button>
   )
@@ -1114,7 +1182,7 @@ function CinemaView({ stream, label, onClose }: { stream: MediaStream | null; la
       <div className={`absolute top-0 inset-x-0 p-3 flex items-center gap-3 bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${bar ? 'opacity-100' : 'opacity-0'}`}>
         <span className="w-2.5 h-2.5 rounded-full bg-red-500" aria-hidden />
         <b className="text-white text-[14px] truncate">{label}</b>
-        <button onClick={onClose} className="ml-auto h-9 px-4 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-semibold">Sair da tela cheia (Esc)</button>
+        <button onClick={onClose} className="mv-hud-btn ml-auto">Sair da tela cheia <kbd className="mv-kbd">Esc</kbd></button>
       </div>
     </div>
   )
@@ -1144,15 +1212,15 @@ function BoardModal({ usage, meId, events, onClose }: {
   const medal = ['#f5c518', '#cbd5e1', '#d97706']
   return (
     <div className="absolute inset-0 z-[70] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="w-[min(760px,100%)] max-h-[90%] overflow-y-auto rounded-2xl bg-[#13101a] border border-white/10 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="h-1.5 bg-mv-accent rounded-t-2xl" />
+      <div className="surface-elevated w-[min(760px,100%)] max-h-[90%] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 flex flex-col gap-4">
-          <div className="flex items-start gap-3">
+          <div className="flex items-center gap-3">
+            <span className="mv-badge-ico" aria-hidden>🏆</span>
             <div className="min-w-0">
-              <b className="font-display text-[22px] block">Tempo no Mamacos</b>
-              <p className="text-[13px] text-mv-muted">Você e seus amigos · últimos 7 dias</p>
+              <b className="font-display text-[21px] font-bold tracking-wide block leading-tight">Tempo no Mamacos</b>
+              <p className="text-[12.5px] text-mv-muted">Você e seus amigos · últimos 7 dias</p>
             </div>
-            <button className="ml-auto text-mv-muted text-2xl leading-none px-1" aria-label="Fechar" onClick={onClose}>×</button>
+            <button className="mv-close ml-auto" aria-label="Fechar" onClick={onClose}><CloseGlyph /></button>
           </div>
 
           {usage === null && <p className="text-[13px] text-mv-muted">Carregando…</p>}
@@ -1161,9 +1229,9 @@ function BoardModal({ usage, meId, events, onClose }: {
 
           {rows.length > 0 && (
             <div className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
-              <div className="rounded-xl bg-white/[0.05] p-3"><p className="text-[11px] uppercase tracking-wider text-mv-muted">Total da turma</p><b className="text-[18px]">{fmtHours(total)}</b></div>
-              <div className="rounded-xl bg-white/[0.05] p-3"><p className="text-[11px] uppercase tracking-wider text-mv-muted">Sua posição</p><b className="text-[18px]">{myPos >= 0 ? `${myPos + 1}º de ${rows.length}` : '—'}</b></div>
-              <div className="rounded-xl bg-white/[0.05] p-3"><p className="text-[11px] uppercase tracking-wider text-mv-muted">Você por dia</p><b className="text-[18px]">{myPos >= 0 ? fmtHours(rows[myPos].seconds / 7) : '—'}</b></div>
+              <div className="mv-pad p-3"><p className="text-[10.5px] uppercase tracking-wider text-mv-muted">Total da turma</p><b className="font-display text-[19px]">{fmtHours(total)}</b></div>
+              <div className="mv-pad p-3"><p className="text-[10.5px] uppercase tracking-wider text-mv-muted">Sua posição</p><b className="font-display text-[19px]">{myPos >= 0 ? `${myPos + 1}º de ${rows.length}` : '—'}</b></div>
+              <div className="mv-pad p-3"><p className="text-[10.5px] uppercase tracking-wider text-mv-muted">Você por dia</p><b className="font-display text-[19px]">{myPos >= 0 ? fmtHours(rows[myPos].seconds / 7) : '—'}</b></div>
             </div>
           )}
 
@@ -1171,8 +1239,8 @@ function BoardModal({ usage, meId, events, onClose }: {
             {rows.map((r, i) => {
               const me = r.userId === meId
               return (
-                <li key={r.userId} className={`flex items-center gap-3 rounded-xl px-3 py-2 ${me ? 'bg-mv-accent/15 ring-1 ring-mv-accent/40' : 'bg-white/[0.03]'}`}>
-                  <span className="w-7 h-7 shrink-0 rounded-full grid place-items-center text-[12px] font-extrabold" style={{ background: medal[i] ?? '#3a3542', color: i < 3 ? '#1b1620' : '#fff' }}>{i + 1}</span>
+                <li key={r.userId} className={`flex items-center gap-3 rounded px-3 py-2 ${me ? 'mv-row-active' : 'bg-white/[0.03]'}`}>
+                  <span className="w-7 h-7 shrink-0 rounded grid place-items-center font-display text-[12.5px] font-extrabold" style={{ background: medal[i] ?? '#3a3542', color: i < 3 ? '#1b1620' : '#fff' }}>{i + 1}</span>
                   {r.avatarUrl ? <img src={r.avatarUrl} alt="" className="w-8 h-8 shrink-0 rounded-full object-cover" referrerPolicy="no-referrer" /> : <span className="w-8 h-8 shrink-0 rounded-full bg-white/10 grid place-items-center text-[13px] font-bold">{r.name.slice(0, 1).toUpperCase()}</span>}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
@@ -1180,7 +1248,7 @@ function BoardModal({ usage, meId, events, onClose }: {
                       <span className="ml-auto text-[13px] font-bold tabular-nums">{fmtHours(r.seconds)}</span>
                     </div>
                     <div className="mt-1 flex items-center gap-2">
-                      <div className="h-1.5 flex-1 rounded-full bg-white/10 overflow-hidden"><div className={`h-full rounded-full ${me ? 'bg-mv-accent' : 'bg-violet-500'}`} style={{ width: `${Math.max(2, (100 * r.seconds) / max)}%` }} /></div>
+                      <div className="h-1.5 flex-1 rounded-full bg-white/10 overflow-hidden"><div className={`h-full rounded-full ${me ? 'bg-mv-accent shadow-[0_0_8px_var(--color-mv-accent)]' : 'bg-white/35'}`} style={{ width: `${Math.max(2, (100 * r.seconds) / max)}%` }} /></div>
                       <span className="text-[11px] text-mv-muted tabular-nums w-[92px] text-right">≈ {fmtHours(r.seconds / 7)}/dia</span>
                     </div>
                   </div>
@@ -1191,14 +1259,14 @@ function BoardModal({ usage, meId, events, onClose }: {
 
           {events.length > 0 && (
             <div className="flex flex-col gap-2">
-              <b className="text-[13px] uppercase tracking-wider text-mv-muted">Próximos eventos</b>
+              <b className="field-label !mb-0">Próximos eventos</b>
               {events.map((e) => {
                 const d = new Date(e.startsAt)
                 return (
-                  <div key={e.id} className="flex items-center gap-3 rounded-xl bg-white/[0.03] px-3 py-2">
-                    <div className="w-12 shrink-0 rounded-lg bg-[#2a2236] text-center py-1">
+                  <div key={e.id} className="mv-pad flex items-center gap-3 px-3 py-2">
+                    <div className="w-12 shrink-0 rounded bg-[color-mix(in_oklab,var(--color-mv-accent)_14%,transparent)] text-center py-1">
                       <p className="text-[10px] font-extrabold text-mv-accent uppercase">{d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</p>
-                      <p className="text-[17px] font-black leading-tight">{d.toLocaleDateString('pt-BR', { day: '2-digit' })}</p>
+                      <p className="font-display text-[17px] font-black leading-tight">{d.toLocaleDateString('pt-BR', { day: '2-digit' })}</p>
                     </div>
                     <div className="min-w-0">
                       <b className="text-[14px] truncate block">{e.name}</b>
@@ -1224,7 +1292,7 @@ function TvScreen({ image }: { image: HTMLCanvasElement | null }) {
     c.height = image.height
     c.getContext('2d')?.drawImage(image, 0, 0)
   }, [image])
-  return <canvas ref={ref} className="w-full aspect-[16/10] rounded-lg border-[6px] border-[#141317] bg-black" />
+  return <canvas ref={ref} className="w-full aspect-[16/10] rounded-md border-[6px] border-[#09090c] bg-black shadow-[0_0_0_1px_var(--color-line-strong)]" />
 }
 type StudioTab = 'skins' | 'cabeca' | 'costas' | 'pelo' | 'conquistas'
 const HEAD_ITEMS: { id: string; label: string; kind: 'hat' | 'glasses' | 'headset' | 'shades' }[] = [
@@ -1264,27 +1332,27 @@ export function SkinStudio({ skin, name, stats = {}, onChange, onClose }: { skin
       onClick={onClick}
       disabled={disabled}
       aria-pressed={on}
-      className={`group relative flex flex-col items-center rounded-2xl border p-1.5 pb-2 transition ${on ? 'border-mv-accent bg-mv-accent/15 shadow-[0_0_0_3px_rgba(244,81,30,.18)]' : 'border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20'} disabled:opacity-35 disabled:cursor-not-allowed`}
+      className={`mv-pick group relative flex flex-col items-center p-1.5 pb-2 ${on ? 'is-recommended' : ''} disabled:opacity-35 disabled:cursor-not-allowed`}
     >
-      <img src={skinThumb(thumb, 112)} alt="" className="w-full aspect-square rounded-xl bg-gradient-to-b from-white/[0.07] to-transparent" draggable={false} />
+      <img src={skinThumb(thumb, 112)} alt="" className="w-full aspect-square rounded bg-gradient-to-b from-white/[0.07] to-transparent" draggable={false} />
       <span className="mt-1 text-[12px] font-semibold text-white truncate max-w-full">{label}</span>
-      {on && <span className="absolute top-2 right-2 w-5 h-5 rounded-full bg-mv-accent text-white text-[11px] font-bold flex items-center justify-center">✓</span>}
+      {on && <span className="mv-tag absolute top-2 right-2 !px-1.5 !py-0 !text-[10px]">✓</span>}
     </button>
   )
 
   return (
     <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4" onClick={onClose}>
       <div
-        className="w-[920px] max-w-full h-[600px] max-h-full rounded-3xl bg-[#16131c] border border-white/10 shadow-2xl overflow-hidden grid grid-cols-[minmax(0,5fr)_minmax(0,7fr)] max-md:grid-cols-1 max-md:grid-rows-[220px_minmax(0,1fr)]"
+        className="surface-elevated w-[920px] max-w-full h-[600px] max-h-full overflow-hidden grid grid-cols-[minmax(0,5fr)_minmax(0,7fr)] max-md:grid-cols-1 max-md:grid-rows-[220px_minmax(0,1fr)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Meu mamaco"
       >
-        <div className="relative bg-[radial-gradient(120%_90%_at_50%_30%,#2f2a3d,#15121b)]">
+        <div className="relative bg-[radial-gradient(120%_90%_at_50%_30%,color-mix(in_oklab,var(--color-mv-accent)_16%,#1a1a22),#0a0a0e)] border-r border-[var(--color-line)]">
           <div ref={stageRef} className="absolute inset-0" />
           <div className="absolute left-4 top-4 pointer-events-none">
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/50">Meu mamaco</p>
-            <p className="font-display text-[22px] font-extrabold text-white leading-tight">{name}</p>
+            <p className="font-display text-[22px] font-bold tracking-wide text-white leading-tight">{name}</p>
             <p className="text-[13px] text-mv-accent font-semibold">{current?.label ?? 'Sem roupa'}</p>
           </div>
           <p className="absolute bottom-3 left-0 right-0 text-center text-[11.5px] text-white/45 pointer-events-none max-md:hidden">Arraste pra girar</p>
@@ -1292,11 +1360,11 @@ export function SkinStudio({ skin, name, stats = {}, onChange, onClose }: { skin
         <div className="flex flex-col min-h-0">
           <div className="flex items-center gap-1 px-4 pt-4 overflow-x-auto">
             {tabs.map(([id, label]) => (
-              <button key={id} onClick={() => setTab(id)} aria-pressed={tab === id} className={`shrink-0 h-9 px-3.5 rounded-xl text-[13px] font-semibold transition ${tab === id ? 'bg-white text-[#1b1622]' : 'text-white/70 hover:text-white hover:bg-white/5'}`}>
+              <button key={id} onClick={() => setTab(id)} aria-pressed={tab === id} className={`shrink-0 h-9 px-3.5 rounded text-[13px] font-semibold transition-colors ${tab === id ? 'mv-seg-active' : 'text-white/70 hover:text-white hover:bg-white/5'}`}>
                 {label}
               </button>
             ))}
-            <button onClick={onClose} className="ml-auto w-9 h-9 rounded-xl text-white/60 hover:text-white hover:bg-white/5 text-xl leading-none" aria-label="Fechar">×</button>
+            <button onClick={onClose} className="mv-close ml-auto shrink-0" aria-label="Fechar"><CloseGlyph /></button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             {tab === 'skins' && (
@@ -1330,8 +1398,8 @@ export function SkinStudio({ skin, name, stats = {}, onChange, onClose }: { skin
                   const v = Math.min(a.goal, stats[a.stat] ?? 0)
                   const done = v >= a.goal
                   return (
-                    <div key={a.id} className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 ${done ? 'border-amber-400/40 bg-amber-400/10' : 'border-white/10 bg-white/[0.03]'}`}>
-                      <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-[22px] ${done ? 'bg-amber-400/20' : 'bg-white/5 grayscale opacity-60'}`}>{a.icon}</span>
+                    <div key={a.id} className={`mv-pad flex items-center gap-3 px-3 py-2.5 ${done ? '!bg-amber-400/10 !shadow-[inset_0_0_0_1px_rgba(251,191,36,.4)]' : ''}`}>
+                      <span className={`w-10 h-10 rounded flex items-center justify-center text-[22px] ${done ? 'bg-amber-400/20' : 'bg-white/5 grayscale opacity-60'}`}>{a.icon}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-[13.5px] font-bold text-white">{a.name}</p>
                         <p className="text-[12px] text-white/55">{a.desc}</p>
@@ -1353,7 +1421,7 @@ export function SkinStudio({ skin, name, stats = {}, onChange, onClose }: { skin
               </div>
             )}
           </div>
-          <div className="px-4 py-3 border-t border-white/10 flex items-center gap-3">
+          <div className="px-4 py-3 border-t border-[var(--color-line)] flex items-center gap-3">
             <div className="min-w-0">
               <p className="text-[11.5px] text-white/45 leading-snug">Salvo no seu perfil: todo mundo te vê assim no Escritório.</p>
               <details className="text-[10.5px] text-white/35 leading-snug mt-0.5">
@@ -1361,7 +1429,7 @@ export function SkinStudio({ skin, name, stats = {}, onChange, onClose }: { skin
                 <p className="mt-1">Acessórios via poly.pizza (CC-BY 3.0): Poly by Google (coroa, chapéus de mago, pirata e xerife, asas de morcego), J-Toastie (óculos escuros), Marisha (máscara de gás), Casey Tumbers (quepe), Michael Fuchs (asas), TRASH - TANUKI (óculos pixel). Mochila e chapéu vivo: Quaternius (CC0). Cenários e móveis: Kenney e KayKit (CC0). Animações: Mixamo.</p>
               </details>
             </div>
-            <button onClick={onClose} className="ml-auto h-10 px-5 rounded-xl text-[13.5px] font-bold text-white bg-gradient-to-r from-rose-500 to-mv-accent hover:brightness-110">Pronto</button>
+            <button onClick={onClose} className="btn-primary ml-auto h-10 px-5 text-[13.5px]">Pronto</button>
           </div>
         </div>
       </div>

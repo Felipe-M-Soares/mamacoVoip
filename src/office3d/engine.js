@@ -4948,8 +4948,8 @@ const CSS = `
 .o3d .prompt kbd{font:700 12px var(--font-display,"Oxanium Variable",Inter,sans-serif);background:var(--color-mv-accent,#ee3a34);color:#fff;border-radius:3px;padding:1px 7px;margin-right:8px;box-shadow:0 0 10px var(--color-mv-accent,#ee3a34)}
 .o3d .map{position:absolute;top:12px;right:max(16px,env(safe-area-inset-right,0px));width:256px;border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.09),0 14px 30px -12px rgba(0,0,0,.8);cursor:pointer;z-index:5;transition:box-shadow .15s}
 .o3d .map:hover{box-shadow:0 0 0 1px var(--color-mv-accent,#ee3a34),0 0 16px color-mix(in oklab,var(--color-mv-accent,#ee3a34) 40%,transparent)}
-.o3d .camctl{position:absolute;top:12px;right:calc(max(16px,env(safe-area-inset-right,0px)) + 268px);display:flex;gap:2px;padding:3px;z-index:5;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);background:rgba(14,14,19,.84);box-shadow:inset 0 0 0 1px rgba(255,255,255,.09);backdrop-filter:blur(12px)}
-.o3d .camctl button{width:32px;height:30px;display:flex;align-items:center;justify-content:center;border:0;border-radius:3px;background:transparent;color:#c9c9d4;cursor:pointer;transition:background-color .15s,color .15s}
+.o3d .camctl{position:absolute;top:178px;right:max(16px,env(safe-area-inset-right,0px));width:256px;box-sizing:border-box;justify-content:space-between;display:flex;gap:2px;padding:3px;z-index:5;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);background:rgba(14,14,19,.84);box-shadow:inset 0 0 0 1px rgba(255,255,255,.09);backdrop-filter:blur(12px)}
+.o3d .camctl button{flex:1;min-width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:0;border-radius:3px;background:transparent;color:#c9c9d4;cursor:pointer;transition:background-color .15s,color .15s}
 .o3d .camctl button svg{width:17px;height:17px;transition:filter .15s}
 .o3d .camctl button[aria-pressed=false]{color:#6b6b78}
 .o3d .camctl .sep{width:1px;margin:5px 2px;background:rgba(255,255,255,.1)}
@@ -4964,7 +4964,7 @@ const CSS = `
 .o3d .bigmap header button:hover{background:color-mix(in oklab,var(--color-mv-accent,#ee3a34) 22%,transparent);color:#fff}
 .o3d .bigmap canvas{flex:1;width:100%;min-height:0;cursor:pointer;display:block}
 .o3d [hidden]{display:none!important}
-@media (max-width:760px){.o3d .camctl{top:60px;right:calc(max(16px,env(safe-area-inset-right,0px)) + 158px);flex-wrap:wrap;width:110px;justify-content:flex-end}.o3d .map{width:150px;top:60px}.o3d .prompt{bottom:230px}}
+@media (max-width:639px){.o3d .camctl{top:160px;width:150px;flex-wrap:wrap}.o3d .camctl .sep{display:none}.o3d .camctl button{flex:0 0 calc((100% - 4px) / 3)}.o3d .map{width:150px;top:60px}.o3d .prompt{bottom:230px}}
 @media (prefers-reduced-motion:reduce){.o3d .bubble{transition:none}.o3d .zzz{animation:none}.o3d .emote.go{animation-duration:.01s}}
 `;
 const SVG_SPK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Zm4.5 3.5a5 5 0 0 1 0 7m2.5-10a9 9 0 0 1 0 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';

@@ -1200,3 +1200,135 @@ nav .uppercase[class*='tracking-']::before {
     inset 0 0 0 1px color-mix(in oklab, var(--color-mv-accent) 60%, white),
     0 0 12px color-mix(in oklab, var(--color-mv-accent) 40%, transparent);
 }
+
+.mv-hud,
+.mv-hud-btn,
+.mv-hud-cta {
+  --cut: 8px;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+.mv-hud {
+  background: color-mix(in oklab, var(--color-elevated) 84%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+.mv-hud-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-mv-text);
+  background: color-mix(in oklab, var(--color-elevated) 84%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+.mv-hud-btn > svg {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  color: var(--color-mv-muted);
+  transition: color 0.15s ease, filter 0.15s ease;
+}
+.mv-hud-btn:hover:not(:disabled),
+.mv-hud-btn:focus-visible {
+  color: #fff;
+  background: color-mix(in oklab, var(--color-mv-accent) 16%, color-mix(in oklab, var(--color-elevated) 84%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-mv-accent) 55%, transparent);
+}
+.mv-hud-btn:hover:not(:disabled) > svg,
+.mv-hud-btn:focus-visible > svg,
+.mv-hud-btn[aria-pressed='true'] > svg {
+  color: color-mix(in oklab, var(--color-neon) 55%, white);
+  filter: drop-shadow(0 0 4px var(--color-mv-accent));
+}
+.mv-hud-btn[aria-pressed='true'] {
+  color: #fff;
+  background: linear-gradient(160deg, color-mix(in oklab, var(--color-mv-accent) 32%, transparent), color-mix(in oklab, var(--color-mv-accent) 14%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-mv-accent) 80%, transparent), inset 0 -2px 0 var(--color-mv-accent);
+}
+.mv-hud-btn.is-off {
+  color: #fecdd3;
+  background: rgb(244 63 94 / 0.18);
+  box-shadow: inset 0 0 0 1px rgb(244 63 94 / 0.5);
+}
+.mv-hud-btn.is-off > svg {
+  color: #fb7185;
+}
+.mv-hud-btn.is-danger {
+  color: #fff;
+  background: linear-gradient(160deg, #ef4444, #b91c1c);
+  box-shadow: inset 0 0 0 1px #fca5a5;
+}
+.mv-hud-btn.is-danger > svg {
+  color: #fff;
+}
+.mv-hud-btn.is-danger:hover {
+  background: linear-gradient(160deg, #f87171, #dc2626);
+}
+.mv-hud-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(120deg, color-mix(in oklab, var(--color-mv-accent) 82%, white), var(--color-mv-accent) 55%, color-mix(in oklab, var(--color-mv-accent) 70%, black));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-mv-accent) 40%, white), 0 0 22px color-mix(in oklab, var(--color-mv-accent) 45%, transparent);
+  transition: filter 0.15s ease;
+}
+.mv-hud-cta > svg {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 0 4px rgb(255 255 255 / 0.5));
+}
+.mv-hud-cta:hover {
+  filter: brightness(1.12);
+}
+.mv-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--color-mv-muted);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong), inset 0 -1.5px 0 rgb(255 255 255 / 0.08);
+  background: rgb(0 0 0 / 0.25);
+}
+.mv-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-mv-green);
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-mv-green) 60%, transparent);
+  animation: mv-live 1.8s ease-out infinite;
+}
+@keyframes mv-live {
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mv-live-dot {
+    animation: none;
+  }
+}

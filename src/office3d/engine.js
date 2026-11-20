@@ -4073,6 +4073,12 @@ function bed(x, z, rot, extra = {}) {
   footprint(x, z, 1.0, 2.1, rot);
   return addSeat(x, z, rot, 0.52, { kind: 'bed', ...extra, h: 0.52, bedH: 0.5 });
 }
+const BUNK_STEP = 1.45;
+const MAX_BUNKS = 40;
+function dormFor(members) {
+  const bunks = Math.min(MAX_BUNKS, Math.max(2, Math.ceil(members / 2)));
+  return { beds: bunks * 2, minW: bunks * BUNK_STEP + 1.0 };
+}
 function bunkBed(x, z, rot, extra = {}) {
   const g = new THREE.Group();
   const UP = 1.3;
@@ -4154,12 +4160,12 @@ Object.assign(THEME_BUILD, {
   },
   dorm(F, room) {
     rug(...F.p(0, F.d / 2), F.yaw(), F.w - 1.2, 2.2, ['#2b2d42', '#8d99ae']);
-    const n = Math.max(2, Math.floor((F.w - 0.8) / 1.45));
+    const n = Math.min(MAX_BUNKS, Math.max(2, Math.floor((F.w - 0.8) / BUNK_STEP)));
     for (let i = 0; i < n; i++) {
-      const u = -((n - 1) * 1.45) / 2 + i * 1.45;
+      const u = -((n - 1) * BUNK_STEP) / 2 + i * BUNK_STEP;
       bunkBed(...F.p(u, F.d - 1.2), F.yaw(Math.PI), { room: room.id, sector: room.sector, color: pick([M.fabricBlue, M.fabricGray, M.fabricGreen]), color2: pick([M.fabricBlue, M.fabricGray, M.fabricGreen]) });
     }
-    for (let i = 0; i < n - 1; i++) nightstand(...F.p(-((n - 1) * 1.45) / 2 + i * 1.45 + 0.725, F.d - 0.35));
+    for (let i = 0; i < n - 1; i++) nightstand(...F.p(-((n - 1) * BUNK_STEP) / 2 + i * BUNK_STEP + BUNK_STEP / 2, F.d - 0.35));
     plant(...F.p(-F.w / 2 + 0.45, 0.6), 1, 'snake');
     floorLamp(...F.p(F.w / 2 - 0.45, 0.6));
   },
@@ -4300,10 +4306,13 @@ function buildWorld(server) {
   }));
   for (const cat of cats) {
     const nRooms = cat.voice.length;
-    const w = Math.max(BLOCK.minW, nRooms * BLOCK.roomW);
+    const roomWs = cat.voice.map((v) => Math.max(BLOCK.roomW, v.minW || 0));
+    const sum = roomWs.reduce((a, b) => a + b, 0);
+    const w = Math.max(BLOCK.minW, sum);
+    if (nRooms && w > sum) for (let i = 0; i < nRooms; i++) roomWs[i] += (w - sum) / nRooms;
     const side = curN <= curS ? 'n' : 's';
     const x0 = side === 'n' ? curN : curS;
-    blocks.push({ cat, side, x0, x1: x0 + w, w, nRooms });
+    blocks.push({ cat, side, x0, x1: x0 + w, w, nRooms, roomWs });
     if (side === 'n') curN += w; else curS += w;
   }
   const X1 = Math.max(curN, curS, 30);
@@ -4379,10 +4388,11 @@ function buildWorld(server) {
     if (b.x1 < X1 - 0.5) { place(div, dx, dz); addCollider(dx - 0.2, dx + 0.2, dz - 1.6, dz + 1.6); }
 
     if (!deep) {
-      const rw = b.w / b.nRooms;
+      let rxAt = b.x0;
       cat.voice.forEach((v, i) => {
         const { id, name } = v;
-        const rx0 = b.x0 + i * rw, rx1 = rx0 + rw;
+        const rx0 = rxAt, rx1 = rx0 + b.roomWs[i];
+        rxAt = rx1;
         const rect = [rx0, rx1, Math.min(zA1, zR1), Math.max(zA1, zR1)];
         const th = v.theme ? { id: v.theme, label: ROOM_THEMES.find((t) => t[0] === v.theme)?.[1] || v.theme } : detectRoomTheme(name);
         const RF = frameFor(rect, b.side);
@@ -4892,7 +4902,7 @@ function toonify(obj) {
 }
 
 const CSS = `
-.o3d{position:absolute;inset:0;overflow:hidden;background:#b8c4cc;font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#ece8f1}
+.o3d{position:absolute;inset:0;overflow:hidden;background:#b8c4cc;font-family:var(--font-sans,Inter),"Segoe UI",system-ui,sans-serif;color:#f4f4f7}
 .o3d canvas.view{display:block;width:100%;height:100%;outline:none;touch-action:none}
 .o3d .labels{position:absolute;inset:0;pointer-events:none}
 .o3d .tag{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;gap:5px;transform-origin:50% 100%;will-change:transform}
@@ -4901,11 +4911,11 @@ const CSS = `
 .o3d .bubble.show{opacity:1;transform:none}
 .o3d .zzz{font:800 15px Sora,Inter,sans-serif;color:#c7d2fe;text-shadow:0 1px 3px rgba(0,0,0,.5);letter-spacing:2px;animation:o3dz 2.4s ease-in-out infinite}
 @keyframes o3dz{0%{opacity:0;transform:translateY(6px)}40%{opacity:1}100%{opacity:0;transform:translateY(-10px)}}
-.o3d .name{font-size:11.5px;font-weight:600;color:#fff;padding:2px 8px;border-radius:999px;background:rgba(12,10,16,.66);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.o3d .name{font-size:11.5px;font-weight:600;color:#fff;padding:2px 8px;border-radius:4px;background:rgba(8,8,12,.74);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);display:flex;align-items:center;gap:5px;white-space:nowrap}
 .o3d .name i{width:7px;height:7px;border-radius:50%;display:inline-block}
 .o3d .name img{width:20px;height:20px;border-radius:50%;object-fit:cover;margin-left:-6px;border:1.5px solid rgba(255,255,255,.85);flex:none}
 .o3d .name img:not([hidden])+i{width:8px;height:8px;margin-left:-11px;margin-top:12px;border:1.5px solid #0c0a10}
-.o3d .name.talking{box-shadow:0 0 0 2px #34d399}
+.o3d .name.talking{box-shadow:inset 0 0 0 1px #34d399,0 0 10px rgba(52,211,153,.45)}
 .o3d .cam{width:76px;height:76px;border-radius:50%;overflow:hidden;border:2.5px solid #fff;box-shadow:0 6px 16px rgba(0,0,0,.35);background:#0c0a10}
 .o3d .cam.talking{border-color:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.45),0 6px 16px rgba(0,0,0,.35)}
 .o3d .cam video{width:100%;height:100%;object-fit:cover;display:block}
@@ -4913,39 +4923,45 @@ const CSS = `
 .o3d .emote{position:absolute;bottom:100%;left:50%;font-size:30px;line-height:1;pointer-events:none;opacity:0;transform:translate(-50%,0)}
 .o3d .emote.go{animation:o3de 2.2s ease-out forwards}
 @keyframes o3de{0%{opacity:0;transform:translate(-50%,10px) scale(.4)}12%{opacity:1;transform:translate(-50%,-4px) scale(1.25)}25%{transform:translate(-50%,-8px) scale(1)}80%{opacity:1}100%{opacity:0;transform:translate(-50%,-46px) scale(.95)}}
-.o3d .game{font-size:10.5px;font-weight:700;color:#d8ccff;background:rgba(40,24,72,.78);padding:1px 8px;border-radius:999px;white-space:nowrap;max-width:190px;overflow:hidden;text-overflow:ellipsis}
+.o3d .game{font-size:10.5px;font-weight:700;color:#bbf7d0;background:rgba(8,8,12,.74);box-shadow:inset 0 0 0 1px rgba(52,211,153,.35);padding:1px 8px;border-radius:3px;white-space:nowrap;max-width:190px;overflow:hidden;text-overflow:ellipsis}
 .o3d .game:empty{display:none}
-.o3d .sign .badge{min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#ef4444;color:#fff;font:800 11px/19px Inter,sans-serif;text-align:center;box-shadow:0 0 0 2px rgba(12,10,16,.8)}
-.o3d .toast{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:8;background:rgba(18,15,24,.92);border:1px solid rgba(255,255,255,.14);padding:9px 14px;border-radius:12px;font-size:13.5px;font-weight:600;pointer-events:none;animation:o3dt 3.6s ease forwards;white-space:nowrap;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis}
+.o3d .sign .badge{min-width:19px;height:19px;padding:0 5px;border-radius:3px;background:var(--color-mv-accent,#ee3a34);color:#fff;font:700 11px/19px var(--font-display,"Oxanium Variable",Inter,sans-serif);text-align:center;box-shadow:0 0 10px var(--color-mv-accent,#ee3a34)}
+.o3d .toast{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:8;background:rgba(14,14,19,.94);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1),inset 3px 0 0 var(--color-mv-accent,#ee3a34),0 12px 30px -10px rgba(0,0,0,.7);padding:9px 16px;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);font-size:13.5px;font-weight:600;pointer-events:none;animation:o3dt 3.6s ease forwards;white-space:nowrap;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis}
 @keyframes o3dt{0%{opacity:0;transform:translate(-50%,-8px)}8%{opacity:1;transform:translate(-50%,0)}85%{opacity:1}100%{opacity:0}}
-.o3d .sign{position:absolute;left:0;top:0;display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:9px;color:#fff;background:rgba(12,10,16,.62);border-left:3px solid var(--c,#f4511e);white-space:nowrap}
-.o3d .sign.room{pointer-events:auto;cursor:pointer;border:1px solid rgba(255,255,255,.12);border-left:3px solid var(--c);background:rgba(12,10,16,.74)}
-.o3d .sign.room:hover{background:rgba(12,10,16,.9)}
+.o3d .sign{position:absolute;left:0;top:0;display:flex;align-items:center;gap:7px;padding:5px 10px;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);color:#fff;background:rgba(8,8,12,.7);box-shadow:inset 3px 0 0 var(--c,var(--color-mv-accent,#ee3a34)),inset 0 0 0 1px rgba(255,255,255,.08);white-space:nowrap}
+.o3d .sign.room{pointer-events:auto;cursor:pointer;background:rgba(8,8,12,.8)}
+.o3d .sign.room:hover{background:rgba(8,8,12,.92);box-shadow:inset 3px 0 0 var(--c),inset 0 0 0 1px color-mix(in oklab,var(--c) 60%,transparent),0 0 14px color-mix(in oklab,var(--c) 35%,transparent)}
 .o3d .sign svg{width:15px;height:15px;color:#9d97a8;flex:none}
 .o3d .sign.live svg{color:#34d399}
-.o3d .sign.mine{box-shadow:0 0 0 2px #34d399}
+.o3d .sign.mine{box-shadow:inset 3px 0 0 #34d399,inset 0 0 0 1px rgba(52,211,153,.7),0 0 14px rgba(52,211,153,.35)}
 .o3d .sign .t{display:flex;flex-direction:column;line-height:1.15}
-.o3d .sign .t b{font-size:12px;font-weight:700}
-.o3d .sign .t small{font-size:10px;font-weight:600;color:#a19ab0}
-.o3d .sign.area .t b{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--c)}
+.o3d .sign .t b{font:700 12.5px var(--font-display,"Oxanium Variable",Inter,sans-serif);letter-spacing:.02em}
+.o3d .sign .t small{font-size:10px;font-weight:600;color:#9d9dab}
+.o3d .sign.area .t b{font:700 13px var(--font-display,"Oxanium Variable",Inter,sans-serif);text-transform:uppercase;letter-spacing:.12em;color:var(--c);text-shadow:0 0 10px color-mix(in oklab,var(--c) 55%,transparent)}
 .o3d .who{display:flex;gap:2px}
 .o3d .who:empty{display:none}
 .o3d .mini{width:20px;height:20px;border-radius:50%;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center;border:1.5px solid rgba(12,10,16,.9)}
 .o3d .mini.speaking{border-color:#34d399;box-shadow:0 0 0 1.5px #34d399}
-.o3d .mini.more{background:#3a3542;color:#fff}
+.o3d .mini.more{background:#1d1d25;color:#fff}
 .o3d .prompt{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);display:flex;gap:8px;z-index:6;pointer-events:none}
-.o3d .prompt span{background:rgba(18,15,24,.86);border:1px solid rgba(255,255,255,.12);padding:7px 11px;border-radius:10px;font-size:13px;font-weight:600}
-.o3d .prompt kbd{font:800 12px Inter,sans-serif;background:#fff;color:#16131c;border-radius:5px;padding:1px 6px;margin-right:6px}
-.o3d .map{position:absolute;top:12px;right:max(16px,env(safe-area-inset-right,0px));width:240px;border-radius:12px;border:1px solid rgba(255,240,230,.09);cursor:pointer;z-index:5}
-.o3d .camctl{position:absolute;top:12px;right:calc(max(16px,env(safe-area-inset-right,0px)) + 252px);display:flex;gap:4px;z-index:5}
-.o3d .camctl button{width:34px;height:30px;border-radius:9px;border:1px solid rgba(255,240,230,.12);background:rgba(18,15,22,.82);color:#f3eef8;font:700 16px/1 Inter,system-ui,sans-serif;cursor:pointer}
-.o3d .camctl button:hover{background:rgba(244,81,30,.85)}
+.o3d .prompt span{display:flex;align-items:center;background:rgba(14,14,19,.9);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);padding:7px 12px 7px 8px;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);font-size:13px;font-weight:600}
+.o3d .prompt kbd{font:700 12px var(--font-display,"Oxanium Variable",Inter,sans-serif);background:var(--color-mv-accent,#ee3a34);color:#fff;border-radius:3px;padding:1px 7px;margin-right:8px;box-shadow:0 0 10px var(--color-mv-accent,#ee3a34)}
+.o3d .map{position:absolute;top:12px;right:max(16px,env(safe-area-inset-right,0px));width:256px;border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.09),0 14px 30px -12px rgba(0,0,0,.8);cursor:pointer;z-index:5;transition:box-shadow .15s}
+.o3d .map:hover{box-shadow:0 0 0 1px var(--color-mv-accent,#ee3a34),0 0 16px color-mix(in oklab,var(--color-mv-accent,#ee3a34) 40%,transparent)}
+.o3d .camctl{position:absolute;top:12px;right:calc(max(16px,env(safe-area-inset-right,0px)) + 268px);display:flex;gap:2px;padding:3px;z-index:5;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);background:rgba(14,14,19,.84);box-shadow:inset 0 0 0 1px rgba(255,255,255,.09);backdrop-filter:blur(12px)}
+.o3d .camctl button{width:32px;height:30px;display:flex;align-items:center;justify-content:center;border:0;border-radius:3px;background:transparent;color:#c9c9d4;cursor:pointer;transition:background-color .15s,color .15s}
+.o3d .camctl button svg{width:17px;height:17px;transition:filter .15s}
+.o3d .camctl button[aria-pressed=false]{color:#6b6b78}
+.o3d .camctl .sep{width:1px;margin:5px 2px;background:rgba(255,255,255,.1)}
+.o3d .camctl button:hover{background:color-mix(in oklab,var(--color-mv-accent,#ee3a34) 20%,transparent);color:#fff}
+.o3d .camctl button:hover svg{filter:drop-shadow(0 0 4px var(--color-mv-accent,#ee3a34))}
 .o3d .bigmap{position:absolute;inset:0;z-index:40;background:rgba(8,6,12,.6);display:flex;align-items:center;justify-content:center;padding:16px}
-.o3d .bigmap>div{width:min(1100px,100%);height:min(700px,100%);display:flex;flex-direction:column;background:#16131c;border:1px solid rgba(255,240,230,.09);border-radius:16px;overflow:hidden}
-.o3d .bigmap header{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,240,230,.09)}
-.o3d .bigmap header b{font:700 16px Sora,Inter,sans-serif}
-.o3d .bigmap header small{color:#9d97a8;font-size:12.5px}
-.o3d .bigmap header button{margin-left:auto;border:0;background:transparent;color:#9d97a8;font-size:22px;cursor:pointer}
+.o3d .bigmap>div{width:min(1100px,100%);height:min(700px,100%);display:flex;flex-direction:column;background:#131319;box-shadow:inset 0 0 0 1px rgba(255,255,255,.09),0 24px 60px -16px rgba(0,0,0,.8);border-radius:10px;overflow:hidden}
+.o3d .bigmap header{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.06);background:linear-gradient(180deg,color-mix(in oklab,var(--color-mv-accent,#ee3a34) 7%,transparent),transparent)}
+.o3d .bigmap header b{font:700 16px var(--font-display,"Oxanium Variable",Inter,sans-serif);letter-spacing:.06em;text-transform:uppercase}
+.o3d .bigmap header small{color:#9d9dab;font-size:12.5px}
+.o3d .bigmap header button{margin-left:auto;width:32px;height:32px;border:0;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);background:rgba(255,255,255,.05);color:#9d9dab;font-size:20px;line-height:1;cursor:pointer}
+.o3d .bigmap header button:hover{background:color-mix(in oklab,var(--color-mv-accent,#ee3a34) 22%,transparent);color:#fff}
 .o3d .bigmap canvas{flex:1;width:100%;min-height:0;cursor:pointer;display:block}
 .o3d [hidden]{display:none!important}
 @media (max-width:760px){.o3d .camctl{top:60px;right:calc(max(16px,env(safe-area-inset-right,0px)) + 158px);flex-wrap:wrap;width:110px;justify-content:flex-end}.o3d .map{width:150px;top:60px}.o3d .prompt{bottom:230px}}
@@ -4972,7 +4988,7 @@ function createOffice(opts) {
   }
   root.innerHTML = `<canvas class="view" tabindex="0" aria-label="Escritório 3D. WASD ou setas para andar."></canvas><div class="labels"></div>
     <div class="prompt" hidden></div><canvas class="map" aria-label="Mapa do escritório. Clique para abrir."></canvas>
-    <div class="bigmap" hidden><div><header><b>Mapa</b><small>Clique numa sala pra ir até lá</small><button aria-label="Fechar mapa">×</button></header><canvas></canvas></div></div>`;
+    <div class="bigmap" hidden><div><header><b>Mapa</b><small>Clique numa sala pra ir até lá</small><button aria-label="Fechar mapa">✕</button></header><canvas></canvas></div></div>`;
   container.appendChild(root);
   const canvas = root.querySelector('canvas.view');
   const labelsEl = root.querySelector('.labels');
@@ -5345,7 +5361,9 @@ function createOffice(opts) {
   function specFrom(d) {
     const cats = d.categories.map((c, i) => ({ id: c.id, name: c.name, color: c.color || SECTOR_COLORS[i % SECTOR_COLORS.length], text: c.text || [], voice: c.voice || [] }));
     const mg = d.minigamesRoom;
-    cats.push(mg ? { ...SPECIALS, voice: [{ id: mg.id, name: mg.name || 'Minigames', theme: 'arcade', voice: true, private: !!mg.private }, ...SPECIALS.voice.slice(1)] } : SPECIALS);
+    const dorm = dormFor((d.members || []).length);
+    const rest = SPECIALS.voice.slice(1).map((v) => (v.theme === 'dorm' ? { ...v, ...dorm } : v));
+    cats.push({ ...SPECIALS, voice: [mg ? { id: mg.id, name: mg.name || 'Minigames', theme: 'arcade', voice: true, private: !!mg.private } : SPECIALS.voice[0], ...rest] });
     sectorColors = { recepcao: '#f4511e' };
     for (const c of cats) sectorColors[c.id] = c.color;
     return { categories: cats };
@@ -6104,8 +6122,8 @@ function createOffice(opts) {
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(zoom * (e.deltaY > 0 ? 0.9 : 1.1)); }, { passive: false });
   const camCtl = document.createElement('div');
   camCtl.className = 'camctl';
-  camCtl.innerHTML = '<button data-a="l" aria-label="Girar câmera pra esquerda">⟲</button><button data-a="r" aria-label="Girar câmera pra direita">⟳</button><button data-a="o" aria-label="Afastar">−</button><button data-a="i" aria-label="Aproximar">+</button><button data-a="s" aria-label="Som ligado/desligado"></button><button data-a="m" aria-label="Música ambiente" title="Música ambiente">🎵</button>';
-  const sndBtn = () => { const b = camCtl.querySelector('[data-a="s"]'); b.textContent = SFX.on ? '🔊' : '🔇'; b.setAttribute('aria-pressed', String(SFX.on)); };
+  camCtl.innerHTML = '<button data-a="l" aria-label="Girar câmera pra esquerda" title="Girar pra esquerda"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h5"/><path d="M5.6 15a7.5 7.5 0 1 0 1.8-7.8L4 9"/></svg></button><button data-a="r" aria-label="Girar câmera pra direita" title="Girar pra direita"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4v5h-5"/><path d="M18.4 15a7.5 7.5 0 1 1-1.8-7.8L20 9"/></svg></button><span class="sep"></span><button data-a="o" aria-label="Afastar" title="Afastar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M7.8 10.5h5.4M15.5 15.5l5 5"/></svg></button><button data-a="i" aria-label="Aproximar" title="Aproximar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M7.8 10.5h5.4M10.5 7.8v5.4M15.5 15.5l5 5"/></svg></button><span class="sep"></span><button data-a="s" aria-label="Som ligado/desligado"></button><button data-a="m" aria-label="Música ambiente" title="Música ambiente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg></button>';
+  const sndBtn = () => { const b = camCtl.querySelector('[data-a="s"]'); b.innerHTML = SFX.on ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5v5h4l5 4v-13l-5 4z"/><path d="M16.5 9a4.5 4.5 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5v5h4l5 4v-13l-5 4z"/><path d="M17 9.5l5 5M22 9.5l-5 5"/></svg>'; b.title = SFX.on ? 'Efeitos: ligados' : 'Efeitos: desligados'; b.setAttribute('aria-pressed', String(SFX.on)); };
   camCtl.addEventListener('click', (e) => {
     const a = e.target.closest('button')?.dataset.a;
     if (a === 's') { SFX.toggle(); sndBtn(); return; }
@@ -6113,7 +6131,7 @@ function createOffice(opts) {
     if (a === 'l') rotateCam(-1); else if (a === 'r') rotateCam(1); else if (a === 'o') setZoom(zoom / 1.25); else if (a === 'i') setZoom(zoom * 1.25);
   });
   root.appendChild(camCtl);
-  const musBtn = () => { const b = camCtl.querySelector('[data-a="m"]'); b.style.opacity = MUSIC.on ? '1' : '.45'; b.setAttribute('aria-pressed', String(MUSIC.on)); b.title = MUSIC.on ? 'Música ambiente: ligada' : 'Música ambiente: desligada'; };
+  const musBtn = () => { const b = camCtl.querySelector('[data-a="m"]'); b.setAttribute('aria-pressed', String(MUSIC.on)); b.title = MUSIC.on ? 'Música ambiente: ligada' : 'Música ambiente: desligada'; };
   sndBtn(); musBtn();
   let dayOverride = null, dayT = 0;
   const C_SUN = [new THREE.Color(0x9fb0ff), new THREE.Color(0xffb07a), new THREE.Color(0xfff0dc)];
@@ -6220,7 +6238,7 @@ function createOffice(opts) {
   const api = {
     setData(d) {
       data = d;
-      const sig = JSON.stringify([d.minigamesRoom || null, d.categories.map((c) => [c.id, c.name, (c.voice || []).map((v) => (typeof v === 'string' ? v : [v.id, v.name, v.theme, !!v.private]))])]);
+      const sig = JSON.stringify([dormFor((d.members || []).length).beds, d.minigamesRoom || null, d.categories.map((c) => [c.id, c.name, (c.voice || []).map((v) => (typeof v === 'string' ? v : [v.id, v.name, v.theme, !!v.private]))])]);
       const first = !built;
       if (sig !== worldSig) { worldSig = sig; rebuildWorld(); syncMembers(true); }
       else syncMembers(first);
@@ -6304,37 +6322,41 @@ const GAMES = {
   kart: { name: 'Kart Mamaco 3D', hint: 'Corrida em 3D: 3 voltas contra 3 bots, drift com turbo, itens (banana, coco, turbo). Desafie a galera no chat.' },
 };
 const MG_CSS = `
-.mg{position:absolute;inset:0;z-index:50;background:rgba(8,6,12,.7);display:flex;align-items:center;justify-content:center;padding:16px;font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#ece8f1}
-.mg .card{width:min(560px,100%);max-height:100%;overflow:auto;background:#16131c;border:1px solid rgba(255,240,230,.1);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.mg{position:absolute;inset:0;z-index:50;background:rgba(4,4,8,.72);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:16px;font-family:var(--font-sans,Inter),"Segoe UI",system-ui,sans-serif;color:#f4f4f7}
+.mg .card{--h:color-mix(in oklab,var(--color-mv-accent,#ee3a34) 75%,transparent);width:min(560px,100%);max-height:100%;overflow:auto;background:linear-gradient(var(--h),var(--h)) left top/14px 2px no-repeat,linear-gradient(var(--h),var(--h)) left top/2px 14px no-repeat,linear-gradient(var(--h),var(--h)) right bottom/14px 2px no-repeat,linear-gradient(var(--h),var(--h)) right bottom/2px 14px no-repeat,linear-gradient(180deg,color-mix(in oklab,var(--color-mv-accent,#ee3a34) 7%,transparent),transparent 90px),#131319;border:1px solid rgba(255,255,255,.09);border-radius:10px;box-shadow:0 24px 60px -16px rgba(0,0,0,.8);padding:16px;display:flex;flex-direction:column;gap:12px}
 .mg header{display:flex;align-items:center;gap:10px}
-.mg header b{font:800 18px Sora,Inter,sans-serif}
-.mg header small{color:#9d97a8}
-.mg header button{border:0;background:transparent;color:#9d97a8;font-size:24px;cursor:pointer;line-height:1}
-.mg header .snd{margin-left:auto;font-size:17px;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.06)}
+.mg header b{font:700 19px var(--font-display,"Oxanium Variable",Inter,sans-serif);letter-spacing:.04em}
+.mg header small{color:#9d9dab}
+.mg header button{border:0;width:32px;height:32px;clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);background:rgba(255,255,255,.05);color:#9d9dab;font-size:20px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center}
+.mg header button:hover{background:color-mix(in oklab,var(--color-mv-accent,#ee3a34) 22%,transparent);color:#fff}
+.mg header .snd{margin-left:auto;font-size:16px}
 .mg .menu{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-.mg .rkbtn{width:100%;border:1px solid rgba(250,204,21,.35);background:linear-gradient(135deg,rgba(250,204,21,.14),rgba(244,81,30,.12));color:#fde68a;border-radius:14px;padding:11px 14px;font:700 14px Inter,sans-serif;cursor:pointer;margin-bottom:10px;text-align:left}
+.mg .rkbtn{width:100%;border:0;clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);box-shadow:inset 0 0 0 1px rgba(250,204,21,.4);background:linear-gradient(135deg,rgba(250,204,21,.14),color-mix(in oklab,var(--color-mv-accent,#ee3a34) 12%,transparent));color:#fde68a;padding:11px 14px;font:700 14px var(--font-display,"Oxanium Variable",Inter,sans-serif);letter-spacing:.02em;cursor:pointer;margin-bottom:10px;text-align:left}
+.mg .rkbtn:hover{box-shadow:inset 0 0 0 1px rgba(250,204,21,.75),0 0 16px rgba(250,204,21,.2)}
 .mg .tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
-.mg .tabs button{flex:none;border:1px solid rgba(255,255,255,.1);background:#1f1b27;color:#cfc9d8;border-radius:999px;padding:6px 12px;font:600 12.5px Inter,sans-serif;cursor:pointer}
-.mg .tabs button[aria-pressed=true]{background:#f4511e;border-color:#f4511e;color:#fff}
+.mg .tabs button{flex:none;border:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:#c9c9d4;border-radius:4px;padding:6px 12px;font:600 12.5px Inter,sans-serif;cursor:pointer}
+.mg .tabs button[aria-pressed=true]{background:color-mix(in oklab,var(--color-mv-accent,#ee3a34) 16%,transparent);box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--color-mv-accent,#ee3a34) 60%,transparent),0 0 12px color-mix(in oklab,var(--color-mv-accent,#ee3a34) 25%,transparent);color:#fff}
 .mg .rank{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.mg .rank li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;background:#1f1b27;font-variant-numeric:tabular-nums}
-.mg .rank li.me{background:rgba(244,81,30,.18);outline:1px solid rgba(244,81,30,.55)}
-.mg .rank .pos{width:28px;text-align:center;font:800 15px Sora,Inter,sans-serif;color:#9d97a8}
+.mg .rank li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:4px;background:rgba(255,255,255,.04);font-variant-numeric:tabular-nums}
+.mg .rank li.me{background:linear-gradient(90deg,color-mix(in oklab,var(--color-mv-accent,#ee3a34) 18%,transparent),color-mix(in oklab,var(--color-mv-accent,#ee3a34) 4%,transparent) 70%);box-shadow:inset 2px 0 0 var(--color-mv-accent,#ee3a34)}
+.mg .rank .pos{width:28px;text-align:center;font:800 15px var(--font-display,"Oxanium Variable",Inter,sans-serif);color:#9d9dab}
 .mg .rank li:nth-child(1) .pos{color:#facc15}.mg .rank li:nth-child(2) .pos{color:#cbd5e1}.mg .rank li:nth-child(3) .pos{color:#f59e0b}
-.mg .rank .av{width:28px;height:28px;border-radius:50%;object-fit:cover;background:#2a2533;flex:none;display:flex;align-items:center;justify-content:center;font:700 12px Inter,sans-serif}
+.mg .rank .av{width:28px;height:28px;border-radius:50%;object-fit:cover;background:#1d1d25;flex:none;display:flex;align-items:center;justify-content:center;font:700 12px Inter,sans-serif}
 .mg .rank .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.mg .rank .val{font-weight:800}
-.mg .note{color:#9d97a8;font-size:12.5px;line-height:1.5;margin:0}
-.mg .menu button{text-align:left;border:1px solid rgba(255,255,255,.1);background:#1f1b27;color:#ece8f1;border-radius:14px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:4px}
-.mg .menu button:hover{border-color:#f4511e}
-.mg .menu b{font-size:15px}.mg .menu small{color:#9d97a8;font-size:12px;line-height:1.4}.mg .menu em{font-style:normal;font-size:11.5px;color:#34d399}
-.mg canvas{width:100%;aspect-ratio:4/3;background:#0f0d14;border-radius:12px;display:block;touch-action:none}
-.mg .bar{display:flex;align-items:center;gap:10px;font-size:13px;color:#cfc9d8}
+.mg .rank .val{font:800 14px var(--font-display,"Oxanium Variable",Inter,sans-serif)}
+.mg .note{color:#9d9dab;font-size:12.5px;line-height:1.5;margin:0}
+.mg .menu button{position:relative;text-align:left;border:0;clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);background:rgba(255,255,255,.045);color:#f4f4f7;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:background-color .15s,box-shadow .15s}
+.mg .menu button:hover{background:color-mix(in oklab,var(--color-mv-accent,#ee3a34) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--color-mv-accent,#ee3a34) 65%,transparent),inset 0 0 18px color-mix(in oklab,var(--color-mv-accent,#ee3a34) 22%,transparent)}
+.mg .menu b{font:700 15px var(--font-display,"Oxanium Variable",Inter,sans-serif);letter-spacing:.02em}.mg .menu small{color:#9d9dab;font-size:12px;line-height:1.4}.mg .menu em{font-style:normal;font-size:11.5px;color:#34d399}
+.mg canvas{width:100%;aspect-ratio:4/3;background:#0b0b0f;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);display:block;touch-action:none}
+.mg .bar{display:flex;align-items:center;gap:10px;font-size:13px;color:#c9c9d4}
 .mg .bar .sp{flex:1}
-.mg .btn{border:0;border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#ef4444,#f4511e);color:#fff}
-.mg .ghost{border:1px solid rgba(255,255,255,.14);background:transparent;color:#ece8f1;border-radius:10px;padding:8px 12px;font-weight:600;cursor:pointer}
+.mg .btn{border:0;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);padding:8px 14px;font-weight:700;cursor:pointer;background:var(--color-mv-accent,#ee3a34);color:#fff}
+.mg .btn:hover{filter:brightness(1.12)}
+.mg .ghost{border:0;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#f4f4f7;padding:8px 12px;font-weight:600;cursor:pointer}
+.mg .ghost:hover{background:rgba(255,255,255,.1)}
 .mg .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.mg .grid button{aspect-ratio:1;border:0;border-radius:14px;font-size:32px;cursor:pointer;background:radial-gradient(circle at 30% 25%,#3a2f4a,#221c2c 70%);box-shadow:inset 0 0 0 2px rgba(244,81,30,.35),0 4px 0 #120f17;transition:transform .25s cubic-bezier(.3,1.5,.5,1),background .2s;position:relative}
+.mg .grid button{aspect-ratio:1;border:0;border-radius:6px;font-size:32px;cursor:pointer;background:radial-gradient(circle at 30% 25%,#24242e,#121218 70%);box-shadow:inset 0 0 0 1.5px color-mix(in oklab,var(--color-mv-accent,#ee3a34) 40%,transparent),0 4px 0 #08080b;transition:transform .25s cubic-bezier(.3,1.5,.5,1),background .2s;position:relative}
 .mg .grid button:not(.open):not(.done)::after{content:'🐒';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:22px;opacity:.35}
 .mg .grid button:hover:not(.done){transform:translateY(-2px)}
 .mg .grid button.open{background:linear-gradient(160deg,#fff8ec,#f1e4cf);transform:rotateY(180deg) scaleX(-1);box-shadow:0 4px 0 #b9a78a}

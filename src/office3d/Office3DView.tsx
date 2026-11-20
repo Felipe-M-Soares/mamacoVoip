@@ -185,7 +185,7 @@ export function Office3DView({
   const [skin, setSkin] = useState<OfficeSkin>(() => loadSkin(user?.id ?? 'eu', profile?.office_skin))
   const [chatChannelId, setChatChannelId] = useState<string | null>(null)
   const [pinnedChat, setPinnedChat] = useState(false)
-  const [chatMode, setChatMode] = useState<'mini' | 'open' | 'big'>('open')
+  const [chatMode, setChatMode] = useState<'mini' | 'open' | 'big'>('mini')
   const chatBoxRef = useRef<HTMLDivElement>(null)
   const [memberCard, setMemberCard] = useState<VoiceMemberCardTarget | null>(null)
   const [avatarMenu, setAvatarMenu] = useState<{ userId: string; x: number; y: number } | null>(null)
@@ -764,7 +764,7 @@ export function Office3DView({
     <div className="fixed inset-0 z-[70] bg-[#0c0a10] text-mv-text" role="dialog" aria-label="Modo Escritório">
       <div ref={hostRef} className="absolute inset-0" />
 
-      <div className="absolute top-3 left-4 z-[30] flex items-center gap-2 flex-wrap max-w-[calc(100%-2rem)]">
+      <div className="absolute top-3 left-4 z-[30] flex items-center gap-2 flex-wrap max-w-[calc(100%-2rem-272px)] max-sm:max-w-[calc(100%-2rem-162px)]">
         <div className="rounded-xl bg-black/50 backdrop-blur">
           <ViewModeToggle mode="escritorio" onChange={onClose} />
         </div>
@@ -792,56 +792,55 @@ export function Office3DView({
             )}
           </span>
         )}
+        {connectedHere && (
+          <div className={`${gameOpen ? 'fixed left-1/2 -translate-x-1/2 z-[80] bottom-16 max-sm:bottom-28' : ''} glass mv-ctl-bar flex items-center gap-1.5 pl-3 pr-1.5 py-1 max-w-full`}>
+            <div className="leading-tight min-w-0 mr-1.5">
+              <p className="flex items-center gap-1.5 font-display text-[10.5px] font-bold uppercase tracking-[0.14em] text-mv-green">
+                <span className="mv-live-dot" aria-hidden />
+                Em call
+              </p>
+              <p className="text-[13.5px] font-semibold text-white truncate max-w-[160px]">{connectedName}</p>
+            </div>
+            <button
+              onClick={voice.toggleMute}
+              aria-pressed={!voice.muted}
+              className={`mv-hud-btn !h-9 !px-2.5 ${voice.muted ? 'is-off' : ''}`}
+              title={voice.muted ? 'Ativar microfone' : 'Silenciar microfone'}
+            >
+              {voice.muted ? <MicOffIcon /> : <MicIcon />}
+              <span className="max-sm:hidden">{voice.muted ? 'Mudo' : 'Mic'}</span>
+            </button>
+            <button onClick={() => setSoundsOpen(true)} className="mv-hud-btn !h-9 !px-2.5" title="Soundboard">
+              <SoundboardIcon />
+              <span className="max-sm:hidden">Sons</span>
+            </button>
+            {sharers.some((x) => x.key !== 'local') && (
+              <button
+                onClick={toggleTv}
+                aria-pressed={!!remoteWatched}
+                className="mv-hud-btn !h-9 !px-2.5"
+                title={remoteWatched ? 'Para de receber a transmissão' : 'Passa a tela compartilhada na TV da sala'}
+              >
+                <TvIcon />
+                {remoteWatched ? 'Desligar TV' : 'Ver na TV'}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                voice.leave()
+                officeRef.current?.leaveRoom()
+              }}
+              className="mv-hud-btn is-danger !h-9 !px-2.5"
+              title="Sair da call"
+            >
+              <LeaveCallIcon />
+              <span className="max-sm:hidden">Sair</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {connectedHere && (
-        <div className={`absolute left-1/2 -translate-x-1/2 ${gameOpen ? 'z-[80] bottom-16 max-sm:bottom-28' : 'z-[30] top-3 max-sm:top-14 max-sm:left-4 max-sm:translate-x-0'} glass mv-ctl-bar flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 max-w-[calc(100%-2rem)]`}>
-          <div className="leading-tight min-w-0 mr-1.5">
-            <p className="flex items-center gap-1.5 font-display text-[10.5px] font-bold uppercase tracking-[0.14em] text-mv-green">
-              <span className="mv-live-dot" aria-hidden />
-              Em call
-            </p>
-            <p className="text-[13.5px] font-semibold text-white truncate max-w-[160px]">{connectedName}</p>
-          </div>
-          <button
-            onClick={voice.toggleMute}
-            aria-pressed={!voice.muted}
-            className={`mv-hud-btn !h-9 !px-2.5 ${voice.muted ? 'is-off' : ''}`}
-            title={voice.muted ? 'Ativar microfone' : 'Silenciar microfone'}
-          >
-            {voice.muted ? <MicOffIcon /> : <MicIcon />}
-            <span className="max-sm:hidden">{voice.muted ? 'Mudo' : 'Mic'}</span>
-          </button>
-          <button onClick={() => setSoundsOpen(true)} className="mv-hud-btn !h-9 !px-2.5" title="Soundboard">
-            <SoundboardIcon />
-            <span className="max-sm:hidden">Sons</span>
-          </button>
-          {sharers.some((x) => x.key !== 'local') && (
-            <button
-              onClick={toggleTv}
-              aria-pressed={!!remoteWatched}
-              className="mv-hud-btn !h-9 !px-2.5"
-              title={remoteWatched ? 'Para de receber a transmissão' : 'Passa a tela compartilhada na TV da sala'}
-            >
-              <TvIcon />
-              {remoteWatched ? 'Desligar TV' : 'Ver na TV'}
-            </button>
-          )}
-          <button
-            onClick={() => {
-              voice.leave()
-              officeRef.current?.leaveRoom()
-            }}
-            className="mv-hud-btn is-danger !h-9 !px-2.5"
-            title="Sair da call"
-          >
-            <LeaveCallIcon />
-            <span className="max-sm:hidden">Sair</span>
-          </button>
-        </div>
-      )}
-
-      <nav className="absolute right-4 top-[182px] max-sm:top-[160px] z-[30] w-[256px] max-sm:w-[150px] flex flex-col gap-1.5" aria-label="Ações do escritório">
+      <nav className="absolute right-4 top-[222px] max-sm:top-[236px] z-[30] w-[256px] max-sm:w-[150px] flex flex-col gap-1.5" aria-label="Ações do escritório">
         <div className="grid grid-cols-2 max-sm:grid-cols-1 gap-1.5">
           <button onClick={() => officeRef.current?.openMap()} className="mv-hud-btn w-full !px-2.5 !gap-2 !text-[12.5px]" title="Mapa (M)">
             <MapIcon />

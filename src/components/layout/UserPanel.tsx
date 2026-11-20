@@ -121,11 +121,9 @@ function HudSquareButton({
       onClick={onClick}
       title={title}
       aria-label={title}
-      className={`h-8 rounded-lg flex items-center justify-center transition-colors ${
-        active
-          ? 'bg-mv-accent/20 text-mv-accent hover:bg-mv-accent/30'
-          : 'bg-white/[0.06] text-mv-muted hover:bg-white/[0.1] hover:text-white'
-      }`}
+      aria-pressed={active ?? undefined}
+      style={{ '--cut': '7px' } as React.CSSProperties}
+      className={`mv-ctl !w-full !h-9 ${active ? 'mv-ctl--active' : 'mv-ctl--neutral !text-mv-muted hover:!text-white'}`}
     >
       {children}
     </button>
@@ -172,7 +170,7 @@ function VoiceHud() {
   }
 
   return (
-    <div className="mx-2 mt-2 rounded-xl bg-mv-green/[0.07] border border-mv-green/20 overflow-hidden shrink-0">
+    <div className="mx-2 mt-2 rounded-md bg-gradient-to-b from-mv-green/[0.09] to-mv-green/[0.03] shadow-[inset_0_0_0_1px_rgb(34_197_94_/_0.22),inset_2px_0_0_var(--color-mv-green)] overflow-hidden shrink-0">
       <div className="px-3 py-2.5 flex items-center gap-2.5">
         <button
           type="button"
@@ -186,11 +184,11 @@ function VoiceHud() {
           }}
           disabled={!voice.connectedServerId}
           title={voice.connectedServerId ? 'Voltar para a sala de voz' : undefined}
-          className="min-w-0 flex-1 flex items-center gap-2.5 text-left rounded-lg -m-1 p-1 enabled:hover:bg-white/[0.05] transition-colors group/hud"
+          className="min-w-0 flex-1 flex items-center gap-2.5 text-left rounded -m-1 p-1 enabled:hover:bg-white/[0.05] transition-colors group/hud"
         >
           <BroadcastIcon className="w-4 h-4 text-mv-green shrink-0" />
           <span className="min-w-0 flex-1">
-            <span className="block text-xs font-medium text-mv-green truncate leading-tight">Voz conectada</span>
+            <span className="flex items-center gap-1.5 font-display text-[10.5px] font-bold uppercase tracking-[0.14em] text-mv-green truncate leading-tight"><span className="mv-live-dot shrink-0" aria-hidden />Voz conectada</span>
             <span className="block text-sm text-mv-muted group-enabled/hud:group-hover/hud:text-mv-text group-enabled/hud:group-hover/hud:underline truncate leading-tight">
               {voice.connectedChannelName ?? '...'}
             </span>
@@ -200,7 +198,7 @@ function VoiceHud() {
           onClick={voice.leave}
           title="Desconectar"
           aria-label="Desconectar"
-          className="w-8 h-8 rounded-full flex items-center justify-center text-mv-muted hover:bg-red-500/10 hover:text-red-400 transition-colors shrink-0"
+          className="mv-close !w-8 !h-8 shrink-0 hover:!bg-red-500/20 hover:!text-red-400"
         >
           <PhoneHangupIcon className="w-4 h-4" />
         </button>

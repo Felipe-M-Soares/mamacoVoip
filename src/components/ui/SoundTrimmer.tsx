@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { RangeInput } from './RangeInput'
 import { MAX_SOUND_SECONDS, computePeaks, trimAudioBufferToWav } from '../../lib/audioTrim'
 
 const MIN_SELECTION = 0.3
@@ -242,9 +243,8 @@ export function SoundTrimmer({
         <label htmlFor="trim-gain" className="text-[12px] text-mv-muted shrink-0">
           Volume pra ouvir
         </label>
-        <input
+        <RangeInput
           id="trim-gain"
-          type="range"
           min={0}
           max={100}
           step={5}

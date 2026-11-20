@@ -25,15 +25,13 @@ export function Toggle({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex items-center shrink-0 rounded-full p-[3px] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed ${track} ${
-        checked
-          ? 'bg-mv-accent shadow-[inset_0_0_0_1px_rgb(255_255_255/0.12)]'
-          : 'bg-mv-raised shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
+      className={`mv-switch relative inline-flex items-center shrink-0 rounded-[5px] p-[3px] transition-[background-color,box-shadow] duration-150 disabled:opacity-50 disabled:cursor-not-allowed ${track} ${
+        checked ? 'is-on' : ''
       }`}
     >
       <span
         aria-hidden="true"
-        className={`${knob} rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.4)] transition-transform duration-150 ease-out ${
+        className={`${knob} rounded-[3px] bg-white shadow-[0_1px_3px_rgb(0_0_0/0.4)] transition-transform duration-150 ease-out ${
           checked ? shift : 'translate-x-0'
         } flex items-center justify-center`}
       >

@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { RangeInput } from './RangeInput'
 import { useAuth } from '../../hooks/useAuth'
 import { useModeration } from '../../hooks/useModeration'
 import { useSoundboard } from '../../hooks/useSoundboard'
@@ -107,12 +108,12 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
         role="dialog"
         aria-modal="true"
         aria-labelledby="soundboard-title"
-        className="surface-elevated rounded-2xl max-w-lg w-full p-5 max-h-[80vh] flex flex-col animate-pop-in"
+        className="surface-elevated max-w-xl w-full p-5 max-h-[82vh] flex flex-col animate-pop-in"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="w-9 h-9 rounded-[10px] bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 flex items-center justify-center shrink-0">
+            <span className="mv-badge-ico">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]" aria-hidden>
                 <path d="M9 18V5l12-2v13" />
                 <circle cx="6" cy="18" r="3" />
@@ -120,25 +121,24 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
               </svg>
             </span>
             <div className="min-w-0">
-              <h2 id="soundboard-title" className="font-display text-lg font-semibold text-white leading-tight">Soundboard</h2>
+              <h2 id="soundboard-title" className="font-display text-[19px] font-bold tracking-wide text-white leading-tight">Soundboard</h2>
               <p className="text-[12px] text-mv-muted">Todo mundo no canal ouve na hora</p>
             </div>
           </div>
-          <button onClick={onClose} className="icon-btn w-9 h-9 shrink-0" aria-label="Fechar" title="Fechar">
+          <button onClick={onClose} className="mv-close shrink-0" aria-label="Fechar" title="Fechar (Esc)">
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
               <path d="M6.4 19a1 1 0 0 1-.7-1.7L10.6 12 5.7 7.1a1 1 0 0 1 1.4-1.4L12 10.6l4.9-4.9a1 1 0 0 1 1.4 1.4L13.4 12l4.9 4.9a1 1 0 0 1-1.4 1.4L12 13.4l-4.9 4.9a1 1 0 0 1-.7.3z" />
             </svg>
           </button>
         </div>
 
-        <div className="mb-3 px-3 py-2.5 rounded-xl bg-white/[0.03] border border-[var(--color-line)] shrink-0 flex items-center gap-3">
+        <div className="mv-pad !bg-white/[0.03] mb-3 px-3 py-2.5 shrink-0 flex items-center gap-3">
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-mv-muted shrink-0" aria-hidden>
             <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 15 8.2v7.6a4.5 4.5 0 0 0 1.5-3.8z" />
           </svg>
           <label htmlFor="soundboard-volume" className="text-[12px] font-medium text-mv-text shrink-0">Volume dos efeitos</label>
-          <input
+          <RangeInput
             id="soundboard-volume"
-            type="range"
             min={0}
             max={100}
             value={voice.soundboardVolume}
@@ -167,7 +167,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
           {soundboard.loading ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" aria-busy="true" aria-label="Carregando sons">
               {Array.from({ length: 9 }, (_, i) => (
-                <div key={i} className="h-11 animate-pulse bg-white/[0.05] rounded-xl" />
+                <div key={i} className="h-[52px] animate-pulse bg-white/[0.05] rounded-md" />
               ))}
             </div>
           ) : soundboard.sounds.length === 0 ? (
@@ -270,7 +270,7 @@ export function SoundboardPanel({ serverId, onClose }: { serverId: string; onClo
           ) : (
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-full py-3 px-3 rounded-xl border border-dashed border-[var(--color-line-strong)] text-mv-muted hover:text-white hover:border-mv-accent/60 hover:bg-mv-accent/[0.06] transition-colors flex items-center justify-center gap-2.5"
+              className="w-full py-3 px-3 rounded-md border border-dashed border-[var(--color-line-strong)] text-mv-muted hover:text-white hover:border-mv-accent/60 hover:bg-mv-accent/[0.06] transition-colors flex items-center justify-center gap-2.5"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4 shrink-0" aria-hidden>
                 <path d="M12 5v14M5 12h14" />
@@ -301,20 +301,29 @@ function SoundButton({
   onPlay: () => void
   onDelete?: (e: React.MouseEvent) => void
 }) {
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (!flash) return
+    const t = window.setTimeout(() => setFlash(false), 650)
+    return () => window.clearTimeout(t)
+  }, [flash])
   return (
     <div className="relative group">
       <button
-        onClick={onPlay}
+        onClick={() => {
+          setFlash(true)
+          onPlay()
+        }}
         title={sound.name}
         aria-label={`Tocar ${sound.name}`}
-        className="w-full h-11 pl-2.5 pr-3 rounded-xl bg-white/[0.04] border border-[var(--color-line)] hover:bg-mv-accent/[0.12] hover:border-mv-accent/50 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] transition-all flex items-center gap-2 text-left"
+        className={`mv-pad w-full min-h-[52px] pl-2.5 pr-3 py-2 active:scale-[0.97] transition-transform flex items-center gap-2.5 text-left ${flash ? 'is-playing' : ''}`}
       >
-        <span className="w-6 h-6 rounded-full bg-white/[0.06] group-hover:bg-mv-accent text-mv-muted group-hover:text-white flex items-center justify-center shrink-0 transition-colors" aria-hidden>
+        <span className="mv-badge-ico !w-7 !h-7 [--cut:5px] group-hover:!bg-mv-accent group-hover:!text-white transition-colors" aria-hidden>
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 ml-px">
             <path d="M8 5v14l11-7z" />
           </svg>
         </span>
-        <span className="text-[13px] font-medium text-mv-text truncate">{sound.name}</span>
+        <span className="text-[13px] font-medium leading-tight text-mv-text line-clamp-2 break-words min-w-0">{sound.name}</span>
       </button>
       {onDelete && (
         <button

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { RangeInput } from '../ui/RangeInput'
 import { CheckIcon } from '../ui/icons'
 
 export function TabHeader({ title, description }: { title: string; description?: ReactNode }) {
@@ -99,8 +100,7 @@ export function RangeSlider({
 }) {
   const pct = max === min ? 0 : ((value - min) / (max - min)) * 100
   return (
-    <input
-      type="range"
+    <RangeInput
       min={min}
       max={max}
       value={value}

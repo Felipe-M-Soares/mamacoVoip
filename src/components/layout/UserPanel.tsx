@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { RangeInput } from '../ui/RangeInput'
 import { DeviceSelect } from '../ui/DeviceSelect'
 import { useAuth } from '../../hooks/useAuth'
 import { useLocalVoiceConnectionQuality, useVoiceCore } from '../../hooks/useVoice'
@@ -421,8 +422,7 @@ export function UserPanel() {
             )}
             <div className="mb-1">
               <p className="text-[10px] text-mv-muted px-1 mb-1.5">Volume geral: {voice.masterVolume}%</p>
-              <input
-                type="range"
+              <RangeInput
                 min={0}
                 max={100}
                 value={voice.masterVolume}

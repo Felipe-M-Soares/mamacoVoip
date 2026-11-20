@@ -102,7 +102,7 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`surface-elevated rounded-2xl animate-pop-in relative w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden outline-none`}
+        className={`surface-elevated mv-window animate-pop-in relative w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden outline-none`}
       >
         {headerless ? (
           <>
@@ -112,7 +112,7 @@ export function Modal({
             <button
               type="button"
               onClick={onClose}
-              className="absolute top-3 right-3 z-20 w-8 h-8 inline-flex items-center justify-center rounded-full bg-black/45 text-white/85 hover:bg-black/65 hover:text-white backdrop-blur transition-colors"
+              className="mv-close absolute top-3 right-3 z-20 !bg-black/50 !text-white/85 hover:!bg-black/70 hover:!text-white backdrop-blur"
               aria-label="Fechar"
               title="Fechar (Esc)"
             >
@@ -120,9 +120,9 @@ export function Modal({
             </button>
           </>
         ) : (
-          <div className="flex items-start justify-between gap-3 px-5 sm:px-6 pt-5 pb-1 shrink-0">
+          <div className="mv-window-head flex items-start justify-between gap-3 px-5 sm:px-6 pt-5 pb-3.5 shrink-0">
             <div className="min-w-0">
-              <h2 id={titleId} className="font-display text-lg font-semibold text-white leading-tight">
+              <h2 id={titleId} className="font-display text-[19px] font-bold tracking-wide text-white leading-tight">
                 {title}
               </h2>
               {description && <p className="text-[13px] text-mv-muted mt-1 leading-snug">{description}</p>}
@@ -130,7 +130,7 @@ export function Modal({
             <button
               type="button"
               onClick={onClose}
-              className="icon-btn w-8 h-8 -mr-1.5 -mt-0.5 shrink-0"
+              className="mv-close -mr-1.5 -mt-0.5 shrink-0"
               aria-label="Fechar"
               title="Fechar (Esc)"
             >
@@ -138,7 +138,7 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className={`flex-1 min-h-0 overflow-y-auto ${headerless ? '' : 'px-5 sm:px-6 pt-3 pb-5'}`}>{children}</div>
+        <div className={`flex-1 min-h-0 overflow-y-auto ${headerless ? '' : 'px-5 sm:px-6 pt-4 pb-5'}`}>{children}</div>
         {footer && (
           <div className="shrink-0 flex flex-wrap items-center justify-end gap-2 px-5 sm:px-6 py-3.5 border-t border-[var(--color-line)] bg-black/[0.12]">
             {footer}

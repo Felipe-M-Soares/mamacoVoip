@@ -1,4 +1,5 @@
 import { applyOutput } from '../../lib/audioDevices'
+import { RangeInput } from '../ui/RangeInput'
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { createEphemeralAuthClient, supabase } from '../../lib/supabase'
@@ -1742,8 +1743,7 @@ function SensitivityMeter({
           )}
         </div>
         {manual && (
-          <input
-            type="range"
+          <RangeInput
             min={MIN_MIC_SENSITIVITY}
             max={MAX_MIC_SENSITIVITY}
             value={cutPos}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { RangeInput } from '../ui/RangeInput'
 import { useVoiceCore } from '../../hooks/useVoice'
 import { overlayShortcutText, useKeybinds } from '../../lib/keybinds'
 import type { OverlayCorner } from '../../hooks/useGamePresence'
@@ -100,8 +101,7 @@ export function GameStreamMenuSection() {
             </select>
             <label className="flex items-center gap-2 pt-2 text-[11px] text-mv-muted">
               <span className="shrink-0">Transparência</span>
-              <input
-                type="range"
+              <RangeInput
                 min={20}
                 max={100}
                 step={5}

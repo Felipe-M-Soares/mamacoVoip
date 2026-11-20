@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { RangeInput } from '../ui/RangeInput'
+import { MicIcon as HudMic, MicOffIcon as HudMicOff, HeadphonesIcon as HudHeadphones, HeadphonesOffIcon as HudHeadphonesOff, CameraIcon as HudCamera, ScreenShareIcon as HudScreenShare, SoundboardIcon as HudSoundboard } from '../ui/hudIcons'
 import { DeviceSelect } from '../ui/DeviceSelect'
 import { Avatar } from '../ui/Avatar'
 import { VideoTile } from './CallMediaTiles'
@@ -281,8 +283,7 @@ function ShareTile({
                   }`}
                 >
                   <div className="flex items-center gap-2 pl-1 pr-2">
-                    <input
-                      type="range"
+                    <RangeInput
                       min={0}
                       max={100}
                       step={1}
@@ -605,21 +606,9 @@ function HeadphonesOffIcon({ className = 'w-3.5 h-3.5' }: { className?: string }
     </svg>
   )
 }
-function HeadphonesIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M4 18v-6a8 8 0 0 1 16 0v6" />
-      <path d="M4 14h3a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM20 14h-3a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2z" />
-    </svg>
-  )
-}
 
 function controlBtnClass(tone: 'neutral' | 'active' | 'off') {
-  const base =
-    'w-12 h-12 rounded-full flex items-center justify-center transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed'
-  if (tone === 'active') return `${base} bg-mv-accent text-white shadow-[0_6px_18px_-6px_var(--color-mv-accent)] hover:brightness-110`
-  if (tone === 'off') return `${base} bg-rose-500/15 text-rose-400 ring-1 ring-inset ring-rose-500/35 hover:bg-rose-500/25`
-  return `${base} bg-white/[0.07] text-mv-text hover:bg-white/[0.13] hover:text-white`
+  return `mv-ctl mv-ctl--${tone} disabled:opacity-50 disabled:cursor-not-allowed`
 }
 
 function ParticipantTile({
@@ -1245,10 +1234,10 @@ export function VoiceChannelView({
           <div
             role="toolbar"
             aria-label="Controles da chamada"
-            className="glass rounded-2xl px-2.5 py-2 flex flex-wrap items-center justify-center gap-2 shadow-[0_18px_44px_-18px_rgb(0_0_0/0.85)] max-w-full"
+            className="glass mv-ctl-bar px-2.5 py-2 flex flex-wrap items-center justify-center gap-2 max-w-full"
           >
             <div className="relative" ref={micMenuRef}>
-              <div className="flex items-stretch rounded-full overflow-hidden ring-1 ring-inset ring-[var(--color-line)]">
+              <div className="mv-ctl-split flex items-stretch">
                 {voice.pushToTalkEnabled ? (
                   <div
                     title={`Push-to-talk: segure ${voice.pushToTalkKey} pra falar`}
@@ -1290,11 +1279,9 @@ export function VoiceChannelView({
                     }`}
                   >
                     {deafened || voice.muted ? (
-                      <MicOffIcon className="w-5 h-5" />
+                      <HudMicOff className="w-[22px] h-[22px]" aria-hidden />
                     ) : (
-                      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                        <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zM19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.08A7 7 0 0 0 19 11z" />
-                      </svg>
+                      <HudMic className="w-[22px] h-[22px]" aria-hidden />
                     )}
                   </button>
                 )}
@@ -1368,7 +1355,7 @@ export function VoiceChannelView({
               aria-pressed={deafened}
               className={controlBtnClass(deafened ? 'off' : 'neutral')}
             >
-              {deafened ? <HeadphonesOffIcon className="w-5 h-5" /> : <HeadphonesIcon />}
+              {deafened ? <HudHeadphonesOff className="w-[22px] h-[22px]" aria-hidden /> : <HudHeadphones className="w-[22px] h-[22px]" aria-hidden />}
             </button>
 
             <div className="relative" ref={mixerRef}>
@@ -1379,7 +1366,7 @@ export function VoiceChannelView({
                 aria-expanded={showMixer}
                 className={controlBtnClass(showMixer ? 'active' : 'neutral')}
               >
-                <SlidersIcon className="w-5 h-5" />
+                <SlidersIcon className="w-[21px] h-[21px]" />
               </button>
               {showMixer && (
                 <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 max-sm:left-auto max-sm:right-0 max-sm:translate-x-0 surface-elevated rounded-2xl p-3 z-30 animate-pop-in">
@@ -1397,9 +1384,7 @@ export function VoiceChannelView({
               aria-pressed={voice.videoEnabled}
               className={controlBtnClass(voice.videoEnabled ? 'active' : 'neutral')}
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                <path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z" />
-              </svg>
+              <HudCamera className="w-[22px] h-[22px]" aria-hidden />
             </button>
 
             <button
@@ -1429,9 +1414,7 @@ export function VoiceChannelView({
                   <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
                 </svg>
               ) : (
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                  <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
-                </svg>
+                <HudScreenShare className="w-[22px] h-[22px]" aria-hidden />
               )}
             </button>
 
@@ -1494,11 +1477,7 @@ export function VoiceChannelView({
               aria-haspopup="dialog"
               className={controlBtnClass(showSoundboard ? 'active' : 'neutral')}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5" aria-hidden>
-                <path d="M9 18V5l12-2v13" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="16" r="3" />
-              </svg>
+              <HudSoundboard className="w-[22px] h-[22px]" aria-hidden />
             </button>
 
             <div className="relative" ref={moreMenuRef}>
@@ -1507,7 +1486,7 @@ export function VoiceChannelView({
                 title="Mais opções"
                 aria-label="Mais opções"
                 aria-expanded={showMoreMenu}
-                className={`${controlBtnClass('neutral')} ${showMoreMenu ? '!bg-white/[0.16] !text-white' : ''}`}
+                className={controlBtnClass(showMoreMenu ? 'active' : 'neutral')}
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
                   <path d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />
@@ -1584,7 +1563,7 @@ export function VoiceChannelView({
               onClick={voice.leave}
               title="Desconectar"
               aria-label="Desconectar"
-              className="btn-danger !rounded-full w-16 h-12 flex items-center justify-center ml-0.5"
+              className="mv-ctl mv-ctl--danger !w-16 ml-0.5"
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 rotate-[135deg]" aria-hidden>
                 <path d="M20 15.5c-1.2 0-2.5-.2-3.6-.6-.4-.1-.8 0-1.1.3l-2.2 2.2c-2.8-1.4-5.2-3.8-6.6-6.6l2.2-2.2c.3-.3.4-.7.3-1.1-.4-1.1-.6-2.4-.6-3.6 0-.6-.4-1-1-1H4c-.6 0-1 .4-1 1 0 9.4 7.6 17 17 17 .6 0 1-.4 1-1v-3.5c0-.6-.4-1-1-1z" />

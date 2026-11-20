@@ -132,13 +132,13 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
           <div className="flex flex-col items-center gap-2">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="relative w-24 h-24 rounded-full bg-mv-canvas border-2 border-dashed border-white/[0.18] flex items-center justify-center hover:border-mv-accent transition-colors group"
+              className={`mv-upload relative w-24 h-24 flex items-center justify-center group ${iconPreview ? 'has-image' : ''}`}
               aria-label={iconPreview ? 'Trocar ícone do servidor' : 'Adicionar ícone do servidor'}
             >
               {iconPreview ? (
                 <>
-                  <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover rounded-full" />
-                  <span className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+                  <img src={iconPreview} alt="Ícone" className="w-full h-full object-cover" />
+                  <span className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
                     <EditIcon className="w-5 h-5 text-white" aria-hidden />
                     <span className="text-[10px] font-medium text-white">Trocar</span>
                   </span>
@@ -146,9 +146,6 @@ export function CreateOrJoinServerModal({ onClose }: { onClose: () => void }) {
               ) : (
                 <ImageAddIcon className="w-8 h-8 text-mv-muted group-hover:text-mv-accent transition-colors" strokeWidth={1.5} aria-hidden />
               )}
-              <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-mv-accent flex items-center justify-center border-2 border-[var(--color-elevated)] group-hover:brightness-110 transition-all">
-                <EditIcon className="w-3.5 h-3.5 text-white" aria-hidden />
-              </span>
             </button>
             <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleIconChange} />
             {!iconPreview && (

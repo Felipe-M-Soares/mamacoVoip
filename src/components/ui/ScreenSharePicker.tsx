@@ -65,12 +65,12 @@ export function ScreenSharePicker() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="screen-share-picker-title"
-        className="surface-elevated rounded-2xl max-w-2xl w-full p-5 sm:p-6 animate-pop-in"
+        className="surface-elevated max-w-3xl w-full p-5 sm:p-6 animate-pop-in"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-5">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="w-10 h-10 rounded-xl bg-mv-accent/15 text-mv-accent ring-1 ring-inset ring-mv-accent/25 flex items-center justify-center shrink-0">
+            <span className="mv-badge-ico">
               <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5" aria-hidden>
                 <path d="M4 4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h5l-1 3h8l-1-3h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4zm0 2h16v9H4V6z" />
               </svg>
@@ -78,7 +78,7 @@ export function ScreenSharePicker() {
             <div className="min-w-0">
               <h2
                 id="screen-share-picker-title"
-                className="font-display text-lg font-semibold text-white leading-tight"
+                className="font-display text-[19px] font-bold tracking-wide text-white leading-tight"
               >
                 Escolha o que compartilhar
               </h2>
@@ -131,14 +131,14 @@ export function ScreenSharePicker() {
             </SourceSection>
           )}
           {screens.length > 0 && (
-            <SourceSection title="Tela cheia">
+            <SourceSection title={`Tela cheia · ${screens.length}`}>
               {screens.map((s) => (
                 <SourceCard key={s.id} source={s} onClick={() => choose(s.id)} />
               ))}
             </SourceSection>
           )}
           {windows.length > 0 && (
-            <SourceSection title="Janela">
+            <SourceSection title={`Janela · ${windows.length}`}>
               {windows.map((s) => (
                 <SourceCard key={s.id} source={s} onClick={() => choose(s.id)} />
               ))}
@@ -146,7 +146,7 @@ export function ScreenSharePicker() {
           )}
         </div>
 
-        <div className="mt-4 flex gap-2.5 rounded-xl bg-white/[0.03] border border-[var(--color-line)] px-3 py-2.5">
+        <div className="mv-pad !bg-white/[0.025] mt-4 flex gap-2.5 px-3 py-2.5">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -200,10 +200,8 @@ function SourceCard({
     <button
       onClick={onClick}
       title={source.name}
-      className={`group text-left rounded-xl overflow-hidden border bg-mv-canvas transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 ${
-        highlighted
-          ? 'border-mv-accent shadow-[0_0_0_1px_var(--color-mv-accent),0_10px_28px_-12px_var(--color-mv-accent)]'
-          : 'border-[var(--color-line)] hover:border-mv-accent/60 hover:shadow-[0_10px_28px_-14px_rgb(0_0_0/0.9)]'
+      className={`mv-pick group relative text-left overflow-hidden bg-mv-canvas transition-transform duration-150 hover:-translate-y-0.5 active:translate-y-0 ${
+        highlighted ? 'is-recommended' : ''
       }`}
     >
       <div className="relative">
@@ -214,10 +212,10 @@ function SourceCard({
         )}
         <span className="absolute inset-0 bg-mv-accent/0 group-hover:bg-mv-accent/10 transition-colors" aria-hidden />
         {highlighted && (
-          <span className="absolute top-2 left-2 chip !bg-mv-accent !text-white !border-transparent">Recomendado</span>
+          <span className="mv-tag absolute top-2 left-2">Recomendado</span>
         )}
       </div>
-      <p className="text-[12px] font-medium text-mv-text px-2.5 py-2 truncate">{source.name}</p>
+      <p className="text-[12px] font-medium text-mv-text px-2.5 py-2 truncate group-hover:text-white">{source.name}</p>
     </button>
   )
 }

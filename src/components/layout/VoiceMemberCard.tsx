@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { RangeInput } from '../ui/RangeInput'
 import { Avatar } from '../ui/Avatar'
 import { useAuth } from '../../hooks/useAuth'
 import { useChannels } from '../../hooks/useChannels'
@@ -138,8 +139,7 @@ export function VoiceMemberCard({ target, onClose }: { target: VoiceMemberCardTa
                 <span className="text-mv-muted">Volume (só pra você)</span>
                 <span className="tabular-nums text-mv-text">{volume}%</span>
               </div>
-              <input
-                type="range"
+              <RangeInput
                 min={0}
                 max={100}
                 value={volume}

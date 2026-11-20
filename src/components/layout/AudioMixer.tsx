@@ -1,4 +1,5 @@
 import { Avatar } from '../ui/Avatar'
+import { RangeInput } from '../ui/RangeInput'
 import { useVoiceCore } from '../../hooks/useVoice'
 import { focusStream, hideStream, showStream, useStreamView } from '../../lib/streamView'
 import { rememberVolume, toggleVolumeMute } from '../../lib/muteMemory'
@@ -26,7 +27,7 @@ function VolumeRow({
   extra?: React.ReactNode
 }) {
   return (
-    <div className="py-2">
+    <div className="py-2.5">
       <div className="flex items-center gap-2 mb-1.5">
         {avatar}
         <div className="min-w-0 flex-1">
@@ -40,9 +41,7 @@ function VolumeRow({
           aria-pressed={muted}
           title={muted ? 'Reativar som' : 'Silenciar só pra mim'}
           aria-label={muted ? `Reativar som de ${label}` : `Silenciar ${label} só pra mim`}
-          className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center transition-colors ${
-            muted ? 'bg-rose-500/20 text-rose-400' : 'text-mv-muted hover:text-white hover:bg-white/[0.08]'
-          }`}
+          className={`mv-close !w-7 !h-7 [--cut:5px] ${muted ? '!bg-rose-500/20 !text-rose-400' : ''}`}
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden>
             {muted ? (
@@ -54,17 +53,27 @@ function VolumeRow({
         </button>
       </div>
       <div className="flex items-center gap-2 pl-0.5">
-        <input
-          type="range"
+        <RangeInput
           min={0}
           max={max}
           step={1}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
           aria-label={`Volume de ${label}`}
-          className={`flex-1 accent-mv-accent ${muted ? 'opacity-50' : ''}`}
+          className={`flex-1 min-w-0 ${muted ? 'opacity-50' : ''}`}
         />
-        <span className="w-10 text-right text-[11px] tabular-nums text-mv-muted">{value}%</span>
+        <button
+          type="button"
+          onClick={() => onChange(max)}
+          disabled={value === max}
+          title={value === max ? 'Volume no máximo' : 'Voltar para 100%'}
+          aria-label={`Voltar volume de ${label} para 100%`}
+          className={`w-11 h-6 shrink-0 rounded text-right text-[11.5px] font-display font-semibold tabular-nums transition-colors ${
+            value === max ? 'text-mv-muted cursor-default' : 'text-mv-accent hover:text-white'
+          }`}
+        >
+          {value}%
+        </button>
       </div>
     </div>
   )
@@ -83,8 +92,22 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
   )
 
   return (
-    <div className="w-[300px] max-w-[calc(100vw-24px)] max-h-[min(70vh,520px)] overflow-y-auto">
-      <p className="field-label px-1 !mb-0">Geral</p>
+    <div className="w-[320px] max-w-[calc(100vw-24px)] max-h-[min(72vh,560px)] overflow-y-auto">
+      <div className="flex items-center gap-2.5 px-1 pb-3 mb-1 border-b border-[var(--color-line)]">
+        <span className="mv-badge-ico !w-8 !h-8 [--cut:6px]" aria-hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="w-4 h-4">
+            <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" />
+            <circle cx="16" cy="6" r="2" />
+            <circle cx="10" cy="12" r="2" />
+            <circle cx="18" cy="18" r="2" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <p className="font-display text-[15px] font-bold tracking-wide text-white leading-tight">Volumes</p>
+          <p className="text-[11.5px] text-mv-muted leading-snug">Só você ouve essa mistura. Clique na % para voltar a 100%.</p>
+        </div>
+      </div>
+      <p className="field-label px-1 !mb-0 mt-2">Geral</p>
       <div className="px-1 divide-y divide-[var(--color-line)]">
         <VolumeRow
           label="Tudo da chamada"
@@ -119,7 +142,7 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
         />
       </div>
 
-      <p className="field-label px-1 !mb-0 mt-3">Vozes</p>
+      <p className="field-label px-1 !mb-0 mt-3">Vozes{people.length > 0 ? ` · ${people.length}` : ''}</p>
       {people.length === 0 ? (
         <p className="text-[12px] text-mv-muted px-1 py-2">Ninguém mais na sala ainda.</p>
       ) : (
@@ -145,7 +168,7 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
         </div>
       )}
 
-      <p className="field-label px-1 !mb-0 mt-3">Transmissões</p>
+      <p className="field-label px-1 !mb-0 mt-3">Transmissões{streams.length > 0 ? ` · ${streams.length}` : ''}</p>
       {streams.length === 0 ? (
         <p className="text-[12px] text-mv-muted px-1 py-2">Ninguém transmitindo agora.</p>
       ) : (
@@ -175,7 +198,7 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
                   <button
                     type="button"
                     onClick={() => (isHidden ? focusStream(id) : hideStream(id))}
-                    className="h-7 px-2 rounded-full text-[11px] font-semibold border border-[var(--color-line-strong)] text-mv-muted hover:text-white hover:bg-white/[0.06] shrink-0"
+                    className="btn-secondary h-7 px-2.5 text-[11px] font-semibold shrink-0"
                   >
                     {isHidden ? 'Assistir' : 'Fechar'}
                   </button>
@@ -185,9 +208,6 @@ export function AudioMixer({ profileById }: { profileById: Record<string, Profil
           })}
         </div>
       )}
-      <p className="text-[10.5px] text-mv-muted px-1 mt-2 leading-snug">
-        Tudo aqui vale só pra você.
-      </p>
     </div>
   )
 }
